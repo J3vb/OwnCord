@@ -11,7 +11,7 @@ export const safetyText = defineCatalog("safety", {
   "notice.acknowledge": "Acknowledge",
   "notice.acknowledging": "Acknowledging…",
   "notice.ackFailed": "Your acknowledgement wasn't recorded. Try again.",
-  "notice.viewSafety": "View in Safety settings",
+  "notice.viewSafety": "View in Privacy & Safety settings",
   "toast.warning": "You received a warning from the moderators: {reason}",
   "toast.timeout": "You're timed out until {time}.",
   "toast.acknowledged": "Warning acknowledged.",

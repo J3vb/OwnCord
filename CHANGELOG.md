@@ -55,6 +55,8 @@ and only when it changes something a contributor or fork holder must do
 - You can now Block or Unblock someone from their profile card, from a DM's profile panel and from a DM's right-click menu, a Block asks once and an Unblock is one click. That menu also has Mark As Read, Profile, Call and Copy User ID (Developer Mode), and Message and Call on a profile card are greyed out, with the reason, while you're offline or either of you has blocked the other.
 - DM calls now leave a line in the chat: who started it and how long it lasted, or "You missed a call from X" if you didn't pick up. A call that is still going has a Join button. The line can't be edited, replied to or reacted to, and makes no message sound.
 - The DM header now has a **Video Call** button next to Voice Call, shows the person's avatar (or a group's faces) instead of "@", reads "Do Not Disturb" instead of "Dnd", and you can click a group's name to rename it.
+- Right-clicking a channel now has **Copy Link** (an `owncord://` link that opens that channel) and, if you can manage invites, **Invite People**.
+- The chat header shows the channel's own icon (a megaphone for an announcement channel) instead of always "#", and clicking a long topic opens the whole topic in a small window.
 - Private channels now show a small lock over their icon in the channel list, so you can tell at a glance which channels only some members can see. It updates straight away when a channel's permissions change.
 - In a DM call, drag the bottom edge of the call area to make it taller or shorter, as in Discord; the height is remembered, and double-click puts it back.
 - Settings has a **Search** box above the tabs (Ctrl+F focuses it while Settings is open). It hides tabs and headings with no match, searching each tab's name and the labels and descriptions of its rows, and highlights the matches in the tab you open. Escape clears the box first, and the arrow keys move from it into the tabs.
@@ -92,6 +94,7 @@ and only when it changes something a contributor or fork holder must do
 - Linux: video layers nobody is watching are paused, saving CPU and upload.
 - Linux: a 120 fps screen share now gives up some sharpness before smoothness when the connection or CPU cannot keep up, as on Windows, and holds its frame rate more steadily. Settings → Voice & Video notes that Wayland limits a screen share to 60 fps.
 - Linux: OwnCord now tells the call it can play VP9 video, so a Windows VP9 camera or screen share no longer drops to VP8 when a Linux user joins.
+- Linux: Settings → Voice & Video → Video Codec now offers **VP9** when this build can encode it, for sharper text. Pick it and your camera or screen share goes out as VP9 at one quality level, with no lower-quality extra stream. Auto stays VP8, and a saved VP9 on a build without it publishes VP8.
 - Linux: paused video layers stay paused when you start or stop another camera or screen share.
 - Linux (Wayland): push to talk and the Mute and Deafen shortcuts now work while another app is in front on GNOME 48 or newer and KDE Plasma. Settings → Keybinds has **Set up global shortcuts**, which opens your desktop's own dialog, then shows the keys it set; your desktop reserves those keys for OwnCord in every app, and push to talk is limited to function keys. GNOME 47 and older, Sway and other desktops without this service keep the note that global keys are unavailable, and the tray items still work.
 
@@ -152,6 +155,11 @@ and only when it changes something a contributor or fork holder must do
 - A viewer can tell the server which video codecs it can decode: `voice_e2ee_announce` takes an optional `video_decode` list, and the server passes it on with the voice key to everyone in the call, including people who join later or reconnect. A list that is malformed is dropped and the key still goes through. Older servers and apps behave as before. The desktop app uses it to pick a codec everyone in the call can play.
 
 ### Changed
+
+**Desktop UI**
+
+- A channel with unread messages now shows only a bold name and the white pill, as in Discord; the number is kept for mentions and DMs.
+- A muted channel no longer turns bold or shows the pill for ordinary unread messages; a mention still shows.
 
 **Accounts & profiles**
 

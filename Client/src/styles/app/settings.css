@@ -1218,3 +1218,32 @@ details.disclose[open] > summary .icon {
   color: inherit;
   border-radius: 2px;
 }
+/* ── Privacy & Safety: Blocked users (3B-7) ── */
+.blocked-users-list {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+}
+.blocked-user-row {
+  justify-content: flex-start;
+}
+.blocked-user-info {
+  flex: 1;
+}
+.blocked-user-row .ac-btn {
+  flex-shrink: 0;
+}
+.blocked-user-avatar {
+  position: relative;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-circle);
+  background: var(--accent);
+  color: var(--on-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  overflow: hidden;
+}

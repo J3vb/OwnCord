@@ -250,7 +250,8 @@ const { mockUpdateChatHeaderForDm } = vi.hoisted(() => ({
   mockUpdateChatHeaderForDm: vi.fn(),
 }));
 
-vi.mock("../../src/pages/main-page/ChatHeader", () => ({
+vi.mock("../../src/pages/main-page/ChatHeader", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/pages/main-page/ChatHeader")>()),
   updateChatHeaderForDm: mockUpdateChatHeaderForDm,
 }));
 

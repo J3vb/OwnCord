@@ -40,6 +40,7 @@ import {
   getVideoCodecPref,
   h264Offered,
   h265Offered,
+  vp9Available,
   vp9Offered,
 } from "../../features/voice/videoCodec";
 import { desktop } from "../../platform/desktop";
@@ -1027,11 +1028,11 @@ function buildVoiceAudioTabInner(
   cameraCard.appendChild(previewWrap);
   cameraCard.append(...cameraQualityGroup, ...screenQualityGroup, ...fpsGroup);
   // The codec choice. Off Linux the webview's own encoders decide what is
-  // offered; on Linux the native engine offers VP8, Auto (VP8) and H.264 only
-  // when its probe says it can encode it (WP LP-7c).
-  const codecGroup = (h264Available: boolean): HTMLElement[] => {
+  // offered; on Linux the native engine offers VP8, Auto (VP8), and H.264 and
+  // VP9 only when its probe says it can encode them (WP LP-7c, M-11b).
+  const codecGroup = (h264Available: boolean, vp9Native = false): HTMLElement[] => {
     const linux = isLinuxDesktop();
-    const offerVp9 = vp9Offered();
+    const offerVp9 = linux ? vp9Native : vp9Offered();
     const offerH265 = h265Offered();
     const savedCodec = getVideoCodecPref();
     // A saved codec that is no longer offered reads as VP8, as the resolver
@@ -1072,8 +1073,8 @@ function buildVoiceAudioTabInner(
     // place (a group's height) and the cards below do not jump.
     const slot = createElement("div", { class: "voice-codec-slot", style: "min-height:104px" });
     cameraCard.appendChild(slot);
-    void h264Offered().then((available) => {
-      if (!signal.aborted) slot.append(...codecGroup(available));
+    void Promise.all([h264Offered(), vp9Available()]).then(([h264, vp9]) => {
+      if (!signal.aborted) slot.append(...codecGroup(h264, vp9));
     });
   } else {
     cameraCard.append(...codecGroup(true));

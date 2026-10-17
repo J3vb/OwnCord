@@ -248,15 +248,15 @@ interface PublishOptions {
   resolution?: { width: number; height: number };
   videoEncoding?: { maxBitrate: number; maxFramerate?: number };
   /** The codec `resolveVideoCodec` chose; the native engine publishes VP8
-   *  unless this is `h264`. */
+   *  unless this is `h264` or `vp9`. */
   videoCodec?: string;
 }
 
 /** The native publish's codec for the shared path's `videoCodec` option:
- *  H.264 when asked for, VP8 for everything else (the native engine has no
- *  VP9 or H.265). */
-function nativeCodec(options: PublishOptions): "vp8" | "h264" {
-  return options.videoCodec === "h264" ? "h264" : "vp8";
+ *  H.264 or VP9 when asked for, VP8 for everything else (the native engine has
+ *  no H.265). */
+function nativeCodec(options: PublishOptions): "vp8" | "h264" | "vp9" {
+  return options.videoCodec === "h264" || options.videoCodec === "vp9" ? options.videoCodec : "vp8";
 }
 
 /** A local camera or screen publication, as `getLocalCameraStream`,

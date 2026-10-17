@@ -97,10 +97,10 @@ test.describe("B9-4 shared navigation", () => {
     await page.locator("button[aria-label='Settings']").click();
     await expect(page.locator("[data-testid='settings-overlay']")).toHaveClass(/open/);
     const tabs = page.getByRole("tablist", { name: "Settings sections" }).getByRole("tab");
-    await expect(tabs.filter({ hasText: "Safety" })).toHaveCount(1);
+    await expect(tabs.filter({ hasText: "Privacy & Safety" })).toHaveCount(1);
     await page.getByRole("tab", { name: "Account" }).focus();
     await page.keyboard.press("ArrowDown");
-    await expect(page.getByRole("tab", { name: "Safety" })).toBeFocused();
+    await expect(page.getByRole("tab", { name: "Privacy & Safety" })).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(page.getByRole("tab", { name: "Appearance" })).toBeFocused();
   });
@@ -251,9 +251,10 @@ test.describe("Mark Server as Read in the server header", () => {
     const header = page.locator("[data-testid='unified-sidebar'] .unified-sidebar-header");
     const actions = header.locator(".sidebar-header-actions > button:visible");
     const markAll = page.locator("[data-testid='mark-all-read']");
-    const badge = page.locator("[data-channel-id='2'] .unread-badge");
+    // A server channel shows plain unread as a bold name and a pill, not a count.
+    const badge = page.locator("[data-channel-id='2'].unread");
 
-    await expect(badge).toHaveText("2");
+    await expect(badge).toHaveCount(1);
     await expect(actions).toHaveCount(4);
     await expect(actions.nth(0)).toHaveAttribute("data-testid", "mark-all-read");
     await expect(markAll).toHaveAccessibleName("Mark Server as Read");

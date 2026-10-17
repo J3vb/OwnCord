@@ -7,7 +7,7 @@ import { defineCatalog } from "./format";
  * loaded settings overlay, so none of it is in the startup chunk.
  */
 export const settingsText = defineCatalog("settings", {
-  "tabs.safety": "Safety",
+  "tabs.safety": "Privacy & Safety",
   "tabs.account": "Account",
   "tabs.appearance": "Appearance",
   "tabs.notifications": "Notifications",

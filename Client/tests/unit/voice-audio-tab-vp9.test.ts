@@ -7,8 +7,10 @@ vi.mock("../../src/features/voice/native/platform", () => ({
   isLinuxDesktop: () => isLinuxDesktop(),
 }));
 const nativeH264 = vi.hoisted(() => ({ value: true }));
+const nativeVp9 = vi.hoisted(() => ({ value: false }));
 vi.mock("../../src/features/voice/native/videoCodecs", () => ({
-  nativeVideoCodecs: () => Promise.resolve({ h264: nativeH264.value, vp9: false, decode: [] }),
+  nativeVideoCodecs: () =>
+    Promise.resolve({ h264: nativeH264.value, vp9: nativeVp9.value, decode: [] }),
 }));
 // The Linux case waits for the codec probe, so the tab outlives the build:
 // keep the native device lists and hot-plug watch off the real desktop host.
@@ -77,6 +79,7 @@ function codecOptions(): string[] {
 beforeEach(() => {
   localStorage.clear();
   isLinuxDesktop.mockReturnValue(false);
+  nativeVp9.value = false;
   supportsVP9.mockReturnValue(true);
   installFakeAudio({ worklets: true });
   vi.stubGlobal("navigator", {
@@ -103,13 +106,27 @@ describe("VoiceAudioTab VP9 entry (WP M-5a)", () => {
     expect(codecOptions()).toEqual(["vp8", "h264", "auto"]);
   });
 
-  it("never offers VP9 on Linux", async () => {
+  it("never offers VP9 on Linux when the native engine lacks it", async () => {
     isLinuxDesktop.mockReturnValue(true);
     const ac = new AbortController();
     const el = createVoiceAudioTab(ac.signal).build();
     await vi.waitFor(() => {
       const select = el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement;
       expect([...select.options].map((o) => o.value)).toEqual(["vp8", "h264", "auto"]);
+    });
+    ac.abort();
+  });
+
+  it("offers VP9 on Linux when the native engine has it", async () => {
+    isLinuxDesktop.mockReturnValue(true);
+    nativeVp9.value = true;
+    // The webview's own check does not matter on Linux.
+    supportsVP9.mockReturnValue(false);
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    await vi.waitFor(() => {
+      const select = el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement;
+      expect([...select.options].map((o) => o.value)).toEqual(["vp8", "h264", "vp9", "auto"]);
     });
     ac.abort();
   });

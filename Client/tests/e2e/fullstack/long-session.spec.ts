@@ -194,7 +194,8 @@ async function runCycle(
   await page.locator(".emoji-btn").click();
   await expect(page.locator(".emoji-picker.open")).toBeVisible();
   // The composer's picker closes on an outside mousedown, not Escape.
-  await page.locator(".chat-header").click();
+  // The name, not the header centre: the topic there opens its full-text modal.
+  await page.locator(".chat-header .ch-name").click();
   await expect(page.locator(".emoji-picker.open")).not.toBeVisible();
 
   await page.locator(".member-item").first().click();
@@ -205,7 +206,8 @@ async function runCycle(
   await textChannels.first().click({ button: "right" });
   await expect(page.locator("[data-testid='channel-context-menu']")).toBeVisible();
   // The context menu dismisses on an outside mousedown, not Escape.
-  await page.locator(".chat-header").click();
+  // The name, not the header centre: the topic there opens its full-text modal.
+  await page.locator(".chat-header .ch-name").click();
   await expect(page.locator("[data-testid='channel-context-menu']")).not.toBeVisible();
 
   // 4. Open the DM with Bob, send one message, close it.
