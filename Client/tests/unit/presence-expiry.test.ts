@@ -11,7 +11,7 @@ import {
 } from "@stores/members.store";
 import { createPresenceSender } from "@lib/presence";
 import { createPresenceLimiter } from "@lib/rate-limiter";
-import { saveUserStatus } from "@lib/userStatus";
+import { loadStatusTimer, loadUserStatus, saveStatusTimer, saveUserStatus } from "@lib/userStatus";
 import type { WsClient } from "@lib/ws";
 
 type Frame = { type: string; payload: Record<string, unknown> };
@@ -131,6 +131,37 @@ describe("presence_update custom_status_expires_in", () => {
     expect(own()?.customStatusExpiresAt).toBe("2026-10-17T12:00:00Z");
     applyPresenceBatch([{ user_id: 7, status: "online", custom_status: null }], false);
     expect(own()?.customStatusExpiresAt).toBeNull();
+    sender.destroy();
+  });
+
+  it("a TIMED_OUT rollback keeps a running status timer", () => {
+    const { ws, sent } = mockWs();
+    const sender = createPresenceSender(ws, createPresenceLimiter());
+    saveUserStatus("dnd");
+    saveStatusTimer("dnd", Date.now() + 3_600_000);
+    updatePresence(7, "dnd");
+    membersStore.flush();
+
+    sender.send("dnd", "heads down"); // refused: the user is timed out
+    expect(sent).toHaveLength(1);
+    sender.rollbackTimedOut("id-1");
+
+    expect(loadUserStatus()).toBe("dnd");
+    expect(loadStatusTimer()).toEqual({ status: "dnd", until: Date.now() + 3_600_000 });
+    expect(own()?.customStatus).toBeNull();
+    sender.destroy();
+  });
+
+  it("a rollback that does change the status still ends its timer", () => {
+    const { ws } = mockWs();
+    const sender = createPresenceSender(ws, createPresenceLimiter());
+    saveUserStatus("online");
+    sender.send("dnd", "x"); // optimistic: members entry dnd, baseline online
+    saveUserStatus("dnd");
+    saveStatusTimer("dnd", Date.now() + 3_600_000);
+    sender.rollbackTimedOut("id-1");
+    expect(loadUserStatus()).toBe("online");
+    expect(loadStatusTimer()).toBeNull();
     sender.destroy();
   });
 });

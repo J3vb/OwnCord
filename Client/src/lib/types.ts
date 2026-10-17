@@ -259,9 +259,6 @@ export interface ReadyMember {
   readonly display_name?: string | null;
   /** Free-text status line shown under the name. Null = unset. */
   readonly custom_status?: string | null;
-  /** When the signed-in user's own custom status clears itself. Servers only
-   *  tell the owner, so this is absent on every other member's entry. */
-  readonly custom_status_expires_at?: string | null;
   /** Profile text. Null = unset; absent from servers before 3C-7. */
   readonly about?: string | null;
   /** Account creation time (RFC3339); absent from servers before 3C-7. */

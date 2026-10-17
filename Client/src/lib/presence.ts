@@ -125,7 +125,12 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
       // an already-mounted picker re-seeds from the members store write above.
       updateUser({ status, custom_status: b.custom });
     }
-    saveUserStatus(status, origin);
+    // Only a real change is written: saveUserStatus ends a running status
+    // timer, and a rollback that restores the status already in effect (a
+    // refused custom status while on a timed Do Not Disturb) must not.
+    if (status !== loadUserStatus() || origin !== loadUserStatusOrigin()) {
+      saveUserStatus(status, origin);
+    }
     saveCustomStatus(b.custom ?? "");
   }
 

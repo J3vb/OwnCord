@@ -75,9 +75,6 @@ export function setMembers(members: readonly ReadyMember[]): void {
       displayName: m.display_name ?? null,
       customStatus: m.custom_status ?? null,
       identityPublicKey: m.identity_public_key ?? null,
-      ...(m.custom_status_expires_at === undefined
-        ? {}
-        : { customStatusExpiresAt: m.custom_status_expires_at }),
       ...(m.about === undefined ? {} : { about: m.about }),
       ...(m.created_at === undefined ? {} : { createdAt: m.created_at }),
     });

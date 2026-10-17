@@ -14,10 +14,11 @@
  *  - Any other status write (a manual pick here, in Settings or the tray, the
  *    idle watcher) clears the stored timer in `saveUserStatus`, so this module
  *    sees the change and stands down.
- *  - A status the *server* reports for us that differs from the timed one
- *    (another device changed it, or a reconnect handed back something else)
- *    cancels the timer too; the status stays as it now is on the server and
- *    nothing is sent.
+ *  - The timer follows the *locally saved* status. A live presence for us
+ *    that differs from the timed one (another device changed it) cancels the
+ *    timer and adopts that status locally, sending nothing. A reconnect's
+ *    auth_ok is not such a signal: the page re-asserts the saved status to
+ *    the server on reconnect, so the timed status and its timer carry on.
  *  - The timer firing re-reads the stored timer and the saved status first, so
  *    it can never override a newer manual choice it has not heard about yet.
  */
@@ -41,6 +42,10 @@ import { membersStore } from "@stores/members.store";
  *  A longer wait is slept in pieces. */
 const MAX_TIMER_MS = 2_147_483_647;
 
+/** How long after a local status change a server echo of the previous status
+ *  is taken for a straggler (the presence limiter can hold a frame ~11 s). */
+const STALE_ECHO_MS = 15_000;
+
 export interface StatusTimerWatcherOptions {
   /** Send the revert. The watcher has already saved the new status; the caller
    *  owns the transport (the shared presence sender), as autoIdle's does. */
@@ -55,26 +60,41 @@ export interface StatusTimerWatcher {
   destroy(): void;
 }
 
-/** The server says our status is `reported`: end the timer if that is not
- *  the status it was set for. */
-function onServerStatus(reported: UserStatus | null | undefined): void {
-  // "offline" is what everyone is told about an invisible user, and what our
-  // own entry reads while the socket is down: not a different choice.
-  if (reported === null || reported === undefined || reported === "offline") return;
-  const timer = loadStatusTimer();
-  if (timer === null || reported === timer.status) return;
-  clearStatusTimer();
-}
-
 export function startStatusTimerWatcher(options: StatusTimerWatcherOptions): StatusTimerWatcher {
   const now = options.now ?? Date.now;
   const disposable = new Disposable();
-  /** Bumped by every arm and disarm: a timer whose generation is stale was
-   *  superseded and does nothing when it fires. */
-  let generation = 0;
+  let cancelTimer: (() => void) | null = null;
+  /** The saved status before the latest local change, and when it changed. A
+   *  late echo of that earlier status is not another device speaking. */
+  let previousLocal: UserStatus = loadUserStatus();
+  let currentLocal: UserStatus = previousLocal;
+  let changedAt = 0;
 
   function disarm(): void {
-    generation += 1;
+    cancelTimer?.();
+    cancelTimer = null;
+  }
+
+  function noteLocalStatus(): void {
+    const next = loadUserStatus();
+    if (next === currentLocal) return;
+    previousLocal = currentLocal;
+    currentLocal = next;
+    changedAt = now();
+  }
+
+  /** Our own member entry changed through a live presence (not a ready
+   *  snapshot, which says nothing about what another device just did). */
+  function onLivePresence(reported: UserStatus | null): void {
+    // "offline" is what everyone is told about an invisible user, and what our
+    // own entry reads while the socket is down: not a different choice.
+    if (reported === null || reported === "offline") return;
+    const timer = loadStatusTimer();
+    if (timer === null || reported === timer.status) return;
+    // The frame carrying our latest pick may still be queued behind the
+    // presence limiter, so the server can still be echoing the status we had.
+    if (reported === previousLocal && now() - changedAt < STALE_ECHO_MS) return;
+    saveUserStatus(reported); // adopts it locally and ends the timer; sends nothing
   }
 
   function expire(timer: StatusTimer): void {
@@ -109,11 +129,10 @@ export function startStatusTimerWatcher(options: StatusTimerWatcherOptions): Sta
       expire(timer);
       return;
     }
-    const mine = generation;
-    setOwnedTimeout(
+    cancelTimer = setOwnedTimeout(
       disposable.signal,
       () => {
-        if (mine !== generation) return;
+        cancelTimer = null;
         if (remaining > MAX_TIMER_MS) sync();
         else expire(timer);
       },
@@ -125,16 +144,34 @@ export function startStatusTimerWatcher(options: StatusTimerWatcherOptions): Sta
   // A status written without a timer (saveUserStatus already cleared it) is
   // covered above; this keeps a stale stored timer from outliving a status
   // changed while the watcher is mid-flight.
-  disposable.addCleanup(onUserStatusChange(sync, { signal: disposable.signal }));
+  disposable.addCleanup(
+    onUserStatusChange(
+      () => {
+        noteLocalStatus();
+        sync();
+      },
+      { signal: disposable.signal },
+    ),
+  );
+  // Our own status and the roster revision as one key. A change of status
+  // with the revision unchanged is a live presence; setMembers (ready) bumps
+  // the revision and is ignored.
+  let seenRevision = membersStore.getState().roleRevision ?? 0;
   disposable.onStoreChange(
     membersStore,
-    (s) => {
+    (s): string => {
       const id = authStore.getState().user?.id;
-      return id === undefined ? null : (s.members.get(id)?.status ?? null);
+      const status = id === undefined ? "" : (s.members.get(id)?.status ?? "");
+      return `${status}@${s.roleRevision ?? 0}`;
     },
-    onServerStatus,
+    (key: string) => {
+      const [status = "", revision = "0"] = key.split("@");
+      const rev = Number(revision);
+      const live = rev === seenRevision;
+      seenRevision = rev;
+      if (live && status !== "") onLivePresence(status as UserStatus);
+    },
   );
-  disposable.onStoreChange(authStore, (s) => s.user?.status ?? null, onServerStatus);
   // A laptop that slept through the end fires its timer late, or not at all
   // until it wakes; looking again on focus ends it as soon as the user is back.
   disposable.onEvent(window, "focus", sync);

@@ -41,7 +41,6 @@ import {
   type StatusDef,
 } from "@components/statusDefs";
 import { createEmojiPicker } from "@components/EmojiPicker";
-import { listCustomEmoji } from "@stores/emoji.store";
 import { createAvatarElement } from "@components/message-list/avatar";
 import { copyWithToast, isDeveloperMode } from "../features/developer-mode/developerTools";
 import { shellText } from "../i18n/shell";
@@ -250,7 +249,9 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
 
     function commitCustom(force = false): void {
       if (cardEl !== card || !enabled) return;
-      const text = input.value.trim().slice(0, MAX_CUSTOM_STATUS_LEN);
+      // The server collapses runs of whitespace; doing the same here keeps its
+      // echo equal to what we hold.
+      const text = input.value.replace(/\s+/g, " ").trim().slice(0, MAX_CUSTOM_STATUS_LEN);
       input.value = text;
       if (text === lastCommittedCustom && !force) return;
       lastCommittedCustom = text;
@@ -293,11 +294,14 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
     );
     input.addEventListener("input", syncClearVisibility, { signal });
     // While the emoji picker is open focus moves into it; the text is
-    // committed when it closes and the field is left, or on Enter.
+    // committed when the field is left after it closes, on Enter, or by
+    // closeEmojiPicker when the card goes away with the picker still open.
     input.addEventListener(
       "blur",
-      () => {
-        if (emojiPicker === null) commitCustom();
+      (e: FocusEvent) => {
+        // Not while focus is in the picker, and not when it goes to Clear after:
+        // that choice commits the text itself, with its expiry (one frame).
+        if (emojiPicker === null && e.relatedTarget !== clearAfterSelect) commitCustom();
       },
       { signal },
     );
@@ -322,7 +326,14 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
       emojiPicker.destroy();
       emojiPicker = null;
       emojiBtn.setAttribute("aria-expanded", "false");
-      if (refocus && cardEl === card) input.focus();
+      if (refocus) {
+        // Back in the field: its own blur commits the text later.
+        if (cardEl === card) input.focus();
+      } else {
+        // The card (or the picker's availability) is going away without
+        // returning to the field, so its blur will not commit what was typed.
+        commitCustom();
+      }
     }
     d.addCleanup(() => closeEmojiPicker(false));
 
@@ -349,7 +360,9 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
           return;
         }
         emojiPicker = createEmojiPicker({
-          customEmoji: listCustomEmoji(),
+          // Custom statuses render as plain text, so a server emoji would show
+          // as ":shortcode:".
+          customEmoji: [],
           onSelect: (emoji, select) => {
             insertEmoji(emoji);
             if (select?.keepOpen !== true) closeEmojiPicker(true);
@@ -401,8 +414,9 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
 
     function paintExpanded(): void {
       for (const [value, el] of durationGroups) el.hidden = value !== expanded;
-      for (const [value, el] of chevrons)
-        el.setAttribute("aria-expanded", String(value === expanded));
+      for (const [value, el] of items) {
+        if (isTimedStatus(value)) el.setAttribute("aria-expanded", String(value === expanded));
+      }
     }
 
     function commitStatus(value: UserStatus, durationMs?: number): void {
@@ -422,7 +436,9 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
         "aria-checked": "false",
         tabindex: "-1",
         "data-testid": `spc-status-${def.value}`,
-        ...(timed ? { "aria-keyshortcuts": "ArrowRight" } : {}),
+        ...(timed
+          ? { "aria-keyshortcuts": "ArrowRight", "aria-haspopup": "menu", "aria-expanded": "false" }
+          : {}),
       });
       const dot = createElement("span", { class: "spc-status-dot" });
       dot.style.background = def.color;
@@ -467,7 +483,6 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
         type: "button",
         tabindex: "-1",
         "aria-hidden": "true",
-        "aria-expanded": "false",
         "data-testid": `spc-chevron-${def.value}`,
       });
       chevron.appendChild(createIcon("chevron-down", 16));
@@ -486,7 +501,7 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
 
       const durations = createElement("div", {
         class: "spc-durations",
-        role: "group",
+        role: "menu",
         "aria-label": shellText("status.durationsFor", { status: shellText(def.labelKey) }),
         "data-testid": `spc-durations-${def.value}`,
       });
@@ -557,7 +572,11 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
           durationItems.get(rowStatus)?.[0]?.focus();
           return;
         }
-        if (e.key === "ArrowLeft" && (ownerOfDuration !== undefined || rowStatus !== undefined)) {
+        // Escape inside an open list closes that list, like ArrowLeft; the
+        // card's own Escape (document level) then sees it was handled.
+        const leaves =
+          e.key === "ArrowLeft" || (e.key === "Escape" && ownerOfDuration !== undefined);
+        if (leaves && (ownerOfDuration !== undefined || rowStatus !== undefined)) {
           const owner = ownerOfDuration ?? rowStatus;
           if (owner === undefined || expanded !== owner) return;
           e.preventDefault();
@@ -690,7 +709,7 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
     onStatusTimerChange(() => paintTimer(), { signal });
     const syncCustom = (text: string): void => {
       // Never clobber text the user is typing right now.
-      if (document.activeElement === input) return;
+      if (document.activeElement === input || emojiPicker !== null) return;
       lastCommittedCustom = text;
       input.value = text;
       paintCustomLine();

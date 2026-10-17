@@ -177,22 +177,17 @@ describe("SelfProfileCard from the user bar", () => {
   it("arrows (wrapping), Home and End move focus without saving; Enter commits", () => {
     trigger().click();
     const items = [...document.body.querySelectorAll<HTMLElement>("[role='menuitemradio']")];
-    const key = (k: string): void => {
-      document.activeElement!.dispatchEvent(
-        new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }),
-      );
-    };
     expect(document.activeElement).toBe(items[0]);
-    key("ArrowUp");
+    press("ArrowUp");
     expect(document.activeElement).toBe(items[3]);
-    key("ArrowDown");
+    press("ArrowDown");
     expect(document.activeElement).toBe(items[0]);
-    key("End");
+    press("End");
     expect(document.activeElement).toBe(items[3]);
-    key("Home");
+    press("Home");
     expect(document.activeElement).toBe(items[0]);
-    key("ArrowDown");
-    key("ArrowDown");
+    press("ArrowDown");
+    press("ArrowDown");
     expect(document.activeElement).toBe(items[2]);
     expect(loadUserStatus()).toBe("online");
     expect(ws.send).not.toHaveBeenCalled();
@@ -364,6 +359,37 @@ const press = (k: string): void => {
 };
 const byId = <T extends HTMLElement>(id: string): T => q<T>(`[data-testid='${id}']`)!;
 
+function setOwn(customStatus: string, expiresAt: string | null | undefined): void {
+  membersStore.setState((p) => ({
+    ...p,
+    members: new Map(p.members).set(7, {
+      id: 7,
+      username: "alice",
+      status: "online",
+      customStatus,
+      ...(expiresAt === undefined ? {} : { customStatusExpiresAt: expiresAt }),
+    } as never),
+  }));
+  membersStore.flush();
+}
+
+function openPicker(): HTMLElement {
+  byId<HTMLButtonElement>("spc-custom-emoji").click();
+  return card()!.querySelector<HTMLElement>(".emoji-picker")!;
+}
+const firstCell = (picker: HTMLElement): HTMLElement =>
+  picker.querySelector<HTMLElement>(".ep-emoji")!;
+
+function commitVia(mount: () => void, option: string, text = "heads down"): void {
+  mount();
+  trigger().click();
+  const select = byId<HTMLSelectElement>("spc-clear-after");
+  select.value = option;
+  const input = byId<HTMLInputElement>("spc-custom-input");
+  input.value = text;
+  input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+}
+
 describe("SelfProfileCard: timers, Clear after, emoji", () => {
   let container: HTMLDivElement;
   let comp: ReturnType<typeof createUserBar>;
@@ -375,6 +401,8 @@ describe("SelfProfileCard: timers, Clear after, emoji", () => {
 
   /** A fresh bar with its own presence limiter, so each case's first send
    *  goes straight out. */
+  const commit = (option: string, text?: string): void => commitVia(mountBar, option, text);
+
   function mountBar(): void {
     comp?.destroy?.();
     ws = mockWs();
@@ -540,16 +568,6 @@ describe("SelfProfileCard: timers, Clear after, emoji", () => {
   });
 
   describe("custom status Clear after", () => {
-    function commit(option: string, text = "heads down"): void {
-      mountBar();
-      trigger().click();
-      const select = byId<HTMLSelectElement>("spc-clear-after");
-      select.value = option;
-      const input = byId<HTMLInputElement>("spc-custom-input");
-      input.value = text;
-      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    }
-
     it("offers Today, 4 hours, 1 hour, 30 minutes and Don't clear, defaulting to Don't clear", () => {
       trigger().click();
       const select = byId<HTMLSelectElement>("spc-clear-after");
@@ -642,20 +660,6 @@ describe("SelfProfileCard: timers, Clear after, emoji", () => {
     });
 
     describe("the 'Clears at' line", () => {
-      function setOwn(customStatus: string, expiresAt: string | null | undefined): void {
-        membersStore.setState((p) => ({
-          ...p,
-          members: new Map(p.members).set(7, {
-            id: 7,
-            username: "alice",
-            status: "online",
-            customStatus,
-            ...(expiresAt === undefined ? {} : { customStatusExpiresAt: expiresAt }),
-          } as never),
-        }));
-        membersStore.flush();
-      }
-
       beforeEach(() => {
         vi.useFakeTimers({ toFake: ["Date"] });
         vi.setSystemTime(new Date(2026, 9, 17, 12, 0, 0));
@@ -739,14 +743,90 @@ describe("SelfProfileCard: timers, Clear after, emoji", () => {
     });
   });
 
-  describe("emoji button", () => {
-    function openPicker(): HTMLElement {
-      byId<HTMLButtonElement>("spc-custom-emoji").click();
-      return card()!.querySelector<HTMLElement>(".emoji-picker")!;
-    }
-    const firstCell = (picker: HTMLElement): HTMLElement =>
-      picker.querySelector<HTMLElement>(".ep-emoji")!;
+  describe("submenu semantics and pending text", () => {
+    it("the timed rows carry haspopup/expanded; the list is a labelled menu; Escape closes just the list", () => {
+      trigger().click();
+      const dnd = byId<HTMLButtonElement>("spc-status-dnd");
+      expect(dnd.getAttribute("aria-haspopup")).toBe("menu");
+      expect(dnd.getAttribute("aria-expanded")).toBe("false");
+      expect(byId("spc-status-online").hasAttribute("aria-haspopup")).toBe(false);
+      const list = byId("spc-durations-dnd");
+      expect(list.getAttribute("role")).toBe("menu");
+      expect(list.getAttribute("aria-label")).toBe("Do Not Disturb: choose how long");
 
+      dnd.focus();
+      press("ArrowRight");
+      expect(dnd.getAttribute("aria-expanded")).toBe("true");
+      expect(byId("spc-status-idle").getAttribute("aria-expanded")).toBe("false");
+
+      press("Escape");
+      expect(list.hidden).toBe(true);
+      expect(dnd.getAttribute("aria-expanded")).toBe("false");
+      expect(document.activeElement).toBe(dnd);
+      expect(card()).not.toBeNull();
+      // With nothing open, Escape closes the card as before.
+      document.activeElement!.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+      );
+      expect(card()).toBeNull();
+    });
+
+    it("typed text is committed when an outside click closes the card with the picker open", () => {
+      trigger().click();
+      const input = byId<HTMLInputElement>("spc-custom-input");
+      input.focus();
+      input.value = "  brb   soon ";
+      openPicker();
+      input.blur(); // focus moved into the picker: no commit yet
+      expect(ws.send).not.toHaveBeenCalled();
+
+      document.body.click(); // outside click
+      expect(card()).toBeNull();
+      expect(frames(ws)).toHaveLength(1);
+      expect(frames(ws)[0]!.payload.custom_status).toBe("brb soon");
+    });
+
+    it("the owner tearing the bar down with the picker open commits it too", () => {
+      trigger().click();
+      byId<HTMLInputElement>("spc-custom-input").value = "away";
+      openPicker();
+      comp.destroy?.();
+      expect(frames(ws)[0]!.payload.custom_status).toBe("away");
+    });
+
+    it("whitespace runs are collapsed before sending, like the server does", () => {
+      commit("never", "  a \t  b   c ");
+      expect(frames(ws)[0]!.payload.custom_status).toBe("a b c");
+    });
+
+    it("moving from the text to Clear after sends one frame, not two", () => {
+      trigger().click();
+      const input = byId<HTMLInputElement>("spc-custom-input");
+      const select = byId<HTMLSelectElement>("spc-clear-after");
+      input.focus();
+      input.value = "lunch";
+      input.dispatchEvent(new FocusEvent("blur", { relatedTarget: select }));
+      expect(ws.send).not.toHaveBeenCalled();
+      select.value = "1h";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      expect(frames(ws)).toHaveLength(1);
+      expect(frames(ws)[0]!.payload).toMatchObject({
+        custom_status: "lunch",
+        custom_status_expires_in: 3600,
+      });
+    });
+
+    it("does not overwrite the typed text from the store while the picker is open", () => {
+      trigger().click();
+      const input = byId<HTMLInputElement>("spc-custom-input");
+      input.value = "typing";
+      openPicker();
+      setOwn("from another device", null);
+      expect(input.value).toBe("typing");
+    });
+  });
+
+  describe("emoji button", () => {
     it("opens the emoji picker inside the card and closes it again", () => {
       trigger().click();
       const btn = byId<HTMLButtonElement>("spc-custom-emoji");
@@ -824,6 +904,15 @@ describe("SelfProfileCard: timers, Clear after, emoji", () => {
       cell.click();
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
       expect(frames(ws)[0]!.payload.custom_status).toBe(`on it ${cell.dataset.emoji}`);
+    });
+
+    it("offers no server emoji: a custom status renders as plain text", async () => {
+      const { setCustomEmoji } = await import("@stores/emoji.store");
+      setCustomEmoji([{ id: 1, shortcode: "party", url: "/x.png" } as never], 0);
+      trigger().click();
+      const picker = openPicker();
+      expect(picker.querySelector(".ep-emoji-custom")).toBeNull();
+      expect(picker.textContent).not.toContain("Server");
     });
 
     it("Escape in the picker closes only the picker", () => {

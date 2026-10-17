@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import type { UserStatus } from "@lib/types";
 import { authStore } from "@stores/auth.store";
-import { membersStore, updatePresence } from "@stores/members.store";
+import { membersStore, setMembers, updatePresence } from "@stores/members.store";
 import { startStatusTimerWatcher } from "@lib/statusTimer";
 import { clampExpiresIn, clearAfterSeconds, type ClearAfterId } from "@lib/statusChoices";
 import {
@@ -159,7 +159,7 @@ describe("status timer watcher", () => {
   // Edge case (a): another device (or a reconnect) hands us a different status
   // while the timer is running.
   describe("a server-pushed status that differs from the timed one", () => {
-    it("cancels the timer when another device changes the status (presence)", () => {
+    it("adopts it locally and cancels the timer when another device changes the status", () => {
       pickTimed("dnd", HOUR);
       setOwnPresence("dnd");
       const w = startStatusTimerWatcher({ onRevert });
@@ -167,21 +167,59 @@ describe("status timer watcher", () => {
 
       setOwnPresence("idle");
       expect(loadStatusTimer()).toBeNull();
+      expect(loadUserStatus()).toBe("idle"); // follows the other device, sends nothing
       vi.advanceTimersByTime(2 * HOUR);
       expect(onRevert).not.toHaveBeenCalled();
       w.destroy();
     });
 
-    it("cancels the timer when a reconnect's auth_ok carries another status", () => {
-      setUser("dnd");
-      pickTimed("dnd", HOUR);
+    it("a reconnect's auth_ok with another status does not end the timer: the saved status is re-asserted", () => {
+      setUser("invisible");
+      pickTimed("invisible", HOUR);
       const w = startStatusTimerWatcher({ onRevert });
       vi.advanceTimersByTime(HOUR / 4);
 
-      setUser("online"); // the reconnect: the server's own status is Online
+      // Another device made us Online while we were away; the reconnect says so.
+      setUser("online");
+      expect(loadStatusTimer()).not.toBeNull();
+      // MainPage.restoreSavedPresence: the saved status wins over the server's.
+      const restore = vi.fn();
+      if (authStore.getState().user?.status !== loadUserStatus()) restore(loadUserStatus());
+      expect(restore).toHaveBeenCalledExactlyOnceWith("invisible");
+      expect(loadUserStatus()).toBe("invisible");
+
+      vi.advanceTimersByTime(HOUR);
+      expect(onRevert).toHaveBeenCalledExactlyOnceWith("online");
+      w.destroy();
+    });
+
+    it("a ready snapshot (roster replaced) is not another device speaking", () => {
+      pickTimed("dnd", HOUR);
+      const w = startStatusTimerWatcher({ onRevert });
+      setMembers([{ id: 7, username: "alice", avatar: null, role: "member", status: "online" }]);
+      membersStore.flush();
+      expect(loadStatusTimer()).not.toBeNull();
+      expect(loadUserStatus()).toBe("dnd");
+      w.destroy();
+    });
+
+    it("ignores a late echo of the status we had before an optimistic timed pick", () => {
+      setOwnPresence("online");
+      const w = startStatusTimerWatcher({ onRevert });
+      // The pick: saved, timer set, own entry updated optimistically.
+      pickTimed("dnd", HOUR);
+      setOwnPresence("dnd");
+      vi.advanceTimersByTime(3000);
+      setOwnPresence("online"); // the server still echoing our previous status
+      expect(loadStatusTimer()).not.toBeNull();
+      expect(loadUserStatus()).toBe("dnd");
+
+      // Long after, the same report is a genuine change from another device.
+      vi.advanceTimersByTime(20_000);
+      setOwnPresence("dnd");
+      setOwnPresence("online");
       expect(loadStatusTimer()).toBeNull();
-      vi.advanceTimersByTime(2 * HOUR);
-      expect(onRevert).not.toHaveBeenCalled();
+      expect(loadUserStatus()).toBe("online");
       w.destroy();
     });
 
@@ -229,9 +267,9 @@ describe("status timer watcher", () => {
   });
 });
 
-describe("custom status Clear after", () => {
-  const at = (h: number, m = 0, s = 0): Date => new Date(2026, 9, 17, h, m, s);
+const at = (h: number, m = 0, s = 0): Date => new Date(2026, 9, 17, h, m, s);
 
+describe("custom status Clear after", () => {
   it.each<[ClearAfterId, number | undefined]>([
     ["30m", 1800],
     ["1h", 3600],

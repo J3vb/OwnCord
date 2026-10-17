@@ -49,8 +49,7 @@ function sameLocalDay(a: Date, b: Date): boolean {
 
 /** "3:40 PM", or "Tue 3:40 PM" when it is not today, in the user's clock style. */
 function whenText(at: Date, now: Date): string {
-  const time = formatDate(at, TIME_OF_DAY);
-  return sameLocalDay(at, now) ? time : `${formatDate(at, { weekday: "short" })} ${time}`;
+  return formatDate(at, sameLocalDay(at, now) ? TIME_OF_DAY : { weekday: "short", ...TIME_OF_DAY });
 }
 
 /** The line under a timed status: "Until 3:40 PM". */
