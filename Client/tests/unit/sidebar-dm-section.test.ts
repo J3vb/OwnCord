@@ -959,6 +959,33 @@ describe("SidebarDmSection", () => {
       section.destroy();
     });
 
+    it("leave-group from the compact row menu confirms first, and the confirm closes when the row leaves the list", () => {
+      setConnectionStatus("connected");
+      addDmChannel(
+        makeDm({
+          channelId: 100,
+          isGroup: true,
+          name: "Crew",
+          participants: [{ id: 10, username: "Alice", avatar: "", status: "online" }],
+        }),
+      );
+      const onCloseDm = vi.fn();
+      const section = createSidebarDmSection(defaultOpts({ menu: { onCloseDm } }));
+      container.appendChild(section.element);
+
+      container
+        .querySelector("[data-testid='dm-entry']")
+        ?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }));
+      document.querySelector<HTMLElement>("[data-testid='dm-close-100']")?.click();
+      expect(onCloseDm).not.toHaveBeenCalled();
+      expect(document.querySelector("[data-testid='dm-leave-modal']")).not.toBeNull();
+
+      dmStore.setState(() => ({ channels: [] }));
+      dmStore.flush();
+      expect(document.querySelector("[data-testid='dm-leave-modal']")).toBeNull();
+      section.destroy();
+    });
+
     it("has no menu when none is wired", () => {
       addDmChannel(makeDm({ channelId: 100 }));
       const section = createSidebarDmSection(defaultOpts());

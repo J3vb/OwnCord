@@ -545,6 +545,38 @@ describe("DmProfileSidebar", () => {
       sidebar.destroy?.();
     });
 
+    it("update() for a different person keeps the panel node and swaps their note, about and Block target", () => {
+      localStorage.setItem("owncord:dm-note:2", "bob's note");
+      const onToggleBlock = vi.fn();
+      const sidebar = createDmProfileSidebar(makeOptions({ onToggleBlock }));
+      sidebar.mount(container);
+      const panel = container.querySelector('[data-testid="dm-profile-sidebar"]');
+
+      sidebar.update(makeUser({ id: 2, username: "Bob", about: "Bob about" }));
+
+      expect(container.querySelector('[data-testid="dm-profile-sidebar"]')).toBe(panel);
+      expect(container.querySelector('[data-testid="dps-username"]')?.textContent).toBe("Bob");
+      expect(container.querySelector('[data-testid="dps-about"]')?.textContent).toBe("Bob about");
+      expect(container.querySelector<HTMLTextAreaElement>('[data-testid="dps-note"]')?.value).toBe(
+        "bob's note",
+      );
+      container.querySelector<HTMLElement>('[data-testid="dps-block-btn"]')?.click();
+      expect(onToggleBlock).toHaveBeenCalledExactlyOnceWith(2, true);
+      sidebar.destroy?.();
+      localStorage.removeItem("owncord:dm-note:2");
+    });
+
+    it("does not take focus when mounted with focus: false", () => {
+      const other = document.createElement("textarea");
+      document.body.appendChild(other);
+      other.focus();
+      const sidebar = createDmProfileSidebar(makeOptions({ focus: false }));
+      sidebar.mount(container);
+      expect(document.activeElement).toBe(other);
+      sidebar.destroy?.();
+      other.remove();
+    });
+
     it("leaves Escape to an open confirm: the panel stays, then closes once the confirm is gone", () => {
       const onClose = vi.fn();
       const sidebar = createDmProfileSidebar(makeOptions({ onClose }));

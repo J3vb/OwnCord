@@ -152,6 +152,9 @@ function personName(userId: number): string | undefined {
   return (member !== undefined ? memberDisplayName(member) : "") || voiceUser?.username;
 }
 
+/** Saved preference: the 1:1 DM profile panel opens with the conversation. */
+const DM_PROFILE_PREF = "dmProfileOpen";
+
 /**
  * Build the profile panel's data from the live stores for a 1:1 DM channel.
  * Null for a group (no single "recipient" -- see the caller) or a channel
@@ -159,9 +162,6 @@ function personName(userId: number): string | undefined {
  * refresh below so the two can never disagree on how a status/name is
  * derived.
  */
-/** Saved preference: the 1:1 DM profile panel opens with the conversation. */
-const DM_PROFILE_PREF = "dmProfileOpen";
-
 function buildDmProfileUser(channelId: number): DmProfileData | null {
   const dmChannel = dmStore.getState().channels.find((c) => c.channelId === channelId);
   // A group has no single "recipient" — dm.store.ts documents .recipient as
@@ -328,6 +328,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   let dmProfileSlot: HTMLDivElement | null = null;
   /** The header's "Show User Profile" toggle; its aria-pressed follows the panel. */
   let dmProfileBtn: HTMLButtonElement | null = null;
+  /** The DM the open panel shows; moves with a DM-to-DM switch. */
+  let dmProfileChannelId = 0;
   /** Tears down the store subscriptions that keep an open profile panel's
    *  status/name live (see toggleDmProfile) -- null while the panel is
    *  closed. Always cleared alongside dmProfileSidebar itself. */
@@ -418,7 +420,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // Only open in DM mode
     const active = getActiveChannel();
     if (active === null || active.type !== "dm") return;
-    if (openDmProfileFor(active.id)) savePref(DM_PROFILE_PREF, true);
+    if (openDmProfileFor(active.id, true)) savePref(DM_PROFILE_PREF, true);
   }
 
   /** A close the user asked for (the X, Escape, the header button): remembered. */
@@ -441,15 +443,61 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
    * new person on a DM-to-DM switch), a group or a server channel hides it.
    */
   function syncDmProfileToActive(): void {
-    closeDmProfile();
     const active = getActiveChannel();
-    if (active === null || active.type !== "dm") return;
-    if (!loadPref<boolean>(DM_PROFILE_PREF, true)) return;
-    openDmProfileFor(active.id);
+    if (active !== null && active.type === "dm" && loadPref<boolean>(DM_PROFILE_PREF, true)) {
+      // Already showing: a switch to another 1:1 DM repaints the same panel
+      // (no slide-in, no focus move) and follows the new person live.
+      const next = dmProfileSidebar !== null ? buildDmProfileUser(active.id) : null;
+      if (dmProfileSidebar !== null && next !== null) {
+        bindDmProfileLive(active.id, next.id);
+        dmProfileSidebar.update(next);
+        return;
+      }
+      closeDmProfile();
+      // It opened by itself: never take focus from what the user is typing in.
+      openDmProfileFor(active.id, false);
+      return;
+    }
+    closeDmProfile();
+  }
+
+  /**
+   * Keep the panel's status and name live across presence/rename/nickname
+   * changes for as long as it stays open on this DM -- otherwise it is painted
+   * once from an open-time snapshot and never updated until re-mounted, leaving
+   * it disagreeing with the chat header (which ChannelController's
+   * refreshDmHeader already keeps live the same way). Re-binding replaces the
+   * previous DM's subscriptions; closeDmProfile drops them.
+   */
+  function bindDmProfileLive(channelId: number, recipientId: number): void {
+    dmProfileUnsub?.();
+    dmProfileChannelId = channelId;
+    const refresh = (): void => {
+      const next = buildDmProfileUser(channelId);
+      if (next !== null) dmProfileSidebar?.update(next);
+    };
+    const unsubMembers = membersStore.subscribeSelector(
+      (s) => s.members.get(recipientId)?.status,
+      refresh,
+    );
+    const unsubDm = dmStore.subscribeSelector(
+      (s) => s.channels.find((c) => c.channelId === channelId),
+      refresh,
+    );
+    dmProfileUnsub = () => {
+      unsubMembers();
+      unsubDm();
+    };
+  }
+
+  /** Who a Block confirm names: the person the panel shows now. */
+  function dmProfileBlockName(fallback: string): string {
+    const current = buildDmProfileUser(dmProfileChannelId);
+    return current?.displayName ?? current?.username ?? fallback;
   }
 
   /** Mount the panel for a 1:1 DM; false (nothing opened) for a group or an unknown DM. */
-  function openDmProfileFor(channelId: number): boolean {
+  function openDmProfileFor(channelId: number, focus: boolean): boolean {
     if (dmProfileSlot === null) return false;
     const profileUser = buildDmProfileUser(channelId);
     if (profileUser === null) return false;
@@ -466,6 +514,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         dmProfileSidebar = createDmProfileSidebar({
           user: profileUser,
           host: apiConfig.host ?? "",
+          focus,
           onClose: () => {
             closeDmProfileByUser();
           },
@@ -475,7 +524,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
                 confirmAndToggleBlock(
                   { api, notify: showToast },
                   userId,
-                  profileUser.displayName ?? profileUser.username,
+                  // The panel may have moved to another DM since it opened.
+                  dmProfileBlockName(profileUser.username),
                   block,
                 ),
               () =>
@@ -489,29 +539,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         dmProfileSidebar.mount(dmProfileSlot);
         syncDmProfileButton();
 
-        // Keep the panel's status and name live across presence/rename/
-        // nickname changes for as long as it stays open on this DM --
-        // otherwise it is painted once from this open-time snapshot and never
-        // updated until re-mounted, leaving it disagreeing with the chat
-        // header it was opened from (which ChannelController.ts:621-638
-        // already keeps live the same way). Torn down in closeDmProfile.
-        const recipientId = profileUser.id;
-        const refresh = (): void => {
-          const next = buildDmProfileUser(channelId);
-          if (next !== null) dmProfileSidebar?.update(next);
-        };
-        const unsubMembers = membersStore.subscribeSelector(
-          (s) => s.members.get(recipientId)?.status,
-          refresh,
-        );
-        const unsubDm = dmStore.subscribeSelector(
-          (s) => s.channels.find((c) => c.channelId === channelId),
-          refresh,
-        );
-        dmProfileUnsub = () => {
-          unsubMembers();
-          unsubDm();
-        };
+        bindDmProfileLive(channelId, profileUser.id);
       },
       () => {
         // The panel could not load; a later click may retry.
