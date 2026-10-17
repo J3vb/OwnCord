@@ -14,6 +14,7 @@ import type {
 } from "@lib/types";
 import { membersStore } from "@stores/members.store";
 import { authStore, registerVoiceLogoutTeardown } from "@stores/auth.store";
+import { registerSessionReset } from "@lib/sessionRegistry";
 import { noteJoinSucceeded } from "../features/voice/joinBackoff";
 import { setVoiceDeafened, setVoiceInSession } from "@lib/voiceDeafened";
 import { loadPref, savePref } from "@lib/preferences";
@@ -223,13 +224,16 @@ export function resetVoiceStore(): void {
   }));
 }
 
-registerVoiceLogoutTeardown({
-  snapshot: () => voiceStore.getState(),
-  reset: () => {
+registerVoiceLogoutTeardown({ snapshot: () => voiceStore.getState() });
+// App-lifetime: the voice phase runs before any domain reset.
+void registerSessionReset(
+  "voice:store",
+  () => {
     resetVoiceStore();
     noteJoinSucceeded();
   },
-});
+  { phase: "voice" },
+);
 
 /** Bulk set voice states from the ready payload. */
 export function setVoiceStates(states: readonly ReadyVoiceState[]): void {

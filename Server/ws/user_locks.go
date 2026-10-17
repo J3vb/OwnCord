@@ -18,20 +18,10 @@ import (
 //     guaranteed to run against the same, unchanged DB state its own mute just
 //     produced. It is held across a LiveKit RPC.
 //   - voiceMember (WP 1D-10) serializes every change to a user's voice
-//     membership: the voice_states row, the client's voiceChID/voiceJoinToken
-//     and the voice grace entry. Each top-level path takes it once through
-//     Hub.voiceLock; the helpers they call never do. No LiveKit RPC runs
-//     under it: SFU removals are scoped by identity and join token, so they
-//     run after unlock or on removeLiveKitParticipantAsync.
-//
-// Lock order (outermost first):
-//
-//	voiceMember(uid) → voiceMod(uid) → seqMu → keyHolderMu → h.mu → ps.mu →
-//	c.mu / c.voiceMu / voiceGrace.mu / voiceReconcile.mu
-//
-// A goroutine holds at most one user's voiceMember lock and never takes it
-// while holding any of the locks to its right. The hub dispatch goroutine
-// never takes it. A path holding voiceMod never calls a membership path.
+//     membership. It lives in voiceRegistry; the lock order for both
+//     instances is written down in voice_registry.go. voiceMod comes right
+//     after voiceMember in that order, and a path holding voiceMod never
+//     calls a membership path.
 //
 // Entries are reference-counted and evicted once nobody holds or is waiting
 // on them (round 5, Codex review P3): a long-lived server with a large,
@@ -113,9 +103,10 @@ func (v *userLocks) refsForTest(userID int64) int {
 }
 
 // voiceLock takes userID's voice membership lock and returns its release.
-// See userLocks for the lock order; callers hold none of the hub's locks.
+// See voice_registry.go for the lock order; callers hold none of the hub's
+// locks.
 func (h *Hub) voiceLock(userID int64) func() {
-	return h.voiceMember.lock(userID)
+	return h.lock(userID)
 }
 
 // leaveVoiceLocked runs a client-requested voice leave under c's voice lock.

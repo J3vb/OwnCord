@@ -10,6 +10,7 @@
  */
 
 import { createStore } from "@lib/store";
+import { registerSessionReset } from "@lib/sessionRegistry";
 import type {
   ChatMessagePayload,
   ChatEditedPayload,
@@ -470,6 +471,7 @@ export function updateReaction(payload: ReactionUpdatePayload, currentUserId: nu
 export function resetMessagesStore(): void {
   messagesStore.setState(() => INITIAL_STATE);
 }
+void registerSessionReset("messages:store", resetMessagesStore); // app-lifetime
 
 // -----------------------------------------------------------------------------
 // Selectors

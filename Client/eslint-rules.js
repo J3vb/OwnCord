@@ -764,7 +764,12 @@ const noRawHtmlSink = {
 // is accepted only with a comment on the same line or the line above.
 // ─────────────────────────────────────────────────────────────────────────
 
-const SUBSCRIPTION_NAMES = new Set(["subscribe", "subscribeSelector", "onAuthCleared"]);
+const SUBSCRIPTION_NAMES = new Set([
+  "subscribe",
+  "subscribeSelector",
+  "onAuthCleared",
+  "registerSessionReset",
+]);
 
 /** The name reported for a subscription call, else null. */
 function subscriptionName(call) {

@@ -4,6 +4,7 @@
  */
 
 import { createStore } from "@lib/store";
+import { registerSessionReset } from "@lib/sessionRegistry";
 import type { ReadyMember, MemberJoinPayload, PresenceBatchEntry, UserStatus } from "@lib/types";
 
 export interface Member {
@@ -339,3 +340,21 @@ export function getTypingUsers(channelId: number): readonly Member[] {
     return result;
   });
 }
+
+/** Forget the previous server's roster, presence and typing (with live timers)
+ *  on sign-out or server switch. The revisions bump rather than reset, as
+ *  emoji's `rev` does, so a watcher cannot mistake the next snapshot for the
+ *  one it already saw. */
+export function resetMembersStore(): void {
+  for (const timer of typingTimers.values()) {
+    clearTimeout(timer);
+  }
+  typingTimers.clear();
+  membersStore.setState((prev) => ({
+    ...INITIAL_STATE,
+    roleRevision: (prev.roleRevision ?? 0) + 1,
+    snapshotRevision: (prev.snapshotRevision ?? 0) + 1,
+  }));
+}
+
+void registerSessionReset("members:store", resetMembersStore); // app-lifetime

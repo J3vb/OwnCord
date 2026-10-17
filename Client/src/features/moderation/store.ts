@@ -6,6 +6,7 @@
  */
 
 import { createStore } from "@lib/store";
+import { registerSessionReset } from "@lib/sessionRegistry";
 import type { MemberTimeoutEntry } from "@lib/types";
 
 /** Bumped by every report-queue frame. */
@@ -42,3 +43,6 @@ export function setMemberTimeouts(list: readonly MemberTimeoutEntry[] | undefine
 export function resetMemberTimeouts(): void {
   memberTimeoutsStore.setState(() => null);
 }
+
+// App-lifetime: a profile switch must not carry one server's timeouts into the next.
+void registerSessionReset("moderation:timeouts", resetMemberTimeouts);

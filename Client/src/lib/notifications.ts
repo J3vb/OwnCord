@@ -18,7 +18,8 @@ import { isServerRowKind } from "./messageKind";
 import { mentionsCurrentUser } from "./mentions";
 import { jumpToMessage } from "./message-navigation";
 import { createLogger } from "./logger";
-import { playNotificationSound } from "./notificationSound";
+import { registerSessionReset } from "./sessionRegistry";
+import { cleanupNotificationAudio, playNotificationSound } from "./notificationSound";
 import { soundSwitchOn } from "./soundPrefs";
 import { resolveAuthor } from "@lib/formatting";
 import { resolveDisplayName } from "@lib/avatar";
@@ -64,6 +65,17 @@ function shouldCoalesce(channelId: number, alwaysNotify: boolean, now: number): 
 export function resetNotificationCoalescing(): void {
   lastNotifiedAt.clear();
 }
+
+// App-lifetime. Coalescing is keyed by channel id, which is only unique per
+// server, so a stale window from the previous profile must not suppress the
+// next server's first notification for the same id.
+void registerSessionReset("notifications:audio", () => cleanupNotificationAudio(), {
+  phase: "session",
+});
+// App-lifetime, like the entry above.
+void registerSessionReset("notifications:coalescing", resetNotificationCoalescing, {
+  phase: "session",
+});
 
 /**
  * The name to show for a given channel/DM id, and whether it is a DM (a DM
