@@ -50,6 +50,7 @@ import { notifyChannelActivity, notifyMention } from "../../lib/notifications";
 import type { DispatchApi, Payload } from "../connection/dispatchContext";
 import { log } from "../connection/dispatchContext";
 import { connectText } from "../../i18n/connect";
+import { registerSessionReset } from "../../lib/sessionRegistry";
 
 /** The channel/role/member snapshot of `ready`. */
 export function applyReadyChannels(payload: Payload<"ready">): void {
@@ -397,6 +398,9 @@ export function resetChannelActivity(): void {
   pendingMentionAlerts.clear();
   activityCredits.clear();
 }
+// Mention alerts are keyed by this server's channel ids and fire on a timer;
+// a server switch must not let one fire for the next server.
+void registerSessionReset("channels:activity", resetChannelActivity, { phase: "cache" }); // app-lifetime
 
 /** The newest confirmed message loaded for a channel; a pending send has id 0. */
 function newestLoadedId(channelId: number): number {

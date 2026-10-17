@@ -27,6 +27,7 @@ import { externalAllowed, setExternalConsentScope } from "../../features/content
 import { mediaControlsText } from "../../i18n/mediaControls";
 import { messageStatusText } from "../../i18n/messageStatus";
 import { clearStillCache } from "../../features/messaging/emojiStill";
+import { registerSessionReset } from "@lib/sessionRegistry";
 import type { ImageMenuTarget } from "./image-menu";
 
 /** One image of a message's lightbox sequence. `url` is the resolved server URL. */
@@ -331,6 +332,8 @@ export function clearAttachmentCaches(): void {
   videoDims.clear();
   clearStillCache();
 }
+// The image/video/audio caches pin blob: URLs; they end with the session.
+void registerSessionReset("attachments:caches", clearAttachmentCaches, { phase: "cache" }); // app-lifetime
 
 /** Safe MIME types allowed as a server Blob's type — blocks script injection via crafted Content-Type. */
 // Note: image/svg+xml is intentionally excluded — SVGs can execute JS if
@@ -857,7 +860,7 @@ export const EXTERNAL_IMAGE_CACHE_MAX = 100;
 export const EXTERNAL_IMAGE_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 
 /** Drop every broker-fetched image and move to a fresh broker partition.
- *  Called on page teardown and from the manual "clear cache" action. */
+ *  Run with the session reset and from the manual "clear cache" action. */
 export function clearExternalImageCache(): void {
   externalEpoch += 1;
   // Name the fresh partition now rather than at the next preview: the broker
@@ -872,6 +875,10 @@ export function clearExternalImageCache(): void {
   externalGifUrls.clear();
   externalInFlight.clear();
 }
+// Broker-fetched content belongs to the server it was fetched for (B7-16).
+void registerSessionReset("attachments:external-images", clearExternalImageCache, {
+  phase: "cache",
+}); // app-lifetime
 
 /** The broker cache and consent admission key for an image source. */
 export function externalKey(source: ExternalImageSource): string {

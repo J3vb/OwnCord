@@ -41,6 +41,7 @@ import {
   stripUrlTrailingPunctuation,
   URL_REGEX,
 } from "./content-parser";
+import { registerSessionReset } from "@lib/sessionRegistry";
 import { clearEmbedCaches, focusMessageLink, renderGenericLinkPreview } from "./embeds";
 import type { ExternalContentFailure } from "../../platform/contracts/externalContent";
 
@@ -182,6 +183,7 @@ export function clearMediaCaches(): void {
   imageHeightCache.clear();
   ytTitleCache.clear();
 }
+void registerSessionReset("media:caches", clearMediaCaches, { phase: "cache" }); // app-lifetime
 
 /** Strict pattern for YouTube video IDs (alphanumeric, hyphens, underscores). */
 const YOUTUBE_ID_RE = /^[\w-]{1,20}$/;
