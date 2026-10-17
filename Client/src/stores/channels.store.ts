@@ -395,10 +395,38 @@ export function categoryLabel(category: string): string {
 
 /** The category header a channel is displayed under. */
 export function displayCategoryOf(channel: Channel): string | null {
-  if (channel.category !== null && channel.category !== "") {
-    return channel.category;
+  return displayGroup(channel.category, channel.type);
+}
+
+function displayGroup(category: string | null, type: Channel["type"]): string | null {
+  if (category !== null && category !== "") {
+    return category;
   }
-  return channel.type === "voice" ? UNCATEGORIZED_VOICE_CATEGORY : null;
+  return type === "voice" ? UNCATEGORIZED_VOICE_CATEGORY : null;
+}
+
+/**
+ * The position a new channel needs to land at the bottom of the group it will
+ * be shown under: one past the highest position among the channels displayed
+ * in that group (`displayCategoryOf`, so the synthetic "Voice" group counts
+ * uncategorized voice channels). A group with no channels yet sorts at the
+ * bottom of the whole list. The server stores a provided position as given and
+ * a create with none sends 0, which lands at the top.
+ */
+export function nextPositionInCategory(category: string, type: Channel["type"]): number {
+  const target = displayGroup(category, type);
+  return channelsStore.select((s) => {
+    let groupMax = -1;
+    let allMax = -1;
+    for (const channel of s.channels.values()) {
+      if (channel.type === "dm") continue;
+      if (channel.position > allMax) allMax = channel.position;
+      if (displayCategoryOf(channel) === target && channel.position > groupMax) {
+        groupMax = channel.position;
+      }
+    }
+    return (groupMax >= 0 ? groupMax : allMax) + 1;
+  });
 }
 
 /** Every distinct category name currently in use, sorted, for suggestion lists. */
@@ -420,6 +448,7 @@ export function getKnownCategories(): string[] {
  * server's `ORDER BY position, id` — before grouping, so both the rows inside
  * a category and the categories themselves keep the order a reload would show;
  * Map insertion order alone is frozen at first load and ignores later edits.
+ * Inside a category, text-type channels precede voice channels (N23).
  */
 export function getChannelsByCategory(): Map<string | null, Channel[]> {
   return channelsStore.select((s) => {
@@ -436,6 +465,15 @@ export function getChannelsByCategory(): Map<string | null, Channel[]> {
       } else {
         grouped.set(category, [channel]);
       }
+    }
+    // Text-type channels (text, announcement) come before voice inside each
+    // category, each kind keeping its position order. A stable partition after
+    // grouping, so the categories keep the order the position sort gave them.
+    for (const [category, list] of grouped) {
+      grouped.set(
+        category,
+        list.toSorted((a, b) => Number(a.type === "voice") - Number(b.type === "voice")),
+      );
     }
     return grouped;
   });

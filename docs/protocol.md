@@ -782,9 +782,26 @@ the payload gains `group_event`, present only for these kinds. `group_event` is
 night"}` for rename (`""` means the name was removed) and `{"icon_removed":
 false}` for icon. A group row is read-only like a call row, and `chat_send`
 ignores any `kind` or `group_event` a client sends. The same block rides on each
-message in `GET /channels/{id}/messages`. This server release only stores and
-serves these rows; nothing writes one yet, so a client will not see one until
-the membership endpoints ship.
+message in `GET /channels/{id}/messages`.
+
+The server writes a group row, with an English fallback sentence in `content` for
+clients that do not know the kind (`Alice added Bob to the group.`), in these
+cases. Every row is a sequenced `chat_message` from the REST request that caused
+it, sent to the members after the change, so it is replayed on reconnect:
+
+- `group_add` — one per user added by `POST /dms/{id}/members`. The author is the
+  adder, `group_event.target_user_id` the added user.
+- `group_remove` — the owner removed a member (`DELETE /dms/{id}/members/{userId}`).
+  The removed member does not receive it.
+- `group_leave` — a member left (`DELETE /dms/{id}`). The last leaver writes none.
+- `group_rename` — a changed name (`PATCH /dms/{id}`). An unchanged name writes none.
+- `group_icon` — written by the icon routes, which are not part of this release.
+
+Within one change the refreshed `dm_channel_open` is sent to every member before
+the row, so a newly added user hears of the DM first. An owner transfer
+(`PUT /dms/{id}/owner`) sends the refreshed `dm_channel_open` only and writes no
+row. A group row raises the unread count for everyone except its author, carries
+no mention and sends no push.
 
 The server writes one call row per DM call, from voice presence. The row is
 created when the first person joins the DM's voice channel (its author is the
@@ -2282,8 +2299,10 @@ Delivered only to `target_user_id`, with the sender attached:
 ### dm_channel_open (Server -> Client)
 
 Sent when a DM is opened, created, auto-reopened by an incoming message or call ring, or has
-its membership changed (a group created, renamed, or left). A group's payload
-carries `owner_id` (see `ready`).
+its membership changed (a group created, renamed, left, a member added or removed,
+or the owner changed). A group's payload carries `owner_id` (see `ready`). It is
+always the full summary from the receiving member's seat, so a client replaces its
+stored summary wholesale.
 
 The payload is the same shape as one entry of the `ready` payload's
 `dm_channels` and of `GET /api/v1/dms`, so a client has exactly one DM shape to

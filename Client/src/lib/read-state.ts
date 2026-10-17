@@ -153,14 +153,39 @@ export function unreadChannelIds(opts: UnreadScope = {}): readonly number[] {
 const MARK_ALL_READ_BURST_SIZE = 4;
 const MARK_ALL_READ_BURST_INTERVAL_MS = 1100;
 
-/** Timers for the not-yet-sent tail of the current `markAllRead` burst. Held so
- *  a second mark-all, or a new connection, can drop the stale ones instead of
- *  letting them land against a channel list that has since been replaced. */
-let pendingMarkAll: Array<ReturnType<typeof setTimeout>> = [];
+/** Channels still waiting for their `mark_read` frame, each with its
+ *  unread+mention total at click time. One queue is shared by every caller of
+ *  `markChannelsRead`, so overlapping calls merge instead of dropping each
+ *  other's unsent tail. A re-registered sender (new connection) empties it. */
+let markQueue: Array<{ readonly id: number; readonly snapshot: number }> = [];
+/** When each frame sent inside the current pacing window went out. */
+let markSentAt: number[] = [];
+let markTimer: ReturnType<typeof setTimeout> | null = null;
 
 function cancelPendingMarkAll(): void {
-  for (const t of pendingMarkAll) clearTimeout(t);
-  pendingMarkAll = [];
+  if (markTimer !== null) clearTimeout(markTimer);
+  markTimer = null;
+  markQueue = [];
+  markSentAt = [];
+}
+
+/** Send as many queued channels as the window allows, then re-arm for the rest. */
+function drainMarkQueue(): void {
+  markTimer = null;
+  const now = Date.now();
+  markSentAt = markSentAt.filter((t) => now - t < MARK_ALL_READ_BURST_INTERVAL_MS);
+  while (markQueue.length > 0 && markSentAt.length < MARK_ALL_READ_BURST_SIZE) {
+    const next = markQueue.shift()!;
+    // A message that arrived after the click was never seen: skip its send,
+    // and spend no budget on it.
+    if (unreadTotal(next.id) > next.snapshot) continue;
+    markChannelRead(next.id);
+    markSentAt.push(now);
+  }
+  if (markQueue.length > 0) {
+    const wait = Math.max(0, markSentAt[0]! + MARK_ALL_READ_BURST_INTERVAL_MS - now);
+    markTimer = setTimeout(drainMarkQueue, wait);
+  }
 }
 
 /** Sum of a channel or DM's unread + mention counts, from whichever store
@@ -192,24 +217,28 @@ function unreadTotal(channelId: number): number {
  * every other caller of `markChannelRead`.
  */
 export function markAllRead(opts: UnreadScope = {}): number {
-  // A second click supersedes the first: its own `unreadChannelIds()` already
-  // covers everything the earlier burst had not sent yet, so keeping the old
-  // timers would only duplicate sends and spend budget twice.
-  cancelPendingMarkAll();
-  const ids = unreadChannelIds(opts);
-  for (const [i, id] of ids.entries()) {
-    const delay = Math.floor(i / MARK_ALL_READ_BURST_SIZE) * MARK_ALL_READ_BURST_INTERVAL_MS;
-    if (delay === 0) {
-      markChannelRead(id);
-    } else {
-      const snapshot = unreadTotal(id);
-      pendingMarkAll.push(
-        setTimeout(() => {
-          if (unreadTotal(id) <= snapshot) markChannelRead(id);
-        }, delay),
-      );
-    }
+  return markChannelsRead(unreadChannelIds(opts));
+}
+
+/**
+ * Mark the given channels read with `markAllRead`'s pacing and click-time
+ * snapshot (see its note). A call made while an earlier burst is still pacing
+ * merges its ids (deduplicated) into the same queue, so nothing already queued
+ * is dropped and the server's per-second budget is never exceeded by two
+ * overlapping bursts. Returns how many ids were passed.
+ */
+export function markChannelsRead(ids: readonly number[]): number {
+  const queued = new Set(markQueue.map((q) => q.id));
+  for (const id of ids) {
+    if (queued.has(id)) continue;
+    // Already read (an earlier burst got there first): nothing to send.
+    const snapshot = unreadTotal(id);
+    if (snapshot === 0) continue;
+    queued.add(id);
+    markQueue.push({ id, snapshot });
   }
+  if (markTimer !== null) clearTimeout(markTimer);
+  drainMarkQueue();
   return ids.length;
 }
 

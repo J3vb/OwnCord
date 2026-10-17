@@ -3108,7 +3108,10 @@ describe("WS Dispatcher", () => {
     expect(channelsStore.getState().channels.has(10)).toBe(false);
     expect(channelsStore.getState().activeChannelId).toBe(20);
     // The redirect must say why it happened (ux/channels-members-dms §1.2).
-    expect(mockShowToast).toHaveBeenCalledWith("This channel was deleted", "info");
+    expect(mockShowToast).toHaveBeenCalledWith(
+      "You no longer have access to this channel, or it was deleted",
+      "info",
+    );
   });
 
   it("wires channel_delete without a toast when a non-active channel is deleted", () => {

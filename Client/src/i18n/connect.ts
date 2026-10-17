@@ -214,7 +214,7 @@ export const connectText = defineCatalog("connect", {
   "session.loginUnreadable": "Login failed: the server returned an unreadable response.",
 
   "app.renderFailed": "Something went wrong rendering this section.",
-  "app.channelDeleted": "This channel was deleted",
+  "app.channelDeleted": "You no longer have access to this channel, or it was deleted",
   "app.dmNoMessages": "No messages yet",
   "app.dmCreateFailed": "Failed to create DM",
   "app.dmCreateGroupFailed": "Failed to create group DM",

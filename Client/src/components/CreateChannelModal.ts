@@ -18,17 +18,32 @@ import { createModal, type ModalInstance } from "@lib/modalFactory";
 import { errorText } from "@lib/api";
 import type { MountableComponent } from "@lib/safe-render";
 import type { ChannelType } from "@lib/types";
-import { getKnownCategories, UNCATEGORIZED_VOICE_CATEGORY } from "@stores/channels.store";
+import {
+  getKnownCategories,
+  nextPositionInCategory,
+  UNCATEGORIZED_VOICE_CATEGORY,
+} from "@stores/channels.store";
 import { shellText } from "../i18n/shell";
 
 export interface CreateChannelModalOptions {
   /** The category the create affordance was invoked from ("" = uncategorized). */
   readonly category: string;
   /** Called when the user submits the form. */
-  readonly onCreate: (data: { name: string; type: ChannelType; category: string }) => Promise<void>;
+  readonly onCreate: (data: {
+    name: string;
+    type: ChannelType;
+    category: string;
+    /** Optional; omitted when left blank. */
+    topic?: string;
+    /** One past the highest position in the category, so the channel lands last. */
+    position: number;
+  }) => Promise<void>;
   /** Called when the modal is closed without creating. */
   readonly onClose: () => void;
 }
+
+/** The server's ceiling for a channel topic (`MaxChannelTopicLen`), mirrored for the field. */
+export const MAX_CHANNEL_TOPIC_LENGTH = 1024;
 
 /** Every channel type is creatable under every category. */
 export const CHANNEL_TYPES: readonly ChannelType[] = ["text", "voice", "announcement"] as const;
@@ -124,6 +139,23 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
     });
     appendChildren(nameGroup, nameLabel, nameInput);
 
+    // Topic (optional, shown in the chat header)
+    const topicGroup = createElement("div", { class: "form-group" });
+    const topicLabel = createElement(
+      "label",
+      { class: "form-label", for: "create-channel-topic" },
+      shellText("channelForm.topic"),
+    );
+    const topicInput = createElement("input", {
+      id: "create-channel-topic",
+      class: "form-input",
+      type: "text",
+      placeholder: shellText("channelForm.topicPlaceholder"),
+      maxlength: String(MAX_CHANNEL_TOPIC_LENGTH),
+      "data-testid": "channel-topic-input",
+    });
+    appendChildren(topicGroup, topicLabel, topicInput);
+
     // Channel type
     const typeGroup = createElement("div", { class: "form-group" });
     const typeLabel = createElement(
@@ -151,7 +183,7 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
       "data-testid": "channel-create-error",
     });
 
-    appendChildren(body, categoryGroup, nameGroup, typeGroup, errorEl);
+    appendChildren(body, categoryGroup, nameGroup, topicGroup, typeGroup, errorEl);
 
     // Footer
     const footer = createElement("div", { class: "modal-footer" });
@@ -172,35 +204,49 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
       shellText("channel.create"),
     );
 
-    createBtn.addEventListener(
-      "click",
-      async () => {
-        const name = nameInput.value.trim();
-        if (name === "") {
-          errorEl.style.display = "block";
-          setText(errorEl, shellText("channelForm.nameRequired"));
-          nameInput.classList.add("error");
-          return;
-        }
+    const submit = async (): Promise<void> => {
+      const name = nameInput.value.trim();
+      if (name === "") {
+        errorEl.style.display = "block";
+        setText(errorEl, shellText("channelForm.nameRequired"));
+        nameInput.classList.add("error");
+        return;
+      }
 
-        // Clear previous errors
-        errorEl.style.display = "none";
-        nameInput.classList.remove("error");
-        createBtn.setAttribute("disabled", "true");
-        setText(createBtn, shellText("channelForm.creating"));
+      // Clear previous errors
+      errorEl.style.display = "none";
+      nameInput.classList.remove("error");
+      createBtn.setAttribute("disabled", "true");
+      setText(createBtn, shellText("channelForm.creating"));
 
-        try {
-          await onCreate({
-            name,
-            type: typeSelect.value as ChannelType,
-            category: categoryInput.value.trim(),
-          });
-        } catch (err) {
-          errorEl.style.display = "block";
-          setText(errorEl, errorText(err, shellText("channel.createFailed")));
-          createBtn.removeAttribute("disabled");
-          setText(createBtn, shellText("channel.create"));
-        }
+      try {
+        const type = typeSelect.value as ChannelType;
+        const chosen = categoryInput.value.trim();
+        const topic = topicInput.value.trim();
+        await onCreate({
+          name,
+          type,
+          category: chosen,
+          ...(topic === "" ? {} : { topic }),
+          position: nextPositionInCategory(chosen, type),
+        });
+      } catch (err) {
+        errorEl.style.display = "block";
+        setText(errorEl, errorText(err, shellText("channel.createFailed")));
+        createBtn.removeAttribute("disabled");
+        setText(createBtn, shellText("channel.create"));
+      }
+    };
+    createBtn.addEventListener("click", () => void submit(), { signal: disposable.signal });
+    // Enter in the name field submits. Not while an IME is composing (Enter
+    // then confirms the candidate), not on an empty name, not mid-submit.
+    nameInput.addEventListener(
+      "keydown",
+      (e: KeyboardEvent) => {
+        if (e.key !== "Enter" || e.isComposing || e.keyCode === 229) return;
+        if (nameInput.value.trim() === "" || createBtn.hasAttribute("disabled")) return;
+        e.preventDefault();
+        void submit();
       },
       { signal: disposable.signal },
     );

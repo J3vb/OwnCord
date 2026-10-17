@@ -187,6 +187,16 @@ export function toggleCategory(category: string): void {
   });
 }
 
+/** Collapse every one of `categories`. Persists to localStorage for the current server. */
+export function collapseCategories(categories: readonly string[]): void {
+  uiStore.setState((prev) => {
+    const next = new Set(prev.collapsedCategories);
+    for (const category of categories) next.add(category);
+    saveCollapsedCategories(next);
+    return { ...prev, collapsedCategories: next };
+  });
+}
+
 /** Selector: check if a category is collapsed. */
 export function isCategoryCollapsed(category: string): boolean {
   return uiStore.select((s) => s.collapsedCategories.has(category));

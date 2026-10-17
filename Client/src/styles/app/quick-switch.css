@@ -157,3 +157,32 @@
   color: var(--text-micro);
   font-size: var(--font-size-xs);
 }
+.quick-switcher__unread {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--text-normal);
+  flex-shrink: 0;
+}
+.quick-switcher__mentions {
+  background: var(--danger-fill);
+  color: var(--on-fill);
+  font-size: var(--font-size-xxs);
+  font-weight: 700;
+  min-width: 18px;
+  height: 18px;
+  border-radius: var(--radius-pill);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  flex-shrink: 0;
+}
+.quick-switcher__empty:empty {
+  display: none;
+}
+.quick-switcher__empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-muted);
+}

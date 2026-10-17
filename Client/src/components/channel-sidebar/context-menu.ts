@@ -28,6 +28,7 @@ import {
   enableMenuKeyboard,
   openMenuOnKeyboard,
   clampMenuToViewport,
+  registerSidebarMenu,
 } from "@lib/context-menu";
 import { appendPurgeSection } from "@components/purge-prompt";
 import { copyWithToast, isDeveloperMode } from "../../features/developer-mode/developerTools";
@@ -37,10 +38,6 @@ import { shellText } from "../../i18n/shell";
 /** Bubbles from a channel row when its mute is toggled. Re-exported from the
  *  mute store, which dispatches it on every write (F16). */
 export { CHANNEL_MUTE_CHANGED } from "@lib/channel-mutes";
-
-/** The close hook of the currently-open channel menu, so a same-class reopen
- *  can tear the previous menu's listeners down before removing it. */
-let activeMenuClose: (() => void) | null = null;
 
 /**
  * Attach a context menu to a channel element for mark-read/move/edit/delete/
@@ -104,9 +101,6 @@ export function attachChannelContextMenu(
   /** Build, mount and wire the menu at a viewport anchor. */
   function openMenu(anchorX: number, anchorY: number): void {
     // Remove any existing context menu (and run its close hook).
-    activeMenuClose?.();
-    document.querySelectorAll(".channel-ctx-menu").forEach((prev) => prev.remove());
-
     const menu = createElement("div", {
       class: "context-menu channel-ctx-menu",
       "data-testid": "channel-context-menu",
@@ -117,11 +111,11 @@ export function attachChannelContextMenu(
     // Close menu on click elsewhere — use a per-menu Disposable
     const menuOwner = new Disposable();
     const closeMenu = (): void => {
-      if (activeMenuClose === closeMenu) activeMenuClose = null;
+      unregister();
       menu.remove();
       menuOwner.destroy();
     };
-    activeMenuClose = closeMenu;
+    const unregister = registerSidebarMenu(closeMenu);
 
     const addItem = (
       label: string,
@@ -191,9 +185,13 @@ export function attachChannelContextMenu(
 
     if (showMove && channels !== undefined && onReorder !== undefined) {
       const live = channelsStore.getState().channels;
+      // Text rows sit above voice rows in a category, so a move only swaps
+      // with the neighbour of the same kind; crossing the boundary would swap
+      // positions without changing what the user sees.
+      const isVoice = channel.type === "voice";
       const group = channels
         .map((c) => live.get(c.id))
-        .filter((c): c is Channel => c !== undefined);
+        .filter((c): c is Channel => c !== undefined && (c.type === "voice") === isVoice);
       const index = group.findIndex((c) => c.id === channel.id);
       // Swap positions with the adjacent row. `group` is position-sorted, so
       // this is the same visual move a drag onto that row produces. Equal

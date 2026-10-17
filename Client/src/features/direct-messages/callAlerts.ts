@@ -45,8 +45,8 @@ function popup(title: string, ring: RingState, ringing: boolean): void {
  */
 export function alertIncomingCall(ring: RingState): void {
   popup(dmCallText("notifyIncoming", { name: ring.fromUsername }), ring, true);
-  // Flashes until the window is focused. A passive hint, so it stays under
-  // DND like a message's flash: in the tray it is the only signal left
+  // Flashes until the window is focused. A ringing call is urgent, so unlike a
+  // message's flash it stays under DND: in the tray it is the only signal left
   // (OC-0204).
   if (document.hasFocus() || !loadPref<boolean>("flashTaskbar", true)) return;
   desktop.notifier

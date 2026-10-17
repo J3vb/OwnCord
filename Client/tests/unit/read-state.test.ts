@@ -9,6 +9,7 @@ import {
   markActiveChannelReadOnUnload,
   markAllRead,
   markChannelRead,
+  markChannelsRead,
   hasUnread,
   noteLiveMessageSeen,
   setMarkReadSender,
@@ -211,6 +212,34 @@ describe("unreadChannelIds / markAllRead", () => {
       expect(sent.length).toBe(6);
       expect(new Set(sent)).toEqual(new Set([1, 2, 3, 4, 5, 6]));
       expect(hasUnread(deferredId)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("merges an overlapping markChannelsRead into the pacing queue without dropping or bursting", () => {
+    vi.useFakeTimers();
+    try {
+      const at: number[] = [];
+      setMarkReadSender((id) => {
+        sent.push(id);
+        at.push(Date.now());
+      });
+      const all = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+      setChannels(all.map((id) => channel(id, 1)));
+
+      markAllRead();
+      expect(sent).toHaveLength(4);
+      // Mid-burst: a subset, some already sent, some still queued.
+      vi.advanceTimersByTime(300);
+      markChannelsRead([2, 8, 9]);
+      expect(sent).toHaveLength(4);
+      vi.advanceTimersByTime(10_000);
+
+      expect(sent.toSorted((a, b) => a - b)).toEqual(all);
+      for (const t of at) {
+        expect(at.filter((u) => u >= t && u < t + 1100).length).toBeLessThanOrEqual(4);
+      }
     } finally {
       vi.useRealTimers();
     }

@@ -82,6 +82,9 @@ and only when it changes something a contributor or fork holder must do
 - Settings → Appearance has a **Zoom Level** slider (50 %–200 %), and Ctrl+= / Ctrl+- zoom in and out and Ctrl+0 resets, as in Discord. It scales the whole app and is remembered.
 - Linux `.deb` installs now update from the app with one password prompt, instead of telling you to install the new package by hand. The first update onto this version is still manual; if the system cannot ask for a password, the banner says to install by hand.
 - Settings → Diagnostics & logs has an **Open Log Folder** button that opens OwnCord's log folder in your file manager, so you can find the logs without a tray icon (stock GNOME has none). If the folder cannot be opened, the reason shows under the button.
+- Right-clicking a category header now offers **Mark Category as Read**, **Collapse Category** (or Expand), and **Collapse All Categories**.
+- The Create Channel window has an optional **Topic** field, and Enter in the name field creates the channel.
+- Ctrl+K now also finds your DMs, lists names that start with what you typed first, shows an unread dot or mention count on each result, draws a megaphone for announcement channels and says "No results" when nothing matches.
 
 **Voice**
 
@@ -158,6 +161,7 @@ and only when it changes something a contributor or fork holder must do
 - You can press Enter while files are still uploading: the message box clears at once and the message shows in the chat with a progress bar per file and a **Cancel upload** button, then posts by itself when the files are in, also if you have switched channels. Messages you send meanwhile are not held back. If an upload fails or you cancel, the message shows **Retry** (uploads again) and **Delete**; closing the app drops a message that is still uploading.
 - A DM now keeps a record of its calls. The server adds one call row per call, from voice presence, to the DM, with who started it, who joined and how long it lasted, and everyone in the DM gets it live and on reconnect. A call ends 10 seconds after the last person leaves, so a quick rejoin is the same call, and a call cut short by a server restart ends at the last moment anyone was seen in it. In a one-to-one DM the call is logged once both sides have accepted the DM. Call rows cannot be edited, deleted, pinned, reacted to or replied to, and search skips them. `chat_message` gains `kind` and `call` and the end of a call is a `chat_edited` with `edited_at: null` (see docs/protocol.md). Needs a client that draws call rows; older clients show the row as a plain line of text.
 - A group DM now has an owner. The creator owns it, groups that already exist get an owner from the author of their oldest message who is still a member (else the lowest member id), and when the owner leaves or their account is erased the group passes to the lowest remaining member id. `owner_id` rides on every group DM summary (`ready`, `GET /dms`, `dm_channel_open`) and is left out for a one-to-one DM. The server also learns five more `chat_message.kind` values (`group_add`, `group_remove`, `group_leave`, `group_rename`, `group_icon`) with a `group_event` block, stored read-only like call rows; nothing writes them yet, so nobody sees a change except the new field. Adding and removing members, transferring ownership and the group icon come in later parts.
+- Group DMs can now change membership. Any member can add people (`POST /api/v1/dms/{id}/members`, up to 10 members, a full group answers `409 GROUP_DM_FULL`), only the owner can remove someone (`DELETE /api/v1/dms/{id}/members/{userId}`; the removed member loses the DM and its call) and the owner can hand the group to another member (`PUT /api/v1/dms/{id}/owner`). Adding, removing, leaving and renaming each leave one read-only row in the chat that every remaining member sees live and on reconnect (`group_add`, `group_remove`, `group_leave`, `group_rename`), and the members who are not the author get it as unread. The group changes are limited to 20 a minute per person. When the owner leaves, the group now passes to the lowest member id who is not banned from the server. Leaving or being removed clears your unread count for that DM. Needs a client that draws these rows; older clients show the sentence as an ordinary message from the person who made the change. The group icon is still to come.
 
 **Voice and video**
 
@@ -169,6 +173,9 @@ and only when it changes something a contributor or fork holder must do
 
 - A channel with unread messages now shows only a bold name and the white pill, as in Discord; the number is kept for mentions and DMs.
 - A muted channel no longer turns bold or shows the pill for ordinary unread messages; a mention still shows.
+- Alt+Shift+Up/Down now also reaches unread channels inside collapsed categories, and skips muted channels unless they have a mention.
+- A collapsed category no longer shows a dot for hidden muted channels with unread messages, since those channels now look read.
+- Inside a category, text and announcement channels now come before voice channels, and Move Up / Move Down and dragging only reorder channels of the same kind.
 
 **Accounts & profiles**
 
@@ -183,6 +190,7 @@ and only when it changes something a contributor or fork holder must do
 
 - Suppress @everyone and @here now hides only those pings in channels you are not viewing. A message that mentions you by name still alerts, as it already did in the open channel. Older servers keep today's behaviour.
 - With an older server, a mention in a channel you are not viewing now alerts about 3 seconds after it arrives.
+- Do Not Disturb now also stops the taskbar or window flash for messages and mentions, not just the pop-up and sound. A ringing call still flashes.
 
 **Desktop UI**
 
@@ -195,6 +203,10 @@ and only when it changes something a contributor or fork holder must do
 **Desktop UI**
 
 - An app that fails to start now shows an error dialog instead of closing without a word: on Linux desktops (a run with no display still prints the error only), and on every platform when the main window or tray cannot be created.
+- Picking a channel in Ctrl+K while in the DM list now takes you to the channel list and clears its unread badge, instead of leaving the DM list showing.
+- A new channel now lands at the bottom of its category instead of the top.
+- Losing access to a channel now says "You no longer have access to this channel, or it was deleted" instead of claiming it was deleted, since a permission change looks the same to the app.
+- Editing a channel no longer overwrites a change someone else made while the dialog was open: fields you did not touch update in the open dialog, and Save sends only the fields you changed.
 
 **Login & connection**
 

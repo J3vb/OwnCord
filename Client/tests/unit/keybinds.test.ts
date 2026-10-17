@@ -304,6 +304,7 @@ describe("keybindConflict", () => {
     ["F5", c(0x74)],
     ["F11", c(0x7a)],
     ["F12", c(0x7b)],
+    ["Shift+F10", c(0x79, { shift: true })],
     ["Ctrl+R", c(0x52, { ctrl: true })],
     ["Ctrl+Shift+R", c(0x52, { ctrl: true, shift: true })],
     ["Ctrl+Shift+I", c(0x49, { ctrl: true, shift: true })],

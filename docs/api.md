@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 192 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 195 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -145,6 +145,9 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/dms/group`                                                  |
 | DELETE  | `/api/v1/dms/{channelId}`                                            |
 | PATCH   | `/api/v1/dms/{channelId}`                                            |
+| POST    | `/api/v1/dms/{channelId}/members`                                    |
+| DELETE  | `/api/v1/dms/{channelId}/members/{userId}`                           |
+| PUT     | `/api/v1/dms/{channelId}/owner`                                      |
 | GET     | `/api/v1/emoji/`                                                     |
 | POST    | `/api/v1/emoji/`                                                     |
 | DELETE  | `/api/v1/emoji/{id}`                                                 |
@@ -1151,7 +1154,8 @@ A group DM can also hold group event rows: `kind` is `group_add`, `group_remove`
 `group_leave`, `group_rename` or `group_icon`, with a `group_event` block
 (`{"target_user_id"}` for add and remove, `{}` for leave, `{"name"}` for rename,
 `{"icon_removed"}` for icon). They are read-only in the same way as call rows
-(see `docs/protocol.md`). Nothing writes one yet.
+(see `docs/protocol.md`). The server writes one when a member is added, removed,
+leaves, or the group is renamed; the group icon row comes with the icon.
 
 #### Pagination
 
@@ -1852,15 +1856,27 @@ control or invisible characters, and at most 2 combining marks in a row.
 #### Response 200 OK
 
 The DM summary shape, from the caller's seat. Every participant also receives a
-`dm_channel_open` carrying the new name.
+`dm_channel_open` carrying the new name, then one sequenced `chat_message` of
+kind `group_rename` (author = the caller, `group_event.name` = the new name, `""`
+when the name was removed). A name equal to the current one writes no row and
+sends nothing.
+
+If the change commits but the server cannot then read the summary back, the route
+answers `204 No Content` instead (the change and its events have happened, and the
+caller gets the same summary from its `dm_channel_open`), so a client must not
+treat a missing body as a failure.
+
+Limited to 20 group changes per user per minute, shared with add, remove and
+owner transfer.
 
 #### Errors
 
-| Status | Code          | Reason                                                      |
-| ------ | ------------- | ----------------------------------------------------------- |
-| 400    | `BAD_REQUEST` | The channel is a 1:1 DM, or the name exceeds 100 characters |
-| 403    | `TIMED_OUT`   | The caller is timed out                                     |
-| 404    | `NOT_FOUND`   | Not a participant of this DM                                |
+| Status | Code           | Reason                                                      |
+| ------ | -------------- | ----------------------------------------------------------- |
+| 400    | `BAD_REQUEST`  | The channel is a 1:1 DM, or the name exceeds 100 characters |
+| 403    | `TIMED_OUT`    | The caller is timed out                                     |
+| 404    | `NOT_FOUND`    | Not a participant of this DM                                |
+| 429    | `RATE_LIMITED` | More than 20 group changes in a minute                      |
 
 ---
 
@@ -1880,6 +1896,10 @@ The caller receives `dm_channel_close`; after a group leave the remaining
 participants receive a fresh `dm_channel_open` with the new membership. If the
 leaver owned the group, ownership passes to the lowest remaining member id in the
 same transaction, and the refreshed `dm_channel_open` carries the new `owner_id`.
+The remaining participants then get a sequenced `chat_message` of kind
+`group_leave` (author = the leaver). The last leaver writes no row, because the
+channel goes with them. The leaver's own read state for the DM is deleted.
+A leave is never refused for a timeout and is not rate limited.
 
 **Auth:** Required (participant)
 
@@ -1890,6 +1910,142 @@ same transaction, and the refreshed `dm_channel_open` carries the new `owner_id`
 | Status | Code        | Reason                       |
 | ------ | ----------- | ---------------------------- |
 | 404    | `NOT_FOUND` | Not a participant of this DM |
+
+---
+
+### POST /api/v1/dms/{channelId}/members
+
+Add people to a group DM. Any member may add, up to 10 members in all. A 1:1 DM
+refuses.
+
+Adding has no trust or message-request gate: groups are outside message requests,
+as at create. The recipient checks are the ones create runs (the same code):
+every user must exist and not be banned (either is "not found"), and none of the
+new people may be blocked by, or have blocked, any other new person or any
+current member. The pairs between people who are already in the group are not
+re-checked. Once added, the group is a shared room and sends are not
+block-checked, as today. Added people see the earlier history.
+
+**Auth:** Required (member)
+
+#### Request
+
+```json
+{ "user_ids": [4, 5] }
+```
+
+| Field      | Type  | Required | Description                                                                                       |
+| ---------- | ----- | -------- | ------------------------------------------------------------------------------------------------- |
+| `user_ids` | int[] | Yes      | 1–9 users. De-duplicated. Users who are already members are skipped; if none is new, it is a 400. |
+
+#### Response 200 OK
+
+The DM summary shape from the caller's seat, with the new members. Then, in this
+order, from the request:
+
+1. Every member after the change, the added people included, receives a
+   `dm_channel_open` (the full summary from their own seat).
+2. Every member receives one sequenced `chat_message` of kind `group_add` per
+   added user (author = the caller, `group_event.target_user_id` = the added
+   user).
+
+So on each connection the open arrives before the row, and an added user never
+sees a row for a DM they do not know yet. The cap is counted inside the
+transaction: two adds that together pass 10 cannot both succeed.
+
+The blocked-pair check runs again inside the transaction, so a block or another
+add that lands between the first check and the commit cannot slip a blocked pair
+into the room (403 `FORBIDDEN`).
+
+If the change commits but the server cannot then read the summary back, the route
+answers `204 No Content` instead (the change and its events have happened, and the
+caller gets the same summary from its `dm_channel_open`), so a client must not
+treat a missing body as a failure.
+
+Limited to 20 group changes per user per minute.
+
+#### Errors
+
+| Status | Code            | Reason                                                                                |
+| ------ | --------------- | ------------------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST`   | A 1:1 DM, no ids, more than 9 ids, a non-positive id, or every id is already a member |
+| 403    | `FORBIDDEN`     | A blocked pair among the new people and the members                                   |
+| 403    | `TIMED_OUT`     | The caller is timed out                                                               |
+| 404    | `NOT_FOUND`     | The caller is not a member, or a new user does not exist or is banned                 |
+| 409    | `GROUP_DM_FULL` | The group would pass 10 members                                                       |
+| 429    | `RATE_LIMITED`  | More than 20 group changes in a minute                                                |
+
+---
+
+### DELETE /api/v1/dms/{channelId}/members/{userId}
+
+Remove a member from a group DM. Owner only. To remove yourself, leave
+(`DELETE /api/v1/dms/{channelId}`).
+
+**Auth:** Required (owner)
+
+#### Response 204 No Content
+
+The removed member receives `dm_channel_close` (the visibility watermark is bumped
+first, as on a leave) and is evicted from the group's voice call with reason
+`dm_removed`. They get no row. Then the remaining members receive a refreshed
+`dm_channel_open` and one sequenced `chat_message` of kind `group_remove`
+(author = the owner, `group_event.target_user_id` = the removed user). The removed
+member's unread state for the DM is deleted. The owner can remove everyone else,
+which leaves a group of one.
+
+A remove that races the target's own leave writes one row: whichever commits first
+wins and the other gets a 404.
+
+Limited to 20 group changes per user per minute.
+
+#### Errors
+
+| Status | Code           | Reason                                                |
+| ------ | -------------- | ----------------------------------------------------- |
+| 400    | `BAD_REQUEST`  | A 1:1 DM, or the target is the caller (leave instead) |
+| 403    | `FORBIDDEN`    | The caller is not the owner                           |
+| 403    | `TIMED_OUT`    | The caller is timed out                               |
+| 404    | `NOT_FOUND`    | The caller or the target is not a member              |
+| 429    | `RATE_LIMITED` | More than 20 group changes in a minute                |
+
+---
+
+### PUT /api/v1/dms/{channelId}/owner
+
+Hand a group DM to another member. Owner only.
+
+**Auth:** Required (owner)
+
+#### Request
+
+```json
+{ "user_id": 3 }
+```
+
+#### Response 200 OK
+
+The DM summary shape from the caller's seat, with the new `owner_id`. Every member
+receives a refreshed `dm_channel_open`. A transfer writes no row. `owner_id`
+always names a current member: a transfer to someone who has just left or been
+removed is a 404 and changes nothing.
+
+If the change commits but the server cannot then read the summary back, the route
+answers `204 No Content` instead (the change and its events have happened, and the
+caller gets the same summary from its `dm_channel_open`), so a client must not
+treat a missing body as a failure.
+
+Limited to 20 group changes per user per minute.
+
+#### Errors
+
+| Status | Code           | Reason                                   |
+| ------ | -------------- | ---------------------------------------- |
+| 400    | `BAD_REQUEST`  | A 1:1 DM, or the target is the caller    |
+| 403    | `FORBIDDEN`    | The caller is not the owner              |
+| 403    | `TIMED_OUT`    | The caller is timed out                  |
+| 404    | `NOT_FOUND`    | The caller or the target is not a member |
+| 429    | `RATE_LIMITED` | More than 20 group changes in a minute   |
 
 ---
 

@@ -1447,10 +1447,12 @@ describe("notifyIncomingMessage", () => {
   });
 
   describe("Do Not Disturb", () => {
-    it("suppresses the desktop notification and the sound while DND", async () => {
+    it("suppresses the desktop notification, the sound and the taskbar flash while DND", async () => {
       const { sendNotification } = await import("@tauri-apps/plugin-notification");
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
       (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const win = getCurrentWindow();
+      (win.requestUserAttention as ReturnType<typeof vi.fn>).mockClear();
       mockOscillator.start.mockClear();
 
       testPrefs.set("desktopNotifications", true);
@@ -1459,13 +1461,10 @@ describe("notifyIncomingMessage", () => {
       testPrefs.set("userStatus", "dnd");
 
       notifyIncomingMessage(makePayload());
+      notifyIncomingMessage(makePayload({ content: "hi @Me", mentions: [1], id: 2 }));
 
-      // The taskbar flash still fires — it's the one passive cue DND keeps.
-      await vi.waitFor(() => {
-        const win = getCurrentWindow();
-        expect(win.requestUserAttention).toHaveBeenCalled();
-      });
-
+      await new Promise((r) => setTimeout(r, 50));
+      expect(win.requestUserAttention).not.toHaveBeenCalled();
       expect(sendNotification).not.toHaveBeenCalled();
       expect(mockOscillator.start).not.toHaveBeenCalled();
     });
@@ -2176,8 +2175,8 @@ describe("notifyIncomingMessage", () => {
       expect(win.requestUserAttention).not.toHaveBeenCalled();
     });
 
-    it("Do Not Disturb suppresses the popup and the chime", async () => {
-      const { invoke } = await spies();
+    it("Do Not Disturb suppresses the popup, the chime and the taskbar flash", async () => {
+      const { invoke, win } = await spies();
       testPrefs.set("userStatus", "dnd");
 
       notifyMention(1);
@@ -2185,6 +2184,7 @@ describe("notifyIncomingMessage", () => {
       await new Promise((r) => setTimeout(r, 50));
       expect(invoke).not.toHaveBeenCalled();
       expect(mockOscillator.start).not.toHaveBeenCalled();
+      expect(win.requestUserAttention).not.toHaveBeenCalled();
     });
 
     it("stays silent while Suppress @everyone is on", async () => {

@@ -146,6 +146,7 @@ describe("CreateChannelModal", () => {
         name: "lounge",
         type: "voice",
         category: "Gaming",
+        position: expect.any(Number),
       });
     });
     modal.destroy?.();
@@ -186,9 +187,146 @@ describe("CreateChannelModal", () => {
         name: "test-channel",
         type: "text",
         category: "Text Channels",
+        position: expect.any(Number),
       });
     });
 
+    modal.destroy?.();
+  });
+
+  describe("topic and Enter", () => {
+    const q = <T extends HTMLElement>(id: string): T =>
+      container.querySelector(`[data-testid='${id}']`) as T;
+    const press = (init: KeyboardEventInit): KeyboardEvent => {
+      const e = new KeyboardEvent("keydown", {
+        key: "Enter",
+        bubbles: true,
+        cancelable: true,
+        ...init,
+      });
+      q("channel-name-input").dispatchEvent(e);
+      return e;
+    };
+
+    it("has an optional topic field capped at the server's length", () => {
+      const { modal } = makeModal("Chat");
+      const topic = q<HTMLInputElement>("channel-topic-input");
+      expect(topic.getAttribute("maxlength")).toBe("1024");
+      expect(container.querySelector("label[for='create-channel-topic']")).not.toBeNull();
+      modal.destroy?.();
+    });
+
+    it("sends a trimmed topic when given", async () => {
+      const onCreate = vi.fn(async (_d: { name: string; topic?: string }) => {});
+      const { modal } = makeModal("Chat", { onCreate });
+      q<HTMLInputElement>("channel-name-input").value = "a";
+      q<HTMLInputElement>("channel-topic-input").value = "  hello  ";
+      q<HTMLButtonElement>("channel-create-submit").click();
+      await vi.waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
+      expect(onCreate.mock.calls[0]![0]).toMatchObject({ name: "a", topic: "hello" });
+
+      modal.destroy?.();
+    });
+
+    it("omits a blank topic", async () => {
+      const onCreate = vi.fn(async (_d: { name: string; topic?: string }) => {});
+      const { modal } = makeModal("Chat", { onCreate });
+      q<HTMLInputElement>("channel-name-input").value = "a";
+      q<HTMLInputElement>("channel-topic-input").value = "   ";
+      q<HTMLButtonElement>("channel-create-submit").click();
+      await vi.waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
+      expect("topic" in onCreate.mock.calls[0]![0]).toBe(false);
+      modal.destroy?.();
+    });
+
+    it("Enter in the name field submits", async () => {
+      const onCreate = vi.fn(async () => {});
+      const { modal } = makeModal("Chat", { onCreate });
+      q<HTMLInputElement>("channel-name-input").value = "fresh";
+      const e = press({});
+      expect(e.defaultPrevented).toBe(true);
+      await vi.waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
+      modal.destroy?.();
+    });
+
+    it("Enter does not submit while an IME is composing", () => {
+      const onCreate = vi.fn(async () => {});
+      const { modal } = makeModal("Chat", { onCreate });
+      q<HTMLInputElement>("channel-name-input").value = "fresh";
+      press({ isComposing: true });
+      press({ keyCode: 229 });
+      expect(onCreate).not.toHaveBeenCalled();
+      modal.destroy?.();
+    });
+
+    it("Enter does not submit an empty name, and shows no error", () => {
+      const onCreate = vi.fn(async () => {});
+      const { modal } = makeModal("Chat", { onCreate });
+      q<HTMLInputElement>("channel-name-input").value = "   ";
+      press({});
+      expect(onCreate).not.toHaveBeenCalled();
+      modal.destroy?.();
+    });
+
+    it("a second Enter while the create is in flight does not submit twice", async () => {
+      let release: () => void = () => {};
+      const onCreate = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            release = resolve;
+          }),
+      );
+      const { modal } = makeModal("Chat", { onCreate });
+      q<HTMLInputElement>("channel-name-input").value = "fresh";
+      press({});
+      press({});
+      expect(onCreate).toHaveBeenCalledTimes(1);
+      release();
+      modal.destroy?.();
+    });
+  });
+
+  it("sends position one past the highest in the category so the channel lands last", async () => {
+    setChannels([
+      { id: 1, name: "a", type: "text", category: "Chat", position: 3 },
+      { id: 2, name: "b", type: "voice", category: "Chat", position: 7 },
+      { id: 3, name: "c", type: "text", category: "Other", position: 40 },
+    ]);
+    const onCreate = vi.fn(async (_data: { position: number; category: string }) => {});
+    const { modal } = makeModal("Chat", { onCreate });
+    (container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement).value =
+      "fresh";
+    (container.querySelector("[data-testid='channel-create-submit']") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(onCreate).toHaveBeenCalled());
+    expect(onCreate.mock.calls[0]![0]).toMatchObject({ category: "Chat", position: 8 });
+    modal.destroy?.();
+  });
+
+  it("counts uncategorized voice channels when creating from the synthetic Voice group", async () => {
+    setChannels([
+      { id: 1, name: "v1", type: "voice", category: null, position: 3 },
+      { id: 2, name: "v2", type: "voice", category: "", position: 5 },
+      { id: 3, name: "t", type: "text", category: null, position: 9 },
+    ]);
+    const onCreate = vi.fn(async (_data: { position: number; category: string }) => {});
+    const { modal } = makeModal(UNCATEGORIZED_VOICE_CATEGORY, { onCreate });
+    (container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement).value =
+      "fresh";
+    (container.querySelector("[data-testid='channel-create-submit']") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(onCreate).toHaveBeenCalled());
+    expect(onCreate.mock.calls[0]![0].position).toBe(6);
+    modal.destroy?.();
+  });
+
+  it("sorts the first channel of a brand-new category below every other channel", async () => {
+    setChannels([{ id: 1, name: "a", type: "text", category: "Chat", position: 3 }]);
+    const onCreate = vi.fn(async (_data: { position: number; category: string }) => {});
+    const { modal } = makeModal("Brand New", { onCreate });
+    (container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement).value =
+      "fresh";
+    (container.querySelector("[data-testid='channel-create-submit']") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(onCreate).toHaveBeenCalled());
+    expect(onCreate.mock.calls[0]![0]).toMatchObject({ position: 4 });
     modal.destroy?.();
   });
 
