@@ -2,6 +2,12 @@
   "_doc": "Top-level per-server-looking state that registers no session reset (tests/unit/session-state-ownership.test.ts). This list only shrinks: the test fails an entry whose binding is gone or whose file now registers a reset. Keys are file + binding, never a line number. Categories: app-lifetime, host-keyed, dom-owned, pure-cache, transient, reset-elsewhere.",
   "entries": [
     {
+      "file": "components/ChannelSidebar.ts",
+      "binding": "volumeMenuAttempts",
+      "category": "dom-owned",
+      "reason": "WeakMap keyed by the sidebar's lifetime AbortSignal; entries go with the destroyed sidebar"
+    },
+    {
       "file": "components/MemberList.ts",
       "binding": "foldCache",
       "category": "dom-owned",
