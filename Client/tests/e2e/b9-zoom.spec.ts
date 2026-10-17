@@ -387,7 +387,7 @@ test.describe("B9 OS 200 % zoom reflow", () => {
       ]);
       await openDrawer(page);
       await openSettings(page);
-      await openSettingsTab(page, "Safety");
+      await openSettingsTab(page, "Privacy & Safety");
       const section = page.getByRole("region", { name: "My reports" });
       await section.locator(".my-reports-item").first().waitFor();
       const screen: ZoomScreen = {

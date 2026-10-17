@@ -2,6 +2,9 @@
 // with loading, empty, error/retry and late-result states.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OwnReportSummary } from "@lib/api";
+// Loaded up front: the Blocked users section lazily imports it, and its module-level
+// listener must not first appear inside a test.
+import "@components/message-list/avatar";
 import { buildMyReportsSection, reportStateKey } from "./myReports";
 import { buildSafetyPane } from "./safetyPane";
 import { pinZone } from "../../../tests/helpers/tz-pin";
@@ -18,6 +21,8 @@ const api = {
     signals.push(signal);
     return new Promise<OwnReportSummary[]>((resolve, reject) => pending.push({ resolve, reject }));
   },
+  listBlocks: () => new Promise<{ blocked_user_ids: number[] }>(() => undefined),
+  unblockUser: () => Promise.resolve(),
 };
 let tab: AbortController;
 let restoreTZ: () => void;
@@ -151,6 +156,14 @@ describe("My reports", () => {
     await vi.waitFor(() => expect(pane.querySelector("section.my-reports")).not.toBeNull());
     expect(pane.lastElementChild?.matches("section.my-reports")).toBe(true);
     expect(signals).toEqual([tab.signal]);
+  });
+
+  it("puts Blocked users first in the pane, above the other sections", async () => {
+    const pane = buildSafetyPane(tab.signal, api);
+    await vi.waitFor(() => expect(pane.querySelector("section.blocked-users")).not.toBeNull());
+    await vi.waitFor(() => expect(pane.querySelector("section.my-reports")).not.toBeNull());
+    expect(pane.firstElementChild?.matches("section.blocked-users")).toBe(true);
+    expect(pane.querySelector("section.blocked-users h3")?.textContent).toBe("Blocked users");
   });
 
   it("says so in the pane when the section fails to load", async () => {

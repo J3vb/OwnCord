@@ -97,10 +97,10 @@ test.describe("B9-4 shared navigation", () => {
     await page.locator("button[aria-label='Settings']").click();
     await expect(page.locator("[data-testid='settings-overlay']")).toHaveClass(/open/);
     const tabs = page.getByRole("tablist", { name: "Settings sections" }).getByRole("tab");
-    await expect(tabs.filter({ hasText: "Safety" })).toHaveCount(1);
+    await expect(tabs.filter({ hasText: "Privacy & Safety" })).toHaveCount(1);
     await page.getByRole("tab", { name: "Account" }).focus();
     await page.keyboard.press("ArrowDown");
-    await expect(page.getByRole("tab", { name: "Safety" })).toBeFocused();
+    await expect(page.getByRole("tab", { name: "Privacy & Safety" })).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(page.getByRole("tab", { name: "Appearance" })).toBeFocused();
   });
