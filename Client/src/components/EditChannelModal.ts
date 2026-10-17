@@ -332,7 +332,8 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     // Fields the user has not touched follow the store while the dialog is
     // open, and only touched fields are sent: a concurrent edit by another admin
     // is neither hidden from this form nor overwritten by its save. "Touched"
-    // is the control differing from the value this dialog last wrote into it.
+    // is the control differing from the latest server value, so typing back
+    // what another admin replaced still counts as a change and is sent.
     type Mutable = { -readonly [K in keyof EditChannelData]: EditChannelData[K] };
     interface TrackedField {
       applied: string | boolean;
@@ -432,8 +433,11 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
       (ch) => {
         if (ch === undefined) return;
         for (const f of fields) {
-          if (touched(f)) continue;
           const next = f.fromChannel(ch);
+          if (touched(f)) {
+            f.applied = next;
+            continue;
+          }
           f.write(next);
           f.applied = f.read();
         }

@@ -577,6 +577,18 @@ describe("EditChannelModal", () => {
       modal.destroy?.();
     });
 
+    it("sends a value typed back after another admin replaced it", async () => {
+      const onSave = vi.fn(async () => {});
+      const { modal } = makeModal({ onSave, channelTopic: "old", channelCategory: "Chat" });
+      topicEl().value = "mine";
+      remoteUpdate({ topic: "theirs" });
+      topicEl().value = "old";
+
+      submit();
+      await vi.waitFor(() => expect(onSave).toHaveBeenCalledWith({ topic: "old" }));
+      modal.destroy?.();
+    });
+
     it("closes without saving when nothing was changed", () => {
       const onSave = vi.fn(async () => {});
       const onClose = vi.fn();

@@ -115,11 +115,14 @@ function navigableChannelIds(unreadOnly: boolean): number[] {
     return dmStore.getState().channels.map((c) => c.channelId);
   }
   const ids: number[] = [];
+  // The active channel always stays in, so a step starts from where you are.
+  const active = channelsStore.getState().activeChannelId;
   for (const [category, channels] of getChannelsByCategory()) {
     if (!unreadOnly && category !== null && isCategoryCollapsed(category)) continue;
     for (const ch of channels) {
       if (ch.type === "voice") continue;
-      if (unreadOnly && isChannelMuted(ch.id) && ch.mentionCount === 0) continue;
+      const quiet = isChannelMuted(ch.id) && ch.mentionCount === 0;
+      if (unreadOnly && quiet && ch.id !== active) continue;
       ids.push(ch.id);
     }
   }
@@ -148,7 +151,7 @@ export function stepChannel(direction: 1 | -1, unreadOnly = false): void {
   for (let step = 1; step <= ids.length; step++) {
     const idx = (((start + direction * step) % ids.length) + ids.length) % ids.length;
     const id = ids[idx]!;
-    if (!unreadOnly || hasUnread(id)) {
+    if (!unreadOnly || (hasUnread(id) && id !== current)) {
       navigateToChannel(id);
       const dm = dmStore.getState().channels.find((c) => c.channelId === id);
       if (dm !== undefined) setActiveDmUser(dm.isGroup ? null : dm.recipient.id);

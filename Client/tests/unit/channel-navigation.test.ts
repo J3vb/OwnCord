@@ -284,6 +284,18 @@ describe("channel-navigation", () => {
         expect(channelsStore.getState().activeChannelId).toBe(2);
       });
 
+      it("the unread step starts from a muted active channel", () => {
+        seed([
+          makeChannel({ id: 1, name: "a", position: 0, unreadCount: 1 }),
+          makeChannel({ id: 2, name: "m", position: 1, unreadCount: 2 }),
+          makeChannel({ id: 3, name: "b", position: 2, unreadCount: 1 }),
+        ]);
+        muteChannel(2);
+        channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
+        stepChannel(1, true);
+        expect(channelsStore.getState().activeChannelId).toBe(3);
+      });
+
       it("a muted channel with a mention still counts", () => {
         seed([
           makeChannel({ id: 1, name: "a", position: 0, unreadCount: 3, mentionCount: 1 }),
