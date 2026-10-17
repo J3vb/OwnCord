@@ -214,6 +214,10 @@ and only when it changes something a contributor or fork holder must do
 - Losing access to a channel now says "You no longer have access to this channel, or it was deleted" instead of claiming it was deleted, since a permission change looks the same to the app.
 - Editing a channel no longer overwrites a change someone else made while the dialog was open: fields you did not touch update in the open dialog, and Save sends only the fields you changed.
 
+**Accounts & admin**
+
+- "Update now" on a server whose install folder the service cannot write to failed with a vague download error after the download. The Updates page now says the server cannot replace its own program file and to install the release by hand, and nothing is downloaded or restarted.
+
 **Login & connection**
 
 - An app that was online when the server had to skip an update meant for it now also fetches everything fresh on its next reconnect, instead of keeping the gap. Every sequenced update now also carries a per-connection count (`cseq`).

@@ -5,10 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/admin"
@@ -489,4 +491,127 @@ func TestApplyStagedUpdate_NilHub_NoPanic(t *testing.T) {
 	newPath := exePath + ".new" // never written -> verification fails
 
 	admin.ApplyStagedUpdate(nil, exePath, newPath, "0000000000000000000000000000000000000000000000000000000000000000")
+}
+
+// ─── Install directory the service cannot write to ───────────────────────────
+
+// releaseServer serves a release that is newer than 1.0.0 and counts every
+// request, so a test can prove nothing was fetched.
+func releaseServer(t *testing.T, hits *atomic.Int32) *httptest.Server {
+	t.Helper()
+	const dl = "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		names := []string{
+			"chatserver.exe", "chatserver-linux-amd64.tar.gz", "checksums.sha256",
+			"chatserver.exe.sig", "server-update-manifest.json", "server-update-manifest.json.sig",
+		}
+		assets := make([]map[string]any, 0, len(names))
+		for _, n := range names {
+			assets = append(assets, map[string]any{"name": n, "browser_download_url": dl + n})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"tag_name": "v2.0.0",
+			"html_url": "https://github.com/J3vb/OwnCord/releases/tag/v2.0.0",
+			"assets":   assets,
+		})
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func checkUpdateBody(t *testing.T) map[string]any {
+	t.Helper()
+	var hits atomic.Int32
+	mockGH := releaseServer(t, &hits)
+	u := updater.NewUpdater("1.0.0", "", "J3vb", "OwnCord")
+	u.SetBaseURL(mockGH.URL)
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestServices(database))
+	token := createAdminUser(t, database)
+
+	w := doRequest(t, handler, http.MethodGet, "/updates", token, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	return body
+}
+
+func TestCheckUpdate_ReportsInstallReadOnly(t *testing.T) {
+	t.Setenv("OWNCORD_CONTAINER", "0")
+	t.Cleanup(admin.SetInstallWritable(func() error { return errors.New("read-only") }))
+
+	body := checkUpdateBody(t)
+	if body["can_apply"] != false {
+		t.Errorf("can_apply = %v, want false", body["can_apply"])
+	}
+	if body["apply_blocked"] != "install_read_only" {
+		t.Errorf("apply_blocked = %v, want install_read_only", body["apply_blocked"])
+	}
+}
+
+func TestCheckUpdate_WritableInstallOmitsApplyBlocked(t *testing.T) {
+	t.Setenv("OWNCORD_CONTAINER", "0")
+	t.Cleanup(admin.SetInstallWritable(func() error { return nil }))
+
+	body := checkUpdateBody(t)
+	if body["can_apply"] != true {
+		t.Errorf("can_apply = %v, want true", body["can_apply"])
+	}
+	if _, ok := body["apply_blocked"]; ok {
+		t.Errorf("apply_blocked = %v, want it absent", body["apply_blocked"])
+	}
+}
+
+// The container check wins, so the contract containers already rely on is
+// unchanged even when the install directory is also read-only.
+func TestCheckUpdate_ContainerWinsOverReadOnly(t *testing.T) {
+	t.Setenv("OWNCORD_CONTAINER", "1")
+	t.Cleanup(admin.SetInstallWritable(func() error { return errors.New("read-only") }))
+
+	body := checkUpdateBody(t)
+	if body["can_apply"] != false {
+		t.Errorf("can_apply = %v, want false", body["can_apply"])
+	}
+	if body["apply_blocked"] != "container" {
+		t.Errorf("apply_blocked = %v, want container", body["apply_blocked"])
+	}
+}
+
+// A read-only install is refused before the release is even looked up: no
+// outbound request, no restart countdown, and the restart guard stays free.
+func TestApplyUpdate_ReadOnlyInstallRefusedBeforeDownload(t *testing.T) {
+	t.Setenv("OWNCORD_CONTAINER", "0")
+	t.Cleanup(admin.SetInstallWritable(func() error { return errors.New("read-only") }))
+
+	var hits atomic.Int32
+	mockGH := releaseServer(t, &hits)
+	u := updater.NewUpdater("1.0.0", "", "J3vb", "OwnCord")
+	u.SetBaseURL(mockGH.URL)
+	hub := &mockHub{}
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, u, nil, nil, nil, newTestServices(database))
+	token := createAdminUser(t, database)
+
+	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp["error"] != "INSTALL_READ_ONLY" {
+		t.Errorf("error code = %q, want INSTALL_READ_ONLY", resp["error"])
+	}
+	if n := hits.Load(); n != 0 {
+		t.Errorf("release server saw %d request(s), want 0", n)
+	}
+	if len(hub.restartCalls) != 0 {
+		t.Errorf("restart broadcasts = %d, want 0", len(hub.restartCalls))
+	}
 }

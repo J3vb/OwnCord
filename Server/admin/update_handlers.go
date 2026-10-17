@@ -15,9 +15,27 @@ import (
 	"golang.org/x/mod/semver"
 )
 
+// installWritable reports whether the install directory accepts the files a
+// self-update writes next to the binary. A var so tests can stand in for a
+// read-only install without depending on file permissions.
+var installWritable = func() error {
+	exePath, err := updater.ExecutablePath()
+	if err != nil {
+		return fmt.Errorf("resolving executable path: %w", err)
+	}
+	return updater.CanReplaceExecutable(exePath)
+}
+
+// Values of apply_blocked in the update check response.
+const (
+	applyBlockedContainer       = "container"
+	applyBlockedInstallReadOnly = "install_read_only"
+)
+
 // handleCheckUpdate returns the current update status. can_apply tells the
-// admin SPA whether POST /updates/apply is usable in this deployment (false
-// in containers, where upgrades are image pulls).
+// admin SPA whether POST /updates/apply is usable in this deployment: false in
+// containers (upgrades are image pulls) and when the service cannot write to
+// its install directory. apply_blocked names which; the container check wins.
 func handleCheckUpdate(u *updater.Updater) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if u == nil {
@@ -30,10 +48,18 @@ func handleCheckUpdate(u *updater.Updater) http.HandlerFunc {
 			writeErr(w, http.StatusBadGateway, "UPDATE_CHECK_FAILED", "failed to check for updates — see server logs")
 			return
 		}
+		blocked := ""
+		switch {
+		case updater.RunningInContainer():
+			blocked = applyBlockedContainer
+		case installWritable() != nil:
+			blocked = applyBlockedInstallReadOnly
+		}
 		writeJSON(w, http.StatusOK, struct {
 			updater.UpdateInfo
-			CanApply bool `json:"can_apply"`
-		}{info, !updater.RunningInContainer()})
+			CanApply     bool   `json:"can_apply"`
+			ApplyBlocked string `json:"apply_blocked,omitempty"`
+		}{info, blocked == "", blocked})
 	}
 }
 
@@ -65,6 +91,16 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 		}
 		if u == nil {
 			writeErr(w, http.StatusServiceUnavailable, "UPDATE_UNAVAILABLE", "update checking is not configured")
+			return
+		}
+
+		// A read-only install directory cannot take the staged file or the
+		// backup name, so say so before any download or countdown rather than
+		// failing later as a download error.
+		if err := installWritable(); err != nil {
+			slog.Info("update apply refused: install directory not writable", "err", err)
+			writeErr(w, http.StatusServiceUnavailable, "INSTALL_READ_ONLY",
+				"this server cannot replace its own program file (the install folder is read-only to the service) — install the new release by hand")
 			return
 		}
 
