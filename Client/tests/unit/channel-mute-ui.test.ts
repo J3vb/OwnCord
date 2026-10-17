@@ -1,3 +1,4 @@
+import { pruneExpiredMutes } from "@lib/channel-mute-expiry";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   attachChannelContextMenu,
@@ -9,7 +10,6 @@ import {
   muteChannel,
   invalidateMuteCache,
   getChannelMute,
-  pruneExpiredMutes,
 } from "@lib/channel-mutes";
 import { saveTimeFormat } from "@lib/timeFormat";
 import { channelsStore } from "@stores/channels.store";
@@ -393,7 +393,7 @@ describe("NotificationsTab — timed mutes (3D-3a)", () => {
     vi.useRealTimers();
   });
 
-  it("Settings list shows until and drops the row on expiry", () => {
+  it("Settings list shows until and drops the row on expiry", async () => {
     muteChannel(5, 900_000);
     muteChannel(6);
     const tab = buildNotificationsTab(ac.signal);
@@ -403,11 +403,50 @@ describe("NotificationsTab — timed mutes (3D-3a)", () => {
 
     vi.setSystemTime(T0 + 900_000);
     pruneExpiredMutes(Date.now());
+    await Promise.resolve();
     expect(tab.querySelector('[data-testid="unmute-5"]')).toBeNull();
     expect(tab.querySelector('[data-testid="unmute-6"]')).not.toBeNull();
   });
 
-  it("stops listening once the tab's signal aborts", () => {
+  it("hands focus to the next row's Unmute button when the focused one goes", async () => {
+    muteChannel(5);
+    muteChannel(6);
+    muteChannel(7);
+    const tab = buildNotificationsTab(ac.signal);
+    container.appendChild(tab);
+    const btn = (id: number): HTMLElement =>
+      tab.querySelector(`[data-testid="unmute-${id}"]`) as HTMLElement;
+    btn(6).focus();
+    btn(6).click();
+    await Promise.resolve();
+    expect(document.activeElement).toBe(btn(7));
+
+    btn(7).click();
+    await Promise.resolve();
+    expect(document.activeElement).toBe(btn(5));
+
+    btn(5).click();
+    await Promise.resolve();
+    expect(document.activeElement).toBe(tab.querySelector('[data-testid="muted-channel-list"]'));
+  });
+
+  it("redraws once for a prune that ends several mutes", async () => {
+    muteChannel(5, 900_000);
+    muteChannel(6, 900_000);
+    const tab = buildNotificationsTab(ac.signal);
+    container.appendChild(tab);
+    const list = tab.querySelector('[data-testid="muted-channel-list"]') as HTMLElement;
+    const clears = vi.spyOn(list, "replaceChildren");
+    const adds = vi.spyOn(list, "appendChild");
+    vi.setSystemTime(T0 + 900_000);
+    pruneExpiredMutes(Date.now());
+    await Promise.resolve();
+    // One empty-state node drawn, not one redraw per ended mute.
+    expect(adds).toHaveBeenCalledTimes(1);
+    expect(clears.mock.calls.length).toBeLessThanOrEqual(1);
+  });
+
+  it("stops listening once the tab's signal aborts", async () => {
     muteChannel(5, 900_000);
     const own = new AbortController();
     const tab = buildNotificationsTab(own.signal);
@@ -415,6 +454,7 @@ describe("NotificationsTab — timed mutes (3D-3a)", () => {
     own.abort();
     vi.setSystemTime(T0 + 900_000);
     pruneExpiredMutes(Date.now());
+    await Promise.resolve();
     expect(tab.querySelector('[data-testid="unmute-5"]')).not.toBeNull();
   });
 });

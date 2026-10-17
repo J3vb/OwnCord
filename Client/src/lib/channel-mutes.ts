@@ -18,8 +18,6 @@
  * and `notificationSounds` live in localStorage next to it.
  */
 
-import { Disposable } from "./disposable";
-import { setOwnedTimeout } from "./dom";
 import { loadPref, savePref, STORAGE_PREFIX } from "./preferences";
 
 /**
@@ -29,14 +27,6 @@ import { loadPref, savePref, STORAGE_PREFIX } from "./preferences";
 export const MUTE_DURATIONS_MS: readonly number[] = [
   900_000, 3_600_000, 10_800_000, 28_800_000, 86_400_000,
 ];
-
-/** The longest a timed mute may have left. Only a clock set backwards can
- *  exceed it, and `pruneExpiredMutes` pulls such an entry back in. */
-const MAX_MUTE_MS = 86_400_000;
-
-/** The expiry watcher never sleeps longer than this, so a suspended machine or
- *  a moved clock leaves a stale dim for at most about a minute. */
-const WATCH_CAP_MS = 60_000;
 
 /** localStorage key (under the shared settings prefix). */
 const MUTED_KEY = "mutedChannels";
@@ -49,7 +39,7 @@ const MUTED_KEY = "mutedChannels";
  */
 export const CHANNEL_MUTE_CHANGED = "owncord:channel-mute-changed";
 
-function announceMuteChange(channelId: number): void {
+export function announceMuteChange(channelId: number): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(CHANNEL_MUTE_CHANGED, { detail: { channelId } }));
 }
@@ -136,6 +126,12 @@ function keyExists(key: string): boolean {
   return localStorage.getItem(STORAGE_PREFIX + key) !== null;
 }
 
+/** The stored entries (`null` = until turned off), expired ones included.
+ *  For the expiry module, which prunes them; callers ask `isChannelMuted`. */
+export function readMutedEntries(): ReadonlyMap<number, number | null> {
+  return readMuted();
+}
+
 function readMuted(): ReadonlyMap<number, number | null> {
   if (cache !== null) return cache;
 
@@ -172,6 +168,8 @@ function readMuted(): ReadonlyMap<number, number | null> {
  *  is written as a bare id, so a list without timed mutes is byte-identical
  *  to the original format. */
 function writeMuted(entries: ReadonlyMap<number, number | null>, now = Date.now()): void {
+  // Dropped expired entries are not announced one by one here; the writers that
+  // matter announce, and listeners redraw everything from the store.
   const live = new Map<number, number | null>();
   const out: Array<number | { id: number; until: number }> = [];
   for (const [id, until] of entries) {
@@ -181,6 +179,14 @@ function writeMuted(entries: ReadonlyMap<number, number | null>, now = Date.now(
   }
   cache = live;
   savePref(mutedKey(), out);
+}
+
+/** Replace the stored list (expired entries are dropped). For the expiry module. */
+export function replaceMutedEntries(
+  entries: ReadonlyMap<number, number | null>,
+  now: number,
+): void {
+  writeMuted(entries, now);
 }
 
 /** Whether an entry still mutes at `now`. */
@@ -255,90 +261,6 @@ export function toggleChannelMute(channelId: number): boolean {
   }
   muteChannel(channelId);
   return true;
-}
-
-/**
- * Remove every mute that has ended by `now`, write once, announce each removed
- * id, and return them. A timed entry with more than a day left (only possible
- * after the clock moved back) is pulled in to `now` + 24 h, so a backward jump
- * can never stretch a mute past a day from now.
- */
-export function pruneExpiredMutes(now: number): readonly number[] {
-  const current = readMuted();
-  const removed: number[] = [];
-  const next = new Map<number, number | null>();
-  let changed = false;
-  for (const [id, until] of current) {
-    if (until === null) {
-      next.set(id, null);
-    } else if (until <= now) {
-      removed.push(id);
-      changed = true;
-    } else if (until > now + MAX_MUTE_MS) {
-      next.set(id, now + MAX_MUTE_MS);
-      changed = true;
-    } else {
-      next.set(id, until);
-    }
-  }
-  if (!changed) return [];
-  writeMuted(next, now);
-  for (const id of removed) announceMuteChange(id);
-  return removed;
-}
-
-/** The soonest end among active timed mutes, or null when there is none. */
-function nextMuteExpiry(): number | null {
-  const now = Date.now();
-  let soonest: number | null = null;
-  for (const until of readMuted().values()) {
-    if (until !== null && until > now && (soonest === null || until < soonest)) soonest = until;
-  }
-  return soonest;
-}
-
-/**
- * Start the page-owned watcher that redraws the UI when a timed mute ends.
- * Returns its stop function. The watcher only prunes and announces; whether a
- * channel is muted is always decided by `isChannelMuted` at read time, so a
- * timer that never fires costs a stale dim for up to a minute and nothing else.
- *
- * Each arming owns its own child `Disposable`, so re-arming destroys the
- * previous timer. It re-arms on every mute change, and re-checks on window
- * focus and when the page becomes visible (a machine that slept through an
- * expiry). It checks once at start, for mutes that ended while closed.
- */
-export function startMuteExpiryWatch(): () => void {
-  const owner = new Disposable();
-  let arm: Disposable | null = null;
-  owner.addCleanup(() => arm?.destroy());
-
-  const schedule = (): void => {
-    arm?.destroy();
-    arm = null;
-    if (owner.signal.aborted) return;
-    const next = nextMuteExpiry();
-    if (next === null) return;
-    arm = new Disposable();
-    const delay = Math.min(Math.max(next - Date.now(), 0), WATCH_CAP_MS);
-    setOwnedTimeout(arm.signal, check, delay);
-  };
-  const check = (): void => {
-    pruneExpiredMutes(Date.now());
-    schedule();
-  };
-
-  window.addEventListener(CHANNEL_MUTE_CHANGED, schedule, { signal: owner.signal });
-  window.addEventListener("focus", check, { signal: owner.signal });
-  document.addEventListener(
-    "visibilitychange",
-    () => {
-      if (document.visibilityState === "visible") check();
-    },
-    { signal: owner.signal },
-  );
-  check();
-  return () => owner.destroy();
 }
 
 /**

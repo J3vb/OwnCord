@@ -19,6 +19,7 @@ import {
   listMutedChannels,
   unmuteChannel,
 } from "@lib/channel-mutes";
+import { Disposable } from "@lib/disposable";
 import { clockAndDate } from "../muteMenu";
 import {
   NOTIFICATION_LEVELS,
@@ -496,12 +497,53 @@ function buildMutedChannelsSection(signal: AbortSignal): HTMLDivElement {
   const list = createElement("div", {
     class: "settings-muted-list",
     "data-testid": "muted-channel-list",
+    tabindex: "-1",
   });
   appendChildren(wrapper, label, desc, list);
 
+  // Each draw owns its rows' listeners, so a redrawn button is released.
+  let rows = new Disposable();
+  signal.addEventListener("abort", () => rows.destroy(), { once: true });
+  let drawn: readonly number[] = [];
+  let drawnKey: string | null = null;
+
   function render(): void {
-    clearChildren(list);
+    if (signal.aborted) return;
     const muted = listMutedChannels();
+    // Nothing changed (a burst of events, or the click that already drew).
+    const key = muted.map((id) => `${id}:${getChannelMute(id)?.until ?? ""}`).join(",");
+    if (key === drawnKey) return;
+    drawnKey = key;
+
+    // Where focus was, so a removed Unmute button hands it on instead of
+    // dropping it to <body>.
+    const active = document.activeElement;
+    const focusedId = list.contains(active)
+      ? (drawn.find((id) => active?.getAttribute("data-testid") === `unmute-${id}`) ?? null)
+      : null;
+    const before = drawn;
+    drawn = muted;
+
+    rows.destroy();
+    rows = new Disposable();
+    clearChildren(list);
+    if (focusedId !== null) {
+      const at = before.indexOf(focusedId);
+      const next =
+        before.slice(at + 1).find((id) => muted.includes(id)) ??
+        before
+          .slice(0, at)
+          .toReversed()
+          .find((id) => muted.includes(id));
+      queueMicrotask(() => {
+        if (signal.aborted || list.contains(document.activeElement)) return;
+        const target =
+          next === undefined
+            ? list
+            : (list.querySelector<HTMLElement>(`[data-testid="unmute-${next}"]`) ?? list);
+        target.focus();
+      });
+    }
     if (muted.length === 0) {
       list.appendChild(
         createElement(
@@ -543,7 +585,7 @@ function buildMutedChannelsSection(signal: AbortSignal): HTMLDivElement {
           unmuteChannel(channelId);
           render();
         },
-        { signal },
+        { signal: rows.signal },
       );
       appendChildren(row, name);
       if (untilEl !== null) row.appendChild(untilEl);
@@ -553,7 +595,20 @@ function buildMutedChannelsSection(signal: AbortSignal): HTMLDivElement {
   }
 
   render();
-  // A timed mute ends (or is changed from a menu) while this tab is open.
-  window.addEventListener(CHANNEL_MUTE_CHANGED, render, { signal });
+  // A timed mute ends (or is changed from a menu) while this tab is open. One
+  // prune that ends several mutes announces once per id; redraw once per burst.
+  let pending = false;
+  window.addEventListener(
+    CHANNEL_MUTE_CHANGED,
+    () => {
+      if (pending) return;
+      pending = true;
+      queueMicrotask(() => {
+        pending = false;
+        render();
+      });
+    },
+    { signal },
+  );
   return wrapper;
 }

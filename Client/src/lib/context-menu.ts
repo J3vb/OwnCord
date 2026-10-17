@@ -299,6 +299,13 @@ function placeFlyout(flyout: HTMLElement): void {
   if (rect.right > window.innerWidth - margin) {
     flyout.style.left = `${trigger.offsetLeft - rect.width}px`;
   }
+  // Near the bottom edge, slide up just enough to stay on screen (never past
+  // the top margin).
+  const overflow = rect.bottom - (window.innerHeight - margin);
+  if (overflow > 0) {
+    const shift = Math.min(overflow, Math.max(0, rect.top - margin));
+    flyout.style.top = `${trigger.offsetTop - shift}px`;
+  }
   trigger.setAttribute("aria-expanded", "true");
 }
 
@@ -306,6 +313,8 @@ function hideFlyout(flyout: HTMLElement): void {
   flyout.style.display = "none";
   flyout.previousElementSibling?.setAttribute("aria-expanded", "false");
 }
+
+let submenuSeq = 0;
 
 export interface SubmenuTriggerOptions {
   readonly testId?: string;
@@ -337,10 +346,15 @@ export function createSubmenuTrigger(
   );
   trigger.setAttribute("aria-haspopup", "menu");
   trigger.setAttribute("aria-expanded", "false");
+  const seq = ++submenuSeq;
+  trigger.id = `ctx-submenu-trigger-${seq}`;
   if (opts.activates === true) trigger.setAttribute("data-activates", "true");
   const flyout = createElement("div", { class: "context-menu__submenu" });
   flyout.style.display = "none";
   flyout.setAttribute("role", "menu");
+  flyout.id = `ctx-submenu-${seq}`;
+  flyout.setAttribute("aria-labelledby", trigger.id);
+  trigger.setAttribute("aria-controls", flyout.id);
 
   const show = (): void => {
     flyout.style.display = "";

@@ -923,3 +923,39 @@ describe("submenus and radio rows (3D-3a)", () => {
     );
   });
 });
+
+describe("submenu a11y and placement (3D-3a review)", () => {
+  let ac: AbortController;
+  beforeEach(() => {
+    ac = new AbortController();
+  });
+  afterEach(() => ac.abort());
+
+  it("links the trigger and flyout by id", () => {
+    const { trigger, flyout } = createSubmenuTrigger("T", "context-menu-item", {}, ac.signal);
+    expect(trigger.id).not.toBe("");
+    expect(trigger.getAttribute("aria-controls")).toBe(flyout.id);
+    expect(flyout.getAttribute("aria-labelledby")).toBe(trigger.id);
+    const other = createSubmenuTrigger("U", "context-menu-item", {}, ac.signal);
+    expect(other.trigger.id).not.toBe(trigger.id);
+  });
+
+  it("slides the flyout up when it would run off the bottom edge", () => {
+    showContextMenu({
+      x: 0,
+      y: 0,
+      signal: ac.signal,
+      items: [
+        { label: "M", testId: "t", onClick: vi.fn(), submenu: [{ label: "A", onClick: vi.fn() }] },
+      ],
+    });
+    const trigger = document.querySelector('[data-testid="t"]') as HTMLElement;
+    const flyout = trigger.nextElementSibling as HTMLElement;
+    Object.defineProperty(trigger, "offsetTop", { value: 300 });
+    flyout.getBoundingClientRect = () =>
+      ({ left: 0, width: 100, right: 100, top: 300, bottom: window.innerHeight + 60 }) as DOMRect;
+    trigger.dispatchEvent(new MouseEvent("mouseenter"));
+    expect(flyout.style.top).toBe("232px");
+    document.querySelectorAll(".context-menu").forEach((el) => el.remove());
+  });
+});

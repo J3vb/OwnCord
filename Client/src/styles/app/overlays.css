@@ -112,7 +112,7 @@
 /* A row that owns a sibling flyout (createSubmenuTrigger) shows a chevron;
    the label stays the row's only text. */
 .context-menu-item--flyout::after {
-  content: "\203A";
+  content: "\203A" / "";
   margin-left: auto;
   color: var(--text-muted);
 }

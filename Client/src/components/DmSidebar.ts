@@ -29,6 +29,7 @@ import {
 } from "./message-list/attachments";
 import { requestsText } from "../i18n/requests";
 import { voiceText } from "../i18n/voice";
+import { getChannelMute } from "@lib/channel-mutes";
 import { openDmContextMenu, openLeaveConfirm, type DmMenuConvo } from "./dmContextMenu";
 
 /** One member of a group DM, as far as the sidebar needs to draw them. */
@@ -79,6 +80,8 @@ export interface DmSidebarOptions {
    *  which one it is is the server's call, and the label says so. */
   readonly onCloseDm?: (channelId: number) => void;
   readonly onToggleMute?: (channelId: number) => void;
+  /** Row menu: set the mute outright (see `DmMenuActions.onSetMute`). */
+  readonly onSetMute?: (channelId: number, muted: boolean) => void;
   /** Row menu: mute for a fixed time. */
   readonly onMuteFor?: (channelId: number, durationMs: number) => void;
   /** Row menu: mark the conversation read. Offered only while it is unread. */
@@ -188,14 +191,19 @@ function buildAvatar(convo: DmConversation): HTMLDivElement {
 }
 
 function menuConvo(convo: DmConversation): DmMenuConvo {
+  // Read the store as the menu opens: the list may have been drawn before a
+  // timed mute ended (or was set elsewhere). An untimed `muted` flag from the
+  // list still stands when the store has no entry.
+  const live = getChannelMute(convo.channelId);
+  const muted = live !== null || (convo.muted === true && convo.mutedUntil == null);
   return {
     channelId: convo.channelId,
     userId: convo.userId,
     username: convo.username,
     isGroup: convo.isGroup === true,
     unread: convo.unread,
-    muted: convo.muted === true,
-    mutedUntil: convo.mutedUntil ?? null,
+    muted,
+    mutedUntil: live?.until ?? null,
   };
 }
 

@@ -33,6 +33,11 @@ export interface DmMenuActions {
   /** Close a 1:1 DM / leave a group. */
   readonly onCloseDm?: (channelId: number) => void;
   readonly onToggleMute?: (channelId: number) => void;
+  /** Set the mute outright (true: until turned off, false: unmute). Preferred
+   *  over `onToggleMute`, which acts on whatever state it finds when it runs: a
+   *  timed mute that ended while the menu was open would be flipped to
+   *  "muted forever" by an Unmute click. */
+  readonly onSetMute?: (channelId: number, muted: boolean) => void;
   /** Mute for a fixed time. Absent: the menu offers only the plain toggle. */
   readonly onMuteFor?: (channelId: number, durationMs: number) => void;
   /** Offered only while the conversation is unread. */
@@ -151,8 +156,10 @@ export function openDmContextMenu(req: DmContextMenuRequest): void {
       onClick: () => call(id),
     });
   }
-  if (actions.onToggleMute !== undefined) {
-    const toggle = actions.onToggleMute;
+  if (actions.onSetMute !== undefined || actions.onToggleMute !== undefined) {
+    const { onSetMute, onToggleMute } = actions;
+    const setMute = (channelId: number, muted: boolean): void =>
+      onSetMute !== undefined ? onSetMute(channelId, muted) : onToggleMute?.(channelId);
     const muteFor = actions.onMuteFor;
     const until = convo.muted ? mutedUntilLabel(convo.mutedUntil) : null;
     items.push({
@@ -169,11 +176,13 @@ export function openDmContextMenu(req: DmContextMenuRequest): void {
                 label: choice.label,
                 testId: `dm-mute-for-${choice.durationMs ?? "forever"}-${id}`,
                 onClick: () =>
-                  choice.durationMs === undefined ? toggle(id) : muteFor(id, choice.durationMs),
+                  choice.durationMs === undefined
+                    ? setMute(id, true)
+                    : muteFor(id, choice.durationMs),
               }),
             ),
           }),
-      onClick: () => toggle(id),
+      onClick: () => setMute(id, !convo.muted),
     });
   }
   if (isGroup && actions.onRenameGroup !== undefined) {

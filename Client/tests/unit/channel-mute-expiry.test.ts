@@ -1,3 +1,4 @@
+import { startMuteExpiryWatch } from "@lib/channel-mute-expiry";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   CHANNEL_MUTE_CHANGED,
@@ -6,7 +7,6 @@ import {
   isChannelMuted,
   muteChannel,
   setChannelMutesHost,
-  startMuteExpiryWatch,
   unmuteChannel,
 } from "@lib/channel-mutes";
 import { STORAGE_PREFIX } from "@lib/preferences";

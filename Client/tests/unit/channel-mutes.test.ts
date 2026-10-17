@@ -1,3 +1,4 @@
+import { pruneExpiredMutes } from "@lib/channel-mute-expiry";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   isChannelMuted,
@@ -9,7 +10,6 @@ import {
   invalidateMuteCache,
   setChannelMutesHost,
   getChannelMute,
-  pruneExpiredMutes,
   CHANNEL_MUTE_CHANGED,
   MUTE_DURATIONS_MS,
 } from "@lib/channel-mutes";
@@ -409,6 +409,7 @@ describe("channel mutes — timed mutes (3D-3a)", () => {
 
   it("toggleChannelMute unmutes a timed mute", () => {
     muteChannel(7, HOUR);
+    expect(getChannelMute(7)).toEqual({ until: T0 + HOUR });
     expect(toggleChannelMute(7)).toBe(false);
     expect(isChannelMuted(7)).toBe(false);
   });
