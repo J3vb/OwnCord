@@ -70,6 +70,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Voice**
 
+- Linux: you can now change a screen share's quality while it is live, from the stream card's Quality menu. Viewers see a short blip while the share restarts at the new quality.
 - On Linux, Settings → Voice & Video now has **Input Volume** (0–200 %) and **Automatically determine input sensitivity**, as on Windows, and the sensitivity bar moves with your voice during a call. A Linux profile still at the default sensitivity switches to automatic, as Windows did in beta 4.
 - On Linux, Echo Cancellation, Noise Suppression, Automatic Gain Control and Enhanced Noise Suppression now apply straight away during a call instead of at the next join.
 - On Linux, Settings → Voice & Video now has a working **Mic Test**: it plays your microphone back on your chosen speakers with your input volume, sensitivity and noise settings, and the level bar moves while it runs. Use headphones, as on Windows. Joining a voice channel stops the test, and it cannot start during a call.

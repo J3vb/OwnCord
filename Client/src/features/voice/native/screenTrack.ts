@@ -18,6 +18,8 @@ import type {
   NativeVoiceSenderLayer,
   NativeVoiceStats,
 } from "../../../platform/contracts/nativeVoice";
+import type { PublishCodec } from "../videoCodec";
+import type { StreamQuality } from "@lib/screenShare";
 import { PICKER_DISMISSED, PORTAL_NOT_STARTED } from "./platform";
 import { nativeCounters } from "./counters";
 import { NativeVideoRenderer } from "./videoRenderer";
@@ -65,11 +67,33 @@ export function isDeviceFallback(err: unknown): boolean {
   return message.includes("switched to the default");
 }
 
+/** A live quality change the host did not complete: `refused` changed nothing
+ *  and the share goes on; `publish` means the republish failed, so the share's
+ *  video is no longer published and the caller ends the share. */
+export class ScreenQualityError extends Error {
+  constructor(
+    readonly stage: "refused" | "publish",
+    message: string,
+  ) {
+    super(message);
+    this.name = "ScreenQualityError";
+  }
+}
+
 /** The publish encoding the picker chose for this share. */
 export interface ScreenPublishEncoding {
   readonly maxBitrate: number;
   readonly maxFramerate: number;
   readonly simulcast: boolean;
+}
+
+/** What a track carries after a live quality change: the choice and the
+ *  capture and encoding it maps to (`shareSettings`). */
+export interface ScreenQualitySettings {
+  readonly quality: StreamQuality;
+  readonly fps: number;
+  readonly capture: NativeVoiceScreenCapture;
+  readonly encoding: ScreenPublishEncoding;
 }
 
 export class NativeScreenTrack {
@@ -85,14 +109,25 @@ export class NativeScreenTrack {
   /** `previewUrl`: the frame socket's `/screen` route. `onStop` stops the
    *  host capture. `publishEncoding` is the per-share quality the picker
    *  chose and `captureRequest` its capture pacing and size; a Change source
-   *  (`onChangeSource`) keeps both. */
+   *  (`onChangeSource`) keeps both, and a live quality change
+   *  (`onSetQuality`) replaces them (`retargetQuality`). */
   constructor(
     started: NativeVoiceScreenStarted,
     previewUrl: string,
     private readonly onStop: (track: NativeScreenTrack) => void,
-    readonly publishEncoding: ScreenPublishEncoding,
-    readonly captureRequest: NativeVoiceScreenCapture,
+    public publishEncoding: ScreenPublishEncoding,
+    public captureRequest: NativeVoiceScreenCapture,
+    /** The quality and frame-rate choice behind both; the stream card's
+     *  Quality menu shows `quality`. */
+    public quality: StreamQuality,
+    public fps: number,
     private readonly onChangeSource: (track: NativeScreenTrack) => Promise<void>,
+    private readonly onSetQuality: (
+      track: NativeScreenTrack,
+      quality: StreamQuality,
+      fps: number,
+      published: PublishCodec,
+    ) => Promise<void>,
     private readonly senderStats: () => Promise<NativeVoiceStats | null> = () =>
       Promise.resolve(null),
   ) {
@@ -134,6 +169,27 @@ export class NativeScreenTrack {
    *  keeps going on any rejection. */
   changeSource(): Promise<void> {
     return this.onChangeSource(this);
+  }
+
+  /** Run this share at `quality` and `fps` without stopping it: the host
+   *  re-sizes the running capture and republishes it, which gives viewers a
+   *  new publication. `published` is the codec the share goes out with now.
+   *  Rejects with a `ScreenQualityError` and leaves the share as it was
+   *  (stage "refused") or unpublished (stage "publish"). */
+  setQuality(quality: StreamQuality, fps: number, published: PublishCodec): Promise<void> {
+    return this.onSetQuality(this, quality, fps, published);
+  }
+
+  /** The host republished this share at `settings`, delivering `size`. The
+   *  encoding and capture request a codec republish and a Change source
+   *  reuse follow. */
+  retargetQuality(size: { width: number; height: number }, settings: ScreenQualitySettings): void {
+    this.width = size.width;
+    this.height = size.height;
+    this.quality = settings.quality;
+    this.fps = settings.fps;
+    this.captureRequest = settings.capture;
+    this.publishEncoding = settings.encoding;
   }
 
   /** The host moved this share onto capture `started`. The preview socket
