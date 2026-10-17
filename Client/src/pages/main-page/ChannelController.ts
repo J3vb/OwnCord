@@ -1857,7 +1857,8 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           // optimistic row (pending/failed) carries id 0 until the server
           // acks it, so editing it would send chat_edit for a message that
           // does not exist yet.
-          if (m.user.id === myId && !m.deleted && m.status === "sent") {
+          // A server-written row (a DM call log) is never editable.
+          if (m.user.id === myId && !m.deleted && m.status === "sent" && m.kind === undefined) {
             messageList?.startEdit(m.id);
             break;
           }

@@ -202,7 +202,36 @@ describe("inline message editor (WP 3A-8)", () => {
       composer.destroy?.();
     });
 
+    it("ArrowUp skips a call row that is your newest message and edits the one before", async () => {
+      const call = mine(5, { kind: "call", content: "started a call." });
+      const messages = [mine(1), call];
+      mount(messages);
+      const composerHost = document.createElement("div");
+      document.body.appendChild(composerHost);
+      const composer = createMessageInput({
+        channelId: 1,
+        channelName: "general",
+        onSend: vi.fn(),
+        onTyping: vi.fn(),
+      });
+      composer.mount(composerHost);
+      // The controller's wiring (ChannelController's edit-last-message handler).
+      composerHost.addEventListener("edit-last-message", () => {
+        const newest = messages.findLast(
+          (m) => m.user.id === ME && m.status === "sent" && m.kind === undefined,
+        );
+        if (newest !== undefined) list!.startEdit(newest.id);
+      });
+      composerHost
+        .querySelector(".msg-textarea")!
+        .dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+      await vi.waitFor(() => expect(editor(1)).not.toBeNull());
+      expect(list!.startEdit(5)).toBe(false);
+      composer.destroy?.();
+    });
+
     it.each([
+      ["a call log row", () => [mine(1, { kind: "call" })], 1],
       ["someone else's message", () => [theirs(1)], 1],
       ["an unsent message", () => [mine(0, { status: "pending", correlationId: "c" })], 0],
       ["a message that is not loaded", () => [mine(1)], 99],
