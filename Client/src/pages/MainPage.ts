@@ -670,6 +670,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     lastRingId = ws.send({ type: "call_ring", payload: { channel_id: channelId } });
     const roster = voiceStore.getState().voiceUsers.get(channelId);
     const self = getCurrentUserId();
+    // The ring above already went out to the whole DM (a group redial from inside
+    // a live call too, 3B-8); with someone else in the room there is no
+    // "Calling…" to show, and the voice subscription would clear it at once.
     if (roster !== undefined && [...roster.keys()].some((id) => id !== self)) return;
     const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
     // The server drops rings to offline members, so waiting on them would

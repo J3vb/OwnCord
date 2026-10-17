@@ -2168,6 +2168,55 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     page.destroy?.();
   });
 
+  it("Ring again in a connected group call with a member missing re-rings the group without a Calling… state (3B-8)", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    dmStore.setState((prev) => ({
+      channels: prev.channels.map((c) => ({
+        ...c,
+        isGroup: true,
+        participants: [
+          ...c.participants,
+          { id: 12, username: "dan", avatar: "", status: "online" as const },
+        ],
+      })),
+    }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+
+    // Alice and bob are in the room; dan is not.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 50,
+      voiceStatus: "connected" as const,
+      voiceUsers: new Map([
+        [
+          50,
+          new Map([
+            [1, { userId: 1, username: "alice" }],
+            [10, { userId: 10, username: "bob" }],
+          ]),
+        ],
+      ]) as never,
+    }));
+    voiceStore.flush();
+    const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+    expect(panel.dataset.state).toBe("connected");
+    const again = panel.querySelector('[data-testid="dcp-ring-again"]') as HTMLElement;
+    expect(again).not.toBeNull();
+
+    vi.mocked(ws.send).mockClear();
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 4000);
+    again.click();
+    now.mockRestore();
+    expect(ws.send).toHaveBeenCalledWith({ type: "call_ring", payload: { channel_id: 50 } });
+    // Bob is in the call: no ringing state is started over a live call.
+    expect(panel.dataset.state).toBe("connected");
+    page.destroy?.();
+  });
+
   it("calling an offline 1:1 contact says so at once instead of ringing back for 30 s (D-14)", async () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
