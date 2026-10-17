@@ -186,3 +186,61 @@ func TestSearchFiltered_ValuesAreBound(t *testing.T) {
 		t.Errorf("messages count = %d, %v; want 1", n, err)
 	}
 }
+
+func TestSearchFiltered_RelevanceRanksOnlyNewestCandidates(t *testing.T) {
+	ctx := context.Background()
+	database := openMigratedMemory(t)
+	restore := db.SetRankCandidateCapForTest(3)
+	defer restore()
+	u := seedUser(t, database, "rk")
+	in, other := seedChannel(t, database, "rkin"), seedChannel(t, database, "rkother")
+	strong, _ := database.CreateMessage(ctx, in, u, "needle needle needle needle", nil)
+	w1, _ := database.CreateMessage(ctx, in, u, "needle plus many other words here today", nil)
+	w2, _ := database.CreateMessage(ctx, in, u, "needle plus many other words here again too", nil)
+	mid, _ := database.CreateMessage(ctx, in, u, "needle needle plus a few words", nil)
+	w3, _ := database.CreateMessage(ctx, in, u, "needle with a good number of other words around", nil)
+	for range 5 {
+		_, _ = database.CreateMessage(ctx, other, u, "needle needle needle needle", nil)
+	}
+
+	q := db.SearchQuery{Text: "needle", ChannelIDs: []int64{in}}
+	got, err := database.SearchMessagesFiltered(ctx, q, db.SearchPage{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := resultIDs(got)
+	if len(ids) != 3 || slices.Contains(ids, strong) || slices.Contains(ids, w1) {
+		t.Fatalf("relevance ids = %v, want only the newest 3 in scope {%d %d %d}", ids, mid, w3, w2)
+	}
+	if ids[0] != mid {
+		t.Errorf("strongest of the candidates should lead: ids = %v", ids)
+	}
+
+	recent, err := database.SearchMessagesFiltered(ctx, q, db.SearchPage{Limit: 10, Recent: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []int64{w3, mid, w2, w1, strong}; !slices.Equal(resultIDs(recent), want) {
+		t.Errorf("recent ids = %v, want %v", resultIDs(recent), want)
+	}
+}
+
+func TestSearchFiltered_RelevanceFewerHitsThanCapRanksAll(t *testing.T) {
+	ctx := context.Background()
+	database := openMigratedMemory(t)
+	restore := db.SetRankCandidateCapForTest(10)
+	defer restore()
+	u := seedUser(t, database, "rk2")
+	ch := seedChannel(t, database, "rkall")
+	strong, _ := database.CreateMessage(ctx, ch, u, "needle needle needle needle", nil)
+	_, _ = database.CreateMessage(ctx, ch, u, "needle plus many other words here today", nil)
+	_, _ = database.CreateMessage(ctx, ch, u, "needle plus several other words here", nil)
+
+	got, err := database.SearchMessagesFiltered(ctx, db.SearchQuery{Text: "needle", ChannelIDs: []int64{ch}}, db.SearchPage{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got[0].MessageID != strong {
+		t.Errorf("ids = %v, want 3 results with %d first", resultIDs(got), strong)
+	}
+}
