@@ -2,6 +2,7 @@ package updater
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 )
@@ -48,7 +49,9 @@ func CanReplaceExecutable(exePath string) error {
 		return fmt.Errorf("closing install directory probe: %w", closeErr)
 	}
 	if removeErr != nil {
-		return fmt.Errorf("removing install directory probe: %w", removeErr)
+		// The create already proved the folder writable; a file briefly held
+		// open (antivirus, indexer) is left for the boot cleanup.
+		slog.Debug("install directory probe not removed", "path", name, "err", removeErr)
 	}
 	return nil
 }
