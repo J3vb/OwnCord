@@ -393,7 +393,7 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
-  it("the Quality select shows on a Linux share at the picked quality and reverts a refused change", async () => {
+  it("the stream card shows the share's quality in the select and reverts a refused change", async () => {
     // A Linux share now carries its quality (the native track changes it), so
     // the card shows the select like a web share's.
     mockShareQuality.mockReturnValue("high");

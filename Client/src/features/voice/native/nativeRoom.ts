@@ -936,9 +936,14 @@ export class NativeRoom {
       },
     );
     if (!result.ok) throw new ScreenQualityError(result.stage, result.message);
-    // A stop or leave that came meanwhile released the share; nothing to
-    // track (a stop queued behind the command released the new publication).
-    if (!live()) return;
+    // A stop or leave that came meanwhile released the share (a stop queued
+    // behind the command released the new publication), so the change did
+    // not take: report it as refused rather than leave the caller's state
+    // ahead of the track's.
+    if (!live()) {
+      // i18n-exempt: internal native-room state guard, never rendered
+      throw new ScreenQualityError("refused", "the share ended during the change");
+    }
     track.retargetQuality(
       { width: result.width, height: result.height },
       {

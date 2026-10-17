@@ -1865,7 +1865,7 @@ describe("NativeRoom screen share", () => {
     await vi.waitFor(() => expect(names()).toContain("setScreenQuality"));
     screen.stop();
     resolve({ ok: true, sid: "TR_screen2", width: 1920, height: 1080 });
-    await changing;
+    await expect(changing).rejects.toMatchObject({ stage: "refused" });
 
     expect(screen.quality).toBe("low");
     expect(host.notedQuality).toEqual([]);
