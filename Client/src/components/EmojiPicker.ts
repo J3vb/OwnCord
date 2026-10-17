@@ -52,9 +52,7 @@ export const SERVER_CATEGORY = "emoji.category.server" as const;
 
 /** A category heading; the key is resolved through the messaging catalog. */
 type EmojiCategoryKey =
-  | typeof SERVER_CATEGORY
-  | "emoji.category.recent"
-  | `emoji.category.${EmojiGroupKey}`;
+  typeof SERVER_CATEGORY | "emoji.category.recent" | `emoji.category.${EmojiGroupKey}`;
 
 interface EmojiCategory {
   readonly name: EmojiCategoryKey;
