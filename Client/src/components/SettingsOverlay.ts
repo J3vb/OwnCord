@@ -69,6 +69,8 @@ export interface SettingsOverlayOptions {
   }): Promise<void>;
   /** Upload an avatar image. Resolves with the URL the server stored. */
   onUploadAvatar(file: File): Promise<string>;
+  /** Remove the avatar (3C-7a). Resolves once the server has cleared it. */
+  onRemoveAvatar(): Promise<void>;
   onLogout(): void;
   onDeleteAccount(password: string): Promise<void>;
   /** The server-default retention sentence for the Account tab, or null when

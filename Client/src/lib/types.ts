@@ -125,8 +125,12 @@ export interface MessageUser {
 export interface UserWithRole extends MessageUser {
   readonly role: string;
   readonly totp_enabled?: boolean;
-  /** The signed-in user's own profile text. Null = unset. */
+  /** The user's profile text. Null = unset. Sent for every member since the
+   *  server's 3C-7 (absent from older servers). */
   readonly about?: string | null;
+  /** Account creation time (RFC3339), the "Member since" date. Absent from
+   *  older servers. */
+  readonly created_at?: string;
   readonly custom_status?: string | null;
   /** The signed-in user's OWN true status, "invisible" included. Only ever
    *  present on their own auth_ok / REST me payload. */
@@ -252,6 +256,10 @@ export interface ReadyMember {
   readonly display_name?: string | null;
   /** Free-text status line shown under the name. Null = unset. */
   readonly custom_status?: string | null;
+  /** Profile text. Null = unset; absent from servers before 3C-7. */
+  readonly about?: string | null;
+  /** Account creation time (RFC3339); absent from servers before 3C-7. */
+  readonly created_at?: string;
   /** Long-term E2EE identity public key (base64) for voice TOFU (F3). */
   readonly identity_public_key?: string | null;
 }

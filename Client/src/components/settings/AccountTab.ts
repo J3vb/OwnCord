@@ -236,9 +236,51 @@ function buildAvatarUploader(
     { class: "ac-btn secondary", "data-testid": "avatar-upload-btn" },
     t("profile.changeAvatar"),
   );
+  const removeBtn = createElement(
+    "button",
+    { class: "ac-btn secondary", "data-testid": "avatar-remove-btn" },
+    t("profile.removeAvatar"),
+  );
   const errorEl = outcomeEl("error", "avatar-error");
 
+  // Shown only while there is an avatar to remove; follows the auth store so
+  // an upload (or a user_update from another device) toggles it.
+  const syncRemoveBtn = (): void => {
+    removeBtn.hidden = !isRenderableAvatar(authStore.getState().user?.avatar);
+  };
+  syncRemoveBtn();
+  const unsubAvatar = authStore.subscribeSelector((st) => st.user?.avatar, syncRemoveBtn);
+  signal.addEventListener("abort", () => unsubAvatar?.(), { once: true });
+
   uploadBtn.addEventListener("click", () => input.click(), { signal });
+  removeBtn.addEventListener(
+    "click",
+    () => {
+      setText(errorEl, "");
+      removeBtn.disabled = true;
+      void (async () => {
+        try {
+          await options.onRemoveAvatar();
+          const user = authStore.getState().user;
+          paintAvatar(
+            avatarLarge,
+            null,
+            user?.username ?? "avatar",
+            avatarInitial({
+              username: user?.username ?? "?",
+              displayName: user?.display_name ?? null,
+            }),
+          );
+        } catch (err) {
+          // The old avatar stays; the handler has already toasted.
+          setText(errorEl, errorText(err, t("toast.avatarRemoveFailed")));
+        } finally {
+          removeBtn.disabled = false;
+        }
+      })();
+    },
+    { signal },
+  );
 
   input.addEventListener(
     "change",
@@ -280,7 +322,7 @@ function buildAvatarUploader(
     { signal },
   );
 
-  appendChildren(wrapper, input, uploadBtn, errorEl);
+  appendChildren(wrapper, input, uploadBtn, removeBtn, errorEl);
   return wrapper;
 }
 

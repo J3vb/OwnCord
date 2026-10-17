@@ -954,6 +954,44 @@ describe("API Client", () => {
       expect(onUnauthorized).toHaveBeenCalledTimes(1);
     });
 
+    it("removeAvatar sends DELETE /users/me/avatar and returns the user", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({ id: 1, username: "alice", role: "member", status: "online" }),
+      );
+      const user = await api.removeAvatar("alice");
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me/avatar");
+      expect(fetchCallOpts().method).toBe("DELETE");
+      expect(user.username).toBe("alice");
+    });
+
+    it("removeAvatar falls back to PATCH /users/me on 405 (older server)", async () => {
+      mockFetch
+        .mockResolvedValueOnce(errorResponse(405, "METHOD_NOT_ALLOWED", "no"))
+        .mockResolvedValueOnce(
+          jsonResponse({ id: 1, username: "alice", role: "member", status: "online" }),
+        );
+      const user = await api.removeAvatar("alice");
+      expectConsole("warn", /\[api\] API error/);
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(fetchCallUrl(1)).toBe("https://localhost:8443/api/v1/users/me");
+      expect(fetchCallOpts(1).method).toBe("PATCH");
+      expect(JSON.parse(fetchCallOpts(1).body as string)).toEqual({
+        username: "alice",
+        avatar: "",
+      });
+      expect(user.avatar ?? null).toBeNull();
+    });
+
+    it("removeAvatar rethrows any other failure without the PATCH fallback", async () => {
+      mockFetch.mockResolvedValue(errorResponse(500, "INTERNAL", "boom"));
+      await expect(api.removeAvatar("alice")).rejects.toMatchObject({ status: 500 });
+      expectConsole("warn", /\[api\] API error/);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
     it("uploadFile throws ApiClientError on non-ok", async () => {
       mockFetch.mockResolvedValue(errorResponse(413, "FILE_TOO_LARGE", "File exceeds limit"));
       const file = new File(["x"], "big.bin");
