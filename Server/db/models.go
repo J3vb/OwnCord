@@ -244,6 +244,8 @@ type MessageSearchResult struct {
 type SearchPage struct {
 	Limit int
 	// Recent orders newest first (message id descending) instead of by rank.
+	// Relevance ranks only the newest 2,000 in-scope matches; Recent reaches
+	// older ones.
 	Recent bool
 	// Before, when positive, keeps only messages with an id below it — the
 	// cursor for the next page of a Recent search.

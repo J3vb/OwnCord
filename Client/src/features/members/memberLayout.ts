@@ -17,10 +17,10 @@ export const MEMBER_WIDTH_MIN = 200;
 export const MEMBER_WIDTH_MAX = 360;
 export const MEMBER_WIDTH_DEFAULT = 240;
 
-/** The stored layout. Any value other than `"right"` reads as `"left"`
- *  (3C-6c flips the default). */
+/** The stored layout. Only a stored `"left"` reads as left; a missing or
+ *  invalid value reads as `"right"` (the default since 3C-6c). */
 export function loadMemberLayout(): MemberLayout {
-  return loadPref<string>(MEMBER_LAYOUT_PREF, "left") === "right" ? "right" : "left";
+  return loadPref<string>(MEMBER_LAYOUT_PREF, "right") === "left" ? "left" : "right";
 }
 
 /** Clamp a column width to 200-360 px, rounded; NaN or a non-number gives the

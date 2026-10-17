@@ -245,7 +245,7 @@ func openFile(path string, maxReaders int, takeLock bool) (*DB, error) {
 		var lockErr error
 		release, lockErr = acquireProcessLock(path)
 		if lockErr != nil {
-			if errors.Is(lockErr, errAlreadyLocked) {
+			if errors.Is(lockErr, ErrAlreadyLocked) {
 				return nil, fmt.Errorf(
 					"database %s is in use by another running OwnCord process — stop that process first (the lock is released automatically when it exits)",
 					path)

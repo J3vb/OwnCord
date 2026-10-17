@@ -18,6 +18,8 @@ const LAZY = [
   "CreateChannelModal",
   "EmojiPicker",
   "GifPicker",
+  "VoiceWidget",
+  "volume-menu",
 ] as const;
 
 // Modules in the main-page chunk that used to import them.
@@ -29,6 +31,9 @@ const EAGER_SITES = [
   "components/SelfProfileCard.ts",
   "components/EditChannelModal.ts",
   "components/message-list/quick-reactions.ts",
+  "pages/MainPage.ts",
+  "components/DmCallPanel.ts",
+  "components/ChannelSidebar.ts",
 ] as const;
 
 describe("lazy screens stay out of the main-page chunk", () => {

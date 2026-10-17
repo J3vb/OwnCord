@@ -244,6 +244,10 @@ to it. If they try, you see a warning and an `ERROR` line in the container log.
 To change a startup setting, edit the file on the host and recreate the
 container.
 
+If a setting saved from the admin panel keeps you out of the panel, stop the
+server and run `docker compose run --rm --no-deps owncord config reset-overrides`
+(see [If a panel change locks you out](server-configuration.md#if-a-panel-change-locks-you-out)).
+
 ### Health and privilege
 
 **Health check.** The image has its own `HEALTHCHECK`, so `docker ps` shows a

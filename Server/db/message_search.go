@@ -30,6 +30,9 @@ const minPrefixRunes = 3
 // the order and the limit, with their arguments. idCol is the message-id
 // column of the query's driving table (f.rowid with a MATCH, m.id without).
 // ranked reports whether the query has an FTS driver, so rank ordering exists.
+// Relevance orders by +rank (the unary plus stops FTS5 consuming the ORDER BY,
+// which would score every match in the corpus; BM25 is then computed only for
+// rows passing the filters) with the rowid as a deterministic tie-break.
 func searchPageSQL(page SearchPage, idCol string, ranked bool) (string, []any) {
 	var (
 		sb   strings.Builder
@@ -42,7 +45,7 @@ func searchPageSQL(page SearchPage, idCol string, ranked bool) (string, []any) {
 	if page.Recent || !ranked {
 		sb.WriteString(" ORDER BY " + idCol + " DESC")
 	} else {
-		sb.WriteString(" ORDER BY rank")
+		sb.WriteString(" ORDER BY +rank, " + idCol + " DESC")
 	}
 	sb.WriteString(" LIMIT ?")
 	return sb.String(), append(args, page.Limit)

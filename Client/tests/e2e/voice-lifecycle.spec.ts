@@ -82,7 +82,8 @@ test.describe("Voice widget", () => {
     // them there (the old rows checked attachment while hidden, which passes
     // even if the controls never become reachable).
     const widget = page.locator("[data-testid='voice-widget']");
-    await expect(widget).not.toHaveClass(/visible/);
+    // The widget now loads on the first voice join, so before it the element may be absent (O-6b).
+    await expect(widget).not.toBeVisible();
 
     await joinVoiceChannelByName(page);
     await expect(widget).toHaveClass(/visible/);
@@ -151,7 +152,8 @@ test.describe("Voice WS flow", () => {
     const widget = page.locator("[data-testid='voice-widget']");
 
     // Not in voice at start
-    await expect(widget).not.toHaveClass(/visible/);
+    // The widget now loads on the first voice join, so before it the element may be absent (O-6b).
+    await expect(widget).not.toBeVisible();
 
     // Join "Voice Chat" (channel 10)
     await joinVoiceChannelByName(page, "Voice Chat");
@@ -307,7 +309,8 @@ test.describe("Voice WS flow — failure", () => {
     page,
   }) => {
     const widget = page.getByTestId("voice-widget");
-    await expect(widget).not.toHaveClass(/visible/);
+    // The widget now loads on the first voice join, so before it the element may be absent (O-6b).
+    await expect(widget).not.toBeVisible();
     // Do not require the transient optimistic widget to survive the refusal.
     await page.locator(".channel-item.voice", { hasText: "Music" }).click();
     await expect(

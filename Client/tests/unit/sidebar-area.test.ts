@@ -162,7 +162,7 @@ import { uiStore, setSidebarMode } from "../../src/stores/ui.store";
 import { authStore } from "../../src/stores/auth.store";
 import { Permission } from "../../src/lib/types";
 import { membersStore } from "../../src/stores/members.store";
-import { voiceStore, joinVoiceChannel } from "../../src/stores/voice.store";
+import { voiceStore, joinVoiceChannel, leaveVoiceChannel } from "../../src/stores/voice.store";
 import { isDmKeptForCall, resetKeptCallDms } from "../../src/features/direct-messages/keptCallDms";
 import type { DmChannel } from "../../src/stores/dm.store";
 import { createChannelSidebar } from "@components/ChannelSidebar";
@@ -254,7 +254,8 @@ function resetStores(): void {
   }));
   localStorage.removeItem("owncord:member-list-height");
   localStorage.removeItem("owncord:member-list-collapsed");
-  localStorage.removeItem("owncord:settings:memberListLayout");
+  // The default layout is "right" (3C-6c); these tests exercise the left section.
+  localStorage.setItem("owncord:settings:memberListLayout", '"left"');
 }
 
 function resetMocks(): void {
@@ -280,6 +281,14 @@ function resetMocks(): void {
   (createCreateChannelModal as MockedFn).mockReturnValue({ mount: vi.fn(), destroy: vi.fn() });
   (createEditChannelModal as MockedFn).mockReturnValue({ mount: vi.fn(), destroy: vi.fn() });
   (createDeleteChannelModal as MockedFn).mockReturnValue({ mount: vi.fn(), destroy: vi.fn() });
+}
+
+/** The voice widget loads when the user is first in voice (O-6b): put the user
+ *  in a voice channel and wait for the widget's code to arrive. */
+async function enterVoiceAndAwaitWidget(): Promise<void> {
+  joinVoiceChannel(1);
+  voiceStore.flush();
+  await vi.dynamicImportSettled();
 }
 
 // ---------------------------------------------------------------------------
@@ -382,10 +391,14 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("returns children array with mounted components", () => {
+    it("returns children array with mounted components", async () => {
       const result = createSidebarArea(defaultOpts());
-      expect(result.children.length).toBeGreaterThanOrEqual(2);
+      await enterVoiceAndAwaitWidget();
+      // The lazy voice widget is torn down by an unsubscriber, not `children`
+      // (the page copies `children` before it loads).
+      expect(result.children.length).toBeGreaterThanOrEqual(1);
       cleanup(result);
+      leaveVoiceChannel();
     });
 
     it("returns unsubscribers for cleanup", () => {
@@ -1534,14 +1547,16 @@ describe("SidebarArea", () => {
   // -------------------------------------------------------------------------
 
   describe("voice widget and user bar", () => {
-    it("mounts voice widget", () => {
+    it("mounts voice widget", async () => {
       const result = createSidebarArea(defaultOpts());
       container.appendChild(result.sidebarWrapper);
+      await enterVoiceAndAwaitWidget();
 
       expect(createVoiceWidget).toHaveBeenCalled();
       expect(getMockMount(createVoiceWidget as MockedFn)).toHaveBeenCalled();
 
       cleanup(result);
+      leaveVoiceChannel();
     });
 
     it("mounts user bar", () => {
@@ -1566,10 +1581,17 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("voice widget and user bar are included in children", () => {
+    it("the user bar is in children and the voice widget is destroyed by the unsubscribers", async () => {
       const result = createSidebarArea(defaultOpts());
-      expect(result.children.length).toBe(2);
+      await enterVoiceAndAwaitWidget();
+      expect(result.children.length).toBe(1);
+      const widget = (createVoiceWidget as MockedFn).mock.results.at(-1)!.value as {
+        destroy: ReturnType<typeof vi.fn>;
+      };
+      for (const unsub of result.unsubscribers) unsub();
+      expect(widget.destroy).toHaveBeenCalledOnce();
       cleanup(result);
+      leaveVoiceChannel();
     });
   });
 
@@ -2257,6 +2279,7 @@ describe("SidebarArea", () => {
       const onOpenCall = vi.fn();
       const result = createSidebarArea({ ...defaultOpts(), onOpenCall });
       container.appendChild(result.sidebarWrapper);
+      await enterVoiceAndAwaitWidget();
 
       // The page's channel subscriber shows that channel's chat; the call
       // view must open after it, not before.

@@ -14,7 +14,7 @@ import { createLogger } from "@lib/logger";
 import { desktop } from "../platform/desktop";
 import { createRateLimiterSet } from "@lib/rate-limiter";
 import type { CallState, VideoGridComponent } from "@components/VideoGrid";
-import { isConnecting } from "@components/VoiceWidget";
+import { isConnecting } from "@components/voiceStatusText";
 import { createServerBanner, applyConnectionStatus } from "@components/ServerBanner";
 import type { ServerBannerControl } from "@components/ServerBanner";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
@@ -1098,7 +1098,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         sidebar: sidebar.sidebarWrapper,
         toggle: chatAreaResult.sidebarToggle,
         fallbackFocus: focusReachable,
-        onOpen: chatAreaResult.closePinnedPanel,
+        onOpen: () => {
+          chatAreaResult.closePinnedPanel();
+          memberColumn?.closeOverlay();
+        },
       });
     });
     unsubscribers.push(() => {

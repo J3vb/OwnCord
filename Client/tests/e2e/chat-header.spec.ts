@@ -20,14 +20,13 @@ test.describe("Chat Header", () => {
     await expect(header.locator(".ch-tools .search-input")).toBeAttached();
   });
 
-  test("member list is always visible in sidebar", async ({ page }) => {
-    const memberList = page.locator("[data-testid='sidebar-members']");
-    await expect(memberList).toBeVisible({ timeout: 3000 });
-
-    // "Always visible" means the member roster rendered, not merely that an
-    // empty container exists: assert the seeded member names are in it.
-    await expect(memberList).toContainText("testuser");
-    await expect(memberList).toContainText("otheruser");
+  test("member list is visible in the right column by default", async ({ page }) => {
+    // No stored layout: the default is the right-hand column (3C-6c).
+    const column = page.locator("[data-testid='member-column']");
+    await expect(column).toBeVisible({ timeout: 3000 });
+    await expect(column).toContainText("testuser");
+    await expect(column).toContainText("otheruser");
+    await expect(page.locator("[data-testid='sidebar-members']")).toHaveCount(0);
   });
 
   test("focusing the search input opens the SearchOverlay", async ({ page }) => {
@@ -58,5 +57,27 @@ test.describe("Chat Header", () => {
     const closeBtn = pinnedPanel.locator(".pinned-panel__close");
     await closeBtn.click();
     await expect(pinnedPanel).not.toBeAttached({ timeout: 3000 });
+  });
+});
+
+test.describe("Chat Header — member list under the channels", () => {
+  test.beforeEach(async ({ page }) => {
+    // The default moved to the right column in 3C-6c; this is the left layout.
+    await page.addInitScript(() => {
+      localStorage.setItem("owncord:settings:memberListLayout", JSON.stringify("left"));
+    });
+    await mockTauriFullSession(page);
+    await page.goto("/");
+    await navigateToMainPage(page);
+  });
+
+  test("member list is always visible in sidebar", async ({ page }) => {
+    const memberList = page.locator("[data-testid='sidebar-members']");
+    await expect(memberList).toBeVisible({ timeout: 3000 });
+
+    // "Always visible" means the member roster rendered, not merely that an
+    // empty container exists: assert the seeded member names are in it.
+    await expect(memberList).toContainText("testuser");
+    await expect(memberList).toContainText("otheruser");
   });
 });

@@ -51,6 +51,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Desktop UI**
 
+- The member list now sits on the right; Appearance > Member list position puts it back under the channels.
 - A group DM now has a member list on the right (a **Show Member List** button in the header toggles it) showing everyone with a crown on the owner. Anyone can add people with **Add People** while the group has fewer than 10, and the owner can **Remove From Group** or **Make Group Owner** from a member's right-click or ⋯ menu, each after a confirm. Added, removed, left, renamed and icon-changed events show as quiet lines in the chat that make no sound, and the leave confirm now says someone can add you back. These need a server with 3B-10 group DM support; on an older server the list shows but the add and owner actions stay hidden.
 - A group DM can now have its own picture. Right-click the group and choose **Change Group Icon** to pick a PNG, JPEG or WebP (it is cropped to a square for you) or **Remove Group Icon**; anyone in the group can do either, and everyone sees the picture in the DM list and the chat header instead of the two stacked faces. If the picture can't load, the faces show as before. This needs a server with 3B-10 group DM support.
 - The New Direct Message picker now has a search box (it filters by name or username), lists online people first, shows real avatars, and keeps your picks as removable chips while you search. Leaving a group now says you won't be able to rejoin it. The Message Requests inbox has a **Retry** button when it can't load. Closing a 1:1 DM while you're in its call no longer drops the call on the next connection blip.
@@ -187,6 +188,7 @@ and only when it changes something a contributor or fork holder must do
 - A collapsed category no longer shows a dot for hidden muted channels with unread messages, since those channels now look read.
 - Inside a category, text and announcement channels now come before voice channels, and Move Up / Move Down and dragging only reorder channels of the same kind.
 - The emoji and GIF pickers, Ctrl+K, message search, the Invite Manager, pinned messages, Create Channel and the new-DM picker now load the first time you open them instead of at startup, so the app loads less up front. If one cannot load, a "Couldn't open that. Try again." message shows and the next try tries again.
+- The voice panel and the per-user volume menu now load the first time you join a voice channel or open the menu, instead of at startup.
 
 **Accounts & profiles**
 

@@ -20,7 +20,8 @@ test("connection test exercises the real HTTP and authenticated socket paths wit
     "not-tested",
   );
   await expect(alice.getByTestId("diagnostic-media")).toContainText("Join a call");
-  await expect(alice.locator(".voice-widget")).not.toHaveClass(/visible/);
+  // The widget loads on the first voice join, so it may be absent before one (O-6b).
+  await expect(alice.locator(".voice-widget.visible")).toHaveCount(0);
 });
 
 test("connection test exposes HTTP and microphone failures at their actual boundaries", async ({
