@@ -81,6 +81,7 @@ vi.mock("@lib/notificationSound", () => ({
 vi.mock("../../src/features/direct-messages/callAlerts", () => ({
   alertIncomingCall: vi.fn(),
   alertMissedCall: vi.fn(),
+  alertSupersededCall: vi.fn(),
   clearIncomingCall: vi.fn(),
 }));
 
@@ -321,7 +322,11 @@ import { SCREENSHARE_TILE_ID_OFFSET } from "../../src/lib/constants";
 import { saveUserStatus } from "../../src/lib/userStatus";
 import { markAllRead } from "../../src/lib/read-state";
 import { startRingChime, startRingback, stopRingback } from "../../src/lib/notificationSound";
-import { alertIncomingCall, alertMissedCall } from "../../src/features/direct-messages/callAlerts";
+import {
+  alertIncomingCall,
+  alertMissedCall,
+  alertSupersededCall,
+} from "../../src/features/direct-messages/callAlerts";
 
 function resetStores(): void {
   channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
@@ -1244,6 +1249,68 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     noteJoinSucceeded();
     acceptBtn.click();
     expect(ws.send).toHaveBeenCalledWith(expect.objectContaining({ type: "voice_join" }));
+  });
+
+  it("Join with video on the incoming banner joins and turns the camera on once connected (3B-4)", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+    const lk = await import("@lib/livekitSession");
+    vi.mocked(lk.enableCamera).mockClear();
+
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    (document.querySelector('[data-testid="incoming-call-accept-video"]') as HTMLElement).click();
+    expect(ws.send).toHaveBeenCalledWith(expect.objectContaining({ type: "voice_join" }));
+    expect(lk.enableCamera).not.toHaveBeenCalled();
+
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 50, voiceStatus: "connected" }));
+    voiceStore.flush();
+    expect(lk.enableCamera).toHaveBeenCalledTimes(1);
+    vi.mocked(lk.enableCamera).mockClear();
+    page.destroy?.();
+  });
+
+  it("Ctrl+Enter accepts and Escape declines a ringing call (3B-4)", () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    // The closed Settings panel is hidden by stylesheet only, which jsdom does
+    // not load; hide it the way the real page's CSS does.
+    document
+      .querySelectorAll<HTMLElement>('[aria-modal="true"]')
+      .forEach((el) => (el.style.display = "none"));
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, cancelable: true }),
+    );
+    expect(ws.send).toHaveBeenCalledWith(expect.objectContaining({ type: "voice_join" }));
+
+    ws.emit("call_incoming", { channel_id: 51, from_user: 11, username: "carol" });
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+    expect(ws.send).toHaveBeenCalledWith({ type: "call_decline", payload: { channel_id: 51 } });
+    page.destroy?.();
+  });
+
+  it("a ring replaced by a ring from another channel reports the first as missed (3B-4)", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    vi.mocked(alertSupersededCall).mockClear();
+
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    await vi.dynamicImportSettled();
+    expect(alertSupersededCall).not.toHaveBeenCalled();
+
+    ws.emit("call_incoming", { channel_id: 51, from_user: 11, username: "carol" });
+    await vi.waitFor(() => expect(alertSupersededCall).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(alertSupersededCall).mock.calls[0]![0]).toMatchObject({ channelId: 50 });
+    page.destroy?.();
   });
 
   function openOneToOneDm(id: number): void {

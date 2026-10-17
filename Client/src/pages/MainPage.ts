@@ -1203,6 +1203,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           if (uiStore.getState().sidebarMode === "dms") sidebar.rememberChannel();
           stepChannel(direction, unreadOnly);
         },
+        ringActive: () => ringCtrl?.current() != null,
+        onAcceptRing: () => acceptRing(false),
+        onDeclineRing: () => ringCtrl?.decline(),
         // Don't fire app shortcuts while the settings panel is on top of them.
         isSuspended: () => uiStore.getState().settingsOpen,
         isGlobalPollerActive: () => globalPollerActive,
@@ -1315,10 +1318,14 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       },
       onRingStart: (ring) => void callAlerts().then((m) => m.alertIncomingCall(ring)),
       onMissed: (ring) => void callAlerts().then((m) => m.alertMissedCall(ring)),
-      onRingEnd: (ring) => void callAlerts().then((m) => m.clearIncomingCall(ring)),
+      onRingEnd: (ring, reason) =>
+        void callAlerts().then((m) => {
+          m.clearIncomingCall(ring);
+          if (reason === "superseded") m.alertSupersededCall(ring);
+        }),
     });
     callBanner = createIncomingCallBanner({
-      onAccept: () => acceptRing(false),
+      onAccept: (withVideo) => acceptRing(withVideo),
       onDecline: () => ringCtrl?.decline(),
     });
     callBanner.mount(root);

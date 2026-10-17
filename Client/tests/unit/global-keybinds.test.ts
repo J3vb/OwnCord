@@ -519,6 +519,72 @@ describe("global keybinds", () => {
       return ta;
     }
 
+    describe("a ringing call (3B-4)", () => {
+      function ringHandlers(active = true) {
+        return {
+          ...makeHandlers(),
+          ringActive: vi.fn(() => active),
+          onAcceptRing: vi.fn<() => void>(),
+          onDeclineRing: vi.fn<() => void>(),
+        };
+      }
+
+      it("Ctrl+Enter accepts and Escape declines, ahead of mark-read", () => {
+        const h = ringHandlers();
+        detach = attachGlobalKeybinds(h);
+
+        const enter = keyOn(document.body, "Enter", { ctrlKey: true });
+        const esc = keyOn(document.body, "Escape");
+
+        expect(h.onAcceptRing).toHaveBeenCalledOnce();
+        expect(h.onDeclineRing).toHaveBeenCalledOnce();
+        expect(h.onMarkChannelRead).not.toHaveBeenCalled();
+        expect(enter.defaultPrevented).toBe(true);
+        expect(esc.defaultPrevented).toBe(true);
+      });
+
+      it("with no ring, Ctrl+Enter is left alone and Escape still marks read", () => {
+        const h = ringHandlers(false);
+        detach = attachGlobalKeybinds(h);
+
+        const enter = keyOn(document.body, "Enter", { ctrlKey: true });
+        keyOn(document.body, "Escape");
+
+        expect(h.onAcceptRing).not.toHaveBeenCalled();
+        expect(h.onDeclineRing).not.toHaveBeenCalled();
+        expect(enter.defaultPrevented).toBe(false);
+        expect(h.onMarkChannelRead).toHaveBeenCalledOnce();
+      });
+
+      it("a dialog open keeps both keys for itself", () => {
+        const h = ringHandlers();
+        detach = attachGlobalKeybinds(h);
+        const dialog = document.createElement("div");
+        dialog.setAttribute("aria-modal", "true");
+        document.body.appendChild(dialog);
+        onTestFinished(() => dialog.remove());
+
+        keyOn(document.body, "Enter", { ctrlKey: true });
+        keyOn(document.body, "Escape");
+
+        expect(h.onAcceptRing).not.toHaveBeenCalled();
+        expect(h.onDeclineRing).not.toHaveBeenCalled();
+        expect(h.onMarkChannelRead).not.toHaveBeenCalled();
+      });
+
+      it("Escape already used by another handler does not also decline", () => {
+        const h = ringHandlers();
+        detach = attachGlobalKeybinds(h);
+        const claim = (e: Event): void => e.preventDefault();
+        document.body.addEventListener("keydown", claim);
+        onTestFinished(() => document.body.removeEventListener("keydown", claim));
+
+        keyOn(document.body, "Escape");
+
+        expect(h.onDeclineRing).not.toHaveBeenCalled();
+      });
+    });
+
     it("Escape marks the channel read; Shift+Escape the server", () => {
       const h = makeHandlers();
       detach = attachGlobalKeybinds(h);

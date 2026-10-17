@@ -8,6 +8,10 @@
  * anywhere, like the user panel's buttons: outside a call they only change the
  * saved state the next join starts with.
  *
+ * While a call is ringing, Ctrl+Enter accepts it (audio only) and Escape
+ * declines it, ahead of the mark-read use of Escape below. Both keep to the same
+ * rules: no dialog open, not suspended, nobody else used the key.
+ *
  * Escape marks the open channel read (Shift+Escape the whole server) only when
  * nothing else used the key: a dialog or Settings open when it was pressed, or
  * any handler that called preventDefault() on it (closing a popup, cancelling
@@ -48,6 +52,14 @@ export interface GlobalKeybindHandlers {
   /** Alt+↑/↓ — step to the previous/next channel; with Shift, the previous/
    *  next unread one (DP-35). `direction` is 1 for down/next, -1 for up. */
   readonly onStepChannel: (direction: 1 | -1, unreadOnly: boolean) => void;
+  /** Whether an incoming-call ring is on screen. While it is, Ctrl+Enter
+   *  accepts it and Escape declines it (3B-4); with none, neither key does
+   *  anything new. Optional so a host with no calls attaches nothing. */
+  readonly ringActive?: () => boolean;
+  /** Ctrl+Enter while a ring is current — accept it, audio only. */
+  readonly onAcceptRing?: () => void;
+  /** Escape while a ring is current — decline it, ahead of mark-read. */
+  readonly onDeclineRing?: () => void;
   /** Whether shortcuts should be ignored right now (e.g. settings overlay open). */
   readonly isSuspended?: () => boolean;
   /** The mute/deafen keys of the global shortcut, read on every press so a
@@ -101,6 +113,20 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
     if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
     // A modal owns the keyboard while it is up.
     if (dialogOpen()) return;
+
+    // Ctrl+Enter answers a ringing call. With no ring it falls through to the
+    // composer's own use of the key, untouched.
+    if (
+      e.key === "Enter" &&
+      !e.shiftKey &&
+      !e.repeat &&
+      !e.isComposing &&
+      !e.defaultPrevented &&
+      handlers.ringActive?.() === true
+    ) {
+      runGlobal(e, "accept-ring", () => handlers.onAcceptRing?.());
+      return;
+    }
 
     // `e.key` is layout-dependent and uppercases with Shift held — compare
     // case-insensitively so Ctrl+Shift+V arrives as "V", not a missed "v".
@@ -198,6 +224,12 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
     if (e.key !== "Escape" || e.ctrlKey || e.metaKey || e.altKey) return;
     if (escapeTaken || e.defaultPrevented || e.isComposing || e.repeat) return;
     if (isTypingTarget(e.target) && !isComposer(e.target)) return;
+    // A ringing call outranks mark-read: the key declines it, and the
+    // preventDefault inside runGlobal keeps anything else from reusing it.
+    if (!e.shiftKey && handlers.ringActive?.() === true) {
+      runGlobal(e, "decline-ring", () => handlers.onDeclineRing?.());
+      return;
+    }
     if (e.shiftKey) runGlobal(e, "mark-server-read", handlers.onMarkServerRead);
     else runGlobal(e, "mark-channel-read", handlers.onMarkChannelRead);
   };

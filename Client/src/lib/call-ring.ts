@@ -44,8 +44,10 @@ export interface RingControllerOptions {
   /** The ring ended with nobody answering (DP-24): the timeout, or the ringer
    *  hanging up first (D-07). An accept, a decline or a newer call is not a miss. */
   readonly onMissed?: (state: RingState) => void;
-  /** The ring ended, however it ended; reported before `onMissed` (D-13). */
-  readonly onRingEnd?: (state: RingState) => void;
+  /** The ring ended, however it ended; reported before `onMissed` (D-13).
+   *  `reason` is set where the end is known: "superseded" is a ring replaced by
+   *  a ring from another channel (3B-4), which the page reports as missed. */
+  readonly onRingEnd?: (state: RingState, reason?: RingEndReason) => void;
   /** Test seam for the 30s timer. */
   readonly setTimer?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
   readonly clearTimer?: (handle: ReturnType<typeof setTimeout>) => void;
@@ -78,7 +80,7 @@ export function createRingController(opts: RingControllerOptions): RingControlle
   let state: RingState | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
-  function stopRinging(): void {
+  function stopRinging(reason?: RingEndReason): void {
     if (timer !== null) {
       clearTimer(timer);
       timer = null;
@@ -88,7 +90,7 @@ export function createRingController(opts: RingControllerOptions): RingControlle
     state = null;
     opts.onChime(false);
     opts.onRingStateChange(null);
-    opts.onRingEnd?.(ended);
+    opts.onRingEnd?.(ended, reason);
   }
 
   function incoming(next: RingState): void {
@@ -96,7 +98,7 @@ export function createRingController(opts: RingControllerOptions): RingControlle
     // once is two decisions the user did not ask to make, and the newer ring
     // is the one they can still answer.
     if (state !== null && state.channelId !== next.channelId) {
-      stopRinging();
+      stopRinging("superseded");
     }
     const redial = state !== null;
     state = next;
@@ -105,7 +107,7 @@ export function createRingController(opts: RingControllerOptions): RingControlle
       // No decline goes back to the ringer (see onDecline's comment), but the
       // callee is told they missed it.
       const missed = state;
-      stopRinging();
+      stopRinging("timeout");
       if (missed !== null) opts.onMissed?.(missed);
     }, RING_TIMEOUT_MS);
     opts.onRingStateChange(next);
@@ -116,21 +118,21 @@ export function createRingController(opts: RingControllerOptions): RingControlle
   function accept(): void {
     const active = state;
     if (active === null) return;
-    stopRinging();
+    stopRinging("accepted");
     opts.onAccept(active.channelId);
   }
 
   function decline(): void {
     const active = state;
     if (active === null) return;
-    stopRinging();
+    stopRinging("declined");
     opts.onDecline(active.channelId);
   }
 
   function cancel(channelId: number, reason?: RingEndReason): void {
     if (state === null || state.channelId !== channelId) return;
     const missed = reason === "ringer-left" ? state : null;
-    stopRinging();
+    stopRinging(reason);
     if (missed !== null) opts.onMissed?.(missed);
   }
 

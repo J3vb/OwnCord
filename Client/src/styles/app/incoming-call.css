@@ -18,10 +18,38 @@
   box-shadow: var(--shadow-md);
   max-width: min(92vw, 460px);
 }
-.incoming-call-icon {
+.incoming-call-avatar-slot {
   display: flex;
   align-items: center;
-  color: var(--green);
+  flex-shrink: 0;
+}
+/* A fixed box, so the initial keeps literal px (DESIGN_SYSTEM). The ring is a
+   box-shadow, so the pulse never moves the layout. */
+.incoming-call-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-circle);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 700;
+  font-size: 16px;
+  animation: incoming-call-pulse 1.6s ease-out infinite;
+}
+@keyframes incoming-call-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 55%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 10px transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .incoming-call-avatar {
+    animation: none;
+  }
 }
 .incoming-call-info {
   flex: 1;
@@ -39,6 +67,8 @@
 }
 .incoming-call-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
   flex-shrink: 0;
 }
