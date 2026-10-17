@@ -156,6 +156,12 @@ export const shellText = defineCatalog("shell", {
   "banner.signedInElsewhere": "Signed in elsewhere",
   "banner.useHere": "Use here",
 
+  "serverMenu.items": "Server actions",
+  "serverMenu.invite": "Invite People",
+  "serverMenu.markRead": "Mark as Read",
+  "serverMenu.notifications": "Notification Settings",
+  "serverMenu.createChannel": "Create Channel",
+  "serverMenu.serverSettings": "Server Settings",
   "invite.invite": "Invite",
   "invite.invitePeople": "Invite people",
   "invite.title": "Server Invites",

@@ -12,6 +12,8 @@
  * declines it, ahead of the mark-read use of Escape below. Both keep to the same
  * rules: no dialog open, not suspended, nobody else used the key.
  *
+ * Ctrl+, (Cmd+, on macOS) opens Settings, including from the message box.
+ *
  * Escape marks the open channel read (Shift+Escape the whole server) only when
  * nothing else used the key: a dialog or Settings open when it was pressed, or
  * any handler that called preventDefault() on it (closing a popup, cancelling
@@ -60,6 +62,9 @@ export interface GlobalKeybindHandlers {
   readonly onAcceptRing?: () => void;
   /** Escape while a ring is current — decline it, ahead of mark-read. */
   readonly onDeclineRing?: () => void;
+  /** Ctrl+, (Cmd+, on macOS) — open Settings. Not run while Settings is open
+   *  (`isSuspended`) or a dialog is up. */
+  readonly onOpenSettings: () => void;
   /** Whether shortcuts should be ignored right now (e.g. settings overlay open). */
   readonly isSuspended?: () => boolean;
   /** The mute/deafen keys of the global shortcut, read on every press so a
@@ -153,6 +158,12 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
     switch (key) {
       case "f":
         run("search", handlers.onSearch);
+        break;
+      // Ctrl+, opens Settings from anywhere, the message box included: the key
+      // has no text-editing meaning, like Ctrl+F. Settings itself is covered by
+      // `isSuspended`, a dialog by the guard above.
+      case ",":
+        if (!e.repeat) run("open-settings", handlers.onOpenSettings);
         break;
       // Ctrl+M / Ctrl+D: hidden aliases from before the Ctrl+Shift keys.
       // A text field keeps its own Ctrl+D (forward-delete on macOS).
