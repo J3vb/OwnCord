@@ -568,6 +568,12 @@ read `100` as an exact total.
 A DM's `last_read_message_id` is the caller's own read pointer for the DM, `0` when
 they have never read it. The same value is returned by `GET /api/v1/dms`.
 
+A group entry also carries `owner_id`, the group's owner (a current member). It
+is omitted for a 1:1 DM, so a client can read its presence as "this server has
+group owners". The owner is set to the creator at create and handed to the
+lowest remaining member id when the owner leaves or is erased. `GET /dms` and
+every `dm_channel_open` carry it too.
+
 A DM's `mention_count` is the same `read_states.mention_count` the channel list
 carries. It used to be absent here, so a DM mention badge silently reset to 0 on
 every reconnect; the ready payload now ships the stored value. A DM's
@@ -768,6 +774,17 @@ The same fields ride on each message in `GET /channels/{id}/messages`
 including members who join a group DM later, the same audience that sees the
 channel's `voice_state` and its history. Clients treat an unknown `kind` as an
 ordinary message.
+
+A group DM can also hold group event rows (WP 3B-10): `kind` is one of
+`group_add`, `group_remove`, `group_leave`, `group_rename` and `group_icon`, and
+the payload gains `group_event`, present only for these kinds. `group_event` is
+`{"target_user_id": 12}` for add and remove, `{}` for leave, `{"name": "Raid
+night"}` for rename (`""` means the name was removed) and `{"icon_removed":
+false}` for icon. A group row is read-only like a call row, and `chat_send`
+ignores any `kind` or `group_event` a client sends. The same block rides on each
+message in `GET /channels/{id}/messages`. This server release only stores and
+serves these rows; nothing writes one yet, so a client will not see one until
+the membership endpoints ship.
 
 The server writes one call row per DM call, from voice presence. The row is
 created when the first person joins the DM's voice channel (its author is the
@@ -2265,7 +2282,8 @@ Delivered only to `target_user_id`, with the sender attached:
 ### dm_channel_open (Server -> Client)
 
 Sent when a DM is opened, created, auto-reopened by an incoming message or call ring, or has
-its membership changed (a group created, renamed, or left).
+its membership changed (a group created, renamed, or left). A group's payload
+carries `owner_id` (see `ready`).
 
 The payload is the same shape as one entry of the `ready` payload's
 `dm_channels` and of `GET /api/v1/dms`, so a client has exactly one DM shape to

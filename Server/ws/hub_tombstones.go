@@ -211,6 +211,10 @@ type frameRefs struct {
 		Call *struct {
 			Participants []int64 `json:"participants"`
 		} `json:"call"`
+		// A group add or remove row names the member it concerns.
+		GroupEvent *struct {
+			TargetUserID *int64 `json:"target_user_id"`
+		} `json:"group_event"`
 		User *struct {
 			ID int64 `json:"id"`
 		} `json:"user"`
@@ -241,7 +245,7 @@ func parseFrameRefs(data []byte) (frameRefs, bool) {
 
 // userIn returns the first user the frame names that is a key of set:
 // payload.user_id, payload.from_user_id, payload.user.id, the replied-to
-// message's author, payload.mentions, payload.call.participants or payload.updates[].user_id.
+// message's author, payload.mentions, payload.call.participants, payload.group_event.target_user_id or payload.updates[].user_id.
 func userIn[V any](f *frameRefs, set map[int64]V) (int64, bool) {
 	pl := &f.Payload
 	var ids []int64
@@ -260,6 +264,9 @@ func userIn[V any](f *frameRefs, set map[int64]V) (int64, bool) {
 	ids = append(ids, pl.Mentions...)
 	if pl.Call != nil {
 		ids = append(ids, pl.Call.Participants...)
+	}
+	if pl.GroupEvent != nil && pl.GroupEvent.TargetUserID != nil {
+		ids = append(ids, *pl.GroupEvent.TargetUserID)
 	}
 	for _, u := range pl.Updates {
 		ids = append(ids, u.UserID)

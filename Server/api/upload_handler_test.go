@@ -133,7 +133,8 @@ CREATE TABLE IF NOT EXISTS channels (
     created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
     voice_max_users INTEGER NOT NULL DEFAULT 0,
     is_group        INTEGER NOT NULL DEFAULT 0,
-    nsfw            INTEGER NOT NULL DEFAULT 0
+    nsfw            INTEGER NOT NULL DEFAULT 0,
+    dm_owner_id     INTEGER
 );
 CREATE TABLE IF NOT EXISTS messages (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,

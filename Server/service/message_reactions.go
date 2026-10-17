@@ -108,9 +108,9 @@ func (s *MessageService) handleReaction(ctx context.Context, userID, msgID int64
 		return nil, err
 	}
 	// After the audience check, so a non-member gets the same answer for a
-	// call row as for a missing id.
-	if msg.Kind == db.MessageKindCall {
-		return nil, fmt.Errorf("%w: cannot react to a call", ErrBadRequest)
+	// system row (call or group event) as for a missing id.
+	if msg.Kind != db.MessageKindUser {
+		return nil, fmt.Errorf("%w: cannot react to a system message", ErrBadRequest)
 	}
 
 	action := "add"

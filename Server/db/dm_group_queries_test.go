@@ -24,7 +24,7 @@ func TestCreateGroupDMChannel_OpensForEveryone(t *testing.T) {
 	database := groupDMFixture(t)
 	ctx := context.Background()
 
-	ch, err := database.CreateGroupDMChannel(ctx, "Crew", []int64{1, 2, 3})
+	ch, err := database.CreateGroupDMChannel(ctx, "Crew", 1, []int64{1, 2, 3})
 	if err != nil {
 		t.Fatalf("CreateGroupDMChannel: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestCreateGroupDMChannel_OpensForEveryone(t *testing.T) {
 
 func TestCreateGroupDMChannel_RefusesUnderThree(t *testing.T) {
 	database := groupDMFixture(t)
-	if _, err := database.CreateGroupDMChannel(context.Background(), "", []int64{1, 2}); err == nil {
+	if _, err := database.CreateGroupDMChannel(context.Background(), "", 1, []int64{1, 2}); err == nil {
 		t.Fatal("expected an error creating a 2-person group DM")
 	}
 }
@@ -72,7 +72,7 @@ func TestGetOrCreateDMChannel_IgnoresShrunkGroup(t *testing.T) {
 	database := groupDMFixture(t)
 	ctx := context.Background()
 
-	group, err := database.CreateGroupDMChannel(ctx, "Shrinking", []int64{1, 2, 3})
+	group, err := database.CreateGroupDMChannel(ctx, "Shrinking", 1, []int64{1, 2, 3})
 	if err != nil {
 		t.Fatalf("CreateGroupDMChannel: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestLeaveGroupDM_DeletesChannelOnLastLeave(t *testing.T) {
 	database := groupDMFixture(t)
 	ctx := context.Background()
 
-	group, err := database.CreateGroupDMChannel(ctx, "Ephemeral", []int64{1, 2, 3})
+	group, err := database.CreateGroupDMChannel(ctx, "Ephemeral", 1, []int64{1, 2, 3})
 	if err != nil {
 		t.Fatalf("CreateGroupDMChannel: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestLeaveGroupDM_LastLeavePreservesAttachmentsForReclaim(t *testing.T) {
 	database := groupDMFixture(t)
 	ctx := context.Background()
 
-	group, err := database.CreateGroupDMChannel(ctx, "Ephemeral", []int64{1, 2, 3})
+	group, err := database.CreateGroupDMChannel(ctx, "Ephemeral", 1, []int64{1, 2, 3})
 	if err != nil {
 		t.Fatalf("CreateGroupDMChannel: %v", err)
 	}
@@ -204,7 +204,7 @@ func TestGetDMParticipants_CollapsesInvisible(t *testing.T) {
 	database := groupDMFixture(t)
 	ctx := context.Background()
 
-	group, err := database.CreateGroupDMChannel(ctx, "Ghosts", []int64{1, 2, 3})
+	group, err := database.CreateGroupDMChannel(ctx, "Ghosts", 1, []int64{1, 2, 3})
 	if err != nil {
 		t.Fatalf("CreateGroupDMChannel: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestNewDMChannelInfo_ExcludesViewerAndPicksRecipient(t *testing.T) {
 		{ID: 2, Username: "b"},
 		{ID: 3, Username: "c"},
 	}
-	info := db.NewDMChannelInfo(7, "Trio", true, participants, 2)
+	info := db.NewDMChannelInfo(7, "Trio", true, 1, participants, 2)
 
 	if info.ChannelID != 7 || info.Name != "Trio" || !info.IsGroup {
 		t.Errorf("unexpected header fields: %+v", info)
@@ -261,7 +261,7 @@ func TestNewDMChannelInfo_ExcludesViewerAndPicksRecipient(t *testing.T) {
 // A DM with no other participants (the moment before the row is cleaned up)
 // must produce an empty list, not a nil one — clients iterate it directly.
 func TestNewDMChannelInfo_EmptyRecipientsIsNotNil(t *testing.T) {
-	info := db.NewDMChannelInfo(9, "", false, []db.DMUser{{ID: 5}}, 5)
+	info := db.NewDMChannelInfo(9, "", false, 0, []db.DMUser{{ID: 5}}, 5)
 	if info.Recipients == nil {
 		t.Fatal("recipients must be an empty slice, not nil")
 	}
@@ -274,7 +274,7 @@ func TestNewDMChannelInfo_EmptyRecipientsIsNotNil(t *testing.T) {
 // field is omitted from the JSON rather than reported as 0. The
 // dm_channel_open frame is built the same way.
 func TestNewDMChannelInfo_OmitsLastRead(t *testing.T) {
-	info := db.NewDMChannelInfo(7, "", false, []db.DMUser{{ID: 1}, {ID: 2}}, 1)
+	info := db.NewDMChannelInfo(7, "", false, 0, []db.DMUser{{ID: 1}, {ID: 2}}, 1)
 	if info.LastReadMessageID != nil {
 		t.Fatalf("LastReadMessageID = %v, want nil", *info.LastReadMessageID)
 	}
