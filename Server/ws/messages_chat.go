@@ -3,6 +3,8 @@ package ws
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
+	"strconv"
 
 	"github.com/J3vb/OwnCord/Server/service"
 )
@@ -142,7 +144,7 @@ func replayCopy(frame []byte) []byte {
 		return frame
 	}
 	var payload map[string]json.RawMessage
-	if json.Unmarshal(env["payload"], &payload) != nil {
+	if json.Unmarshal(env["payload"], &payload) != nil || payload == nil {
 		return frame
 	}
 	payload["referenced_message"] = json.RawMessage("null")
@@ -156,4 +158,87 @@ func replayCopy(frame []byte) []byte {
 		return frame
 	}
 	return out
+}
+
+// replaySplice is a reply frame's stored copy computed without its seq: the
+// bytes before and after the point where json.Marshal of the envelope map
+// would place the "seq" key (envelope keys sort, so "seq" lands between
+// "payload" and "type"). It exists so the JSON round-trips of replayCopy run
+// before seqMu is taken; under the lock only the seq digits are spliced in.
+// A nil *replaySplice means the frame needs no stripping.
+type replaySplice struct {
+	prefix []byte // `{"payload":...` — no trailing comma
+	suffix []byte // `"type":...}` — no leading comma
+}
+
+// newReplaySplice does replayCopy's work for a not-yet-sequenced msg. It
+// returns nil when msg carries no snippet, is not a sequenceable object, or
+// cannot be parsed — in every such case the stored copy is the wrapped frame
+// itself (or replayCopy of it, see storedCopy).
+func newReplaySplice(msg []byte) *replaySplice {
+	if !sequenceable(msg) || !bytes.Contains(msg, referencedMessageKey) {
+		return nil
+	}
+	var env map[string]json.RawMessage
+	if json.Unmarshal(msg, &env) != nil {
+		return nil
+	}
+	if _, has := env["seq"]; has {
+		return nil
+	}
+	var payload map[string]json.RawMessage
+	if json.Unmarshal(env["payload"], &payload) != nil || payload == nil {
+		return nil
+	}
+	payload["referenced_message"] = json.RawMessage("null")
+	pb, err := json.Marshal(payload)
+	if err != nil {
+		return nil
+	}
+	env["payload"] = pb
+	before := map[string]json.RawMessage{}
+	after := map[string]json.RawMessage{}
+	for k, v := range env {
+		if k < "seq" {
+			before[k] = v
+		} else {
+			after[k] = v
+		}
+	}
+	bb, err := json.Marshal(before)
+	if err != nil {
+		return nil
+	}
+	ab, err := json.Marshal(after)
+	if err != nil {
+		return nil
+	}
+	return &replaySplice{prefix: bb[:len(bb)-1], suffix: ab[1:]}
+}
+
+// storedCopy returns the replay bytes for wrapped (msg stamped with seq),
+// identical to replayCopy(wrapped). rs is newReplaySplice(msg), computed
+// before the sequencing lock. It does no JSON work on the splice path.
+func storedCopy(rs *replaySplice, msg, wrapped []byte, seq uint64) []byte {
+	if rs == nil {
+		if sequenceable(msg) {
+			// wrapped is msg plus a seq; replayCopy would have found
+			// nothing to strip or failed to parse, and returned it as is.
+			if !bytes.Contains(msg, referencedMessageKey) {
+				return wrapped
+			}
+		}
+		return replayCopy(wrapped)
+	}
+	var mid [32]byte
+	m := mid[:0]
+	if len(rs.prefix) > 1 {
+		m = append(m, ',')
+	}
+	m = append(m, `"seq":`...)
+	m = strconv.AppendUint(m, seq, 10)
+	if len(rs.suffix) > 1 {
+		m = append(m, ',')
+	}
+	return slices.Concat(rs.prefix, m, rs.suffix)
 }
