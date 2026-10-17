@@ -164,6 +164,12 @@ describe("vkName", () => {
       expect(vkName(0x7b)).toBe("F12");
     });
 
+    it("names F13 to F24 for 0x7C to 0x87", () => {
+      for (let n = 13; n <= 24; n++) {
+        expect(vkName(0x7c + (n - 13))).toBe(`F${n}`);
+      }
+    });
+
     it("returns 'Enter' for 0x0D", () => {
       expect(vkName(0x0d)).toBe("Enter");
     });
