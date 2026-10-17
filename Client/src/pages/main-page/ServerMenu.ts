@@ -16,6 +16,7 @@ import {
   type ContextMenuSeparator,
 } from "@lib/context-menu";
 import { canManageChannels, canManageInvites, canViewAuditLog } from "@lib/permissions";
+import { isHideMutedChannels, setHideMutedChannels } from "@lib/hide-muted-channels";
 import { unreadChannelIds } from "@lib/read-state";
 import { shellText } from "../../i18n/shell";
 
@@ -59,6 +60,15 @@ export function buildServerMenuItems(actions: ServerMenuActions): MenuRow[] {
     label: shellText("serverMenu.notifications"),
     testId: "server-menu-notifications",
     onClick: actions.onNotificationSettings,
+  });
+  // A per-device list preference, so it needs no permission and no action from
+  // the page. Read now, like every other row, so the check is current.
+  const hideMuted = isHideMutedChannels();
+  top.push({
+    label: shellText("serverMenu.hideMuted"),
+    testId: "server-menu-hide-muted",
+    checked: hideMuted,
+    onClick: () => setHideMutedChannels(!hideMuted),
   });
 
   const manage: ContextMenuItem[] = [];

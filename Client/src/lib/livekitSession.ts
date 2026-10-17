@@ -41,6 +41,7 @@ import type {
   SessionState,
 } from "../features/voice/sessionState";
 import { JoinOrchestration } from "../features/voice/joinOrchestration";
+import { isDmKeptForCall } from "../features/direct-messages/keptCallDms";
 import { noteJoinSent } from "../features/voice/joinRequest";
 import { RoomLifecycle } from "../features/voice/roomLifecycle";
 import { MediaControl, syncShareGrant } from "../features/voice/mediaControl";
@@ -501,7 +502,8 @@ export class LiveKitSession {
         this.ws !== null &&
         this.ws.getState() !== "disconnected" &&
         (channelsStore.getState().channels.has(channelId) ||
-          dmStore.getState().channels.some((dm) => dm.channelId === channelId)),
+          dmStore.getState().channels.some((dm) => dm.channelId === channelId) ||
+          isDmKeptForCall(channelId)),
       serverMembership: () => {
         if (this.ws?.getState() !== "connected") return "unknown";
         const self = authStore.getState().user?.id ?? 0;

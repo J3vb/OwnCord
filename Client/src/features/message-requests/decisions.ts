@@ -67,7 +67,7 @@ export async function decide(
     if (signal.aborted) return "aborted";
     if (decision === "block") refreshBlocks(api, signal);
     if (isStale(err)) {
-      loadRequests(requestsApi());
+      void loadRequests(requestsApi());
       return "stale";
     }
     return "failed";

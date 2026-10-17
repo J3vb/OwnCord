@@ -133,6 +133,7 @@ export const shards = {
     "src/features/whats-new/appVersion.ts",
     "src/features/whats-new/seenVersion.ts",
     "src/lib/userStatus.ts",
+    "src/lib/hide-muted-channels.ts",
   ],
   "lib-rest-2": [
     "src/lib/autoIdle.ts",
@@ -150,6 +151,7 @@ export const shards = {
   "lib-rest-3": [
     "src/lib/call-ring.ts",
     "src/features/direct-messages/callAlerts.ts",
+    "src/features/direct-messages/keptCallDms.ts",
     "src/lib/context-menu.ts",
     "src/features/developer-mode/developerTools.ts",
     "src/lib/dialogOpen.ts",
