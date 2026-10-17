@@ -106,7 +106,14 @@ start() {
   if [ -n "$publish" ]; then
     args+=(-p "$publish")
   fi
-  docker run -d --name "$c" "${args[@]}" "$image" >/dev/null
+  local out
+  if ! out=$(docker run -d --name "$c" "${args[@]}" "$image" 2>&1); then
+    if [ -n "$publish" ]; then
+      echo "::error::could not start $c with -p $publish: is the host port in ${publish} already in use? (docker-smoke needs it free)"
+    fi
+    echo "$out"
+    exit 1
+  fi
 }
 
 # wait_healthy <phase> <container> — polls the binary's own healthcheck
@@ -260,10 +267,21 @@ wiz_pass="smoke-${$}-${RANDOM}-Ab1"
 cat >"$work/setup.json" <<EOF
 {"username":"smokeowner","password":"${wiz_pass}","setup_token":"${setup_token}","wizard":{"port":8443,"tls_mode":"self_signed","upload_max_size_mb":123,"voice_quality":"high"}}
 EOF
-status=$(curl -ksS --max-time 30 -o "$work/setup.out" -w '%{http_code}' \
-  -X POST -H 'Content-Type: application/json' \
-  --data-binary @"$work/setup.json" "$smoke_url/admin/api/setup") ||
-  fail "$wiz" "wizard: POST /admin/api/setup did not complete"
+# The curls run from inside $work with relative names: MSYS_NO_PATHCONV=1
+# stops Git Bash converting a host path handed to a native curl.exe. Only a
+# refused connection is retried (the published port can lag the healthcheck by
+# a moment); any HTTP answer, including an error, is final.
+status=""
+for ((i = 0; i < 10; i++)); do
+  rc=0
+  status=$(cd "$work" && curl -ksS --max-time 30 -o setup.out -w '%{http_code}' \
+    -X POST -H 'Content-Type: application/json' \
+    --data-binary @setup.json "$smoke_url/admin/api/setup" 2>/dev/null) || rc=$?
+  [ "$rc" = "7" ] || break
+  sleep 1
+done
+[ "$rc" = "0" ] ||
+  fail "$wiz" "wizard: POST /admin/api/setup did not complete (curl exit $rc)"
 [ "$status" = "201" ] ||
   fail "$wiz" "wizard: POST /admin/api/setup returned HTTP $status, want 201"
 tr -d ' \n' <"$work/setup.out" | grep -q '"restart_required":true' ||
@@ -272,6 +290,13 @@ session_token=$(tr -d ' \n' <"$work/setup.out" | grep -o '"token":"[^"]*"' | hea
 [ -n "$session_token" ] ||
   fail "$wiz" "wizard: setup returned no session token"
 printf 'Authorization: Bearer %s\n' "$session_token" >"$work/auth.hdr"
+
+# admin_get <outfile> — GET the settings list with the session token. Relative
+# names from inside $work, as above.
+admin_get() {
+  (cd "$work" && curl -ksS --max-time 30 --fail -o "$1" -H @auth.hdr \
+    "$smoke_url/admin/api/config/settings")
+}
 echo "wizard: setup accepted (201, restart_required)"
 
 # The restart exits the container and nothing brings it back, so wait for the
@@ -298,8 +323,7 @@ wiz="${name}-wizard-replacement"
 start "$wiz" "$wiz_vol" "127.0.0.1:${smoke_port}:8443"
 wait_healthy "wizard replace" "$wiz"
 
-curl -ksS --max-time 30 -o "$work/settings.json" -H @"$work/auth.hdr" \
-  --fail "$smoke_url/admin/api/config/settings" ||
+admin_get settings.json ||
   fail "$wiz" "wizard replace: GET /admin/api/config/settings failed"
 tr -d ' \n' <"$work/settings.json" >"$work/settings.flat"
 grep -Eq '"key":"upload\.max_size_mb","type":"[a-z]+","value":123[,}]' "$work/settings.flat" ||
@@ -318,42 +342,57 @@ reset_overrides() {
     "$image" config reset-overrides
 }
 
-# Refused while the server runs: it holds the database's process lock.
+# Leave the lockout-capable key in the file the way a real panel save does: a
+# PATCH with the session token and the confirmation header the server expects.
+# The allowlist still admits the address this request arrives from (the docker
+# bridge, or loopback through the port relay), so the server's lockout guard
+# accepts it, plus a TEST-NET-3 range. Both are values the reset must never
+# print.
+cat >"$work/patch.json" <<'EOF'
+{"server.admin_allowed_cidrs":["127.0.0.0/8","10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","203.0.113.0/24"]}
+EOF
+status=$(cd "$work" && curl -ksS --max-time 30 -o patch.out -w '%{http_code}' \
+  -X PATCH -H 'Content-Type: application/json' -H @auth.hdr \
+  -H 'X-OwnCord-Confirm: server.admin_allowed_cidrs' \
+  --data-binary @patch.json "$smoke_url/admin/api/config/settings") ||
+  fail "$wiz" "recovery: PATCH /admin/api/config/settings did not complete"
+[ "$status" = "200" ] ||
+  fail "$wiz" "recovery: PATCH /admin/api/config/settings returned HTTP $status, want 200"
+read_overrides "$wiz" | grep -q '"server.admin_allowed_cidrs"' ||
+  fail "$wiz" "recovery: the panel save did not reach config-overrides.json"
+
+# Refused while the server runs: it holds the database's process lock. The file
+# now holds the key, so "unchanged" has something to protect.
 read_overrides "$wiz" >"$work/overrides.before"
 code=0
 reset_overrides >"$work/reset.running" 2>&1 || code=$?
-[ "$code" = "1" ] ||
+if [ "$code" != "1" ]; then
+  echo "reset-overrides output (key names only):"
+  cat "$work/reset.running"
   fail "$wiz" "recovery: reset-overrides exited $code against a running server, want 1 (refused)"
+fi
+grep -q 'in use by another process' "$work/reset.running" ||
+  { cat "$work/reset.running"; fail "$wiz" "recovery: the refusal was not the process lock"; }
 read_overrides "$wiz" >"$work/overrides.after"
 cmp -s "$work/overrides.before" "$work/overrides.after" ||
   fail "$wiz" "recovery: a refused reset still changed config-overrides.json"
-echo "recovery: reset-overrides refused while the server runs (exit 1), file unchanged"
+grep -q '"server.admin_allowed_cidrs"' "$work/overrides.after" ||
+  fail "$wiz" "recovery: the refused reset removed the lockout key"
+echo "recovery: reset-overrides refused while the server runs (exit 1, process lock), file unchanged"
 
 drain "recovery drain" "$wiz"
 
-# Seed the lockout-capable key the way a panel save would leave it. The file
-# is owned by uid 65532 and mode 0600 as the server writes it; docker cp -a
-# keeps the tar's ids, so the reset (uid 65532) can read it. A CIDR from
-# TEST-NET-3 excludes every real client, which is the failure being recovered.
-mkdir "$work/seed"
-{
-  printf '{\n  "server.admin_allowed_cidrs": ["203.0.113.0/24"],\n'
-  docker cp "$wiz:/app/data/config-overrides.json" - | tar -xO | tail -n +2
-} >"$work/seed/config-overrides.json"
-tar -cf - --owner=65532 --group=65532 --numeric-owner --mode=600 -C "$work/seed" config-overrides.json |
-  docker cp -a - "$wiz:/app/data" ||
-  fail "$wiz" "recovery: could not seed config-overrides.json"
-read_overrides "$wiz" | grep -q '"server.admin_allowed_cidrs"' ||
-  fail "$wiz" "recovery: the seeded override is not in the volume"
-
 code=0
 reset_overrides >"$work/reset.stopped" 2>&1 || code=$?
-[ "$code" = "0" ] ||
+if [ "$code" != "0" ]; then
+  echo "reset-overrides output (key names only):"
+  cat "$work/reset.stopped"
   fail "$wiz" "recovery: reset-overrides exited $code with the server stopped, want 0"
+fi
 # Key names are printed; values never are.
 grep -q 'server.admin_allowed_cidrs' "$work/reset.stopped" ||
   fail "$wiz" "recovery: reset-overrides did not name the key it removed"
-if grep -q '203.0.113' "$work/reset.stopped"; then
+if grep -Eq '203\.0\.113|172\.16\.0\.0|192\.168\.0\.0' "$work/reset.stopped"; then
   fail "$wiz" "recovery: reset-overrides printed a setting's value"
 fi
 read_overrides "$wiz" >"$work/overrides.reset"
@@ -367,6 +406,11 @@ echo "recovery: reset-overrides removed server.admin_allowed_cidrs and kept uplo
 # The server must come back on the recovered volume.
 docker start "$wiz" >/dev/null
 wait_healthy "recovery restart" "$wiz"
+# The admin surface answers again with the same session, under the default
+# allowlist the reset fell back to.
+admin_get settings.recovered.json ||
+  fail "$wiz" "recovery restart: GET /admin/api/config/settings failed after the reset"
+echo "recovery restart: the admin settings API answers"
 show_logs "$wiz"
 drain "recovery final drain" "$wiz"
 
