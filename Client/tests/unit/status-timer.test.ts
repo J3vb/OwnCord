@@ -1,13 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import type { UserStatus } from "@lib/types";
 import { authStore } from "@stores/auth.store";
-import { membersStore, setMembers, updatePresence } from "@stores/members.store";
+import { addMember, membersStore, setMembers, updatePresence } from "@stores/members.store";
 import { startStatusTimerWatcher } from "@lib/statusTimer";
 import { clampExpiresIn, clearAfterSeconds, type ClearAfterId } from "@lib/statusChoices";
 import {
   clearStatusTimer,
   loadStatusTimer,
   loadUserStatus,
+  loadUserStatusOrigin,
   saveStatusTimer,
   saveUserStatus,
 } from "@lib/userStatus";
@@ -173,7 +174,7 @@ describe("status timer watcher", () => {
       w.destroy();
     });
 
-    it("a reconnect's auth_ok with another status does not end the timer: the saved status is re-asserted", () => {
+    it("a reconnect's auth_ok with another status does not end the timer or change the saved status", () => {
       setUser("invisible");
       pickTimed("invisible", HOUR);
       const w = startStatusTimerWatcher({ onRevert });
@@ -182,10 +183,8 @@ describe("status timer watcher", () => {
       // Another device made us Online while we were away; the reconnect says so.
       setUser("online");
       expect(loadStatusTimer()).not.toBeNull();
-      // MainPage.restoreSavedPresence: the saved status wins over the server's.
-      const restore = vi.fn();
-      if (authStore.getState().user?.status !== loadUserStatus()) restore(loadUserStatus());
-      expect(restore).toHaveBeenCalledExactlyOnceWith("invisible");
+      // The saved status is untouched, so the page's restore step (which
+      // compares it with auth_ok's) re-asserts it to the server.
       expect(loadUserStatus()).toBe("invisible");
 
       vi.advanceTimersByTime(HOUR);
@@ -220,6 +219,93 @@ describe("status timer watcher", () => {
       setOwnPresence("online");
       expect(loadStatusTimer()).toBeNull();
       expect(loadUserStatus()).toBe("online");
+      w.destroy();
+    });
+
+    it("adopts an Idle from another device as automatic, so auto-idle can bring it back", () => {
+      pickTimed("dnd", HOUR);
+      const w = startStatusTimerWatcher({ onRevert });
+      setOwnPresence("idle");
+      expect(loadUserStatus()).toBe("idle");
+      expect(loadUserStatusOrigin()).toBe("auto");
+      w.destroy();
+    });
+
+    it("adopts any other status from another device as a manual choice", () => {
+      pickTimed("idle", HOUR);
+      const w = startStatusTimerWatcher({ onRevert });
+      setOwnPresence("dnd");
+      expect(loadUserStatus()).toBe("dnd");
+      expect(loadUserStatusOrigin()).toBe("manual");
+      w.destroy();
+    });
+
+    it("reconciles an ignored echo at the end of the window when it was a real change", () => {
+      setOwnPresence("online");
+      const w = startStatusTimerWatcher({ onRevert });
+      pickTimed("dnd", HOUR);
+      setOwnPresence("dnd");
+      vi.advanceTimersByTime(3000);
+      setOwnPresence("online"); // looks like a straggler, ignored for now
+      expect(loadStatusTimer()).not.toBeNull();
+
+      vi.advanceTimersByTime(13_000); // past the window, still Online on the server
+      expect(loadStatusTimer()).toBeNull();
+      expect(loadUserStatus()).toBe("online");
+      w.destroy();
+    });
+
+    it("the end-of-window look keeps the timer when the server has since caught up", () => {
+      setOwnPresence("online");
+      const w = startStatusTimerWatcher({ onRevert });
+      pickTimed("dnd", HOUR);
+      setOwnPresence("dnd");
+      vi.advanceTimersByTime(3000);
+      setOwnPresence("online"); // the straggler
+      vi.advanceTimersByTime(2000);
+      setOwnPresence("dnd"); // our frame finally landed
+      vi.advanceTimersByTime(20_000);
+      expect(loadStatusTimer()?.status).toBe("dnd");
+      expect(loadUserStatus()).toBe("dnd");
+      w.destroy();
+    });
+
+    it("ignores an echo of any recent status, not only the latest one left", () => {
+      setOwnPresence("online");
+      const w = startStatusTimerWatcher({ onRevert });
+      saveUserStatus("idle");
+      vi.advanceTimersByTime(1000);
+      pickTimed("dnd", HOUR);
+      setOwnPresence("dnd");
+      setOwnPresence("online"); // two changes ago: still a straggler
+      expect(loadStatusTimer()).not.toBeNull();
+      expect(loadUserStatus()).toBe("dnd");
+      w.destroy();
+    });
+
+    it("the recheck does not outlive the watcher", () => {
+      setOwnPresence("online");
+      const w = startStatusTimerWatcher({ onRevert });
+      pickTimed("dnd", HOUR);
+      setOwnPresence("dnd");
+      setOwnPresence("online");
+      w.destroy();
+      vi.advanceTimersByTime(30_000);
+      expect(loadStatusTimer()).not.toBeNull();
+      expect(loadUserStatus()).toBe("dnd");
+    });
+
+    it("a live presence batched with other roster updates is still handled", () => {
+      pickTimed("dnd", HOUR);
+      const w = startStatusTimerWatcher({ onRevert });
+      updatePresence(7, "idle");
+      addMember({
+        user: { id: 9, username: "bob", avatar: null, role: "member" },
+        status: "online",
+      } as never);
+      membersStore.flush();
+      expect(loadUserStatus()).toBe("idle");
+      expect(loadStatusTimer()).toBeNull();
       w.destroy();
     });
 

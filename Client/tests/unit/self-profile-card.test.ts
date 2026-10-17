@@ -794,6 +794,53 @@ describe("SelfProfileCard: timers, Clear after, emoji", () => {
       expect(frames(ws)[0]!.payload.custom_status).toBe("away");
     });
 
+    it("text typed before moving to Clear after is still sent when the select changes nothing and the card closes", () => {
+      trigger().click();
+      const input = byId<HTMLInputElement>("spc-custom-input");
+      const select = byId<HTMLSelectElement>("spc-clear-after");
+      input.focus();
+      input.value = "lunch";
+      input.dispatchEvent(new FocusEvent("blur", { relatedTarget: select }));
+      expect(ws.send).not.toHaveBeenCalled();
+      document.body.click(); // outside click, no change event on the select
+      expect(card()).toBeNull();
+      expect(frames(ws)).toHaveLength(1);
+      expect(frames(ws)[0]!.payload.custom_status).toBe("lunch");
+    });
+
+    it("Escape still discards typed text: nothing is sent", () => {
+      trigger().click();
+      const input = byId<HTMLInputElement>("spc-custom-input");
+      input.focus();
+      input.value = "never mind";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      expect(card()).toBeNull();
+      expect(ws.send).not.toHaveBeenCalled();
+    });
+
+    it("an update held back while the picker was open applies when it closes and the field is left", () => {
+      trigger().click();
+      const input = byId<HTMLInputElement>("spc-custom-input");
+      openPicker();
+      setOwn("from another device", null);
+      expect(input.value).toBe("");
+      byId<HTMLButtonElement>("spc-custom-emoji").click(); // closes it, focus to the field
+      expect(document.activeElement).toBe(input);
+      input.blur();
+      expect(input.value).toBe("from another device");
+      expect(byId("spc-custom-line").textContent).toBe("from another device");
+    });
+
+    it("an update held back while the field was focused applies on blur", () => {
+      trigger().click();
+      const input = byId<HTMLInputElement>("spc-custom-input");
+      input.focus();
+      setOwn("remote text", null);
+      expect(input.value).toBe("");
+      input.blur();
+      expect(input.value).toBe("remote text");
+    });
+
     it("whitespace runs are collapsed before sending, like the server does", () => {
       commit("never", "  a \t  b   c ");
       expect(frames(ws)[0]!.payload.custom_status).toBe("a b c");

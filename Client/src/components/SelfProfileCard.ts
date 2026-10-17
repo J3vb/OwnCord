@@ -301,7 +301,11 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
       (e: FocusEvent) => {
         // Not while focus is in the picker, and not when it goes to Clear after:
         // that choice commits the text itself, with its expiry (one frame).
-        if (emojiPicker === null && e.relatedTarget !== clearAfterSelect) commitCustom();
+        if (emojiPicker === null && e.relatedTarget !== clearAfterSelect) {
+          commitCustom();
+          // An update held back while the field was focused applies now.
+          syncCustom(options.getCustomStatus());
+        }
       },
       { signal },
     );
@@ -334,8 +338,17 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
         // returning to the field, so its blur will not commit what was typed.
         commitCustom();
       }
+      // An update held back while the picker was open applies now.
+      if (cardEl === card && document.activeElement !== input)
+        syncCustom(options.getCustomStatus());
     }
-    d.addCleanup(() => closeEmojiPicker(false));
+    // Whatever takes the card away, text typed but not yet committed goes with
+    // it (the picker's and the select's blur skips would otherwise lose it).
+    // Escape has already put the last committed text back, so it sends nothing.
+    d.addCleanup(() => {
+      closeEmojiPicker(false);
+      commitCustom();
+    });
 
     /** Put `emoji` at the caret (replacing a selection), unless that would
      *  take the text past the server's limit. The input's own maxlength caps
@@ -707,7 +720,7 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
       { signal },
     );
     onStatusTimerChange(() => paintTimer(), { signal });
-    const syncCustom = (text: string): void => {
+    function syncCustom(text: string): void {
       // Never clobber text the user is typing right now.
       if (document.activeElement === input || emojiPicker !== null) return;
       lastCommittedCustom = text;
@@ -715,7 +728,7 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
       paintCustomLine();
       syncClearVisibility();
       paintClearsLine();
-    };
+    }
     d.onStoreChange(
       authStore,
       (s) => s.user,

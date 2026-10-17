@@ -60,15 +60,20 @@ export interface StatusTimerWatcher {
   destroy(): void;
 }
 
+function ownReportedStatus(): UserStatus | null {
+  const id = authStore.getState().user?.id;
+  return id === undefined ? null : (membersStore.getState().members.get(id)?.status ?? null);
+}
+
 export function startStatusTimerWatcher(options: StatusTimerWatcherOptions): StatusTimerWatcher {
   const now = options.now ?? Date.now;
   const disposable = new Disposable();
   let cancelTimer: (() => void) | null = null;
-  /** The saved status before the latest local change, and when it changed. A
-   *  late echo of that earlier status is not another device speaking. */
-  let previousLocal: UserStatus = loadUserStatus();
-  let currentLocal: UserStatus = previousLocal;
-  let changedAt = 0;
+  let cancelRecheck: (() => void) | null = null;
+  /** The statuses this device left recently and when. A late echo of any of
+   *  them is not another device speaking. */
+  let recent: Array<{ status: UserStatus; at: number }> = [];
+  let currentLocal: UserStatus = loadUserStatus();
 
   function disarm(): void {
     cancelTimer?.();
@@ -78,9 +83,10 @@ export function startStatusTimerWatcher(options: StatusTimerWatcherOptions): Sta
   function noteLocalStatus(): void {
     const next = loadUserStatus();
     if (next === currentLocal) return;
-    previousLocal = currentLocal;
+    const t = now();
+    recent = recent.filter((r) => t - r.at < STALE_ECHO_MS);
+    recent.push({ status: currentLocal, at: t });
     currentLocal = next;
-    changedAt = now();
   }
 
   /** Our own member entry changed through a live presence (not a ready
@@ -93,8 +99,26 @@ export function startStatusTimerWatcher(options: StatusTimerWatcherOptions): Sta
     if (timer === null || reported === timer.status) return;
     // The frame carrying our latest pick may still be queued behind the
     // presence limiter, so the server can still be echoing the status we had.
-    if (reported === previousLocal && now() - changedAt < STALE_ECHO_MS) return;
-    saveUserStatus(reported); // adopts it locally and ends the timer; sends nothing
+    const t = now();
+    const echoed = recent.find((r) => r.status === reported && t - r.at < STALE_ECHO_MS);
+    if (echoed !== undefined) {
+      // Ignored for now; once the window is over, look again, so a genuine
+      // change from another device that merely matched is still reconciled.
+      cancelRecheck?.();
+      cancelRecheck = setOwnedTimeout(
+        disposable.signal,
+        () => {
+          cancelRecheck = null;
+          onLivePresence(ownReportedStatus());
+        },
+        STALE_ECHO_MS - (t - echoed.at) + 1,
+      );
+      return;
+    }
+    // Adopts it locally and ends the timer; sends nothing. An Idle from
+    // elsewhere is taken as automatic, so this device's auto-idle can bring
+    // it back like any idle it started itself.
+    saveUserStatus(reported, reported === "idle" ? "auto" : "manual");
   }
 
   function expire(timer: StatusTimer): void {
@@ -153,16 +177,16 @@ export function startStatusTimerWatcher(options: StatusTimerWatcherOptions): Sta
       { signal: disposable.signal },
     ),
   );
-  // Our own status and the roster revision as one key. A change of status
-  // with the revision unchanged is a live presence; setMembers (ready) bumps
-  // the revision and is ignored.
-  let seenRevision = membersStore.getState().roleRevision ?? 0;
+  // Our own status and the snapshot counter as one key. A change of status
+  // with the counter unchanged is a live presence; setMembers (ready) bumps
+  // it and is ignored, whatever else landed in the same flush.
+  let seenRevision = membersStore.getState().snapshotRevision ?? 0;
   disposable.onStoreChange(
     membersStore,
     (s): string => {
       const id = authStore.getState().user?.id;
       const status = id === undefined ? "" : (s.members.get(id)?.status ?? "");
-      return `${status}@${s.roleRevision ?? 0}`;
+      return `${status}@${s.snapshotRevision ?? 0}`;
     },
     (key: string) => {
       const [status = "", revision = "0"] = key.split("@");
@@ -176,6 +200,7 @@ export function startStatusTimerWatcher(options: StatusTimerWatcherOptions): Sta
   // until it wakes; looking again on focus ends it as soon as the user is back.
   disposable.onEvent(window, "focus", sync);
   disposable.addCleanup(disarm);
+  disposable.addCleanup(() => cancelRecheck?.());
 
   sync();
 

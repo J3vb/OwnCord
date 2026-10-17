@@ -43,12 +43,17 @@ export interface MembersState {
    *  presence/typing update. Optional only so the many inline test fixtures
    *  need not restate it. */
   readonly roleRevision?: number;
+  /** Bumped only by setMembers (a ready snapshot replacing the roster), so a
+   *  watcher can tell "the roster was replaced" from "someone's presence
+   *  changed" even when other updates land in the same store flush. */
+  readonly snapshotRevision?: number;
 }
 
 const INITIAL_STATE: MembersState = {
   members: new Map(),
   typingUsers: new Map(),
   roleRevision: 0,
+  snapshotRevision: 0,
 };
 
 export const membersStore = createStore<MembersState>(INITIAL_STATE);
@@ -88,6 +93,7 @@ export function setMembers(members: readonly ReadyMember[]): void {
     members: map,
     typingUsers: new Map(),
     roleRevision: (prev.roleRevision ?? 0) + 1,
+    snapshotRevision: (prev.snapshotRevision ?? 0) + 1,
   }));
 }
 
