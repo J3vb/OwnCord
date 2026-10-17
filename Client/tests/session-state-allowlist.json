@@ -9,12 +9,6 @@
     },
     {
       "file": "components/MemberList.ts",
-      "binding": "foldCache",
-      "category": "dom-owned",
-      "reason": "WeakMap keyed by Member objects; entries go with the objects"
-    },
-    {
-      "file": "components/MemberList.ts",
       "binding": "ownPopupClosers",
       "category": "dom-owned",
       "reason": "Close callbacks of popups the list owns; each popup removes its own on close"
@@ -90,6 +84,12 @@
       "binding": "inFlight",
       "category": "transient",
       "reason": "User ids with a request in flight; removed in the request's finally"
+    },
+    {
+      "file": "features/members/memberModel.ts",
+      "binding": "foldCache",
+      "category": "dom-owned",
+      "reason": "WeakMap keyed by Member objects; entries go with the objects"
     },
     {
       "file": "features/messaging/emojiCatalog.ts",
