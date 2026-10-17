@@ -2728,6 +2728,7 @@ describe("createChannelController", () => {
         avatarEl: document.createElement("span"),
         sidebarToggle: document.createElement("button"),
         nameGroupEl: document.createElement("div"),
+        memberListBtn: document.createElement("button"),
       };
       const headerAvatar = (): HTMLElement =>
         (mockUpdateChatHeaderForDm.mock.calls.at(-1)![1] as { avatar: HTMLElement }).avatar;
