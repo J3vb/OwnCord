@@ -661,7 +661,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     if (item.kind === "new-divider") return renderNewDivider();
     const owner = new Disposable();
     if (item.kind === "blocked-run") {
-      const el = renderBlockedRun(item, () => toggleBlockedRun(item), owner.signal);
+      const el = renderBlockedRun(item, () => toggleBlockedRun(item.firstId), owner.signal);
       rowOwners.set(el, owner);
       return el;
     }
@@ -1624,7 +1624,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     return contentContainer?.children[idx - renderedStart];
   }
 
-  function renderAll(): void {
+  function renderAll(hold?: { readonly key: string; readonly edge: number }): void {
     if (root === null) return;
     if (renderAllRunning) return; // prevent re-entrancy
 
@@ -1666,7 +1666,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       let anchorMessageId: number | null = null;
       let anchorOffsetInItem = 0;
       let anchorEdge: number | null = null;
-      if (!wasAtBottom && root !== null) {
+      if (!wasAtBottom && root !== null && hold === undefined) {
         const anchorIdx = topMessageIndex();
         if (anchorIdx !== -1) {
           anchorMessageId = (virtualItems[anchorIdx] as VirtualItemMessage).message.id;
@@ -1694,6 +1694,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         if (topSpacer !== null) topSpacer.style.height = "0px";
         if (bottomSpacer !== null) bottomSpacer.style.height = `${estTotal}px`;
         root.scrollTop = Math.max(0, estTotal - root.clientHeight);
+      } else if (hold !== undefined && root !== null) {
+        const at = virtualItems.findIndex((item, i) => keyOf(item, i) === hold.key);
+        if (at !== -1) {
+          const estTotal = totalHeight();
+          if (topSpacer !== null) topSpacer.style.height = "0px";
+          if (bottomSpacer !== null) bottomSpacer.style.height = `${estTotal}px`;
+          root.scrollTop = Math.max(0, offsetBefore(at) - hold.edge);
+        }
       } else if (anchorMessageId !== null && root !== null) {
         const newIdx = virtualItems.findIndex(
           (item) => item.kind === "message" && item.message.id === anchorMessageId,
@@ -1721,6 +1729,15 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       if (wasAtBottom) {
         scrollToBottom();
         updateScrollToBottomBtn();
+      } else if (hold !== undefined) {
+        const at = virtualItems.findIndex((item, i) => keyOf(item, i) === hold.key);
+        if (at !== -1) {
+          for (let pass = 0; pass < 3; pass++) {
+            if (!placeIndex(at, -hold.edge)) break;
+          }
+          const el = renderedRowAt(at);
+          if (el !== undefined) holdRow(el, hold.edge);
+        }
       } else if (anchorMessageId !== null) {
         // The anchor above was applied against estimates for the rows the
         // rebuild put above the reader (a prepended page); renderWindow has
@@ -2345,10 +2362,19 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // rebuild.
     lastCanManageMessages = canManageMessages();
     // A block or an unblock folds or unfolds the author's rows in place.
+    let prevBlocked = blockedUsers();
     unsubscribers.push(
       blocksStore.subscribeSelector(
         (s) => [...s.blockedByMe].toSorted((x, y) => x - y).join(","),
-        () => renderAll(),
+        () => {
+          const now = blockedUsers();
+          // A run of someone blocked again starts folded, whatever was shown before.
+          for (const m of allMessages) {
+            if (now.has(m.user.id) && !prevBlocked.has(m.user.id)) shownBlocked.delete(m.id);
+          }
+          prevBlocked = now;
+          renderAll();
+        },
       ),
     );
     unsubscribers.push(
@@ -2654,7 +2680,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       const at = virtualItems.findIndex(
         (item) => item.kind === "message" && item.message.id === messageId,
       );
-      return at !== -1 && revealIndex(at, true);
+      if (at !== -1 && revealIndex(at, true)) return true;
+      renderAll();
+      return false;
     }
     return revealIndex(idx, true);
   }
@@ -2674,16 +2702,25 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         messageId <= item.lastId,
     );
     if (run?.kind !== "blocked-run") return false;
-    for (const id of runIds(run.firstId, run.lastId)) shownBlocked.add(id);
+    const members = runIds(run.firstId, run.lastId);
+    if (!members.includes(messageId)) return false;
+    for (const id of members) shownBlocked.add(id);
     return true;
   }
 
-  function toggleBlockedRun(run: VirtualItemBlockedRun): void {
+  /** Show or Hide the run headed by `firstId`, read from the current items (the
+   *  row a click came from may be older than the run), holding its header in place. */
+  function toggleBlockedRun(firstId: number): void {
+    const key = `blk-${firstId}`;
+    const at = virtualItems.findIndex((item, i) => keyOf(item, i) === key);
+    const run = virtualItems[at];
+    if (run?.kind !== "blocked-run") return;
     for (const id of runIds(run.firstId, run.lastId)) {
       if (run.expanded) shownBlocked.delete(id);
       else shownBlocked.add(id);
     }
-    renderAll();
+    const el = renderedRowAt(at);
+    renderAll(el === undefined ? undefined : { key, edge: edgeOf(el) });
   }
 
   /** Centre row `idx` in the view, rendering it; with `flash`, highlight it too. */

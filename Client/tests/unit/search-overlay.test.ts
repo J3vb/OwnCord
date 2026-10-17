@@ -66,6 +66,7 @@ describe("createSearchOverlay", () => {
     vi.useRealTimers();
     container.remove();
     setDmChannels([]);
+    resetBlocksStore();
     localStorage.removeItem("owncord:settings:timeFormat");
     window.dispatchEvent(new CustomEvent("owncord:pref-change", { detail: { key: "timeFormat" } }));
   });
@@ -567,7 +568,6 @@ describe("createSearchOverlay", () => {
     expect(onSelectResult).toHaveBeenCalledWith(result);
 
     overlay.destroy?.();
-    resetBlocksStore();
   });
 
   it("does not attach a new click listener to each row on every re-render (OC-0147)", async () => {

@@ -347,7 +347,7 @@ describe("MessageList: blocked users' messages (WP 3B-6)", () => {
       scrollTo(600);
       expect(row(10)).not.toBeNull();
 
-      expect(() => block(ALICE.id)).not.toThrow();
+      block(ALICE.id);
 
       expect(messageIds()).toEqual([]);
       expect(runs()).toHaveLength(1);
@@ -390,6 +390,140 @@ describe("MessageList: blocked users' messages (WP 3B-6)", () => {
     expect(toggle(1).textContent).toBe("Show");
     expect(row(5)!.classList.contains("highlight-flash")).toBe(true);
     expect(list!.scrollToMessage(99)).toBe(false);
+  });
+
+  it("a jump to a deleted id inside a run changes nothing and leaves the list in step", () => {
+    block(BOB.id);
+    setMessages([msg(1, BOB), msg(2, BOB, { deleted: true }), msg(3, BOB), msg(4)]);
+    mount();
+    expect(run(1)!.textContent).toContain("2 blocked messages");
+
+    expect(list!.scrollToMessage(2)).toBe(false);
+    expect(messageIds()).toEqual(["4"]);
+    expect(toggle(1).textContent).toBe("Show");
+
+    setMessages([msg(1, BOB), msg(2, BOB, { deleted: true }), msg(3, BOB), msg(4), msg(5)]);
+    expect(messageIds()).toEqual(["4", "5"]);
+    expect(run(1)!.textContent).toContain("2 blocked messages");
+    expect(toggle(1).textContent).toBe("Show");
+  });
+
+  it("blocking someone again folds the rows they were shown on", () => {
+    block(BOB.id);
+    setMessages([msg(1), msg(2, BOB), msg(3, BOB), msg(4)]);
+    mount();
+    toggle(2).click();
+    expect(messageIds()).toEqual(["1", "2", "3", "4"]);
+
+    block();
+    expect(runs()).toHaveLength(0);
+    block(BOB.id);
+    expect(messageIds()).toEqual(["1", "4"]);
+    expect(toggle(2).textContent).toBe("Show");
+  });
+
+  it("the toggle acts on the current run after a live arrival extended it", () => {
+    block(BOB.id);
+    const first = [msg(1), msg(2, BOB), msg(3, BOB)];
+    setMessages(first);
+    mount();
+    setMessages([...first, msg(4, BOB)]);
+    toggle(2).click();
+    expect(messageIds()).toEqual(["1", "2", "3", "4"]);
+    toggle(2).click();
+    expect(messageIds()).toEqual(["1"]);
+  });
+
+  describe("scroll hold on Show and Hide", () => {
+    const CLIENT_HEIGHT = 500;
+    const saved = new Map<string, PropertyDescriptor | undefined>();
+    let rectSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      for (const [prop, value] of [
+        ["scrollHeight", 4000],
+        ["clientHeight", CLIENT_HEIGHT],
+      ] as const) {
+        saved.set(prop, Object.getOwnPropertyDescriptor(HTMLElement.prototype, prop));
+        Object.defineProperty(HTMLElement.prototype, prop, {
+          configurable: true,
+          get: () => value,
+        });
+      }
+      // A one-column layout: 61 px per message, 32 px for anything else.
+      rectSpy = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
+        this: Element,
+      ) {
+        const rect = (top: number, height: number): DOMRect =>
+          ({
+            top,
+            height,
+            bottom: top + height,
+            left: 0,
+            right: 0,
+            width: 0,
+            x: 0,
+            y: top,
+          }) as DOMRect;
+        const scroller = container.querySelector<HTMLElement>(".messages-container");
+        const content = container.querySelector<HTMLElement>(".virtual-content");
+        if (scroller === null || content === null) return rect(0, 0);
+        if (this === scroller) return rect(0, CLIENT_HEIGHT);
+        if (this.parentElement !== content) return rect(0, 0);
+        const heightOf = (el: Element): number => (el.classList.contains("message") ? 61 : 32);
+        let top = parseFloat((content.previousElementSibling as HTMLElement).style.height || "0");
+        for (const sib of content.children) {
+          if (sib === this) break;
+          top += heightOf(sib);
+        }
+        return rect(top - scroller.scrollTop, heightOf(this));
+      });
+    });
+
+    afterEach(() => {
+      rectSpy.mockRestore();
+      for (const [prop, descriptor] of saved) {
+        if (descriptor) Object.defineProperty(HTMLElement.prototype, prop, descriptor);
+        else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[prop];
+      }
+      saved.clear();
+    });
+
+    const scroller = (): HTMLDivElement =>
+      container.querySelector(".messages-container") as HTMLDivElement;
+    const headerTop = (): number => run(11)!.getBoundingClientRect().top;
+    const load = (): void => {
+      block(BOB.id);
+      setMessages([
+        ...Array.from({ length: 10 }, (_, i) => msg(i + 1)),
+        msg(11, BOB),
+        msg(12, BOB),
+        msg(13, BOB),
+        ...Array.from({ length: 17 }, (_, i) => msg(i + 14)),
+      ]);
+      mount();
+    };
+
+    it("keeps the header where it was after Show, and after Hide", () => {
+      load();
+      // The header is the topmost row, partly above the viewport.
+      scroller().scrollTop = 32 + 10 * 61 + 10;
+      scroller().dispatchEvent(new Event("scroll"));
+      const before = headerTop();
+      expect(before).toBe(-10);
+
+      toggle(11).click();
+      expect(messageIds()).toContain("12");
+      expect(headerTop()).toBe(before);
+
+      // Scrolled so the top row is inside the expanded run.
+      scroller().scrollTop = 32 + 10 * 61 + 32 + 61 + 20;
+      scroller().dispatchEvent(new Event("scroll"));
+      const expandedEdge = headerTop();
+      toggle(11).click();
+      expect(messageIds()).not.toContain("12");
+      expect(headerTop()).toBe(expandedEdge);
+    });
   });
 
   it("deleting the run's first message leaves one header with the count reduced", () => {

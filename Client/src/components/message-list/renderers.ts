@@ -11,12 +11,6 @@ import { connectionLockReason, messageActionGates } from "./message-actions";
 import { QUICK_REACTIONS, emojiNode, quickReactionEmojiForPass } from "./quick-reactions";
 import { messagesStore, type Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
-
-/** What a row render reads beyond the list's own options. */
-export interface MessageRenderOptions extends MessageListOptions {
-  /** Authors whose messages are hidden, so a reply quoting one shows no content. */
-  readonly blockedUsers?: ReadonlySet<number>;
-}
 import { messagingText } from "../../i18n/messaging";
 import { connectText } from "../../i18n/connect";
 import { uiStore } from "@stores/ui.store";
@@ -70,6 +64,12 @@ import {
   type LightboxGallery,
 } from "./attachments";
 import { atReactionLimit, renderReactions, wireReactionControl } from "./reactions";
+
+/** What a row render reads beyond the list's own options. */
+export interface MessageRenderOptions extends MessageListOptions {
+  /** Authors whose messages are hidden, so a reply quoting one shows no content. */
+  readonly blockedUsers?: ReadonlySet<number>;
+}
 
 // -- Composite rendering functions --------------------------------------------
 
