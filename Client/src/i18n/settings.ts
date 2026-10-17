@@ -145,6 +145,14 @@ export const settingsText = defineCatalog("settings", {
   "notifications.muted.unmute": "Unmute",
   "notifications.muted.until": "Until {time}",
   "notifications.muted.untilDate": "Until {date}, {time}",
+  "notifications.channelLevels.title": "Channel Notification Overrides",
+  "notifications.channelLevels.desc":
+    "Channels with their own notification level. They ignore the server level in both directions.",
+  "notifications.channelLevels.empty": "No channel has its own level.",
+  "notifications.channelLevels.reset": "Reset",
+  "notifications.channelLevels.all": "All messages",
+  "notifications.channelLevels.mentions": "Only @mentions",
+  "notifications.channelLevels.nothing": "Nothing",
   "notifications.channelFallback": "Channel {id}",
 
   "images.linkPreview.label": "Link Preview",

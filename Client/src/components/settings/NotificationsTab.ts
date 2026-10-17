@@ -28,6 +28,8 @@ import {
   setGlobalNotificationLevel,
   setServerNotificationLevel,
   clearServerNotificationLevel,
+  listChannelNotificationOverrides,
+  setChannelNotificationLevel,
   type NotificationLevel,
 } from "@lib/notificationLevel";
 import { setRovingTabindex, enableRovingNavigation } from "@lib/a11y";
@@ -346,6 +348,7 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
   desktopRow.querySelector(".setting-desc")!.after(blockedReason);
 
   section.appendChild(buildMutedChannelsSection(signal));
+  section.appendChild(buildChannelLevelsSection(signal));
   return section;
 }
 
@@ -480,6 +483,86 @@ function mutedChannelName(channelId: number): string {
   // is shown rather than hidden so the user can clear it.
   // i18n-exempt: a numeric channel id, formatted as a plain string so it is not thousands-grouped
   return t("notifications.channelFallback", { id: String(channelId) });
+}
+
+/**
+ * The channels that carry their own notification level. Set from a right-click
+ * on a row, so as easy to forget as a mute; Reset hands the channel back to the
+ * server level.
+ */
+function buildChannelLevelsSection(signal: AbortSignal): HTMLDivElement {
+  const wrapper = createElement("div", { class: "setting-row", style: "display:block;" });
+  const list = createElement("div", {
+    class: "settings-muted-list",
+    "data-testid": "channel-level-list",
+    tabindex: "-1",
+  });
+  appendChildren(
+    wrapper,
+    createElement("div", { class: "setting-label" }, t("notifications.channelLevels.title")),
+    createElement("div", { class: "setting-desc" }, t("notifications.channelLevels.desc")),
+    list,
+  );
+
+  let rows = new Disposable();
+  signal.addEventListener("abort", () => rows.destroy(), { once: true });
+  let drawnKey: string | null = null;
+
+  function render(): void {
+    if (signal.aborted) return;
+    const overrides = listChannelNotificationOverrides();
+    const key = [...overrides].map(([id, level]) => `${id}:${level}`).join(",");
+    if (key === drawnKey) return;
+    drawnKey = key;
+    rows.destroy();
+    rows = new Disposable();
+    clearChildren(list);
+    if (overrides.size === 0) {
+      list.appendChild(
+        createElement(
+          "div",
+          { class: "setting-desc", "data-testid": "channel-level-empty" },
+          t("notifications.channelLevels.empty"),
+        ),
+      );
+      return;
+    }
+    for (const [channelId, level] of overrides) {
+      const row = createElement("div", { class: "settings-muted-row" });
+      const name = createElement("span", { class: "settings-muted-name" });
+      setText(name, mutedChannelName(channelId));
+      const btn = createElement(
+        "button",
+        {
+          class: "btn btn-secondary",
+          type: "button",
+          "data-testid": `channel-level-reset-${channelId}`,
+        },
+        t("notifications.channelLevels.reset"),
+      );
+      btn.addEventListener("click", () => setChannelNotificationLevel(channelId, null), {
+        signal: rows.signal,
+      });
+      appendChildren(
+        row,
+        name,
+        createElement(
+          "span",
+          { class: "settings-muted-until", "data-testid": `channel-level-${channelId}` },
+          t(`notifications.channelLevels.${level}`),
+        ),
+        btn,
+      );
+      list.appendChild(row);
+    }
+  }
+
+  render();
+  // Every write announces itself as a pref change, including one from a menu
+  // while this tab is open.
+  window.addEventListener("owncord:pref-change", render, { signal });
+  window.addEventListener("storage", render, { signal });
+  return wrapper;
 }
 
 /**

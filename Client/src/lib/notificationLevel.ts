@@ -119,6 +119,69 @@ export function effectiveNotificationLevel(): NotificationLevel {
   return getServerNotificationLevel() ?? getGlobalNotificationLevel();
 }
 
+const CHANNEL_KEY_PREFIX = "channelNotificationLevels";
+
+function channelKey(): string | null {
+  const host = getChannelMutesHost();
+  return host === null ? null : `${CHANNEL_KEY_PREFIX}:${host}`;
+}
+
+/**
+ * The connected server's per-channel overrides, as a map. A malformed entry
+ * (an unknown level, a non-positive id) is skipped and the rest kept; a
+ * corrupt value reads as no overrides. With no host there is nothing to key
+ * on, so it is empty.
+ */
+export function listChannelNotificationOverrides(): ReadonlyMap<number, NotificationLevel> {
+  const out = new Map<number, NotificationLevel>();
+  const key = channelKey();
+  if (key === null) return out;
+  const raw = loadPref<unknown>(key, {});
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return out;
+  for (const [idText, value] of Object.entries(raw)) {
+    const id = Number(idText);
+    const level = asLevel(value);
+    if (Number.isInteger(id) && id > 0 && level !== null) out.set(id, level);
+  }
+  return out;
+}
+
+/** The channel's own level, or null when it follows the server default. */
+export function getChannelNotificationLevel(channelId: number): NotificationLevel | null {
+  return listChannelNotificationOverrides().get(channelId) ?? null;
+}
+
+/**
+ * Sets a channel's level, or clears it with null (back to the server default).
+ * Does nothing without a host: channel ids mean nothing without a server.
+ */
+export function setChannelNotificationLevel(
+  channelId: number,
+  level: NotificationLevel | null,
+): void {
+  const key = channelKey();
+  if (key === null || !Number.isInteger(channelId) || channelId <= 0) return;
+  const next = new Map(listChannelNotificationOverrides());
+  if (level === null) next.delete(channelId);
+  else next.set(channelId, level);
+  savePref(key, Object.fromEntries(next));
+}
+
+/**
+ * The level in force for one channel: its override, else the server level. An
+ * override wins both ways, so a channel at All notifies in a server at Nothing.
+ */
+export function channelNotificationLevel(channelId: number): NotificationLevel {
+  return getChannelNotificationLevel(channelId) ?? effectiveNotificationLevel();
+}
+
+/** `channelNotificationLevel` for many channels, reading storage once. */
+export function channelLevelResolver(): (channelId: number) => NotificationLevel {
+  const overrides = listChannelNotificationOverrides();
+  const fallback = effectiveNotificationLevel();
+  return (channelId) => overrides.get(channelId) ?? fallback;
+}
+
 export interface NotificationSubject {
   /** Whether the message names the reader (@mention or @everyone). */
   readonly mentioned: boolean;

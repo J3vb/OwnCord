@@ -3,7 +3,10 @@ import { channelsStore, type Channel } from "../../stores/channels.store";
 import { dmStore, type DmChannel } from "../../stores/dm.store";
 import { invalidateMuteCache, muteChannel, setChannelMutesHost } from "../../lib/channel-mutes";
 import { savePref } from "../../lib/preferences";
-import { setGlobalNotificationLevel } from "../../lib/notificationLevel";
+import {
+  setChannelNotificationLevel,
+  setGlobalNotificationLevel,
+} from "../../lib/notificationLevel";
 import { startUnreadBadge, unreadBadgeCount } from "./unreadBadge";
 
 function channel(id: number, patch: Partial<Channel>): Channel {
@@ -174,6 +177,36 @@ describe("unread badge", () => {
     expect(unreadBadgeCount()).toBe(5);
     setGlobalNotificationLevel("mentions");
     expect(unreadBadgeCount()).toBe(3 + 5);
+  });
+
+  it("a channel at Nothing drops its mentions; others still count", () => {
+    setChannelList([channel(1, { mentionCount: 3 }), channel(2, { mentionCount: 4 })]);
+    setChannelNotificationLevel(1, "nothing");
+    expect(unreadBadgeCount()).toBe(4);
+    setChannelNotificationLevel(1, null);
+    expect(unreadBadgeCount()).toBe(7);
+  });
+
+  it("an override to All counts under a server at Nothing, and a DM is untouched", () => {
+    setChannelList([
+      channel(1, { mentionCount: 3 }),
+      channel(2, { mentionCount: 4 }),
+      channel(20, { type: "dm", unreadCount: 5, mentionCount: 1 }),
+    ]);
+    setDms([dm(20, 5, 1)]);
+    setGlobalNotificationLevel("nothing");
+    setChannelNotificationLevel(2, "all");
+    expect(unreadBadgeCount()).toBe(4 + 5);
+  });
+
+  it("re-pushes the count when a channel's level changes", () => {
+    const setUnreadBadge = vi.fn((_count: number) => Promise.resolve());
+    setChannelList([channel(1, { mentionCount: 3 })]);
+    const stop = startUnreadBadge({ setUnreadBadge });
+    expect(setUnreadBadge).toHaveBeenLastCalledWith(3);
+    setChannelNotificationLevel(1, "nothing");
+    expect(setUnreadBadge).toHaveBeenLastCalledWith(0);
+    stop();
   });
 
   it("at the 'nothing' level a muted DM still counts only its mentions", () => {

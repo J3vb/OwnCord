@@ -36,11 +36,24 @@ import {
   clampMenuToViewport,
   registerSidebarMenu,
 } from "@lib/context-menu";
+import {
+  NOTIFICATION_LEVELS,
+  effectiveNotificationLevel,
+  getChannelNotificationLevel,
+  setChannelNotificationLevel,
+  type NotificationLevel,
+} from "@lib/notificationLevel";
 import { appendPurgeSection } from "@components/purge-prompt";
 import { copyWithToast, isDeveloperMode } from "../../features/developer-mode/developerTools";
 import type { ChannelReorderData } from "../ChannelSidebar";
 import { shellText } from "../../i18n/shell";
 import { muteChoices, mutedUntilLabel } from "../muteMenu";
+
+const LEVEL_KEYS = {
+  all: "channel.notify.all",
+  mentions: "channel.notify.mentions",
+  nothing: "channel.notify.nothing",
+} as const satisfies Record<NotificationLevel, string>;
 
 /** Bubbles from a channel row when its mute is toggled. Re-exported from the
  *  mute store, which dispatches it on every write (F16). */
@@ -207,6 +220,47 @@ export function attachChannelContextMenu(
         }
         menu.append(trigger, flyout);
       }
+    }
+
+    if (showMute) {
+      // Notification Settings ›: the channel's own level, or the server's.
+      // Only the flyout rows act; the row itself just opens them.
+      const own = getChannelNotificationLevel(channel.id);
+      const { trigger, flyout } = createSubmenuTrigger(
+        shellText("channel.notifySettings"),
+        "context-menu-item",
+        { testId: "ctx-notify-settings" },
+        lifetimeSignal,
+      );
+      const addLevelRow = (
+        label: string,
+        level: NotificationLevel | null,
+        testId: string,
+      ): void => {
+        const row = createMenuItem(label, "context-menu-item", { testId });
+        row.setAttribute("role", "menuitemradio");
+        row.setAttribute("aria-checked", String(own === level));
+        row.addEventListener(
+          "click",
+          () => {
+            closeMenu();
+            setChannelNotificationLevel(channel.id, level);
+          },
+          { signal: lifetimeSignal },
+        );
+        flyout.appendChild(row);
+      };
+      addLevelRow(
+        shellText("channel.notify.default", {
+          level: shellText(LEVEL_KEYS[effectiveNotificationLevel()]),
+        }),
+        null,
+        "ctx-notify-default",
+      );
+      for (const level of NOTIFICATION_LEVELS) {
+        addLevelRow(shellText(LEVEL_KEYS[level]), level, `ctx-notify-${level}`);
+      }
+      menu.append(trigger, flyout);
     }
 
     if (showCopyLink) {
