@@ -259,6 +259,24 @@ test.describe("context menus are keyboard-operable (A11Y-01)", () => {
     expect(await row.evaluate((el) => el === document.activeElement)).toBe(true);
   });
 
+  test("arrow to a member then Shift+F10 opens its menu", async ({ page }) => {
+    const rows = page.locator(".member-item");
+    await expect(rows.nth(1)).toBeVisible({ timeout: 5_000 });
+    await rows.first().focus();
+    await page.keyboard.press("ArrowDown");
+    const target = rows.nth(1);
+    expect(await target.evaluate((el) => el === document.activeElement)).toBe(true);
+
+    await page.keyboard.press("Shift+F10");
+    const menu = page.locator(".context-menu").first();
+    await expect(menu).toBeVisible({ timeout: 3_000 });
+    await expect(menu.locator("[role='menuitem']:focus")).toHaveCount(1);
+
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".context-menu")).toHaveCount(0);
+    expect(await target.evaluate((el) => el === document.activeElement)).toBe(true);
+  });
+
   test("channel menu: opens from the keyboard, activates Mute, and offers Move Up/Down", async ({
     page,
   }) => {
