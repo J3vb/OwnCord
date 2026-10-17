@@ -6,7 +6,12 @@ import "@styles/login.css";
 import "@styles/app.css";
 import "@styles/theme-neon-glow.css";
 
-import { installGlobalErrorHandlers, safeMount } from "@lib/safe-render";
+import {
+  installGlobalErrorHandlers,
+  renderFallback,
+  safeMount,
+  type RenderRecovery,
+} from "@lib/safe-render";
 import { createApiClient, ApiClientError, errorText, TLS_CERT_CODE } from "@lib/api";
 import { SessionScope } from "@lib/sessionScope";
 import { prefetchMainPage } from "@pages/mainPagePrefetch";
@@ -554,6 +559,60 @@ async function checkHealth(
 // Guards the async MainPage mount below against the destroy-before-mount race:
 // a stale mount is discarded when a newer navigation supersedes it.
 let navGeneration = 0;
+
+/** Longest Reload waits for the voice leave before reloading regardless. */
+const RELOAD_VOICE_LEAVE_TIMEOUT_MS = 2000;
+
+// The two ways out of a page that failed to render (the fallback's buttons).
+// F5 and Ctrl+R are blocked, so without these a failed render is a dead end.
+// One reload at a time: a second click while the voice leave is pending must
+// wait for it too, not reload straight away.
+let reloadInFlight: Promise<void> | null = null;
+
+async function reloadAfterVoiceLeave(): Promise<void> {
+  // Leave a call first, the way a logout does, so other members don't see a
+  // ghost in the channel and no native call stays live behind the reloaded
+  // page. The leave is awaited (the native room's disconnect finishes in the
+  // host) but bounded: a hung or failed leave must not strand the user on
+  // the fallback.
+  if (voiceStore.getState().currentChannelId !== null) {
+    ws.send({ type: "voice_leave", payload: {} });
+    leaveVoiceChannel();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        import("@lib/livekitSession").then(({ leaveVoice }) => leaveVoice(false)),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, RELOAD_VOICE_LEAVE_TIMEOUT_MS);
+        }),
+      ]);
+    } catch (err) {
+      log.warn("Failed to leave voice before reload", err);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  window.location.reload();
+}
+
+const renderRecovery: RenderRecovery = {
+  reload: () => {
+    reloadInFlight ??= reloadAfterVoiceLeave().finally(() => {
+      reloadInFlight = null;
+    });
+    return reloadInFlight;
+  },
+  signOut: () => {
+    const wasSignedIn = authStore.getState().isAuthenticated;
+    clearAuth();
+    // A signed-in logout is navigated by the authStore subscriber (it needs
+    // the router still on "main"); only a session that never authenticated
+    // has to be sent back here.
+    if (wasSignedIn) return;
+    if (activePage === "connect") void renderPage("connect");
+    else navigate("connect");
+  },
+};
 
 // Render the appropriate page based on router state
 async function renderPage(pageId: "connect" | "main"): Promise<void> {
@@ -1247,7 +1306,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       }
     }
 
-    safeMount(connectPage, appEl!);
+    safeMount(connectPage, appEl!, renderRecovery);
 
     // A server refused this client's protocol epoch as too old: state the
     // requirement on the connect page itself and offer the update there. The
@@ -1378,17 +1437,24 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     // lazily so it stays out of the startup path. The chunk is pre-warmed as
     // soon as the WS connect succeeds, so this normally resolves from the
     // module cache.
-    const { createMainPage } = await import("@pages/MainPage");
-    // A newer navigation may have superseded this one while the chunk loaded;
-    // mounting now would fight the page that navigation rendered.
-    if (!isCurrentNavigation()) return;
-    const mainPage = createMainPage({
-      ws,
-      api,
-      getRetentionNotice: () => retentionNotice(serverInfoByHost.get(api.getConfig().host ?? "")),
-    });
-    safeMount(mainPage, appEl!);
-    currentPage = mainPage;
+    try {
+      const { createMainPage } = await import("@pages/MainPage");
+      // A newer navigation may have superseded this one while the chunk loaded;
+      // mounting now would fight the page that navigation rendered.
+      if (!isCurrentNavigation()) return;
+      const mainPage = createMainPage({
+        ws,
+        api,
+        getRetentionNotice: () => retentionNotice(serverInfoByHost.get(api.getConfig().host ?? "")),
+      });
+      safeMount(mainPage, appEl!, renderRecovery);
+      currentPage = mainPage;
+    } catch (err) {
+      // A rejected chunk import (or a page factory that throws) would leave
+      // the cleared window blank. Show the same fallback a failed mount does.
+      log.error("Main page failed to load", err);
+      if (isCurrentNavigation()) renderFallback(appEl!, err, renderRecovery);
+    }
   }
 }
 
@@ -1547,9 +1613,47 @@ function handleMessageDeepLink(
 ): void {
   openMessageTarget(channelId, messageId, host);
 }
-// An invite link pasted into chat runs the same flow as one opened from the OS.
+// An invite link from outside the app (the OS, a browser, another program)
+// would otherwise end the signed-in session the moment it arrives. While
+// signed in (or signing in), ask first; Cancel leaves everything as it is and the
+// link is dropped. Elsewhere (connect page) nothing is lost, so it runs as
+// before. A second link while the dialog is open replaces the first.
+function handleExternalInviteLink(code: string, host?: string): void {
+  // Signed in, or signing in (the connect call is in flight, or the connected
+  // overlay is still up before the main page mounts): taking the link ends
+  // that session, so ask. Otherwise nothing is lost and it runs as before.
+  if (activePage !== "main" && !authStore.getState().isAuthenticated && lastConnectHost === "") {
+    handleInviteDeepLink(code, host);
+    return;
+  }
+  const inVoice = voiceStore.getState().currentChannelId !== null;
+  const currentName = authStore.getState().serverName ?? api.getConfig().host;
+  // On demand, like the in-chat chip: keeps the modal and its catalog out of
+  // the startup chunk.
+  void Promise.all([import("@components/InviteJoinConfirm"), import("./i18n/messaging")])
+    .then(([{ confirmInviteJoin }, { messagingText }]) => {
+      const current =
+        currentName === undefined || currentName === ""
+          ? messagingText("invite.thisServer")
+          : currentName;
+      confirmInviteJoin(
+        messagingText(inVoice ? "invite.openBodyInVoice" : "invite.openBody", { current }),
+        () => handleInviteDeepLink(code, host),
+        {
+          title:
+            host === undefined
+              ? messagingText("invite.openTitleNoHost")
+              : messagingText("invite.openTitle", { target: host }),
+          confirmLabel: messagingText("invite.openButton"),
+        },
+      );
+    })
+    .catch((err: unknown) => log.warn("Invite confirmation failed to open", err));
+}
+// An invite chip clicked in chat already asked ("Leave X to join Y?") through
+// the same dialog before it reached this handler, so it goes straight in.
 setInviteJoinHandler(handleInviteDeepLink);
-void desktop.deepLinks.init(handleInviteDeepLink, handleMessageDeepLink);
+void desktop.deepLinks.init(handleExternalInviteLink, handleMessageDeepLink);
 
 // A clicked message notification opens the message it was for (U1d). The native
 // host emits `notification-click` with the target; routing it through the same

@@ -8,22 +8,54 @@
 import { Disposable } from "@lib/disposable";
 import { appendChildren, createElement } from "@lib/dom";
 import { createModal } from "@lib/modalFactory";
+import { onAuthCleared } from "@stores/auth.store";
 import { messagingText } from "../i18n/messaging";
 
-let dialogShown = false;
+/** The open dialog's live parts, so a later request can take it over. */
+interface OpenDialog {
+  title: HTMLElement;
+  body: HTMLElement;
+  confirm: HTMLElement;
+  cancel: HTMLElement;
+  onConfirm: () => void;
+  close: () => void;
+}
+let open: OpenDialog | null = null;
 
-/** Ask first; `onConfirm` runs only when the user confirms. */
-export function confirmInviteJoin(body: string, onConfirm: () => void): void {
-  // A double-click must not stack two dialogs.
-  if (dialogShown) return;
-  dialogShown = true;
+/** Wording overrides; the in-chat chip uses the defaults. */
+export interface InviteConfirmText {
+  readonly title?: string;
+  readonly confirmLabel?: string;
+}
+
+/**
+ * Ask first; `onConfirm` runs only when the user confirms. At most one dialog
+ * is ever open: a request that arrives while it is showing replaces its text
+ * and its action, so the latest invite wins and the earlier one is dropped.
+ */
+export function confirmInviteJoin(
+  body: string,
+  onConfirm: () => void,
+  text: InviteConfirmText = {},
+): void {
+  const title = text.title ?? messagingText("invite.confirmTitle");
+  const confirmLabel = text.confirmLabel ?? messagingText("invite.confirmButton");
+  if (open !== null) {
+    open.title.textContent = title;
+    open.body.textContent = body;
+    open.confirm.textContent = confirmLabel;
+    open.onConfirm = onConfirm;
+    // The text changed under the user: put them back on the safe choice.
+    open.cancel.focus();
+    return;
+  }
   const owner = new Disposable();
   const header = createElement("div", { class: "modal-header" });
-  header.appendChild(
-    createElement("h3", { id: "invite-join-title" }, messagingText("invite.confirmTitle")),
-  );
+  const titleEl = createElement("h3", { id: "invite-join-title" }, title);
+  header.appendChild(titleEl);
   const bodyEl = createElement("div", { class: "modal-body" });
-  bodyEl.appendChild(createElement("p", {}, body));
+  const bodyText = createElement("p", {}, body);
+  bodyEl.appendChild(bodyText);
   const cancel = createElement(
     "button",
     { class: "btn-modal-cancel", type: "button", "data-testid": "invite-join-cancel" },
@@ -32,19 +64,31 @@ export function confirmInviteJoin(body: string, onConfirm: () => void): void {
   const confirm = createElement(
     "button",
     { class: "btn-primary", type: "button", "data-testid": "invite-join-confirm" },
-    messagingText("invite.confirmButton"),
+    confirmLabel,
   );
   const footer = createElement("div", { class: "modal-footer" });
   appendChildren(footer, cancel, confirm);
   const content = createElement("div");
   appendChildren(content, header, bodyEl, footer);
 
+  const dialog: OpenDialog = {
+    title: titleEl,
+    body: bodyText,
+    confirm,
+    cancel,
+    onConfirm,
+    close: () => modal.close(),
+  };
+  open = dialog;
+  // Any end of the session (logout, 401, server switch) drops the prompt.
+  const stopAuthWatch = onAuthCleared(() => modal.close());
   const modal = createModal({
     content,
     ariaLabelledBy: "invite-join-title",
     overlayAttrs: { "data-testid": "invite-join-dialog" },
     onClose: () => {
-      dialogShown = false;
+      open = null;
+      stopAuthWatch();
       owner.destroy();
     },
   });
@@ -53,7 +97,7 @@ export function confirmInviteJoin(body: string, onConfirm: () => void): void {
     "click",
     () => {
       modal.close();
-      onConfirm();
+      dialog.onConfirm();
     },
     { signal: owner.signal },
   );
