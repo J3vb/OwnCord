@@ -214,7 +214,11 @@ test.describe("P1-01 channel list priority over a long member list", () => {
 
   test("a saved height holds when the channel list overflows (P1-01)", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
-    await signInFreshProfile(page, { ...LEFT_LAYOUT, "owncord:member-list-height": "200" }, LONG_CHANNEL_LIST);
+    await signInFreshProfile(
+      page,
+      { ...LEFT_LAYOUT, "owncord:member-list-height": "200" },
+      LONG_CHANNEL_LIST,
+    );
 
     const memberBox = (await page.locator("[data-testid='sidebar-members']").boundingBox())!;
     expect(Math.abs(memberBox.height - 200)).toBeLessThanOrEqual(1);
