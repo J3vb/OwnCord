@@ -5,6 +5,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { isDisplayed } from "@lib/dialogOpen";
 import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
 import { createElement, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
@@ -260,7 +261,10 @@ export function createSettingsOverlay(
       const host = createElement("div", { class: "settings-pane active" });
       void import("./settings/AboutTab").then(
         ({ buildAboutTab }) => {
-          if (!signal.aborted) host.replaceWith(buildAboutTab(signal));
+          if (signal.aborted) return;
+          host.replaceWith(buildAboutTab(signal));
+          // The real tab arrived after renderActiveTab's pass: mark it too.
+          markSearchHits();
         },
         (err: unknown) => {
           log.warn("About tab failed to load", { error: String(err) });
@@ -299,8 +303,11 @@ export function createSettingsOverlay(
   /** Highlight the query in the open tab and bring the first hit into view. */
   function markSearchHits(): void {
     if (contentArea === null) return;
-    const first = highlightMatches(contentArea, query);
-    first?.scrollIntoView?.({ block: "center" });
+    highlightMatches(contentArea, query);
+    const hit = Array.from(
+      contentArea.querySelectorAll<HTMLElement>("mark.settings-search-hit"),
+    ).find((m) => isDisplayed(m));
+    hit?.scrollIntoView?.({ block: "center" });
   }
 
   /** Hide the tabs (and headings) the query rules out; show the rest. */
@@ -338,6 +345,12 @@ export function createSettingsOverlay(
 
   /** Move onto a visible tab from the search box (Up/Down/Enter). */
   function enterTabs(pick: "first" | "last"): void {
+    if (query === "") {
+      // Nothing to pick from: just move onto the open tab.
+      const btn = tabButtons.get(activeTab);
+      if (btn?.hidden === false) btn.focus();
+      return;
+    }
     const shown = visibleTabs();
     const name = pick === "first" ? shown[0] : shown[shown.length - 1];
     if (name === undefined) return;
@@ -375,6 +388,8 @@ export function createSettingsOverlay(
     // that is not shown here is ignored.
     const requested = uiStore.getState().settingsTab;
     if (requested !== null && requested !== activeTab && tabButtons.has(requested)) {
+      // A hidden requested tab would strand the only tab stop: reset search.
+      clearSearch();
       setActiveTab(requested);
     }
     // Closing tore down the live parts of the active tab (mic meter, camera
@@ -386,7 +401,7 @@ export function createSettingsOverlay(
     if (!wasOpen && panel !== null) {
       restoreFocus = focusDialog(panel, options.fallbackFocus);
       // The search box is the first control, but opening should not park
-      // the caret there: land on the open tab as before.
+      // the caret there: focus lands on the active tab instead.
       if (document.activeElement === searchInput) tabButtons.get(activeTab)?.focus();
     }
   }
@@ -489,6 +504,12 @@ export function createSettingsOverlay(
     searchBox.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
+        // An IME composition owns its keys (Enter commits, Escape cancels).
+        if (e.isComposing || e.keyCode === 229) {
+          // Keep the page's Escape-to-close from seeing the IME's key.
+          e.stopPropagation();
+          return;
+        }
         if (e.key === "Escape" && searchBox.value !== "") {
           // The first Escape only clears; the next one closes the panel.
           e.preventDefault();
@@ -496,6 +517,7 @@ export function createSettingsOverlay(
           clearSearch();
         } else if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter") {
           e.preventDefault();
+          if (e.key === "Enter" && query === "") return;
           enterTabs(e.key === "ArrowUp" ? "last" : "first");
         }
       },
@@ -540,9 +562,14 @@ export function createSettingsOverlay(
       settingsText("shell.editProfile"),
     );
     if (authenticated) {
-      editProfileLink.addEventListener("click", () => setActiveTab(ACCOUNT), {
-        signal: disposable.signal,
-      });
+      editProfileLink.addEventListener(
+        "click",
+        () => {
+          clearSearch();
+          setActiveTab(ACCOUNT);
+        },
+        { signal: disposable.signal },
+      );
     } else {
       editProfileLink.style.display = "none";
     }

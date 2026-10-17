@@ -71,6 +71,8 @@ import {
   highlightMatches,
   clearHighlights,
 } from "@components/settings/settingsSearch";
+import { settingsText } from "../../src/i18n/settings";
+import { whatsNewText } from "../../src/i18n/whatsNew";
 import type { SearchableTab } from "@components/settings/settingsSearch";
 
 const options = {
@@ -147,6 +149,20 @@ describe("settings search", () => {
   }
 
   describe("index", () => {
+    // Status, error and empty-state text that is not searchable copy: it
+    // changes with state, so it is named here rather than indexed. Anything
+    // else shown as a label or description must be in the index.
+    const STATE_TEXT = new Set<string>([
+      settingsText("notifications.permission.unavailable"),
+      settingsText("notifications.blockedReason"),
+      settingsText("notifications.muted.empty"),
+      settingsText("accessibility.syncOsMotion.asking"),
+      settingsText("accessibility.syncOsMotion.notAsking"),
+      settingsText("keybinds.pttModeOff"),
+      settingsText("voiceAudio.videoCodecIntel"),
+      whatsNewText("about.updateDescNoVersion"),
+      whatsNewText("about.updateDesc", { current: "1.2.3-test" }),
+    ]);
     const names = Object.keys(SETTINGS_SEARCH_INDEX) as SearchableTab[];
 
     // Drift guard. The index is static so no tab has to be rendered to search
@@ -172,11 +188,11 @@ describe("settings search", () => {
         const known = new Set(indexed.map((x) => x.trim()));
         const unindexed = Array.from(
           pane.querySelectorAll(
-            ".setting-label, .settings-section-title, .setting-group-title, .keybind-section-header, .settings-card-head h3",
+            ".setting-label, .setting-desc, .settings-section-title, .setting-group-title, .keybind-section-header, .settings-card-head h3",
           ),
         )
           .map((el) => (el.textContent ?? "").trim())
-          .filter((text) => text !== "" && !known.has(text));
+          .filter((text) => text !== "" && !known.has(text) && !STATE_TEXT.has(text));
         expect(unindexed).toEqual([]);
       },
     );
@@ -288,6 +304,7 @@ describe("settings search", () => {
 
     it("highlights the already-open tab as the query changes and scrolls to the first hit", () => {
       const scroll = vi.fn();
+      const original = Element.prototype.scrollIntoView;
       Element.prototype.scrollIntoView = scroll;
       try {
         mountOverlay();
@@ -299,8 +316,7 @@ describe("settings search", () => {
         expect(scroll).toHaveBeenCalledTimes(1);
         expect(scroll.mock.contexts[0]).toBe(container.querySelector("mark.settings-search-hit"));
       } finally {
-        // @ts-expect-error jsdom has no scrollIntoView; restore that
-        delete Element.prototype.scrollIntoView;
+        Element.prototype.scrollIntoView = original;
       }
     });
 
@@ -323,6 +339,100 @@ describe("settings search", () => {
       overlay!.close();
       expect(box().value).toBe("");
       expect(visibleNames()).toHaveLength(10);
+    });
+  });
+
+  describe("overlay behaviour", () => {
+    it("highlights the About tab after it loads asynchronously", async () => {
+      mountOverlay();
+      type("history");
+      tabs()
+        .find((t) => labelFor(t) === "About")!
+        .click();
+      await vi.waitFor(() => expect(container.querySelector(".about-tab")).not.toBeNull());
+      const marks = container.querySelectorAll(".about-tab mark.settings-search-hit");
+      expect(marks.length).toBeGreaterThan(0);
+    });
+
+    it("scrolls to the first visible hit, skipping hidden rows", () => {
+      const scroll = vi.fn();
+      const original = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = scroll;
+      try {
+        mountOverlay();
+        tabs()
+          .find((t) => labelFor(t) === "Appearance")!
+          .click();
+        type("a");
+        const rows = Array.from(container.querySelectorAll("mark.settings-search-hit")).map((m) =>
+          m.closest<HTMLElement>(".setting-label, .setting-desc, h3"),
+        );
+        expect(new Set(rows).size).toBeGreaterThan(1);
+        rows[0]!.style.display = "none";
+        scroll.mockClear();
+        type("a");
+        const target = scroll.mock.contexts[0] as HTMLElement;
+        expect(scroll).toHaveBeenCalledTimes(1);
+        expect(rows[0]!.contains(target)).toBe(false);
+      } finally {
+        Element.prototype.scrollIntoView = original;
+      }
+    });
+
+    it("ignores keys that belong to an IME composition", () => {
+      mountOverlay();
+      type("zoom");
+      const during = press(box(), { key: "Escape", isComposing: true });
+      expect(during.defaultPrevented).toBe(false);
+      expect(box().value).toBe("zoom");
+      press(box(), { key: "Process", keyCode: 229 });
+      press(box(), { key: "ArrowDown", isComposing: true });
+      expect(document.activeElement).not.toBe(tabs().find((t) => !t.hidden));
+      expect(options.onClose).not.toHaveBeenCalled();
+    });
+
+    it("Edit Profile clears a query that hid Account", () => {
+      mountOverlay();
+      tabs()
+        .find((t) => labelFor(t) === "Appearance")!
+        .click();
+      type("zoom");
+      expect(tabs().find((t) => labelFor(t) === "Account")!.hidden).toBe(true);
+      container.querySelector<HTMLElement>(".settings-sidebar-edit")!.click();
+      expect(box().value).toBe("");
+      const account = tabs().find((t) => labelFor(t) === "Account")!;
+      expect(account.hidden).toBe(false);
+      expect(account.getAttribute("tabindex")).toBe("0");
+      expect(visibleNames()).toHaveLength(10);
+    });
+
+    it("a requested tab that the query hid is reachable once settings reopens", () => {
+      mountOverlay({ safetyTab: () => document.createElement("div") });
+      type("zoom");
+      mockUiState.settingsTab = "Safety";
+      overlay!.open();
+      expect(box().value).toBe("");
+      const safety = tabs().find((t) => labelFor(t) === "Safety")!;
+      expect(safety.hidden).toBe(false);
+      expect(safety.getAttribute("tabindex")).toBe("0");
+    });
+
+    it("Down, Up and Enter from an empty box do not switch tabs", () => {
+      mountOverlay();
+      tabs()
+        .find((t) => labelFor(t) === "Appearance")!
+        .click();
+      const active = (): string => container.querySelector(`${TAB_SELECTOR}.active`)!.textContent!;
+      press(box(), { key: "ArrowUp" });
+      expect(active()).toBe("Appearance");
+      expect(document.activeElement?.textContent).toBe("Appearance");
+      box().focus();
+      press(box(), { key: "ArrowDown" });
+      expect(active()).toBe("Appearance");
+      box().focus();
+      press(box(), { key: "Enter" });
+      expect(document.activeElement).toBe(box());
+      expect(active()).toBe("Appearance");
     });
   });
 

@@ -6,7 +6,14 @@
  * rendered DOM: tabs build lazily (and some read the network), so rendering
  * all of them to index would defeat that. `tests/unit/settings-search.test.ts`
  * renders every tab and fails when an indexed string is not on screen, or a
- * row label on screen is not indexed, so the list cannot drift silently.
+ * row label or description on screen is not indexed, so the list cannot drift
+ * silently.
+ *
+ * Known gaps: rows that exist only on the Linux native build, or only in some
+ * state (a connected server, a granted permission), are not in the test's
+ * jsdom render and so are not indexed unless they also show there. Matching
+ * and highlighting lower-case the text and slice the original by the match
+ * length, which assumes the English catalog (no case mapping changes length).
  */
 
 import { accountText } from "../../i18n/account";
@@ -65,6 +72,7 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("appearance.timeFormat"),
     s("appearance.timeFormat.desc"),
     s("appearance.accentColor"),
+    s("appearance.accentNote"),
   ],
   Accessibility: () => [
     s("accessibility.group.motion"),
@@ -106,9 +114,13 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("voiceAudio.autoPlayCameras"),
     s("voiceAudio.autoPlayCamerasDesc"),
     s("voiceAudio.cameraQuality"),
+    s("voiceAudio.cameraQualityDesc"),
     s("voiceAudio.screenQuality"),
+    s("voiceAudio.screenQualityDesc"),
     s("voiceAudio.screenFps"),
+    s("voiceAudio.screenFpsDesc"),
     s("voiceAudio.videoCodec"),
+    s("voiceAudio.videoCodecDesc"),
     s("voiceAudio.echo.label"),
     s("voiceAudio.echo.desc"),
     s("voiceAudio.noise.label"),
@@ -218,6 +230,8 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
   Logs: () => [
     s("diagnostics.title"),
     s("diagnostics.description"),
+    s("diagnostics.limitation"),
+    s("diagnostics.micCheck"),
     s("logs.getHelp"),
     s("logs.bundleNote"),
     s("logs.clientLogs"),
