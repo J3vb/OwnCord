@@ -88,6 +88,12 @@ describe("member column CSS (3C-6b)", () => {
     expect(block).toMatch(/top:\s*var\(--header-height, 48px\)/);
   });
 
+  it("the pinned panel drops below the chat header, so the pin button can close it", () => {
+    expect(JSON.stringify(cascadedDeclaration(".pinned-panel", "top")?.value)).toContain(
+      "header-height",
+    );
+  });
+
   it("the sidebar copy keeps filling its section", () => {
     expect(cascadedDeclaration(".sidebar-members-section .member-list", "width")).toBeDefined();
   });
