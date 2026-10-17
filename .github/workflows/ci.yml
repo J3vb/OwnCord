@@ -1184,7 +1184,7 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cache/owncord-linux-webrtc
-          key: linux-webrtc-${{ runner.arch }}-webrtc-89d790b-v2
+          key: linux-webrtc-${{ runner.arch }}-webrtc-89d790b-v3
 
       - name: Install native-voice build prerequisites
         run: bash ../scripts/linux-webrtc-toolchain.sh
@@ -1198,6 +1198,9 @@ jobs:
         uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: Client/src-tauri
+          # webrtc-sys build.rs does not rerun on CUDA_HOME; keep a target/ built
+          # without NVENC from restoring over one that has it.
+          env-vars: "CARGO CC CFLAGS CXX CMAKE RUST CUDA_HOME"
 
       # Self-test the glibc-floor matcher before trusting it (the same rule the
       # count/citation/migration matchers follow): a gate whose parser silently
@@ -1550,7 +1553,7 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cache/owncord-linux-webrtc
-          key: linux-webrtc-${{ runner.arch }}-webrtc-89d790b-v2
+          key: linux-webrtc-${{ runner.arch }}-webrtc-89d790b-v3
 
       - name: Install native-voice build prerequisites
         if: startsWith(matrix.os, 'ubuntu')
@@ -1565,6 +1568,9 @@ jobs:
         uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: Client/src-tauri
+          # webrtc-sys build.rs does not rerun on CUDA_HOME; keep a target/ built
+          # without NVENC from restoring over one that has it.
+          env-vars: "CARGO CC CFLAGS CXX CMAKE RUST CUDA_HOME"
 
       - name: Install npm dependencies
         run: npm ci
@@ -1593,6 +1599,11 @@ jobs:
         if: startsWith(matrix.os, 'ubuntu')
         working-directory: Client/
         run: bash scripts/check-glibc-floor.sh src-tauri/target/release/owncord-client
+
+      - name: Check the binary has the NVIDIA encoder
+        if: startsWith(matrix.os, 'ubuntu')
+        working-directory: Client/
+        run: bash scripts/check-nvenc-linked.sh src-tauri/target/release/owncord-client
 
   client-fullstack:
     name: Client E2E (real server and media)

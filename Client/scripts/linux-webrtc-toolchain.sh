@@ -15,6 +15,9 @@
 # LK_CUSTOM_WEBRTC (so webrtc-sys uses our verified copy instead of
 # downloading its own).
 #
+# It also fetches cuda.h so webrtc-sys compiles NVENC/NVDEC, and exports
+# CUDA_HOME.
+#
 # Invoked by every Linux leg that builds the crate: ci.yml's rust-tests and
 # tauri-build, and release.yml's x64 and arm64 client jobs. Idempotent — a
 # second call in the same run re-uses what the first installed.
@@ -22,6 +25,9 @@
 # Security posture, matching the download-and-verify convention the release
 # workflow already uses (see the actionlint/osv-scanner/zizmor installs):
 #   - the libwebrtc archive is pinned by version AND sha256, checked before use;
+#   - the CUDA headers come from NVIDIA's nvidia-cuda-runtime-cu12 wheel on PyPI,
+#     pinned by content-addressed URL plus sha256 per architecture; only
+#     include/ is extracted, and it is compiled against and never shipped;
 #   - clang: CC/CXX from the environment if both are set (and both are
 #     clang >= 21, else the script fails); otherwise an
 #     installed clang++-21 or clang++ (in that order) reporting major >= 21;
@@ -50,6 +56,11 @@ set -euo pipefail
 # stdout (fd 3), so tool chatter can never corrupt the eval'd exports.
 exec 3>&1 1>&2
 
+# CUDA_WHEEL_VERSION names the nvidia-cuda-runtime-cu12 wheel the per-arch URLs
+# and digests below come from (cuda.h only, ~1 MB; Ubuntu's nvidia-cuda-dev is
+# 668 MB). Bumping it moves all three together.
+CUDA_WHEEL_VERSION="12.8.90"
+
 # libwebrtc tag: must match webrtc-sys-build's WEBRTC_TAG for the webrtc-sys
 # version livekit 0.9.5 resolves to (0.3.49, whose webrtc-sys-build 0.3.19 still
 # pins webrtc-89d790b; libwebrtc crate 0.3.52). A crate bump that moves the tag
@@ -62,10 +73,14 @@ case "$(uname -m)" in
   x86_64)
     WEBRTC_TRIPLE="linux-x64-release"
     WEBRTC_SHA256="b167adad5291cea0e4d66a0454d9d52d2ad714e6b0ed70f4410317d3ebde70c5"
+    CUDA_WHEEL_URL="https://files.pythonhosted.org/packages/0d/9b/a997b638fcd068ad6e4d53b8551a7d30fe8b404d6f1804abf1df69838932/nvidia_cuda_runtime_cu12-12.8.90-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
+    CUDA_WHEEL_SHA256="adade8dcbd0edf427b7204d480d6066d33902cab2a4707dcfc48a2d0fd44ab90"
     ;;
   aarch64)
     WEBRTC_TRIPLE="linux-arm64-release"
     WEBRTC_SHA256="f716b10eade18dd11b03b9f93b50cee2ca2eec73b975a63f2ae9ea2a35706420"
+    CUDA_WHEEL_URL="https://files.pythonhosted.org/packages/7c/75/f865a3b236e4647605ea34cc450900854ba123834a5f1598e160b9530c3a/nvidia_cuda_runtime_cu12-12.8.90-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl"
+    CUDA_WHEEL_SHA256="52bf7bbee900262ffefe5e9d5a2a69a30d97e2bc5bb6cc866688caa976966e3d"
     ;;
   *)
     echo "unsupported architecture: $(uname -m) (Linux x64 and arm64 only)" >&2
@@ -84,12 +99,14 @@ emit_env() {
       echo "CC=$CLANG_CC"
       echo "CXX=$CLANG_CXX"
       echo "LK_CUSTOM_WEBRTC=$WEBRTC_DIR"
+      echo "CUDA_HOME=$CUDA_DIR"
     } >> "$GITHUB_ENV"
   else
     {
       echo "export CC=$CLANG_CC"
       echo "export CXX=$CLANG_CXX"
       echo "export LK_CUSTOM_WEBRTC=$WEBRTC_DIR"
+      echo "export CUDA_HOME=$CUDA_DIR"
     } >&3
   fi
 }
@@ -178,10 +195,38 @@ if [ ! -f "$WEBRTC_DIR/lib/libwebrtc.a" ]; then
   rm -f "$zip"
 fi
 
+# ---------------------------------------------------------------------------
+# 3. hardware video encoder headers
+# ---------------------------------------------------------------------------
+# webrtc-sys compiles its NVENC/NVDEC encoders and decoders when
+# $CUDA_HOME/include/cuda.h exists. The NVIDIA libraries are dlopened at run
+# time, so the build needs headers only, and a machine without them still runs.
+# Without cuda.h the crate builds silently with no hardware codec
+# (check-nvenc-linked.sh guards the release binary).
+#
+# VA-API (libva-dev) is deliberately NOT installed: webrtc-sys would then also
+# compile its VA-API H.264 encoder, and hardware H.264 under voice E2EE is
+# unproven there (Intel's 3-byte start codes broke E2EE on Windows; some Mesa
+# drivers write their own slice NAL). It waits on a real Intel/AMD E2EE check.
+CUDA_DIR="$CACHE/cuda-headers-$CUDA_WHEEL_VERSION"
+if [ ! -f "$CUDA_DIR/include/cuda.h" ]; then
+  whl="$CACHE/cuda-runtime-$(uname -m).whl"
+  curl -sSfL --retry 3 -o "$whl" "$CUDA_WHEEL_URL"
+  echo "$CUDA_WHEEL_SHA256  $whl" | sha256sum -c -
+  rm -rf "$CUDA_DIR" "$CACHE/.extract-cuda"
+  mkdir -p "$CACHE/.extract-cuda"
+  unzip -q "$whl" 'nvidia/cuda_runtime/include/*' -d "$CACHE/.extract-cuda"
+  mkdir -p "$CUDA_DIR"
+  mv "$CACHE/.extract-cuda/nvidia/cuda_runtime/include" "$CUDA_DIR/include"
+  rm -rf "$CACHE/.extract-cuda" "$whl"
+fi
+[ -f "$CUDA_DIR/include/cuda.h" ] || { echo "cuda.h missing after extract" >&2; exit 1; }
+
 # Exports to stdout (local `eval` use) or $GITHUB_ENV (CI).
 emit_env
 echo "clang: $CLANG_CXX: $("$CLANG_CXX" --version | head -1)"
 if [ "$CLANG_CXX" = /usr/bin/clang++-21 ]; then
   echo "clang package: clang-21 $(dpkg-query -W -f='${Version}' clang-21 2>/dev/null || echo unknown)"
 fi
+echo "cuda headers: $CUDA_DIR (CUDA_VERSION $(awk '/#define CUDA_VERSION /{print $3}' "$CUDA_DIR/include/cuda.h"))"
 echo "libwebrtc: $WEBRTC_DIR ($(du -sh "$WEBRTC_DIR" | cut -f1))"

@@ -97,7 +97,7 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   this backend rather than the webview. `webrtc-sys` then needs **clang >= 21**
   and downloads a prebuilt **libwebrtc** (~148 MB, ~800 MB extracted); GCC is
   refused (Chromium's hermetic libc++ relies on `trivial_abi`).
-  `Client/scripts/linux-webrtc-toolchain.sh` fetches libwebrtc and uses
+  `Client/scripts/linux-webrtc-toolchain.sh` fetches libwebrtc and the CUDA headers (so NVENC is built) and uses
   `CC`/`CXX`, an installed clang >= 21, or (Debian/Ubuntu only) apt.llvm.org's
   clang-21, in that order. Every Linux leg that builds the crate runs it (see
   the root CLAUDE.md for the local invocation). A non-Linux build is

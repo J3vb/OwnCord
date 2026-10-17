@@ -54,6 +54,7 @@
 //     Server/safefetch/testdata/classify_vectors.json  external_content.rs's tests
 //     Client/scripts/linux-webrtc-toolchain.sh         rust-tests / tauri-build run it
 //     Client/scripts/check-glibc-floor.sh              rust-tests runs its --selftest
+//     Client/scripts/check-nvenc-linked.sh             tauri-build runs it on the built binary
 //
 // The two architecture docs are the trap this table exists for: they are
 // Markdown, so a docs-only rule would skip them, and the Go tests that read
@@ -140,6 +141,7 @@ const RUST_READS_OUTSIDE = new Set([
   // only one component actually exercises.
   "Client/scripts/linux-webrtc-toolchain.sh",
   "Client/scripts/check-glibc-floor.sh",
+  "Client/scripts/check-nvenc-linked.sh",
 ]);
 
 /**
