@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { page } from "vitest/browser";
+// Same stylesheet order as main.ts: tokens, the border-box reset, then app.
+import "../../src/styles/tokens.css";
+import "../../src/styles/base.css";
 import "../../src/styles/app.css";
 
 // jsdom lays nothing out, so the 900px breakpoint of the member column's
@@ -42,7 +45,8 @@ describe("member column overlay breakpoint (real layout)", () => {
     const box = column.getBoundingClientRect();
     expect(box.right).toBe(899);
     expect(box.width).toBeLessThanOrEqual(280);
-    expect(box.top).toBe(0);
-    expect(box.height).toBe(600);
+    // Below the 48px chat header, so its Member List toggle stays clickable.
+    expect(box.top).toBe(48);
+    expect(box.height).toBe(552);
   });
 });

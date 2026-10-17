@@ -85,7 +85,7 @@ describe("member column CSS (3C-6b)", () => {
     const block =
       /@media \(max-width: 899px\)\s*\{\s*\.member-column\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
     expect(block).toMatch(/position:\s*fixed/);
-    expect(block).toMatch(/top:\s*var\(--header-height\)/);
+    expect(block).toMatch(/top:\s*var\(--header-height, 48px\)/);
   });
 
   it("the sidebar copy keeps filling its section", () => {

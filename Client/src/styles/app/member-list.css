@@ -38,7 +38,7 @@
   .member-column {
     position: fixed;
     /* Below the chat header, so its Member List toggle stays clickable. */
-    top: var(--header-height);
+    top: var(--header-height, 48px);
     bottom: 0;
     right: 0;
     /* Beats the width MemberColumn sets inline for the in-flow column. */
