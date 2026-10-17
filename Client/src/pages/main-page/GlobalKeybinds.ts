@@ -114,20 +114,6 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
     // A modal owns the keyboard while it is up.
     if (dialogOpen()) return;
 
-    // Ctrl+Enter answers a ringing call. With no ring it falls through to the
-    // composer's own use of the key, untouched.
-    if (
-      e.key === "Enter" &&
-      !e.shiftKey &&
-      !e.repeat &&
-      !e.isComposing &&
-      !e.defaultPrevented &&
-      handlers.ringActive?.() === true
-    ) {
-      runGlobal(e, "accept-ring", () => handlers.onAcceptRing?.());
-      return;
-    }
-
     // `e.key` is layout-dependent and uppercases with Shift held — compare
     // case-insensitively so Ctrl+Shift+V arrives as "V", not a missed "v".
     const key = e.key.toLowerCase();
@@ -220,6 +206,16 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
     if (e.key !== "Escape") return;
     escapeTaken = handlers.isSuspended?.() === true || dialogOpen();
   };
+  // Ctrl+Enter answers a ringing call. It is taken in the capture phase,
+  // before the message box would send its draft on the same key; with no
+  // ring the key reaches the message box untouched.
+  const onAcceptRingCapture = (e: KeyboardEvent): void => {
+    if (e.key !== "Enter" || !(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+    if (e.repeat || e.isComposing || handlers.isSuspended?.() === true || dialogOpen()) return;
+    if (handlers.ringActive?.() !== true) return;
+    e.stopPropagation();
+    runGlobal(e, "accept-ring", () => handlers.onAcceptRing?.());
+  };
   const onEscape = (e: KeyboardEvent): void => {
     if (e.key !== "Escape" || e.ctrlKey || e.metaKey || e.altKey) return;
     if (escapeTaken || e.defaultPrevented || e.isComposing || e.repeat) return;
@@ -237,6 +233,7 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
   const owner = new Disposable();
   document.addEventListener("keydown", handler, { signal: owner.signal });
   window.addEventListener("keydown", onEscapeCapture, { capture: true, signal: owner.signal });
+  window.addEventListener("keydown", onAcceptRingCapture, { capture: true, signal: owner.signal });
   window.addEventListener("keydown", onEscape, { signal: owner.signal });
   return () => owner.destroy();
 }

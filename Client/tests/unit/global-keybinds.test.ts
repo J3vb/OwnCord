@@ -543,6 +543,34 @@ describe("global keybinds", () => {
         expect(esc.defaultPrevented).toBe(true);
       });
 
+      it("Ctrl+Enter in the message box answers the ring and never sends the draft", () => {
+        const h = ringHandlers();
+        detach = attachGlobalKeybinds(h);
+        const box = document.createElement("textarea");
+        box.className = "msg-textarea";
+        box.value = "half-typed draft";
+        const onSend = vi.fn();
+        // The message box sends on Enter, Ctrl held or not, in its own listener.
+        box.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            onSend();
+          }
+        });
+        document.body.appendChild(box);
+        box.focus();
+
+        try {
+          keyOn(box, "Enter", { ctrlKey: true });
+
+          expect(h.onAcceptRing).toHaveBeenCalledOnce();
+          expect(onSend).not.toHaveBeenCalled();
+          expect(box.value).toBe("half-typed draft");
+        } finally {
+          box.remove();
+        }
+      });
+
       it("with no ring, Ctrl+Enter is left alone and Escape still marks read", () => {
         const h = ringHandlers(false);
         detach = attachGlobalKeybinds(h);

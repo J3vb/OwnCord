@@ -1281,9 +1281,9 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
     // The closed Settings panel is hidden by stylesheet only, which jsdom does
     // not load; hide it the way the real page's CSS does.
-    document
-      .querySelectorAll<HTMLElement>('[aria-modal="true"]')
-      .forEach((el) => (el.style.display = "none"));
+    const settingsOverlay = document.querySelector<HTMLElement>('[data-testid="settings-overlay"]');
+    expect(settingsOverlay).not.toBeNull();
+    settingsOverlay!.style.display = "none";
     document.dispatchEvent(
       new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, cancelable: true }),
     );
