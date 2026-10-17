@@ -690,6 +690,39 @@ impl VideoPublication {
 
 type VideoSlot = Arc<Mutex<Option<VideoPublication>>>;
 
+/// Why `set_screen_quality` did not apply. `Refused` changed nothing and the
+/// share goes on; after `Publish` only the screen video is unpublished: the
+/// capture (running at the new size) and the share audio stay up, so the
+/// caller must stop the screen or retry the publish.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "stage", content = "message", rename_all = "camelCase")]
+pub enum QualityError {
+    Refused(String),
+    Publish(String),
+}
+
+/// Whether a quality change for `capture` may go ahead: it must be the live,
+/// published share, with no source change pending (that change's new capture
+/// would otherwise carry the old options over the new quality).
+fn quality_gate(
+    live: Option<u64>,
+    published: bool,
+    change_pending: bool,
+    capture: u64,
+) -> Result<(), QualityError> {
+    if live != Some(capture) || !published {
+        return Err(QualityError::Refused(format!(
+            "screen capture {capture} is not the published screen share"
+        )));
+    }
+    if change_pending {
+        return Err(QualityError::Refused(
+            "the screen source is being changed".into(),
+        ));
+    }
+    Ok(())
+}
+
 /// The running screen capture: its id (what the webview names to publish or
 /// stop it) and the capturer thread.
 struct ScreenShare {
@@ -1481,6 +1514,43 @@ impl NativeSession {
         Ok(())
     }
 
+    /// Change the live share's quality: re-size and re-pace the running
+    /// capture, then publish it again with `publish` at the new size (the
+    /// SDK cannot change a sender's encoding). One `&mut self` hold covers
+    /// both steps, so a stop, source change or leave queued behind it runs
+    /// after the new publication exists and releases it, and one that came
+    /// first makes the gate refuse. Returns the new sid and the size.
+    pub async fn set_screen_quality(
+        &mut self,
+        capture: u64,
+        options: CaptureOptions,
+        publish: ScreenOptions,
+    ) -> Result<(String, u32, u32), QualityError> {
+        quality_gate(
+            self.screen.as_ref().map(|s| s.id),
+            self.screen_published(),
+            self.screen_change.is_some(),
+            capture,
+        )?;
+        let size = self
+            .screen
+            .as_ref()
+            .and_then(|s| s.capture.set_options(options));
+        let (width, height) = size.unwrap_or((publish.width, publish.height));
+        let sid = self
+            .publish_screen(
+                capture,
+                ScreenOptions {
+                    width,
+                    height,
+                    ..publish
+                },
+            )
+            .await
+            .map_err(QualityError::Publish)?;
+        Ok((sid, width, height))
+    }
+
     /// Whether the running capture is the one published as the screen share.
     fn screen_published(&self) -> bool {
         let live = self.screen.as_ref().map(|s| s.id);
@@ -1952,6 +2022,33 @@ mod tests {
         assert_eq!((layers[0].width, layers[0].height), (1280, 720));
         assert!(layers[0].encoding.max_bitrate <= 1_200_000);
         assert_eq!(layers[0].encoding.max_framerate, 15.0);
+    }
+
+    #[test]
+    fn screen_quality_is_refused_without_a_published_share() {
+        let refused = |r: Result<(), QualityError>| matches!(r, Err(QualityError::Refused(_)));
+        assert!(quality_gate(Some(4), true, false, 4).is_ok());
+        // No capture, an unpublished one (a failed republish or a codec
+        // switch in flight), or a stale id (a source change or stop came
+        // first).
+        assert!(refused(quality_gate(None, false, false, 4)));
+        assert!(refused(quality_gate(Some(4), false, false, 4)));
+        assert!(refused(quality_gate(Some(5), true, false, 4)));
+        // A pending source change keeps the options it started with.
+        assert!(refused(quality_gate(Some(4), true, true, 4)));
+    }
+
+    #[test]
+    fn a_quality_error_names_its_stage_for_the_webview() {
+        let json = |e| serde_json::to_value(e).unwrap();
+        assert_eq!(
+            json(QualityError::Refused("x".into())),
+            serde_json::json!({"stage": "refused", "message": "x"})
+        );
+        assert_eq!(
+            json(QualityError::Publish("y".into())),
+            serde_json::json!({"stage": "publish", "message": "y"})
+        );
     }
 
     #[test]

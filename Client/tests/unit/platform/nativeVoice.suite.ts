@@ -48,6 +48,10 @@ export interface NativeControl {
   refusesCameraChange(reason: string): void;
   /** The host refuses the next screen source change with this reason. */
   refusesScreenChange(reason: string): void;
+  /** The host answers the next live quality change with this publication. */
+  setsScreenQualityAs(set: { sid: string; width: number; height: number }): void;
+  /** The host rejects the next live quality change with this value. */
+  rejectsScreenQuality(rejection: unknown): void;
   /** The host refuses the next screen audio publish with this reason. */
   refusesScreenAudio(reason: string): void;
   /** The host answers the next mic test start with this test id. */
@@ -310,6 +314,49 @@ export function describeNativeVoiceSuite(
         ["native_voice_change_screen", { session: 7, source: "window:9", capture }],
         ["native_voice_change_screen", { session: 7, source: "portal", capture }],
       ]);
+    });
+
+    check("changes a live share's quality and types a refusal or a failed republish", async () => {
+      const capture = { fps: 15, maxWidth: 1280, maxHeight: 720 };
+      const publish = {
+        width: 1280,
+        height: 720,
+        maxBitrate: 1_500_000,
+        maxFramerate: 15,
+        simulcast: false,
+        codec: "vp8" as const,
+      };
+      ctx.native.setsScreenQualityAs({ sid: "TR_new", width: 1280, height: 720 });
+      await expect(ctx.subject.setScreenQuality(7, 3, capture, publish)).resolves.toEqual({
+        ok: true,
+        sid: "TR_new",
+        width: 1280,
+        height: 720,
+      });
+      ctx.native.rejectsScreenQuality({ stage: "refused", message: "not published" });
+      await expect(ctx.subject.setScreenQuality(7, 3, capture, publish)).resolves.toEqual({
+        ok: false,
+        stage: "refused",
+        message: "not published",
+      });
+      ctx.native.rejectsScreenQuality({ stage: "publish", message: "the server said no" });
+      await expect(ctx.subject.setScreenQuality(7, 3, capture, publish)).resolves.toEqual({
+        ok: false,
+        stage: "publish",
+        message: "the server said no",
+      });
+      // A rejection without a stage (an older host) changed nothing.
+      ctx.native.rejectsScreenQuality("unknown command");
+      await expect(ctx.subject.setScreenQuality(7, 3, capture, publish)).resolves.toEqual({
+        ok: false,
+        stage: "refused",
+        message: "unknown command",
+      });
+      const call = [
+        "native_voice_set_screen_quality",
+        { session: 7, capture: 3, options: capture, publish },
+      ];
+      expect(ctx.native.commands()).toEqual([call, call, call, call]);
     });
 
     check("lists the host's devices and switches by their ids", async () => {
