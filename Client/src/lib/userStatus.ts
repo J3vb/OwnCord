@@ -61,6 +61,10 @@ export function loadUserStatusOrigin(): StatusOrigin {
  * silently mark a real choice as revocable.
  */
 export function saveUserStatus(status: UserStatus, origin: StatusOrigin = "manual"): void {
+  // Any status write ends a running timer: a manual change replaces it, the
+  // timer's own revert is its end, and a caller that wants a new timer arms
+  // it after this call (saveStatusTimer).
+  clearStatusTimer();
   savePref(USER_STATUS_ORIGIN_PREF_KEY, origin);
   savePref(USER_STATUS_PREF_KEY, status);
 }
@@ -104,4 +108,65 @@ export function loadCustomStatus(): string {
  *  is only so the input renders the right text before `ready` arrives. */
 export function saveCustomStatus(text: string): void {
   savePref(CUSTOM_STATUS_PREF_KEY, text.slice(0, MAX_CUSTOM_STATUS_LEN));
+}
+
+// ---------------------------------------------------------------------------
+// Status timers (Idle / Do Not Disturb / Invisible "for 1 hour")
+// ---------------------------------------------------------------------------
+
+/** Where a running timer is kept, next to the status it belongs to, so an app
+ *  restart inside the window still reverts when it ends. Client-side only: the
+ *  server never hears of it and just sees the revert to Online. */
+export const STATUS_TIMER_PREF_KEY = "userStatusTimer";
+
+/** The statuses a timer may be put on. Online has nothing to revert to. */
+export type TimedStatus = "idle" | "dnd" | "invisible";
+
+export interface StatusTimer {
+  readonly status: TimedStatus;
+  /** Epoch milliseconds the status reverts to Online. */
+  readonly until: number;
+}
+
+export function isTimedStatus(status: UserStatus): status is TimedStatus {
+  return status === "idle" || status === "dnd" || status === "invisible";
+}
+
+/** The stored timer, or null when there is none or it is malformed. Does not
+ *  judge whether it still matches the current status or has expired. */
+export function loadStatusTimer(): StatusTimer | null {
+  const raw = loadPref<Record<string, unknown> | null>(STATUS_TIMER_PREF_KEY, null);
+  if (raw === null || typeof raw !== "object") return null;
+  const { status, until } = raw;
+  if (typeof status !== "string" || !isUserStatus(status) || !isTimedStatus(status)) return null;
+  if (typeof until !== "number" || !Number.isFinite(until)) return null;
+  return { status, until };
+}
+
+/** Put a timer on the current status. Call after saveUserStatus, which
+ *  clears any earlier one. */
+export function saveStatusTimer(status: TimedStatus, until: number): void {
+  savePref(STATUS_TIMER_PREF_KEY, { status, until });
+}
+
+/** Forget the timer. A no-op (and no event) when none is stored. */
+export function clearStatusTimer(): void {
+  if (loadPref<unknown>(STATUS_TIMER_PREF_KEY, null) === null) return;
+  savePref(STATUS_TIMER_PREF_KEY, null);
+}
+
+/** Run `onChange` whenever the stored timer is set or cleared in this window. */
+export function onStatusTimerChange(
+  onChange: (timer: StatusTimer | null) => void,
+  options?: { signal?: AbortSignal },
+): () => void {
+  const handler = (e: Event): void => {
+    const detail = (e as CustomEvent<{ key?: string }>).detail;
+    if (detail?.key !== STATUS_TIMER_PREF_KEY) return;
+    onChange(loadStatusTimer());
+  };
+  window.addEventListener("owncord:pref-change", handler, { signal: options?.signal });
+  return () => {
+    window.removeEventListener("owncord:pref-change", handler);
+  };
 }

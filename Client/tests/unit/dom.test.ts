@@ -139,6 +139,25 @@ describe("setOwnedTimeout", () => {
     }
   });
 
+  it("returns a function that cancels the pending step early", () => {
+    vi.useFakeTimers();
+    try {
+      const fn = vi.fn();
+      const cancel = setOwnedTimeout(new AbortController().signal, fn, 100);
+      cancel();
+      vi.advanceTimersByTime(100);
+      expect(fn).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+      // Nothing was scheduled for an already-aborted owner, and cancelling it is safe.
+      const owner = new AbortController();
+      owner.abort();
+      setOwnedTimeout(owner.signal, fn, 100)();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("clears the pending step when its owner aborts", () => {
     vi.useFakeTimers();
     try {

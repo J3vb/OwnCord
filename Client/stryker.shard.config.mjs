@@ -135,6 +135,8 @@ export const shards = {
     "src/features/whats-new/seenVersion.ts",
     "src/lib/userStatus.ts",
     "src/lib/hide-muted-channels.ts",
+    "src/lib/statusTimer.ts",
+    "src/lib/statusChoices.ts",
   ],
   "lib-rest-2": [
     "src/lib/autoIdle.ts",

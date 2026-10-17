@@ -76,14 +76,20 @@ export function qs(selector: string, parent?: Element): Element | null {
  * nodes. The abort registration is dropped when the timer fires, so re-arming
  * never accumulates cleanups. Nothing is scheduled once `signal` has aborted.
  */
-export function setOwnedTimeout(signal: AbortSignal, fn: () => void, ms: number): void {
-  if (signal.aborted) return;
+export function setOwnedTimeout(signal: AbortSignal, fn: () => void, ms: number): () => void {
+  if (signal.aborted) return () => {};
   const clear = (): void => clearTimeout(timer);
   const timer = setTimeout(() => {
     signal.removeEventListener("abort", clear);
     fn();
   }, ms);
   signal.addEventListener("abort", clear, { once: true });
+  // Lets an owner that re-arms drop the pending timer (and its abort
+  // registration) instead of leaving it to fire as a no-op.
+  return () => {
+    clear();
+    signal.removeEventListener("abort", clear);
+  };
 }
 
 /**
