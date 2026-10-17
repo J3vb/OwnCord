@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"slices"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/updater"
 )
 
 // ─── SetupOptions ────────────────────────────────────────────────────────────
@@ -81,6 +83,27 @@ type setupDefaults struct {
 	UploadMaxSizeMB   int    `json:"upload_max_size_mb"`
 	VoiceQuality      string `json:"voice_quality"`
 	VoiceAutoDownload bool   `json:"voice_auto_download"`
+	// PortLocked is true when the wizard cannot change the port: in a
+	// container the published port mapping fixes it, so the wizard renders
+	// the port read-only and the server refuses a different one.
+	PortLocked bool `json:"port_locked,omitempty"`
+}
+
+// errWizardPortLocked is the refusal for a wizard port change in a container.
+// It mirrors guardPort's wording for the same change from the panel.
+var errWizardPortLocked = errors.New("port cannot be changed from the setup wizard in a container; the published port mapping fixes it")
+
+// wizardPortRefusal reports a wizard port that differs from the running one
+// while the server runs in a container. A nil running config (the
+// direct-construction test path) has nothing to compare against.
+func wizardPortRefusal(wr *setupWizardRequest, running *config.Config) error {
+	if wr == nil || wr.Port == nil || running == nil || !updater.RunningInContainer() {
+		return nil
+	}
+	if *wr.Port != running.Server.Port {
+		return errWizardPortLocked
+	}
+	return nil
 }
 
 // ─── Validation ──────────────────────────────────────────────────────────────
@@ -285,6 +308,94 @@ func buildConfigPatch(wr *setupWizardRequest, running *config.Config) config.Pat
 	return p
 }
 
+// wizardOverrides maps the wizard payload onto config-overrides.json keys, for
+// a container where config.yaml is a read-only mount. Only a value that
+// differs from running is included, so config.yaml stays authoritative for
+// everything the owner did not change, and a key an OWNCORD_* variable pins is
+// never written (it would lose at the next boot). server.name is not included:
+// the settings table owns it. The generated LiveKit credentials are included
+// only when base, the configuration with no credential generation, has neither half,
+// which is Patch's rule at config/save.go re-expressed; values are never
+// logged.
+//
+// The second result names the keys the wizard chose a new value for but an
+// environment variable pins, so the caller can say they were not saved.
+func wizardOverrides(wr *setupWizardRequest, running, base *config.Config) (map[string]any, []string) {
+	changes := map[string]any{}
+	var pinned []string
+	set := func(key string, value any, differs bool) {
+		if !differs {
+			return
+		}
+		if config.EnvOverridden(key) {
+			if key != keyLiveKitAPIKey && key != keyLiveKitAPISecret {
+				pinned = append(pinned, key)
+			}
+			return
+		}
+		changes[key] = value
+	}
+	if wr.Port != nil {
+		set("server.port", *wr.Port, *wr.Port != running.Server.Port)
+	}
+	if wr.TLSMode != nil {
+		set("tls.mode", *wr.TLSMode, *wr.TLSMode != running.TLS.Mode)
+	}
+	effMode := running.TLS.Mode
+	if wr.TLSMode != nil {
+		effMode = *wr.TLSMode
+	}
+	if effMode == "acme" && wr.TLSDomain != nil {
+		set("tls.domain", *wr.TLSDomain, *wr.TLSDomain != running.TLS.Domain)
+	}
+	if wr.UploadMaxSizeMB != nil {
+		set("upload.max_size_mb", *wr.UploadMaxSizeMB, *wr.UploadMaxSizeMB != running.Upload.MaxSizeMB)
+	}
+	if wr.VoiceQuality != nil {
+		set("voice.quality", *wr.VoiceQuality, *wr.VoiceQuality != running.Voice.Quality)
+	}
+	if wr.VoiceAutoDownload != nil {
+		set("voice.auto_download_livekit", *wr.VoiceAutoDownload, *wr.VoiceAutoDownload != running.Voice.AutoDownloadLiveKit)
+	}
+	// The credentials are a pair: generated ones are persisted only when no
+	// layer below supplies either half, so a key from the environment is never
+	// joined to a generated secret.
+	if base != nil && base.Voice.LiveKitAPIKey == "" && base.Voice.LiveKitAPISecret == "" {
+		set(keyLiveKitAPIKey, running.Voice.LiveKitAPIKey, running.Voice.LiveKitAPIKey != "")
+		set(keyLiveKitAPISecret, running.Voice.LiveKitAPISecret, running.Voice.LiveKitAPISecret != "")
+	}
+	slices.Sort(pinned)
+	return changes, pinned
+}
+
+const (
+	keyLiveKitAPIKey    = "voice.livekit_api_key"
+	keyLiveKitAPISecret = "voice.livekit_api_secret"
+)
+
+// overrideKeyNames lists the keys of an overrides change set, sorted, for the
+// audit row. Names only, never values.
+func overrideKeyNames(changes map[string]any) []string {
+	keys := make([]string, 0, len(changes))
+	for k := range changes {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
+// wizardOverridesNeedRestart reports whether the change set carries a
+// startup-only setting the running process has not applied. The persisted
+// LiveKit credentials match the running state by construction.
+func wizardOverridesNeedRestart(changes map[string]any) bool {
+	for k := range changes {
+		if k != keyLiveKitAPIKey && k != keyLiveKitAPISecret {
+			return true
+		}
+	}
+	return false
+}
+
 // patchedConfigKeys summarises which config.yaml keys a patch touches, for
 // the audit log. Secrets are named, never valued.
 func patchedConfigKeys(wr *setupWizardRequest) string {
@@ -345,6 +456,22 @@ func wizardChangesRunningConfig(wr *setupWizardRequest, running *config.Config) 
 		return true
 	}
 	return false
+}
+
+// computeContainerRestartURL is computeRestartURL for a container: the browser
+// reaches the server through a published port that need not equal the
+// in-container server.port, so the request's host:port is kept and only the
+// scheme follows the wizard's TLS mode.
+func computeContainerRestartURL(host string, wr *setupWizardRequest, running *config.Config) string {
+	effMode := running.TLS.Mode
+	if wr.TLSMode != nil {
+		effMode = *wr.TLSMode
+	}
+	scheme := "https"
+	if effMode == "off" {
+		scheme = "http"
+	}
+	return scheme + "://" + host + "/admin"
 }
 
 // computeRestartURL builds the admin-panel URL the server will be reachable

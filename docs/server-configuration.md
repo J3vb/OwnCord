@@ -31,7 +31,14 @@ It also saves the generated `voice.livekit_api_key` and
 `voice.livekit_api_secret`, but only when the file has none. This keeps voice
 tokens working across restarts.
 
-How it writes the file:
+In a Docker container the wizard writes `config-overrides.json` in the data
+volume instead of `config.yaml` (the same file the admin panel saves to), and
+only the keys whose value differs from the running one and that no `OWNCORD_*`
+variable sets. The generated credentials are saved only when neither
+`config.yaml` nor the environment supplies them. It cannot change
+`server.port` there. `config.yaml` is left untouched.
+
+How it writes the file outside a container:
 
 - It edits the file in place. Comments, and values it does not manage, are
   kept.

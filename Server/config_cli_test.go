@@ -385,8 +385,12 @@ func TestConfigCLI_OutputNeverCarriesValues(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("args %v: exit %d, stderr: %s", args, code, stderr)
 		}
+		// Paths are printed and the temp directory name is random digits, so
+		// it is cut out before looking for the numeric value.
+		out := strings.ReplaceAll(stdout+stderr, f.dir, "")
+		out = strings.ReplaceAll(out, filepath.ToSlash(f.dir), "")
 		for _, leaked := range []string{secret, cidr, "50"} {
-			if strings.Contains(stdout+stderr, leaked) {
+			if strings.Contains(out, leaked) {
 				t.Errorf("args %v: output carries a value (%q)", args, leaked)
 			}
 		}
