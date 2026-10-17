@@ -99,6 +99,14 @@ jobs:
         working-directory: Client
         env:
           BUNDLES: ${{ inputs.bundles }}
+          # Shipped builds only (WP O-2): thin LTO with one codegen unit makes
+          # the Linux bundles about 2-3.5% smaller (Windows about 0.3%), at
+          # 3-6 more minutes per build. Set here and in release.yml rather than
+          # in Cargo.toml so the per-PR Windows native E2E build, which compiles
+          # the release binary three times, stays fast. panic stays "unwind":
+          # ptt.rs, shortcuts.rs and portal_shortcuts.rs rely on catch_unwind.
+          CARGO_PROFILE_RELEASE_LTO: thin
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1"
         shell: bash
         run: npm run tauri build -- --bundles "$BUNDLES" --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
