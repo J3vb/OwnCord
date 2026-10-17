@@ -85,7 +85,11 @@ export const shards = {
     "src/lib/noiseFloor.ts",
     "src/lib/media-visibility.ts",
   ], // ~987 mutants (estimated)
-  "audio-media-2": ["src/lib/audioPipeline.ts"], // ~513 mutants (estimated); 664 lines
+  "audio-media-2": [
+    "src/lib/audioPipeline.ts",
+    "src/lib/virtualRange.ts",
+    "src/features/members/memberModel.ts",
+  ], // ~513 mutants (estimated); 664 lines + virtualRange.ts and memberModel.ts (new)
   "audio-media-3": [
     "src/lib/noise-suppression.ts",
     "src/lib/deviceManager.ts",

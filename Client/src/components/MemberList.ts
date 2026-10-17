@@ -30,6 +30,14 @@ import { positionForRole, roleHasPermission } from "@lib/permissions";
 import { createAvatarElement, pickAvatarColor } from "./message-list/avatar";
 import { readableRoleColor } from "@lib/themes";
 import { shellText, statusLabel } from "../i18n/shell";
+import {
+  buildModel,
+  flattenModel,
+  isAwayStatus,
+  updateModel,
+  type ListItem,
+  type MemberModel,
+} from "../features/members/memberModel";
 
 /** Options for configuring admin action callbacks on the member list. */
 export interface MemberListOptions {
@@ -112,61 +120,6 @@ function timeoutStateOf(userId: number): "active" | "none" | "unknown" {
   return map.has(userId) ? "active" : "none";
 }
 
-interface RoleGroup {
-  readonly role: string;
-  readonly label: string;
-  readonly colorVar: string;
-}
-
-/** Theme-variable fallbacks for the seeded roles (used when the server sends no color). */
-const FALLBACK_ROLE_COLORS: Record<string, string> = {
-  owner: "var(--role-owner, #e74c3c)",
-  admin: "var(--role-admin, #f39c12)",
-  moderator: "var(--role-mod, #2ecc71)",
-};
-
-const MEMBER_COLOR = "var(--role-member, #949ba4)";
-
-/** Ordered role groups used when the server hasn't sent a role list. */
-function fallbackRoleGroups(): readonly RoleGroup[] {
-  return [
-    {
-      role: "owner",
-      label: shellText("members.role.owner"),
-      colorVar: FALLBACK_ROLE_COLORS["owner"]!,
-    },
-    {
-      role: "admin",
-      label: shellText("members.role.admin"),
-      colorVar: FALLBACK_ROLE_COLORS["admin"]!,
-    },
-    {
-      role: "moderator",
-      label: shellText("members.role.moderator"),
-      colorVar: FALLBACK_ROLE_COLORS["moderator"]!,
-    },
-    { role: "member", label: shellText("members.role.member"), colorVar: MEMBER_COLOR },
-  ];
-}
-
-/**
- * Role groups from the server's `ready` role list (already ordered by position,
- * highest first), colored by the server's role color when set. A hardcoded
- * list rendered custom roles nowhere and ignored `roles.color` entirely.
- */
-function roleGroups(): readonly RoleGroup[] {
-  const roles = channelsStore.getState().roles;
-  if (roles.length === 0) return fallbackRoleGroups();
-  return roles.map((r) => {
-    const key = r.name.toLowerCase();
-    return {
-      role: key,
-      label: r.name.toUpperCase(),
-      colorVar: r.color ?? FALLBACK_ROLE_COLORS[key] ?? MEMBER_COLOR,
-    };
-  });
-}
-
 function statusColor(status: UserStatus): string {
   switch (status) {
     case "online":
@@ -181,11 +134,6 @@ function statusColor(status: UserStatus): string {
     default:
       return "var(--text-micro)";
   }
-}
-
-/** True for the statuses that render a member as "not here". */
-function isAwayStatus(status: UserStatus): boolean {
-  return status === "offline" || status === "invisible";
 }
 
 let activeMenu: { element: HTMLDivElement; destroy(): void } | null = null;
@@ -485,117 +433,6 @@ function placeMenu(menuEl: HTMLDivElement, clientX: number, clientY: number): vo
   );
 }
 
-/** One child of `.member-list`, in display order. */
-type ListItem =
-  | {
-      readonly kind: "header";
-      readonly key: string;
-      readonly text: string;
-      readonly offline: boolean;
-    }
-  | {
-      readonly kind: "row";
-      readonly key: string;
-      readonly member: Member;
-      readonly colorVar: string;
-    }
-  | { readonly kind: "empty"; readonly key: string; readonly text: string };
-
-const nameCollator = new Intl.Collator(undefined, { sensitivity: "base" });
-
-interface Entry {
-  readonly member: Member;
-  readonly colorVar: string;
-}
-
-/** Case-, accent- and `@`-insensitive form of a name, for the search box. */
-function fold(text: string): string {
-  return text
-    .normalize("NFD")
-    .replace(/\p{M}+/gu, "")
-    .toLowerCase();
-}
-
-// Folded "username\ndisplayName" per Member object; a new object (every
-// snapshot makes them) is folded once, an unchanged one never again.
-const foldCache = new WeakMap<Member, string>();
-
-function searchText(member: Member): string {
-  let text = foldCache.get(member);
-  if (text === undefined) {
-    text = `${fold(member.username)}\n${fold(member.displayName ?? "")}`;
-    foldCache.set(member, text);
-  }
-  return text;
-}
-
-function compareEntries(a: Entry, b: Entry): number {
-  return (
-    nameCollator.compare(memberDisplayName(a.member), memberDisplayName(b.member)) ||
-    a.member.id - b.member.id
-  );
-}
-
-/**
- * The wanted children, in order: one group per role holding its online
- * members, then one OFFLINE group (offline and invisible members, A-Z across
- * roles) that keeps each member's role colour. The OFFLINE header's key is
- * "offline" and role keys carry a "g:" prefix, so a role named "Offline"
- * cannot collide with it.
- */
-function buildItems(members: ReadonlyMap<number, Member>, query: string): ListItem[] {
-  if (members.size === 0) {
-    return [{ kind: "empty", key: "empty", text: shellText("members.empty") }];
-  }
-  const groups = roleGroups();
-  const known = new Map<string, RoleGroup>();
-  for (const group of groups) if (!known.has(group.role)) known.set(group.role, group);
-
-  const needle = fold(query.trim().replace(/^@\s*/, ""));
-  const buckets = new Map<string, Entry[]>();
-  const offline: Entry[] = [];
-  for (const member of members.values()) {
-    if (needle !== "" && !searchText(member).includes(needle)) continue;
-    const role = member.role.toLowerCase();
-    const entry: Entry = { member, colorVar: known.get(role)?.colorVar ?? MEMBER_COLOR };
-    if (isAwayStatus(member.status)) {
-      offline.push(entry);
-      continue;
-    }
-    const bucket = buckets.get(role);
-    if (bucket === undefined) buckets.set(role, [entry]);
-    else bucket.push(entry);
-  }
-
-  // A role missing from the server's list (deleted mid-session) still renders,
-  // in a gray group, after the listed ones.
-  const order: RoleGroup[] = [...known.values()];
-  for (const role of [...buckets.keys()].filter((r) => !known.has(r)).toSorted()) {
-    order.push({ role, label: role.toUpperCase(), colorVar: MEMBER_COLOR });
-  }
-
-  const items: ListItem[] = [];
-  const push = (key: string, label: string, offlineGroup: boolean, entries: Entry[]): void => {
-    if (entries.length === 0) return;
-    items.push({
-      kind: "header",
-      key,
-      text: shellText("members.groupHeader", { role: label, count: entries.length }),
-      offline: offlineGroup,
-    });
-    for (const { member, colorVar } of entries.toSorted(compareEntries)) {
-      items.push({ kind: "row", key: `u:${member.id}`, member, colorVar });
-    }
-  };
-  for (const group of order)
-    push(`g:${group.role}`, group.label, false, buckets.get(group.role) ?? []);
-  push("offline", shellText("members.offlineGroup"), true, offline);
-  if (items.length === 0) {
-    return [{ kind: "empty", key: "empty", text: shellText("members.searchEmpty") }];
-  }
-  return items;
-}
-
 export function createMemberList(opts: MemberListOptions): MountableComponent {
   const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
@@ -603,6 +440,9 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
   // The filter lives here, so every store-driven render re-applies it. It is
   // not persisted: a remount starts with an empty box.
   let query = "";
+  // Sorted and grouped members, updated in place of a rebuild on each store
+  // change. Model only: it holds no DOM and is dropped with the component.
+  let model: MemberModel | null = null;
   // Rows are reused across renders, so each owns its listeners: a row's owner
   // is destroyed when reconcile removes or rebuilds it (OC-0295 - listeners on
   // the component-lifetime signal would retain every discarded row), and
@@ -626,7 +466,10 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
 
   function render(): void {
     if (root === null) return;
-    reconcileChildren<ListItem>(root, buildItems(membersStore.getState().members, query), {
+    const members = membersStore.getState().members;
+    const roles = channelsStore.getState().roles;
+    model = model === null ? buildModel(members, roles) : updateModel(model, members, roles);
+    reconcileChildren<ListItem>(root, flattenModel(model, query), {
       key: (item) => item.key,
       // A header's text is patched in `update`, not part of its signature.
       // Status is not here: it patches the dot in place without a rebuild.
