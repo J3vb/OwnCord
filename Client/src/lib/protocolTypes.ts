@@ -137,6 +137,11 @@ export type ServerRestartReasonValue = (typeof ServerRestartReason)[keyof typeof
 
 export const ChatMessageKind = {
   CALL: "call", // a call log row in a DM, written and updated only by the server
+  GROUP_ADD: "group_add", // a group DM row: a member was added, written only by the server
+  GROUP_REMOVE: "group_remove", // a group DM row: a member was removed by the owner, written only by the server
+  GROUP_LEAVE: "group_leave", // a group DM row: a member left, written only by the server
+  GROUP_RENAME: "group_rename", // a group DM row: the group name changed or was cleared, written only by the server
+  GROUP_ICON: "group_icon", // a group DM row: the group icon changed or was removed, written only by the server
 } as const;
 
 export type ChatMessageKindValue = (typeof ChatMessageKind)[keyof typeof ChatMessageKind];

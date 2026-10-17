@@ -33,7 +33,11 @@ type DMChannelInfo struct {
 	// IsGroup is channels.is_group: decided once when the DM is created and
 	// never recomputed from the live participant count, so a group that people
 	// have left stays a group (see migration 028).
-	IsGroup       bool   `json:"is_group"`
+	IsGroup bool `json:"is_group"`
+	// OwnerID is the group's owner (channels.dm_owner_id), a current member.
+	// Set for groups only and omitted for a 1:1 DM, so a client can read its
+	// presence as "this server has group owners".
+	OwnerID       int64  `json:"owner_id,omitempty"`
 	LastMessageID *int64 `json:"last_message_id"`
 	LastMessage   string `json:"last_message"`
 	LastMessageAt string `json:"last_message_at"`
@@ -63,13 +67,14 @@ type DMUser struct {
 
 // NewDMChannelInfo assembles the payload shape for one DM from its channel id,
 // optional group name, group flag and full participant list (the viewer
-// included), as seen by viewerID.
+// included), as seen by viewerID. ownerID is the group owner, 0 for a 1:1 DM
+// and for a group whose owner is unknown.
 //
 // It is the single place that answers "which of these is the recipient", so
 // the REST list, the ready payload and the dm_channel_open event cannot
 // disagree about a channel — a disagreement that would show up as a DM whose
 // name changes depending on which event drew it.
-func NewDMChannelInfo(channelID int64, name string, isGroup bool, participants []DMUser, viewerID int64) DMChannelInfo {
+func NewDMChannelInfo(channelID int64, name string, isGroup bool, ownerID int64, participants []DMUser, viewerID int64) DMChannelInfo {
 	others := make([]DMUser, 0, len(participants))
 	for i := range participants {
 		if participants[i].ID == viewerID {
@@ -82,6 +87,9 @@ func NewDMChannelInfo(channelID int64, name string, isGroup bool, participants [
 		Recipients: others,
 		Name:       name,
 		IsGroup:    isGroup,
+	}
+	if isGroup {
+		info.OwnerID = ownerID
 	}
 	if len(others) > 0 {
 		info.Recipient = others[0]
@@ -381,6 +389,7 @@ func (d *DB) GetUserDMChannels(ctx context.Context, userID int64) ([]DMChannelIn
 			Recipients:        recipients,
 			Name:              rows[i].Name,
 			IsGroup:           rows[i].IsGroup != 0,
+			OwnerID:           rows[i].OwnerID,
 			LastMessageID:     rows[i].LastMessageID,
 			LastMessage:       rows[i].LastMessage,
 			LastMessageAt:     rows[i].LastMessageAt,
@@ -573,4 +582,17 @@ func (d *DB) GetDMRecipient(ctx context.Context, channelID, requestingUserID int
 		return nil, fmt.Errorf("GetDMRecipient lookup: %w", err)
 	}
 	return d.GetUserByID(ctx, recipientID)
+}
+
+// GetGroupDMOwner returns the owner of a group DM, or 0 when the channel is
+// not a group or has no owner.
+func (d *DB) GetGroupDMOwner(ctx context.Context, channelID int64) (int64, error) {
+	owner, err := d.q.GetGroupDMOwner(ctx, channelID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("GetGroupDMOwner: %w", err)
+	}
+	return owner, nil
 }

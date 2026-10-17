@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -68,6 +69,9 @@ func TestCreateGroupDM_CreatesChannelWithAllParticipants(t *testing.T) {
 	info := decodeDMInfo(t, rr)
 	if !info.IsGroup {
 		t.Error("expected is_group=true")
+	}
+	if info.OwnerID != 1 {
+		t.Errorf("owner_id = %d, want the creator (1)", info.OwnerID)
 	}
 	if info.Name != "Lunch crew" {
 		t.Errorf("expected name %q, got %q", "Lunch crew", info.Name)
@@ -464,5 +468,54 @@ func TestLeaveGroupDM_NonParticipantRefused(t *testing.T) {
 	rr := dmDelete(t, router, fmt.Sprintf("/api/v1/dms/%d", group.ChannelID), outsider)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", rr.Code)
+	}
+}
+
+// Every summary of a group carries the owner, so GET /dms, ready and
+// dm_channel_open agree: the creator at first, then the lowest remaining member
+// once the owner has left.
+func TestGroupDM_OwnerIDInListAndAfterOwnerLeaves(t *testing.T) {
+	_, router, _, tokens := groupFixture(t)
+	rr := dmPost(t, router, "/api/v1/dms/group", tokens[0], map[string]any{"recipient_ids": []int64{2, 3}})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rr.Code, rr.Body.String())
+	}
+	channelID := decodeDMInfo(t, rr).ChannelID
+
+	ownerSeenBy := func(token string) int64 {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/dms", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.RemoteAddr = "127.0.0.1:9999"
+		out := httptest.NewRecorder()
+		router.ServeHTTP(out, req)
+		var body struct {
+			DMs []db.DMChannelInfo `json:"dm_channels"`
+		}
+		if err := json.Unmarshal(out.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode list: %v (%s)", err, out.Body.String())
+		}
+		for _, d := range body.DMs {
+			if d.ChannelID == channelID {
+				return d.OwnerID
+			}
+		}
+		t.Fatalf("group not in the list: %s", out.Body.String())
+		return 0
+	}
+	if got := ownerSeenBy(tokens[1]); got != 1 {
+		t.Errorf("owner in GET /dms = %d, want 1", got)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/dms/"+strconv.FormatInt(channelID, 10), nil)
+	req.Header.Set("Authorization", "Bearer "+tokens[0])
+	req.RemoteAddr = "127.0.0.1:9999"
+	out := httptest.NewRecorder()
+	router.ServeHTTP(out, req)
+	if out.Code != http.StatusNoContent {
+		t.Fatalf("leave: %d %s", out.Code, out.Body.String())
+	}
+	if got := ownerSeenBy(tokens[1]); got != 2 {
+		t.Errorf("owner after the owner left = %d, want 2", got)
 	}
 }

@@ -100,6 +100,10 @@ type SendMessageResult struct {
 	// participants because a group that people have left can have two members
 	// and must still render as a group.
 	DMIsGroup bool
+	// DMOwnerID is the group's owner, read only for a group DM this send
+	// (re)opened for someone, because only then is it needed for the
+	// dm_channel_open payload. 0 otherwise.
+	DMOwnerID int64
 
 	// Attachment data for broadcast.
 	Attachments []db.AttachmentInfo

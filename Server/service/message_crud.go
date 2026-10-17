@@ -317,6 +317,8 @@ func (s *MessageService) sendMessageDMSideEffects(ctx context.Context, p SendMes
 		}
 	}
 
+	s.fillGroupOwner(bgCtx, isGroup, p.ChannelID, result)
+
 	// The live-delivery audience: the sender plus every other participant who
 	// trusts them (one-to-one) or every participant (group) — see
 	// DMAudience — derived from the same read. The loop above writes no row
@@ -435,8 +437,8 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 	if msg.Deleted {
 		return nil, fmt.Errorf("%w: cannot edit this message", ErrDeletedMessage)
 	}
-	// A call log row is written only by the server (WP 3B-9).
-	if msg.Kind == db.MessageKindCall {
+	// Call log and group event rows are written only by the server.
+	if msg.Kind != db.MessageKindUser {
 		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
 	}
 
@@ -604,9 +606,9 @@ func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64,
 	if msg.Deleted {
 		return nil, fmt.Errorf("%w: cannot delete this message", ErrDeletedMessage)
 	}
-	// A call log row is read-only for everyone, moderators included. It goes
-	// only with its channel, its author's erasure or retention (WP 3B-9).
-	if msg.Kind == db.MessageKindCall {
+	// A call log or group event row is read-only for everyone, moderators
+	// included. It goes only with its channel, erasure or retention.
+	if msg.Kind != db.MessageKindUser {
 		return nil, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
 	}
 

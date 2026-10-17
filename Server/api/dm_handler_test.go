@@ -115,7 +115,8 @@ CREATE TABLE IF NOT EXISTS channels (
     mixing_threshold INTEGER,
     voice_max_video  INTEGER NOT NULL DEFAULT 0,
     nsfw             INTEGER NOT NULL DEFAULT 0,
-    is_group         INTEGER NOT NULL DEFAULT 0
+    is_group         INTEGER NOT NULL DEFAULT 0,
+    dm_owner_id      INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS messages (

@@ -185,8 +185,8 @@ type cancelAfterCreateGroupDMStore struct {
 	cancel context.CancelFunc
 }
 
-func (s *cancelAfterCreateGroupDMStore) CreateGroupDMChannel(ctx context.Context, name string, participantIDs []int64) (*db.Channel, error) {
-	ch, err := s.DB.CreateGroupDMChannel(ctx, name, participantIDs)
+func (s *cancelAfterCreateGroupDMStore) CreateGroupDMChannel(ctx context.Context, name string, ownerID int64, participantIDs []int64) (*db.Channel, error) {
+	ch, err := s.DB.CreateGroupDMChannel(ctx, name, ownerID, participantIDs)
 	if err == nil {
 		s.cancel()
 	}

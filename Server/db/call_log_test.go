@@ -351,9 +351,11 @@ func TestDeleteChannel_CascadesCallTables(t *testing.T) {
 	}
 }
 
-// A call row is read-only wherever messages are written. This keeps call rows
-// written only by the call log: no statement outside call_log.sql may set the
-// kind column, so a new insert or update cannot create or retype one.
+// Call rows and group event rows are read-only wherever messages are written.
+// This keeps them written only by the call log and the group events: no
+// statement outside call_log.sql and group_events.sql (and their Go callers)
+// may set the kind column, so a new insert or update cannot create or retype
+// one.
 func TestCallLog_OnlyWriterOfKind(t *testing.T) {
 	stmt := regexp.MustCompile(`(?is)(INSERT\s+(?:OR\s+\w+\s+)?INTO\s+messages\b[^;` + "`" + `]*|UPDATE\s+messages\s+SET\b[^;` + "`" + `]*)`)
 	kind := regexp.MustCompile(`(?i)\bkind\b\s*(=|,|\))`)
@@ -368,7 +370,8 @@ func TestCallLog_OnlyWriterOfKind(t *testing.T) {
 	checked := 0
 	for _, f := range files {
 		base := filepath.Base(f)
-		if strings.HasSuffix(base, "_test.go") || base == "call_log.sql" || base == "call_log.go" {
+		if strings.HasSuffix(base, "_test.go") || base == "call_log.sql" || base == "call_log.go" ||
+			base == "group_events.sql" || base == "group_events.go" {
 			continue
 		}
 		raw, err := os.ReadFile(f)
@@ -383,7 +386,7 @@ func TestCallLog_OnlyWriterOfKind(t *testing.T) {
 				head = s[:i]
 			}
 			if kind.MatchString(head) {
-				t.Errorf("%s writes messages.kind outside the call log: %s", f, strings.TrimSpace(s))
+				t.Errorf("%s writes messages.kind outside the call log and group events: %s", f, strings.TrimSpace(s))
 			}
 		}
 	}

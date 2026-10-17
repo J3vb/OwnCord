@@ -1147,6 +1147,12 @@ know the field. A call row is read-only: editing, deleting, pinning, reacting to
 or replying to it is refused, and search does not return it. A client treats an
 unknown `kind` as an ordinary message and shows `content`.
 
+A group DM can also hold group event rows: `kind` is `group_add`, `group_remove`,
+`group_leave`, `group_rename` or `group_icon`, with a `group_event` block
+(`{"target_user_id"}` for add and remove, `{}` for leave, `{"name"}` for rename,
+`{"icon_removed"}` for icon). They are read-only in the same way as call rows
+(see `docs/protocol.md`). Nothing writes one yet.
+
 #### Pagination
 
 Use cursor-based pagination by passing the `id` of the last message as the `before` parameter:
@@ -1767,6 +1773,7 @@ List all open DM channels for the authenticated user, ordered by most recent act
 | `recipients`           | Every participant except the caller. What group-aware clients read.                                                                                                                                                        |
 | `name`                 | Optional group name, max 100 characters, one line: runs of spaces collapse, and control characters, line breaks, invisible characters and stacked combining marks are refused. `""` for a 1:1 DM and for an unnamed group. |
 | `is_group`             | True for a group DM. Stored, not derived from the live participant count.                                                                                                                                                  |
+| `owner_id`             | Groups only, omitted for a 1:1 DM: the group's owner, always a current member. The creator at create, then the lowest remaining member id when the owner leaves or their account is erased.                                |
 | `unread_count`         | Unread messages for the caller, capped at 100 (a value of 100 means "100 or more") — the same cap as `ready`.                                                                                                              |
 | `mention_count`        | The caller's `read_states.mention_count` for the DM — the same value the `ready` payload's `dm_channels[]` carries.                                                                                                        |
 | `last_read_message_id` | The caller's read pointer (`read_states.last_message_id`) for the DM; `0` when they have never read it.                                                                                                                    |
@@ -1809,6 +1816,7 @@ block-checked.
 
 The same DM summary shape `GET /api/v1/dms` returns, from the creator's seat.
 Every participant — the creator included — also receives a `dm_channel_open`.
+The creator is the group's owner (`owner_id`).
 
 #### Errors
 
@@ -1825,10 +1833,8 @@ Every participant — the creator included — also receives a `dm_channel_open`
 
 Set or clear a group DM's name.
 
-Any participant may rename it. That is Discord's rule and the only one that
-works here: a group DM has no owner column and no roles, so "who may rename" has
-exactly one answer that does not require inventing an ownership model. A 1:1 DM
-refuses — its name is who is in it.
+Any participant may rename it, the owner included; renaming is not an owner
+power. A 1:1 DM refuses — its name is who is in it.
 
 **Auth:** Required (participant)
 
@@ -1871,7 +1877,9 @@ and the route is shared because the _gesture_ is shared:
   by nobody, and its messages cascade off the channel).
 
 The caller receives `dm_channel_close`; after a group leave the remaining
-participants receive a fresh `dm_channel_open` with the new membership.
+participants receive a fresh `dm_channel_open` with the new membership. If the
+leaver owned the group, ownership passes to the lowest remaining member id in the
+same transaction, and the refreshed `dm_channel_open` carries the new `owner_id`.
 
 **Auth:** Required (participant)
 

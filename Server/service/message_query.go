@@ -227,8 +227,8 @@ func (s *MessageService) SetMessagePinned(ctx context.Context, userID, channelID
 	if err != nil || msg == nil || msg.ChannelID != channelID {
 		return fmt.Errorf("%w: message not found in this channel", ErrNotFound)
 	}
-	if msg.Kind == db.MessageKindCall {
-		return fmt.Errorf("%w: cannot pin a call", ErrBadRequest)
+	if msg.Kind != db.MessageKindUser {
+		return fmt.Errorf("%w: cannot pin a system message", ErrBadRequest)
 	}
 	if err := s.st.SetMessagePinned(ctx, msgID, pinned); err != nil {
 		// The pin SQL excludes soft-deleted rows, so a message deleted between
