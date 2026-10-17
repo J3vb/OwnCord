@@ -53,6 +53,39 @@ describe("reduceEditMessage", () => {
     expect(list(next)[0]).toBe(list(prev)[0]);
   });
 
+  it("a call row's end replaces `call`, and editedAt stays null", () => {
+    const call = { started_at: "T0", ended_at: null, participants: [1] };
+    const withCall: MessagesState = {
+      ...INITIAL_STATE,
+      messagesByChannel: new Map([
+        [1, [row(8, { kind: "call", call, content: "started a call." })]],
+      ]),
+    };
+    const ended = { started_at: "T0", ended_at: "T1", participants: [1, 2] };
+    const next = reduceEditMessage(withCall, {
+      message_id: 8,
+      channel_id: 1,
+      content: "started a call that lasted a few seconds.",
+      edited_at: null,
+      kind: "call",
+      call: ended,
+    });
+    expect(list(next)[0]).toMatchObject({ kind: "call", call: ended, editedAt: null });
+  });
+
+  it("an end for a call row not in the store is a no-op that creates nothing", () => {
+    const next = reduceEditMessage(prev, {
+      message_id: 99,
+      channel_id: 1,
+      content: "x",
+      edited_at: null,
+      kind: "call",
+      call: { started_at: "T0", ended_at: "T1", participants: [1] },
+    });
+    expect(list(next).map((m) => m.id)).toEqual([1, 2, 3]);
+    expect(list(next).some((m) => m.kind === "call")).toBe(false);
+  });
+
   it("returns prev by identity for an unloaded channel", () => {
     const edit = { message_id: 2, channel_id: 9, content: "x", edited_at: "T2" };
     expect(reduceEditMessage(prev, edit)).toBe(prev);

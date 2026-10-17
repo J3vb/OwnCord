@@ -1496,6 +1496,42 @@ ul.md-list-nested {
   margin-left: auto;
 }
 
+/* DM call log row (WP 3B-9c): a one-line record, never grouped */
+.message.call-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 0;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.call-row .cr-icon {
+  color: var(--green);
+  display: inline-flex;
+  align-items: center;
+}
+.call-row.call-missed .cr-icon,
+.call-row.call-missed .cr-text {
+  color: var(--red);
+}
+.call-row .cr-text {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+.call-row .cr-join {
+  padding: 2px 10px;
+  border-radius: 4px;
+  background: var(--green);
+  color: var(--bg-primary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+.call-row .cr-time {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
 /* Message hover actions */
 .msg-actions-bar {
   position: absolute;

@@ -137,6 +137,8 @@ export interface MessageListOptions {
    * "Jump to Present" pill, which only appears while the window is detached.
    */
   readonly onJumpToPresent?: () => void;
+  /** Join the DM call a live call log row stands for (WP 3B-9c). No Join button without it. */
+  readonly onJoinCall?: (channelId: number) => void;
 }
 
 // -- Constants ----------------------------------------------------------------
@@ -2698,6 +2700,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     if (msg === undefined || msg.user.id !== options.currentUserId || msg.status !== "sent") {
       return false;
     }
+    // A server-written row (a DM call log) is read-only.
+    if (msg.kind !== undefined) return false;
     if (edit?.messageId === messageId) {
       if (takeFocus) edit.session?.focusEnd();
       return true;

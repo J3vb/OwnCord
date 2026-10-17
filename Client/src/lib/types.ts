@@ -473,6 +473,16 @@ export interface ReferencedMessage {
   readonly has_attachments: boolean;
 }
 
+/**
+ * The call a `kind: "call"` row stands for (WP 3B-9). `ended_at` is null while
+ * the call is live; `participants` is everyone who was ever in it.
+ */
+export interface CallInfo {
+  readonly started_at: string;
+  readonly ended_at: string | null;
+  readonly participants: readonly number[];
+}
+
 export interface ChatMessagePayload {
   readonly client_message_id?: string;
   readonly id: number;
@@ -505,6 +515,9 @@ export interface ChatMessagePayload {
    * cannot otherwise correct (OC-0271). Absent from older servers.
    */
   readonly mentions_here?: boolean;
+  /** `ChatMessageKind` value ("call" for a DM call log row), open to future kinds; absent for an ordinary message (and from older servers). */
+  readonly kind?: string;
+  readonly call?: CallInfo;
 }
 
 export interface ChatSendOkPayload {
@@ -520,12 +533,15 @@ export interface ChatEditedPayload {
   readonly message_id: number;
   readonly channel_id: number;
   readonly content: string;
-  readonly edited_at: string;
+  /** Null for the end of a call row, which is never shown as an edit. */
+  readonly edited_at: string | null;
   /** Re-resolved mentions for the new content. An edit never re-notifies. */
   readonly mentions?: readonly number[];
   readonly mentions_everyone?: boolean;
   /** See ChatMessagePayload.mentions_here. */
   readonly mentions_here?: boolean;
+  readonly kind?: string;
+  readonly call?: CallInfo;
 }
 
 export interface ChatDeletedPayload {
@@ -1277,6 +1293,8 @@ export interface MessageResponse {
   /** Server-resolved mentioned user IDs. Absent from older servers. */
   readonly mentions?: readonly number[];
   readonly mentions_everyone?: boolean;
+  readonly kind?: string;
+  readonly call?: CallInfo;
 }
 
 /**

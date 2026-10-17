@@ -14,6 +14,9 @@ import type { MessageListOptions } from "../MessageList";
 import { messagingText } from "../../i18n/messaging";
 import { connectText } from "../../i18n/connect";
 import { uiStore } from "@stores/ui.store";
+import { voiceStore } from "@stores/voice.store";
+import { dmCallText } from "../../i18n/dmCall";
+import type { CallInfo } from "../../lib/types";
 
 // -- Re-exports (only the names consumers actually import; everything else is
 // -- available directly from the split modules) -------------------------------
@@ -278,6 +281,78 @@ function renderSystemMessage(msg: Message): HTMLDivElement {
   return el;
 }
 
+/**
+ * A DM call log row (WP 3B-9c), drawn from `kind` and `call` only, never from
+ * `content`. Live calls offer Join; an ended call reads "lasted N minutes" to
+ * the author and anyone who joined, and "You missed a call" to everyone else.
+ */
+function renderCallRow(
+  msg: Message,
+  call: CallInfo,
+  opts: MessageListOptions,
+  signal: AbortSignal,
+): HTMLDivElement {
+  const name = resolveDisplayName(resolveAuthor(msg.user));
+  const live = call.ended_at === null;
+  const missed =
+    !live && msg.user.id !== opts.currentUserId && !call.participants.includes(opts.currentUserId);
+  const el = createElement("div", {
+    class: "message call-row" + (missed ? " call-missed" : ""),
+    "data-testid": `message-${msg.id}`,
+  });
+  const icon = createElement("span", { class: "cr-icon" });
+  icon.appendChild(createIcon(missed ? "phone-off" : "phone", 16));
+  const text = createElement("span", { class: "cr-text" });
+  if (live) {
+    setText(text, dmCallText("rowLive", { name }));
+  } else {
+    const seconds = Math.max(
+      0,
+      (parseTimestamp(call.ended_at).getTime() - parseTimestamp(call.started_at).getTime()) / 1000,
+    );
+    const count = Math.floor(seconds / 60);
+    const few = count < 1;
+    if (missed) {
+      setText(
+        text,
+        few
+          ? dmCallText("rowMissedSeconds", { name })
+          : dmCallText("rowMissedMinutes", { name, count }),
+      );
+    } else {
+      setText(
+        text,
+        few
+          ? dmCallText("rowLastedSeconds", { name })
+          : dmCallText("rowLastedMinutes", { name, count }),
+      );
+    }
+  }
+  const time = createElement(
+    "span",
+    { class: "cr-time", title: fullDateTimeTitle(msg.timestamp) },
+    formatMessageTimestamp(msg.timestamp),
+  );
+  appendChildren(el, icon, text);
+  const inThisCall = voiceStore.getState().currentChannelId === msg.channelId;
+  if (live && opts.onJoinCall !== undefined && !inThisCall) {
+    const join = createElement(
+      "button",
+      {
+        class: "cr-join",
+        "data-testid": `call-join-${msg.id}`,
+        "aria-label": dmCallText("rowJoinLabel"),
+      },
+      dmCallText("rowJoin"),
+    );
+    const onJoinCall = opts.onJoinCall;
+    join.addEventListener("click", () => onJoinCall(msg.channelId), { signal });
+    el.appendChild(join);
+  }
+  el.appendChild(time);
+  return el;
+}
+
 /** Map a send-failure error code to a short, user-facing reason. */
 function sendErrorReason(code: string | null): string {
   switch (code) {
@@ -376,6 +451,17 @@ export function renderMessage(
   // server notice.
   if (msg.user.id === 0 && msg.user.username === "System") {
     return renderSystemMessage(msg);
+  }
+
+  // A call log row is drawn from kind + call alone. Any other kind (a future
+  // one) falls back to plain system text; so does a call row with no `call`.
+  if (msg.kind !== undefined) {
+    if (msg.kind === "call" && msg.call !== undefined) {
+      return renderCallRow(msg, msg.call, opts, signal);
+    }
+    const fallback = renderSystemMessage(msg);
+    fallback.dataset["testid"] = `message-${msg.id}`;
+    return fallback;
   }
 
   const statusClass =

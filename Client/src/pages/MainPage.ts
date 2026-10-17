@@ -466,6 +466,16 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     );
   }
 
+  /** Join a DM's live call: the call panel's Join strip and a call log row's Join button. */
+  function joinDmCall(channelId: number): void {
+    if (uiStore.getState().connectionStatus !== "connected") {
+      showToast(shellText("channel.notConnected"), "error");
+      return;
+    }
+    cameraOnJoin = null;
+    createSidebarVoiceCallbacks(ws).onVoiceJoin(channelId);
+  }
+
   /**
    * Start a call in the currently open DM: join its voice channel and ring the
    * other participants.
@@ -1267,14 +1277,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         onLeave: () => voiceKeybindActions.onDisconnect(),
         onAccept: (withVideo) => acceptRing(withVideo),
         onDecline: () => ringCtrl?.decline(),
-        onJoin: (channelId) => {
-          if (uiStore.getState().connectionStatus !== "connected") {
-            showToast(shellText("channel.notConnected"), "error");
-            return;
-          }
-          cameraOnJoin = null;
-          createSidebarVoiceCallbacks(ws).onVoiceJoin(channelId);
-        },
+        onJoin: joinDmCall,
         onRingAgain: (channelId) => {
           if (uiStore.getState().connectionStatus !== "connected") {
             showToast(shellText("channel.notConnected"), "error");
@@ -1466,6 +1469,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       chatHeaderRefs: chatAreaResult.chatHeaderRefs,
       onContentGated: closeActiveLightbox,
       focusFallback: focusReachable,
+      onJoinCall: joinDmCall,
     });
 
     // Wire voice error callback to toast
