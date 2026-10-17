@@ -1,9 +1,13 @@
 /**
  * Every per-server store registers its reset with the session registry, and
- * clearAuth runs them (ARCH-012). The probe table is the contract: a store that
- * holds per-server data and is not registered fails the first test, and a
- * registration with no probe fails the second.
+ * clearAuth runs them (ARCH-012). The probe table is the contract. The set of
+ * names registered anywhere under src/ is collected from the source text, not
+ * from this file's import graph, and must equal the probe names plus the
+ * commented EXEMPT list: a registration added in any module fails the
+ * completeness test until it gets a probe or an exemption.
  */
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { listSessionResets, registerSessionReset } from "../../src/lib/sessionRegistry";
 import { authStore, clearAuth } from "../../src/stores/auth.store";
@@ -55,7 +59,9 @@ const dm = {
   mentionCount: 1,
 } as DmChannel;
 
-let membersRevBefore = 0;
+let roleRevBefore = 0;
+let snapshotRevBefore = 0;
+const COLLAPSED_KEY = "owncord:collapsed:a.example";
 
 const PROBES: readonly Probe[] = [
   {
@@ -81,21 +87,32 @@ const PROBES: readonly Probe[] = [
   {
     name: "ui:session",
     mutate: () => {
+      localStorage.removeItem(COLLAPSED_KEY);
       loadCollapsedCategories("a.example");
       collapseCategories(["Text"]);
       setSidebarMode("dms");
       setActiveDmUser(7);
     },
-    isInitial: () =>
-      uiStore.getState().collapsedCategories.size === 0 &&
-      uiStore.getState().sidebarMode === "channels" &&
-      uiStore.getState().activeDmUserId === null,
+    isInitial: () => {
+      const cleared =
+        uiStore.getState().collapsedCategories.size === 0 &&
+        uiStore.getState().sidebarMode === "channels" &&
+        uiStore.getState().activeDmUserId === null;
+      // The persistence host must be nulled too: a collapse after the reset
+      // writes no key for the old server. (Side effect, run after the reads.)
+      localStorage.removeItem(COLLAPSED_KEY);
+      collapseCategories(["Probe"]);
+      const hostNulled = localStorage.getItem(COLLAPSED_KEY) === null;
+      localStorage.removeItem(COLLAPSED_KEY);
+      return cleared && hostNulled;
+    },
   },
   {
     // The roster, and the typing timers it owns (asserted by timer count).
     name: "members:store",
     mutate: () => {
-      membersRevBefore = membersStore.getState().roleRevision ?? 0;
+      roleRevBefore = membersStore.getState().roleRevision ?? 0;
+      snapshotRevBefore = membersStore.getState().snapshotRevision ?? 0;
       setMembers([member]);
       setTyping(1, 7);
     },
@@ -103,7 +120,8 @@ const PROBES: readonly Probe[] = [
       membersStore.getState().members.size === 0 &&
       membersStore.getState().typingUsers.size === 0 &&
       vi.getTimerCount() === 0 &&
-      (membersStore.getState().roleRevision ?? 0) > membersRevBefore,
+      (membersStore.getState().roleRevision ?? 0) > roleRevBefore &&
+      (membersStore.getState().snapshotRevision ?? 0) > snapshotRevBefore,
   },
   {
     name: "dm:store",
@@ -123,14 +141,40 @@ const PROBES: readonly Probe[] = [
     mutate: () => setMemberTimeouts([{ user_id: 7, expires_at: "2099-01-01T00:00:00Z" }]),
     isInitial: () => memberTimeoutsStore.getState() === null,
   },
-  // Module-state resets with no store to read: registered and run, asserted by
-  // the registry check below rather than by a state probe.
-  { name: "notifications:audio", mutate: () => undefined, isInitial: () => true },
-  { name: "notifications:coalescing", mutate: () => undefined, isInitial: () => true },
 ];
 
-/** Anonymous `onAuthCleared` listeners (page-scoped and legacy) are numbered. */
-const isAnonymous = (name: string): boolean => name.startsWith("auth-cleared#");
+/**
+ * Registered names that cannot be probed in this file, each with the reason.
+ * Adding to this list is a review decision: say where the behaviour is tested.
+ */
+const EXEMPT: readonly string[] = [
+  // main.ts is not loaded here; session-isolation.test.ts drives it and pins
+  // that it runs before the domain resets.
+  "main:pending-and-api",
+  // Module state with no readable store (an audio context, a coalescing map);
+  // the notification tests cover what each does.
+  "notifications:audio",
+  "notifications:coalescing",
+  // Per-subscriber names built from a counter in auth.store (onAuthCleared).
+  "auth-cleared#${authClearedSeq}",
+];
+
+/** Every `registerSessionReset("<name>"` literal under src/, by source text. */
+function registeredNamesInSource(): Set<string> {
+  const names = new Set<string>();
+  const re = /registerSessionReset\(\s*[`'"]([^`'"]+)[`'"]/g;
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (entry.name.endsWith(".ts")) {
+        for (const m of readFileSync(path, "utf8").matchAll(re)) names.add(m[1]!);
+      }
+    }
+  };
+  walk(join(__dirname, "../../src"));
+  return names;
+}
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -151,22 +195,27 @@ describe("session reset completeness", () => {
     expect(authStore.getState().logoutReason).toBe("server_switch");
   });
 
-  it("every registered reset has a probe, and every probe is registered", () => {
-    const registered = listSessionResets().filter((n) => !isAnonymous(n));
-    const probed = PROBES.map((p) => p.name);
-    expect(registered.filter((n) => !probed.includes(n))).toEqual([]);
-    expect(probed.filter((n) => !registered.includes(n))).toEqual([]);
+  it("every registration in src/ has a probe or an exemption, and every probe is live", () => {
+    const inSource = registeredNamesInSource();
+    const accounted = new Set([...PROBES.map((p) => p.name), ...EXEMPT]);
+    expect([...inSource].filter((n) => !accounted.has(n)).sort()).toEqual([]);
+    expect([...accounted].filter((n) => !inSource.has(n)).sort()).toEqual([]);
+    // A probe whose registration never ran would pass the reset check vacuously.
+    const live = listSessionResets();
+    expect(PROBES.map((p) => p.name).filter((n) => !live.includes(n))).toEqual([]);
   });
 
-  it("runs phases in order with voice before any domain reset", () => {
-    const order = listSessionResets();
-    const phased = (name: string): number => order.indexOf(name);
-    for (const domain of ["messages:store", "channels:store", "members:store", "dm:store"]) {
-      expect(phased("voice:store")).toBeLessThan(phased(domain));
+  it("runs the phases in order whatever the registration order", () => {
+    const calls: string[] = [];
+    const disposers = (["cache", "domain", "voice", "session"] as const).map((phase) =>
+      registerSessionReset(`test:order-${phase}`, () => calls.push(phase), { phase }),
+    );
+    try {
+      clearAuth("user");
+    } finally {
+      for (const dispose of disposers) dispose();
     }
-    for (const session of ["notifications:audio", "notifications:coalescing"]) {
-      expect(phased(session)).toBeLessThan(phased("voice:store"));
-    }
+    expect(calls).toEqual(["session", "voice", "domain", "cache"]);
   });
 
   it("takes the voice snapshot before the first session entry runs", () => {

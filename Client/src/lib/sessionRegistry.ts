@@ -46,6 +46,10 @@ export function registerSessionReset(
   opts?: { readonly phase?: SessionResetPhase },
 ): () => void {
   const entry: Entry = { phase: opts?.phase ?? "domain", reset };
+  const previous = entries.get(name);
+  if (previous !== undefined && previous.reset !== reset) {
+    log.debug("Session reset re-registered with a different function", { name });
+  }
   entries.set(name, entry);
   return () => {
     if (entries.get(name) === entry) entries.delete(name);
@@ -64,9 +68,9 @@ export function runSessionResets(reason: SessionResetReason): readonly string[] 
       if (entry.phase !== phase) continue;
       try {
         entry.reset(reason);
-      } catch {
+      } catch (err) {
         failed.push(name);
-        log.warn("Session reset failed", { name });
+        log.warn("Session reset failed", { name, error: String(err) });
       }
     }
   }

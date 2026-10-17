@@ -121,13 +121,14 @@ vi.mock("@lib/updater", () => ({
   }),
 }));
 const mockApiState = { host: "" };
+const apiRef = vi.hoisted(() => ({ client: null as { endSession(): void } | null }));
 vi.mock("@lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@lib/api")>();
   return {
     ...actual,
     createApiClient: vi.fn(() => {
       const api = actual.createApiClient({ host: "" });
-      return {
+      const wrapped = {
         ...api,
         setConfig: vi.fn((cfg: { host?: string; token?: string }) => {
           if (cfg.host !== undefined) mockApiState.host = cfg.host;
@@ -137,6 +138,8 @@ vi.mock("@lib/api", async (importOriginal) => {
         logout: mockApiLogout,
         getHealth: (...args: unknown[]) => mockGetHealth(...args),
       };
+      apiRef.client = wrapped;
+      return wrapped;
     }),
   };
 });
@@ -191,13 +194,25 @@ vi.mock("@pages/MainPage", () => ({
 // against that write is exercised unmodified, not sidestepped.
 vi.mock("@lib/dispatcher", async () => {
   const { authStore, setAuth } = await import("@stores/auth.store");
+  const { setMembers } = await import("@stores/members.store");
+  const { setDmChannels } = await import("@stores/dm.store");
   return {
     wireDispatcher: (ws: { on: (type: string, cb: (payload: unknown) => void) => () => void }) => {
       const unsub = ws.on("auth_ok", (payload) => {
         const p = payload as { user: unknown; server_name: string; motd: string };
         setAuth(authStore.getState().token ?? "", p.user as never, p.server_name, p.motd);
       });
-      return () => unsub();
+      // `ready` restates the roster and the DM list, as the real handlers do
+      // (dm_channels carries store-shaped rows here; the mapping is not under test).
+      const unsubReady = ws.on("ready", (payload) => {
+        const p = payload as { members?: never[]; dm_channels?: never[] };
+        setMembers(p.members ?? []);
+        setDmChannels(p.dm_channels ?? []);
+      });
+      return () => {
+        unsub();
+        unsubReady();
+      };
     },
     wireConnectionStatus: vi.fn(() => () => {}),
   };
@@ -210,6 +225,10 @@ import { uiStore } from "@stores/ui.store";
 import { messagesStore } from "@stores/messages.store";
 import { channelsStore } from "@stores/channels.store";
 import { blocksStore } from "@stores/blocks.store";
+import { membersStore, setMembers } from "@stores/members.store";
+import { dmStore, setDmChannels } from "@stores/dm.store";
+import type { DmChannel } from "@stores/dm.store";
+import { registerSessionReset } from "@lib/sessionRegistry";
 import { voiceStore } from "@stores/voice.store";
 import { currentUserPermissions } from "@lib/permissions";
 import { cleanupNotificationAudio } from "@lib/notificationSound";
@@ -277,7 +296,11 @@ function latestConnectPage() {
 }
 
 /** The server side of a session: socket open, auth_ok, ready, main page. */
-async function completeHandshake(userId: number, serverName: string): Promise<void> {
+async function completeHandshake(
+  userId: number,
+  serverName: string,
+  ready: object = {},
+): Promise<void> {
   await vi.advanceTimersByTimeAsync(10);
   emitTauriEvent("ws-state", "open");
   emitTauriEvent(
@@ -291,15 +314,35 @@ async function completeHandshake(userId: number, serverName: string): Promise<vo
       },
     }),
   );
-  emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+  emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: ready }));
   await vi.advanceTimersByTimeAsync(800);
 }
 
-async function loginWithPassword(host: string, userId: number): Promise<void> {
+async function loginWithPassword(host: string, userId: number, ready: object = {}): Promise<void> {
   mockLogin.mockResolvedValueOnce({ token: `password-token-${host}`, requires_2fa: false });
   await capturedConnectCallbacks.onLogin!(host, "alex", "hunter2");
-  await completeHandshake(userId, host);
+  await completeHandshake(userId, host, ready);
 }
+
+const dmChannelRow = (channelId: number): DmChannel => ({
+  channelId,
+  recipient: { id: 7, username: "alex", avatar: "", status: "online" },
+  participants: [],
+  name: "",
+  isGroup: false,
+  lastMessageId: null,
+  lastMessage: "hi",
+  lastMessageAt: "",
+  unreadCount: 3,
+  mentionCount: 1,
+});
+const memberOf = (id: number): object => ({
+  id,
+  username: `user${id}`,
+  avatar: null,
+  role: "member",
+  status: "online",
+});
 
 /** SidebarArea's quick-switch overlay: name the target, end the session. */
 async function quickSwitchTo(host: string): Promise<void> {
@@ -344,10 +387,16 @@ describe("profile switch teardown (B7-13)", () => {
     messagesStore.setState((s) => ({ ...s, detachedChannels: new Set([42]) }));
     blocksStore.setState((s) => ({ ...s, blockedByMe: new Set([5]) }));
     voiceStore.setState((s) => ({ ...s, currentChannelId: 3, voiceStatus: "connected" }));
+    setMembers([memberOf(11)] as never);
+    setDmChannels([dmChannelRow(9)]);
+    expect(membersStore.getState().members.size).toBe(1);
+    expect(dmStore.getState().channels.length).toBe(1);
     vi.mocked(cleanupNotificationAudio).mockClear();
 
     await quickSwitchTo(B);
 
+    expect(membersStore.getState().members.size).toBe(0);
+    expect(dmStore.getState().channels.length).toBe(0);
     expect(channelsStore.getState().activeChannelId).toBeNull();
     expect(messagesStore.getState().detachedChannels.size).toBe(0);
     expect(blocksStore.getState().blockedByMe.size).toBe(0);
@@ -356,6 +405,52 @@ describe("profile switch teardown (B7-13)", () => {
     expect(cleanupNotificationAudio).toHaveBeenCalled();
     expect(currentUserPermissions()).toBe(0);
     expect(authStore.getState().token).toBeNull();
+  });
+});
+
+describe("a server switch leaves nothing of the old server behind (5.2a)", () => {
+  it("ends the API session before any domain reset runs", async () => {
+    await loginWithPassword(A, 1);
+    const calls: string[] = [];
+    const endSession = vi
+      .spyOn(apiRef.client!, "endSession")
+      .mockImplementation(() => void calls.push("endSession"));
+    const dispose = registerSessionReset("test:domain-probe", () => calls.push("domain"));
+    try {
+      await quickSwitchTo(B);
+    } finally {
+      dispose();
+      endSession.mockRestore();
+    }
+    // In-flight requests must be cut off before stores are emptied, or a
+    // response could land in a store that was just reset.
+    expect(calls).toEqual(["endSession", "domain"]);
+  });
+
+  it("drops a late `ready` from server A: after B's ready only B's roster and DMs remain", async () => {
+    await loginWithPassword(A, 1, { members: [memberOf(11)], dm_channels: [dmChannelRow(9)] });
+    expect([...membersStore.getState().members.keys()]).toEqual([11]);
+    expect(dmStore.getState().channels.map((c) => c.channelId)).toEqual([9]);
+
+    await quickSwitchTo(B);
+    expect(membersStore.getState().members.size).toBe(0);
+    expect(dmStore.getState().channels.length).toBe(0);
+
+    // A's snapshot arrives after the switch, before B signs in.
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "ready",
+        payload: { members: [memberOf(11)], dm_channels: [dmChannelRow(9)] },
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(10);
+    expect(membersStore.getState().members.size).toBe(0);
+    expect(dmStore.getState().channels.length).toBe(0);
+
+    await loginWithPassword(B, 2, { members: [memberOf(22)], dm_channels: [dmChannelRow(10)] });
+    expect([...membersStore.getState().members.keys()]).toEqual([22]);
+    expect(dmStore.getState().channels.map((c) => c.channelId)).toEqual([10]);
   });
 });
 
