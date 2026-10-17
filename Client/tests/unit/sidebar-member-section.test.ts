@@ -873,7 +873,7 @@ describe("SidebarMemberSection", () => {
       await vi.waitFor(() => expect(open).toHaveBeenCalled());
       const { userId, name, list } = open.mock.calls[open.mock.calls.length - 1]![0];
       expect({ userId, name }).toEqual({ userId: 7, name: "bob" });
-      expect(list).toBe(container.querySelector(".sidebar-members-content"));
+      expect(list).toBe(container.querySelector(".member-panel"));
 
       section.destroy();
     });

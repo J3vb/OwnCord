@@ -2,7 +2,7 @@
  * Mocked E2E: Admin member moderation (gap #5 of the Playwright audit).
  *
  * Exercises the member context menu built by `AdminActions.createMemberContextMenu`
- * over the real `MemberList` → `SidebarMemberSection.onBan/onKick/onToggleBlock`
+ * over the real `MemberList` → `memberPanel` onBan/onKick/onToggleBlock
  * wiring:
  *   - Ban: reason + duration collected, PATCH /api/v1/moderation/members/{id} sent with
  *     `banned:true`, `ban_reason` and `ban_duration_hours` (omitted when permanent).

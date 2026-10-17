@@ -707,7 +707,7 @@ describe("MemberList", () => {
   });
 
   // The role NAME passed via opts.currentUserRole is a snapshot taken once at
-  // mount (SidebarMemberSection.ts). dispatcher.ts keeps authStore.user.role
+  // mount (features/members/memberPanel.ts). dispatcher.ts keeps authStore.user.role
   // current on every self MEMBER_UPDATE specifically so permission gates can
   // read it live -- this is the one gate that opted out by threading the
   // stale prop instead.

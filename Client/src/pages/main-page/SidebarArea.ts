@@ -31,7 +31,8 @@ import {
   createSidebarVoiceCallbacks,
   createVoiceModerationCallbacks,
 } from "./VoiceCallbacks";
-import { createSidebarMemberSection } from "./SidebarMemberSection";
+import { createSidebarMemberSection, memberPanelUi } from "./SidebarMemberSection";
+import { createMemberPanel, type MemberPanel } from "../../features/members/memberPanel";
 import { attachServerMenu } from "./ServerMenu";
 import { createInviteManagerController } from "./OverlayManagers";
 import {
@@ -138,6 +139,10 @@ export interface SidebarAreaResult {
   readonly returnToChannel: () => void;
   /** Open (or start) the 1:1 DM with a user, as the member list's Message. */
   readonly messageUser: (userId: number) => void;
+  /** Build one member panel with the shared callback wiring (Message, Call and
+   *  voice moderation). The one factory every host uses; the caller owns the
+   *  result and must destroy it before another host builds one. */
+  readonly buildMemberPanel: () => MemberPanel;
   /** Rename a group DM through the sidebar's prompt (the header's name click). */
   readonly renameGroup: (channelId: number) => void;
 }
@@ -836,6 +841,33 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     });
   }
 
+  /** Call a user: open the DM first, then start the call in it (BUG-05). An
+   *  existing DM is selected at once; a new one starts the call in
+   *  `handleCreateDm`'s onReady, once it is the active channel `startCall`
+   *  reads. */
+  function callUser(userId: number): void {
+    const existing = findDirectDm(userId);
+    if (existing !== undefined) {
+      selectDmConversation(existing, dmDeps);
+      opts.onStartCall?.();
+      return;
+    }
+    void handleCreateDm(userId, dmDeps, () => opts.onStartCall?.());
+  }
+
+  function buildMemberPanel(): MemberPanel {
+    return createMemberPanel({
+      ui: memberPanelUi,
+      api,
+      getToast,
+      onMessageUser: (userId) => {
+        void handleCreateDm(userId, dmDeps);
+      },
+      onCallUser: callUser,
+      onVoiceModerate: createVoiceModerationCallbacks(ws),
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // Mount sidebar content for current mode
   // ---------------------------------------------------------------------------
@@ -894,28 +926,12 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       contentSlot.appendChild(innerSlot);
 
       // --- Member list (below DM section) ---
-      // Same wiring lives in SidebarMemberSection; this used to be a private
-      // copy of it, and a fix to one silently missed the other.
+      // The panel comes from the one factory every host shares, so the
+      // callback wiring exists once.
       const memberSection = createSidebarMemberSection({
         api,
         getToast,
-        onMessageUser: (userId) => {
-          void handleCreateDm(userId, dmDeps);
-        },
-        onCallUser: (userId) => {
-          // A call lives in the DM's voice channel, so open the 1:1 first and
-          // start the call there (BUG-05). An existing DM is selected at once;
-          // a new one starts the call in `handleCreateDm`'s onReady, once it is
-          // the active channel `startCall` reads.
-          const existing = findDirectDm(userId);
-          if (existing !== undefined) {
-            selectDmConversation(existing, dmDeps);
-            opts.onStartCall?.();
-            return;
-          }
-          void handleCreateDm(userId, dmDeps, () => opts.onStartCall?.());
-        },
-        onVoiceModerate: createVoiceModerationCallbacks(ws),
+        buildPanel: buildMemberPanel,
       });
       contentSlot.appendChild(memberSection.element);
       channelModeExtras.push(memberSection.memberListComponent);
@@ -1206,6 +1222,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     },
     returnToChannel,
     messageUser: (userId) => void handleCreateDm(userId, dmDeps),
+    buildMemberPanel,
     renameGroup,
   };
 }
