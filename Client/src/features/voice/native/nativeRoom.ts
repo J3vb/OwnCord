@@ -53,8 +53,22 @@ import { NativeVideoRenderer } from "./videoRenderer";
 import { NativeCameraTrack } from "./nativeCameraTrack";
 import { CameraSwitchUnavailable } from "../cameraSwitch";
 import { NativeScreenAudioTrack } from "./screenAudioTrack";
-import { NativeScreenTrack, startError, isDeviceFallback, pickerDismissed } from "./screenTrack";
-import { noteChangedSource, pickChangeSource, pickScreenSource } from "./screenPicker";
+import {
+  NativeScreenTrack,
+  ScreenQualityError,
+  startError,
+  isDeviceFallback,
+  pickerDismissed,
+} from "./screenTrack";
+import {
+  noteChangedQuality,
+  noteChangedSource,
+  pickChangeSource,
+  pickScreenSource,
+  shareSettings,
+} from "./screenPicker";
+import type { StreamQuality } from "@lib/screenShare";
+import type { PublishCodec } from "../videoCodec";
 
 const log = createLogger("nativeRoom");
 
@@ -839,7 +853,10 @@ export class NativeRoom {
       (t) => this.stopScreen(session, t),
       { maxBitrate: pick.maxBitrate, maxFramerate: pick.maxFramerate, simulcast: pick.simulcast },
       pick.capture,
+      pick.quality,
+      pick.fps,
       (t) => this.changeScreenSource(session, t),
+      (t, q, fps, published) => this.changeScreenQuality(session, t, q, fps, published),
       () => this.readStats(),
     );
     // The old share goes first (its stop also ends its audio), then both of
@@ -884,6 +901,61 @@ export class NativeRoom {
     }
     track.retarget(started);
     noteChangedSource(source);
+    if (this.endedCapture === track.capture) track.end();
+  }
+
+  /** Run the live share `track` at `quality` and `fps`: the host re-sizes the
+   *  running capture and republishes it with the new encoding (the SDK cannot
+   *  change a sender's parameters), at `published`, the codec the share goes
+   *  out with now (the room cannot read the share state). Viewers get a new
+   *  publication, so its sid replaces the old one. Throws a
+   *  `ScreenQualityError`: "refused" when nothing changed, "publish" when the
+   *  republish failed and the share's video is gone. */
+  private async changeScreenQuality(
+    session: number,
+    track: NativeScreenTrack,
+    quality: StreamQuality,
+    fps: number,
+    published: PublishCodec,
+  ): Promise<void> {
+    const live = (): boolean => this.sessionId === session && this.screen === track;
+    // i18n-exempt: internal native-room state guard, never rendered
+    if (!live()) throw new ScreenQualityError("refused", "screen share is no longer live");
+    const settings = shareSettings(quality, fps);
+    const result = await desktop.nativeVoice.setScreenQuality(
+      session,
+      track.capture,
+      settings.capture,
+      {
+        width: track.width,
+        height: track.height,
+        maxBitrate: settings.maxBitrate,
+        maxFramerate: settings.maxFramerate,
+        simulcast: settings.simulcast,
+        codec: nativeCodec({ videoCodec: published }),
+      },
+    );
+    if (!result.ok) throw new ScreenQualityError(result.stage, result.message);
+    // A stop or leave that came meanwhile released the share; nothing to
+    // track (a stop queued behind the command released the new publication).
+    if (!live()) return;
+    track.retargetQuality(
+      { width: result.width, height: result.height },
+      {
+        quality,
+        fps,
+        capture: settings.capture,
+        encoding: {
+          maxBitrate: settings.maxBitrate,
+          maxFramerate: settings.maxFramerate,
+          simulcast: settings.simulcast,
+        },
+      },
+    );
+    noteChangedQuality(quality, fps);
+    const pubs = this.localParticipant.trackPublications;
+    const old = pubs.get("screen_share");
+    if (old?.track === track) pubs.set("screen_share", { ...old, trackSid: result.sid });
     if (this.endedCapture === track.capture) track.end();
   }
 
