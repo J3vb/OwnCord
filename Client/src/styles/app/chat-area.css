@@ -598,3 +598,15 @@
 .mod-center-toolbar[hidden] {
   display: none;
 }
+.chat-header .ch-topic[role="button"] {
+  cursor: pointer;
+}
+.chat-header .ch-topic[role="button"]:hover {
+  color: var(--text-normal);
+}
+.channel-topic-full {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-normal);
+}

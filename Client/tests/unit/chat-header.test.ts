@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { buildChatHeader, updateChatHeaderForDm } from "../../src/pages/main-page/ChatHeader";
+import {
+  buildChatHeader,
+  updateChatHeaderForDm,
+  setChatHeaderChannelType,
+  setChatHeaderTopic,
+} from "../../src/pages/main-page/ChatHeader";
 
 describe("ChatHeader", () => {
   let container: HTMLDivElement;
@@ -343,5 +348,64 @@ describe("updateChatHeaderForDm", () => {
       refs.profileBtn.click();
       expect(onToggleDmProfile).toHaveBeenCalledOnce();
     });
+  });
+});
+
+describe("ChatHeader channel type icon and topic modal (N21)", () => {
+  let container: HTMLDivElement;
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+  afterEach(() => {
+    container.remove();
+    document.querySelectorAll('[data-testid="channel-topic-modal"]').forEach((e) => e.remove());
+  });
+
+  it("shows the megaphone for an announcement channel and # for a text one", () => {
+    const { element, refs } = buildChatHeader({ onTogglePins: vi.fn() });
+    container.appendChild(element);
+
+    setChatHeaderChannelType(refs, "announcement");
+    expect(refs.hashEl.querySelector("svg")).not.toBeNull();
+    expect(refs.hashEl.dataset["channelType"]).toBe("announcement");
+
+    setChatHeaderChannelType(refs, "text");
+    expect(refs.hashEl.querySelector("svg")).toBeNull();
+    expect(refs.hashEl.textContent).toBe("#");
+  });
+
+  it("opens the full topic as plain text on click; Escape and the close button close it", () => {
+    const { element, refs } = buildChatHeader({ onTogglePins: vi.fn() });
+    container.appendChild(element);
+    const topic = 'A very long topic <img src=x onerror="alert(1)"> <b>bold</b>';
+    setChatHeaderTopic(refs, topic);
+
+    refs.topicEl.click();
+    const text = document.querySelector('[data-testid="channel-topic-text"]')!;
+    expect(text.textContent).toBe(topic);
+    expect(text.querySelector("img, b")).toBeNull();
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(document.querySelector('[data-testid="channel-topic-modal"]')).toBeNull();
+
+    refs.topicEl.click();
+    (document.querySelector('[data-testid="channel-topic-close"]') as HTMLElement).click();
+    expect(document.querySelector('[data-testid="channel-topic-modal"]')).toBeNull();
+  });
+
+  it("does nothing for an empty topic or a DM status line", () => {
+    const { element, refs } = buildChatHeader({ onTogglePins: vi.fn() });
+    container.appendChild(element);
+
+    setChatHeaderTopic(refs, "");
+    refs.topicEl.click();
+    expect(document.querySelector('[data-testid="channel-topic-modal"]')).toBeNull();
+
+    setChatHeaderTopic(refs, "topic");
+    updateChatHeaderForDm(refs, { username: "bob", status: "online" });
+    refs.topicEl.click();
+    expect(document.querySelector('[data-testid="channel-topic-modal"]')).toBeNull();
+    expect(refs.topicEl.textContent).toBe("online");
   });
 });

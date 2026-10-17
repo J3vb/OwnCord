@@ -177,6 +177,8 @@ export const messagingText = defineCatalog("messaging", {
   "toast.userIdCopied": "User ID copied",
   "toast.userIdCopyFailed": "Couldn't copy the user ID",
   "toast.channelIdCopied": "Channel ID copied",
+  "toast.channelLinkCopied": "Channel link copied",
+  "toast.channelLinkCopyFailed": "Couldn't copy the channel link",
   "toast.channelIdCopyFailed": "Couldn't copy the channel ID",
 
   "spoiler.reveal": "Spoiler — click to reveal",
@@ -221,6 +223,8 @@ export const messagingText = defineCatalog("messaging", {
   "header.startCall": "Start a call",
   "header.startVideoCall": "Start a video call",
   "header.pins": "Pins",
+  "header.topicOpen": "Show the full topic",
+  "header.topicTitle": "Topic of {channel}",
   "header.search": "Search...",
 
   "jump.channelUnavailable": "That channel isn't available",
