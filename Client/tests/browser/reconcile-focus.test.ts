@@ -27,4 +27,43 @@ describe("reconcileChildren focus in a real browser", () => {
     expect(document.activeElement).toBe(bob);
     container.remove();
   });
+
+  const opts = {
+    key: (name: string) => name,
+    signature: (name: string) => name,
+    create: (name: string) => {
+      const row = document.createElement("div");
+      row.tabIndex = -1;
+      row.textContent = name;
+      return row;
+    },
+  };
+
+  it("a focused row stays focused when a row above it moves to the end", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    reconcileChildren(container, ["a", "b", "c", "d"], opts);
+    const c = container.children[2] as HTMLElement;
+    c.focus();
+
+    reconcileChildren(container, ["b", "c", "d", "a"], opts);
+
+    expect(container.children[1]).toBe(c);
+    expect(document.activeElement).toBe(c);
+    container.remove();
+  });
+
+  it("a focused row that itself moves down keeps focus", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    reconcileChildren(container, ["a", "b", "c", "d"], opts);
+    const a = container.children[0] as HTMLElement;
+    a.focus();
+
+    reconcileChildren(container, ["b", "c", "d", "a"], opts);
+
+    expect(container.children[3]).toBe(a);
+    expect(document.activeElement).toBe(a);
+    container.remove();
+  });
 });

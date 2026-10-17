@@ -133,12 +133,25 @@ describe("MemberList", () => {
     const headers = container.querySelectorAll(".member-role-group");
     const headerTexts = Array.from(headers).map((h) => h.textContent);
 
-    // Should have all 4 role groups
-    expect(headers.length).toBe(4);
-    expect(headerTexts[0]).toContain("OWNER");
-    expect(headerTexts[1]).toContain("ADMIN");
-    expect(headerTexts[2]).toContain("MODERATOR");
-    expect(headerTexts[3]).toContain("MEMBER");
+    // The four role groups, then the one OFFLINE group (Dave is offline).
+    expect(headers.length).toBe(5);
+    expect(headerTexts).toEqual([
+      "OWNER — 1",
+      "ADMIN — 2",
+      "MODERATOR — 1",
+      "MEMBER — 1",
+      "OFFLINE — 1",
+    ]);
+  });
+
+  it("keeps the four role headers and counts when everyone is online", () => {
+    setTestMembers(testMembers.map((m) => ({ ...m, status: "online" as UserStatus })));
+    memberList.mount(container);
+
+    const headerTexts = Array.from(container.querySelectorAll(".member-role-group")).map(
+      (h) => h.textContent,
+    );
+    expect(headerTexts).toEqual(["OWNER — 1", "ADMIN — 2", "MODERATOR — 1", "MEMBER — 2"]);
   });
 
   it("sorts online-ish members together, A-Z, within a group", () => {
@@ -173,11 +186,13 @@ describe("MemberList", () => {
     const headers = container.querySelectorAll(".member-role-group");
     const headerTexts = Array.from(headers).map((h) => h.textContent);
 
-    // OWNER has 1, ADMIN has 2, MODERATOR has 1, MEMBER has 2
-    expect(headerTexts[0]).toContain("1");
-    expect(headerTexts[1]).toContain("2");
-    expect(headerTexts[2]).toContain("1");
-    expect(headerTexts[3]).toContain("2");
+    // Counts are online members only: OWNER 1, ADMIN 2, MODERATOR 1, MEMBER 1
+    // (Dave is offline), OFFLINE 1.
+    expect(headerTexts[0]).toBe("OWNER — 1");
+    expect(headerTexts[1]).toBe("ADMIN — 2");
+    expect(headerTexts[2]).toBe("MODERATOR — 1");
+    expect(headerTexts[3]).toBe("MEMBER — 1");
+    expect(headerTexts[4]).toBe("OFFLINE — 1");
   });
 
   it("shows member avatars with first letter", () => {
@@ -1475,5 +1490,206 @@ describe("MemberList full context menu (3C-3)", () => {
       await vi.dynamicImportSettled();
       expect(document.body.querySelector(".context-menu")).toBeNull();
     });
+  });
+});
+
+describe("MemberList rows update in place (3C-4a)", () => {
+  let container: HTMLDivElement;
+  let list: ReturnType<typeof createMemberList> | null = null;
+
+  const row = (id: number): HTMLElement =>
+    container.querySelector<HTMLElement>(`[data-testid="member-${id}"]`)!;
+  const texts = (): string[] =>
+    Array.from(container.querySelectorAll(".member-role-group, .member-item")).map((el) =>
+      el.classList.contains("member-role-group")
+        ? (el.textContent ?? "")
+        : (el.getAttribute("data-testid") ?? ""),
+    );
+
+  beforeEach(() => {
+    resetStore();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    list = null;
+  });
+
+  afterEach(() => {
+    list?.destroy?.();
+    container.remove();
+    document.body.querySelectorAll(".context-menu").forEach((m) => m.remove());
+  });
+
+  function mountWith(members: Member[]): void {
+    setTestMembers(members);
+    list = createMemberList(defaultOpts());
+    list.mount(container);
+  }
+
+  it("offline and invisible members form one OFFLINE group at the end, A-Z across roles", () => {
+    mountWith([
+      makeMember({ id: 1, username: "Zed", role: "owner", status: "offline" }),
+      makeMember({ id: 2, username: "Amy", role: "member", status: "invisible" }),
+      makeMember({ id: 3, username: "Mia", role: "admin", status: "offline" }),
+      makeMember({ id: 4, username: "Bo", role: "member", status: "online" }),
+    ]);
+    expect(texts()).toEqual([
+      "MEMBER — 1",
+      "member-4",
+      "OFFLINE — 3",
+      "member-2",
+      "member-3",
+      "member-1",
+    ]);
+    // An offline name keeps its role colour (dimmed by .offline).
+    expect(row(1).classList.contains("offline")).toBe(true);
+    expect(row(1).querySelector(".mi-name")!.getAttribute("data-role-color")).toBe(
+      "var(--role-owner, #e74c3c)",
+    );
+  });
+
+  it("a member going offline moves into OFFLINE; same element, no other row moved", () => {
+    mountWith(testMembers);
+    const before = new Map(
+      Array.from(container.querySelectorAll(".member-item")).map((el) => [
+        el.getAttribute("data-testid"),
+        el,
+      ]),
+    );
+    const listEl = container.querySelector(".member-list")!;
+    const records: MutationRecord[] = [];
+    const observer = new MutationObserver((r) => records.push(...r));
+    observer.observe(listEl, { childList: true });
+
+    updatePresence(6, "offline");
+    membersStore.flush();
+    records.push(...observer.takeRecords());
+    observer.disconnect();
+
+    const removed = records.flatMap((r) => Array.from(r.removedNodes));
+    const added = records.flatMap((r) => Array.from(r.addedNodes));
+    expect(removed).toEqual([before.get("member-6")]);
+    expect(added).toEqual([before.get("member-6")]);
+    expect(row(6)).toBe(before.get("member-6"));
+    expect(texts().slice(-3)).toEqual(["OFFLINE — 2", "member-4", "member-6"]);
+    for (const [id, el] of before) {
+      expect(container.querySelector(`[data-testid="${id}"]`)).toBe(el);
+    }
+  });
+
+  it("focus stays on a row when another member changes status", () => {
+    mountWith(testMembers);
+    row(3).focus();
+    expect(document.activeElement).toBe(row(3));
+    updatePresence(1, "offline");
+    membersStore.flush();
+    updatePresence(6, "dnd");
+    membersStore.flush();
+    expect(document.activeElement).toBe(row(3));
+  });
+
+  it("an open member menu survives another member's presence change, and Escape refocuses its row", async () => {
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 99, username: "Actor", avatar: null, role: "admin" },
+      serverName: "Test",
+      motd: null,
+      isAuthenticated: true,
+    }));
+    mountWith(testMembers);
+    row(5).focus();
+    row(5).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    await vi.dynamicImportSettled();
+    const menu = document.body.querySelector(".context-menu");
+    expect(menu).not.toBeNull();
+
+    updatePresence(1, "offline");
+    membersStore.flush();
+    expect(document.body.querySelector(".context-menu")).toBe(menu);
+    expect(row(5).isConnected).toBe(true);
+
+    menu!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(document.body.querySelector(".context-menu")).toBeNull();
+    expect(document.activeElement).toBe(row(5));
+  });
+
+  it("a first right-click whose menu module loads after a presence update still opens", async () => {
+    mountWith(testMembers);
+    row(5).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    // The presence update lands before the lazy module settles.
+    updatePresence(1, "offline");
+    membersStore.flush();
+    await vi.dynamicImportSettled();
+    expect(document.body.querySelector(".context-menu")).not.toBeNull();
+  });
+
+  it("a same-colour role change reuses the row and the menu gates on the new role", async () => {
+    setRoles([
+      { id: 1, name: "Owner", color: null, permissions: Permission.ADMINISTRATOR, position: 100 },
+      {
+        id: 2,
+        name: "Admin",
+        color: "#112233",
+        permissions: Permission.ADMINISTRATOR,
+        position: 80,
+      },
+      { id: 3, name: "Mod", color: "#112233", permissions: 0, position: 60 },
+    ]);
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 99, username: "Actor", avatar: null, role: "Admin" },
+      serverName: "Test",
+      motd: null,
+      isAuthenticated: true,
+    }));
+    mountWith([
+      makeMember({ id: 7, username: "Target", role: "Mod" }),
+      makeMember({ id: 99, username: "Actor", role: "Admin" }),
+    ]);
+    const menuLabels = async (): Promise<(string | null | undefined)[]> => {
+      row(7).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+      await vi.dynamicImportSettled();
+      return Array.from(document.body.querySelectorAll(".context-menu__item")).map(
+        (el) => el.firstChild?.textContent,
+      );
+    };
+    expect(await menuLabels()).toContain("Force Logout");
+    document.body.querySelectorAll(".context-menu").forEach((m) => m.remove());
+
+    const before = row(7);
+    updateMemberRole(7, "Admin");
+    membersStore.flush();
+    // Same colour as Mod, so the row is reused; the actor no longer outranks it.
+    expect(row(7)).toBe(before);
+    expect(await menuLabels()).not.toContain("Force Logout");
+  });
+
+  it('a role named "Offline" and the Offline group render as two groups', () => {
+    setRoles([
+      { id: 1, name: "Offline", color: null, permissions: 0, position: 50 },
+      { id: 2, name: "Member", color: null, permissions: 0, position: 40 },
+    ]);
+    mountWith([
+      makeMember({ id: 1, username: "Ann", role: "Offline", status: "online" }),
+      makeMember({ id: 2, username: "Bob", role: "Member", status: "offline" }),
+    ]);
+    expect(texts()).toEqual(["OFFLINE — 1", "member-1", "OFFLINE — 1", "member-2"]);
+    expect(container.querySelectorAll('[data-testid="member-group-offline"]')).toHaveLength(1);
+  });
+
+  it("a full presence snapshot and a ready setMembers reuse unchanged rows by id", () => {
+    mountWith(testMembers);
+    const before = Array.from(container.querySelectorAll(".member-item"));
+
+    // Same data, brand-new objects for every member (what ready / presence full do).
+    setTestMembers(testMembers.map((m) => ({ ...m })));
+    membersStore.flush();
+    expect(Array.from(container.querySelectorAll(".member-item"))).toEqual(before);
+
+    // A member gone from the snapshot is removed; the rest keep their nodes.
+    setTestMembers(testMembers.filter((m) => m.id !== 5).map((m) => ({ ...m })));
+    membersStore.flush();
+    expect(container.querySelector('[data-testid="member-5"]')).toBeNull();
+    expect(container.querySelectorAll(".member-item")).toHaveLength(before.length - 1);
+    expect(row(1)).toBe(before[0]);
   });
 });

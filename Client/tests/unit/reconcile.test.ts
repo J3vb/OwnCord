@@ -158,4 +158,56 @@ describe("reconcileChildren", () => {
     expect(document.activeElement).toBe(container.querySelector(".row-action"));
     container.remove();
   });
+
+  it("moves only the nodes outside the longest kept run", () => {
+    const container = document.createElement("div");
+    const items = Array.from({ length: 500 }, (_, i) => ({ id: i, label: String(i) }));
+    reconcileChildren(container, items, opts);
+    const records: MutationRecord[] = [];
+    const observer = new MutationObserver((r) => records.push(...r));
+    observer.observe(container, { childList: true });
+
+    reconcileChildren(container, [...items.slice(1), items[0]!], opts);
+    records.push(...observer.takeRecords());
+    observer.disconnect();
+
+    const moves = records.reduce((n, r) => n + r.addedNodes.length, 0);
+    expect(moves).toBe(1);
+    expect(ids(container)).toEqual([...items.slice(1), items[0]!].map((r) => String(r.id)));
+  });
+
+  it("order matches wanted for random permutations", () => {
+    let seed = 12345;
+    const rand = (): number => {
+      seed = (seed * 1664525 + 1013904223) % 4294967296;
+      return seed / 4294967296;
+    };
+    const container = document.createElement("div");
+    let current = Array.from({ length: 30 }, (_, i) => i);
+    reconcileChildren(
+      container,
+      current.map((id) => ({ id, label: String(id) })),
+      opts,
+    );
+    for (let round = 0; round < 200; round++) {
+      const next = current.filter(() => rand() > 0.15);
+      for (let id = 100 * round; id < 100 * round + Math.floor(rand() * 4); id++) {
+        next.splice(Math.floor(rand() * (next.length + 1)), 0, id);
+      }
+      for (let i = next.length - 1; i > 0; i--) {
+        if (rand() < 0.3) {
+          const j = Math.floor(rand() * (i + 1));
+          [next[i], next[j]] = [next[j]!, next[i]!];
+        }
+      }
+      const unique = [...new Set(next)];
+      reconcileChildren(
+        container,
+        unique.map((id) => ({ id, label: String(id) })),
+        opts,
+      );
+      expect(ids(container)).toEqual(unique.map(String));
+      current = unique;
+    }
+  });
 });
