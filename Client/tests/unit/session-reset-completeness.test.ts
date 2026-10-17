@@ -78,7 +78,6 @@ import {
 import type { MessageRequest } from "../../src/features/message-requests/api";
 import { loadRequests, requestsApi } from "../../src/features/message-requests/sync";
 import type { DispatchApi } from "../../src/features/connection/dispatchContext";
-import { isDmKeptForCall, keepDmForCall } from "../../src/features/direct-messages/keptCallDms";
 import type { GifFavoritesApi } from "../../src/lib/gifProvider";
 import type { ReadyMember } from "../../src/lib/types";
 
@@ -413,22 +412,6 @@ const PROBES: readonly Probe[] = [
       messageRequestsStore.getState().status === "loading",
   },
   {
-    // A kept DM ends with the voice session either way (a voice reset prunes
-    // it), so this probe pins the registration, not an observable difference.
-    name: "dm:kept-calls",
-    mutate: () => {
-      voiceStore.setState((s) => ({ ...s, currentChannelId: 3, voiceStatus: "idle" }));
-      keepDmForCall(3);
-      expect(isDmKeptForCall(3)).toBe(true);
-    },
-    isInitial: () => {
-      voiceStore.setState((s) => ({ ...s, currentChannelId: 3 }));
-      const kept = isDmKeptForCall(3);
-      voiceStore.setState((s) => ({ ...s, currentChannelId: null }));
-      return !kept;
-    },
-  },
-  {
     name: "safety:store",
     mutate: () =>
       setReadyNotices([
@@ -455,6 +438,9 @@ const EXEMPT: readonly string[] = [
   // the notification tests cover what each does.
   "notifications:audio",
   "notifications:coalescing",
+  // Its reset is not observable: a kept DM needs the live voice session on that
+  // channel, and the voice reset that follows prunes the set anyway.
+  "dm:kept-calls",
   // Per-subscriber names built from a counter in auth.store (onAuthCleared);
   // page-scoped callers only, each removes its own entry with its disposer.
   "auth-cleared#${authClearedSeq}",
