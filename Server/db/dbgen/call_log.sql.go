@@ -113,6 +113,34 @@ func (q *Queries) GetMessageCallsByMessageIDs(ctx context.Context, ids []int64) 
 	return items, nil
 }
 
+const getOpenMessageCallByChannel = `-- name: GetOpenMessageCallByChannel :one
+SELECT c.message_id, c.channel_id, c.started_at, c.last_seen_at, m.user_id
+FROM message_calls c
+JOIN messages m ON m.id = c.message_id
+WHERE c.channel_id = ? AND c.ended_at IS NULL
+`
+
+type GetOpenMessageCallByChannelRow struct {
+	MessageID  int64  `json:"messageId"`
+	ChannelID  int64  `json:"channelId"`
+	StartedAt  string `json:"startedAt"`
+	LastSeenAt string `json:"lastSeenAt"`
+	UserID     int64  `json:"userId"`
+}
+
+func (q *Queries) GetOpenMessageCallByChannel(ctx context.Context, channelID int64) (GetOpenMessageCallByChannelRow, error) {
+	row := q.db.QueryRowContext(ctx, getOpenMessageCallByChannel, channelID)
+	var i GetOpenMessageCallByChannelRow
+	err := row.Scan(
+		&i.MessageID,
+		&i.ChannelID,
+		&i.StartedAt,
+		&i.LastSeenAt,
+		&i.UserID,
+	)
+	return i, err
+}
+
 const insertCallMessage = `-- name: InsertCallMessage :one
 INSERT INTO messages (channel_id, user_id, content, kind) VALUES (?, ?, ?, 1)
 RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
@@ -145,6 +173,23 @@ func (q *Queries) InsertCallMessage(ctx context.Context, arg InsertCallMessagePa
 		&i.Kind,
 	)
 	return i, err
+}
+
+const insertExistingMessageCallParticipant = `-- name: InsertExistingMessageCallParticipant :exec
+INSERT OR IGNORE INTO message_call_participants (message_id, user_id)
+SELECT ?1, ?2 WHERE EXISTS (SELECT 1 FROM users WHERE id = ?2)
+`
+
+type InsertExistingMessageCallParticipantParams struct {
+	MessageID int64 `json:"messageId"`
+	UserID    int64 `json:"userId"`
+}
+
+// Records a participant only while the user still exists, so a vanished user
+// is skipped instead of failing the whole write.
+func (q *Queries) InsertExistingMessageCallParticipant(ctx context.Context, arg InsertExistingMessageCallParticipantParams) error {
+	_, err := q.db.ExecContext(ctx, insertExistingMessageCallParticipant, arg.MessageID, arg.UserID)
+	return err
 }
 
 const insertMessageCall = `-- name: InsertMessageCall :exec
@@ -180,6 +225,69 @@ type InsertMessageCallParticipantParams struct {
 
 func (q *Queries) InsertMessageCallParticipant(ctx context.Context, arg InsertMessageCallParticipantParams) error {
 	_, err := q.db.ExecContext(ctx, insertMessageCallParticipant, arg.MessageID, arg.UserID)
+	return err
+}
+
+const listOpenMessageCalls = `-- name: ListOpenMessageCalls :many
+SELECT c.message_id, c.channel_id, c.started_at, c.last_seen_at, m.user_id
+FROM message_calls c
+JOIN messages m ON m.id = c.message_id
+WHERE c.ended_at IS NULL
+ORDER BY c.message_id
+`
+
+type ListOpenMessageCallsRow struct {
+	MessageID  int64  `json:"messageId"`
+	ChannelID  int64  `json:"channelId"`
+	StartedAt  string `json:"startedAt"`
+	LastSeenAt string `json:"lastSeenAt"`
+	UserID     int64  `json:"userId"`
+}
+
+// Every live call with its author, for the call log worker's start-up
+// recovery, its periodic pass and its stop.
+func (q *Queries) ListOpenMessageCalls(ctx context.Context) ([]ListOpenMessageCallsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listOpenMessageCalls)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListOpenMessageCallsRow{}
+	for rows.Next() {
+		var i ListOpenMessageCallsRow
+		if err := rows.Scan(
+			&i.MessageID,
+			&i.ChannelID,
+			&i.StartedAt,
+			&i.LastSeenAt,
+			&i.UserID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const touchMessageCall = `-- name: TouchMessageCall :exec
+UPDATE message_calls SET last_seen_at = ?1
+WHERE message_id = ?2 AND ended_at IS NULL AND last_seen_at < ?1
+`
+
+type TouchMessageCallParams struct {
+	LastSeenAt string `json:"lastSeenAt"`
+	MessageID  int64  `json:"messageId"`
+}
+
+// last_seen_at only moves forward, and only while the call is live.
+func (q *Queries) TouchMessageCall(ctx context.Context, arg TouchMessageCallParams) error {
+	_, err := q.db.ExecContext(ctx, touchMessageCall, arg.LastSeenAt, arg.MessageID)
 	return err
 }
 

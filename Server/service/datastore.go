@@ -18,6 +18,7 @@ import (
 // permissions.NewChecker takes its own narrower interface (permissions.DB),
 // which *db.DB and this Store both satisfy.
 type Store interface {
+	CallLogStore // the DM call log worker's reads and writes (WP 3B-9)
 	// ── Second-factor state (B4-3) ──
 	// The durable backend behind the auth service's partial-auth, pending
 	// enrolment and used-code stores, plus the recovery-code rows; stdlib

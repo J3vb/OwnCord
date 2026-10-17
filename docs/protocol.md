@@ -760,13 +760,34 @@ omitted for an ordinary message: `kind` (`"call"`, the closed set
 ended_at, participants}`. `started_at` and `ended_at` use the same layout as
 `timestamp` of the surface they ride on (`ended_at` is `null` while the call is
 live), and `participants` is the list of user IDs who were in the call at any
-point. `content` is fallback text that only clients
-that do not know `kind` show. `chat_send` ignores any `kind` or `call` a client sends: only the server writes a
-call row, and nobody can edit, delete, pin, react to or reply to one. The same
-fields ride on each message in `GET /channels/{id}/messages` (`before`, `after`
-and `around`). Every member of the DM sees `participants`, including members who
-join a group DM later, the same audience that sees the channel's `voice_state`
-and its history. Clients treat an unknown `kind` as an ordinary message.
+point. `content` is fallback text that only clients that do not know `kind`
+show. `chat_send` ignores any `kind` or `call` a client sends: only the server
+writes a call row, and nobody can edit, delete, pin, react to or reply to one.
+The same fields ride on each message in `GET /channels/{id}/messages`
+(`before`, `after` and `around`). Every member of the DM sees `participants`,
+including members who join a group DM later, the same audience that sees the
+channel's `voice_state` and its history. Clients treat an unknown `kind` as an
+ordinary message.
+
+The server writes one call row per DM call, from voice presence. The row is
+created when the first person joins the DM's voice channel (its author is the
+first joiner), and it is sent as an ordinary sequenced `chat_message` to the DM's
+audience, so it is replayed on reconnect like chat. If a recipient had closed
+the DM, a `dm_channel_open` for them comes first, as for a ring. A one-to-one
+call is logged once both sides have accepted the DM (see `dm_request`); a call in a DM that
+has not been accepted writes no row and sends no frame. A group DM has no such condition. The call ends 10 seconds after the
+last person leaves, so a quick rejoin is the same call, and `ended_at` is the
+time of the last leave. The end is sent as a `chat_edited` with the row's
+`message_id` and `channel_id`, the fallback `content` for the finished call
+(for example `started a call that lasted 5 minutes.`), `kind`, the final `call`
+block (with `ended_at` set and the complete `participants` list), empty
+`mentions`, and **`edited_at: null`**. Clients replace the row's `call` and do
+not show an edited marker for `kind: "call"`; a client that does not know `kind`
+shows the new `content` without one, because `edited_at` is null. Joining or
+leaving mid-call sends no frame. If the server stops during a call, the call is
+ended at the last time anyone was seen in it when the server next starts, and
+that end is sent like any other. Calls that continue across a restart are not
+carried over: people who rejoin start a new row.
 
 | Field                | Type           | Description                                                                                                                                              |
 | -------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -847,6 +868,11 @@ content and replace the stored set, except a reply-ping target, which an
 edit keeps. Editing never raises anyone's
 `mention_count`: a badge is only ever raised by the original send, so
 re-adding an already-counted mention cannot double-count it.
+
+The end of a DM call log row is also a `chat_edited`, with `edited_at: null`,
+the row's `kind` (`"call"`) and its final `call` block (see `chat_message`). It
+is not an edit by anyone: a client replaces `content` and `call` and does not
+show an edited marker.
 
 ### chat_delete (Client -> Server)
 
