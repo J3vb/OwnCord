@@ -96,13 +96,25 @@ describe("bundle-budgets.json shape", () => {
       ...valid,
       chunks: { MainPage: { budget: 2000, note: "x".repeat(MAX_NOTE_LENGTH + 1) } },
     };
-    expect(validateBudgets(budgets)).toEqual([expect.stringContaining("chunks.MainPage: note is")]);
+    expect(validateBudgets(budgets)).toEqual([expect.stringContaining("chunks.MainPage.note is")]);
   });
 
   it("rejects text appended to the WASM marker", () => {
     const budgets = { ...valid, forbidEmbeddedWasm: { marker: `${WASM_MARKER} Raised 1 -> 2 B` } };
     expect(validateBudgets(budgets)).toEqual([
       `forbidEmbeddedWasm.marker must be exactly '${WASM_MARKER}'`,
+    ]);
+  });
+
+  it("rejects history in a top-level text field or a new key", () => {
+    const budgets = {
+      ...valid,
+      ratchet: "x".repeat(MAX_NOTE_LENGTH + 1),
+      startup: { budget: 1000, rebaseline: "measured 1 B" },
+    };
+    expect(validateBudgets(budgets)).toEqual([
+      expect.stringContaining("ratchet is"),
+      "startup: unknown key 'rebaseline'",
     ]);
   });
 

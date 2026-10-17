@@ -83,50 +83,84 @@ export const MAX_NOTE_LENGTH = 300;
 export const WASM_MARKER = "AGFzbQ";
 
 /** Problems with the shape of bundle-budgets.json, as messages; empty when it
- *  is well formed. Catches history appended to a note, and anything appended
- *  to the WASM marker, which would make that check search for text no chunk
- *  contains. */
+ *  is well formed. Every text field is capped and unknown keys are refused, so
+ *  history appended to any of them (or to a new sibling key) fails here, and so
+ *  does anything appended to the WASM marker, which would make that check search
+ *  for text no chunk contains. */
 export function validateBudgets(budgets) {
   const problems = [];
-  const checkEntry = (label, spec) => {
-    if (!Number.isInteger(spec?.budget) || spec.budget <= 0) {
-      problems.push(`${label}: budget must be a positive integer`);
-    }
-    if (typeof spec?.note === "string" && spec.note.length > MAX_NOTE_LENGTH) {
+  if (budgets === null || typeof budgets !== "object") {
+    return ["bundle-budgets.json must be an object"];
+  }
+  const text = (label, value) => {
+    if (value === undefined) return;
+    if (typeof value !== "string") {
+      problems.push(`${label} must be a string`);
+    } else if (value.length > MAX_NOTE_LENGTH) {
       problems.push(
-        `${label}: note is ${spec.note.length} characters (max ${MAX_NOTE_LENGTH}); ` +
-          "put the reason for a raise in the commit and PR, not the note",
+        `${label} is ${value.length} characters (max ${MAX_NOTE_LENGTH}); ` +
+          "put the reason for a raise in the commit and PR, not this file",
       );
     }
   };
-  checkEntry("startup", budgets.startup);
-  checkEntry("css", budgets.css);
+  const keys = (label, obj, allowed) => {
+    for (const key of Object.keys(obj ?? {})) {
+      if (!allowed.includes(key)) problems.push(`${label}: unknown key '${key}'`);
+    }
+  };
+  const entry = (label, spec, allowed) => {
+    if (spec === null || typeof spec !== "object") {
+      problems.push(`${label} must be an object`);
+      return;
+    }
+    keys(label, spec, allowed);
+    if (!Number.isInteger(spec.budget) || spec.budget <= 0) {
+      problems.push(`${label}: budget must be a positive integer`);
+    }
+    if (spec.lazy !== undefined && typeof spec.lazy !== "boolean") {
+      problems.push(`${label}: lazy must be true or false`);
+    }
+    text(`${label}.note`, spec.note);
+  };
+  keys("bundle-budgets.json", budgets, [
+    "method",
+    "ratchet",
+    "history",
+    "startup",
+    "chunks",
+    "forbidEmbeddedWasm",
+    "css",
+  ]);
+  for (const key of ["method", "ratchet", "history"]) text(key, budgets[key]);
+  entry("startup", budgets.startup, ["budget", "note"]);
+  entry("css", budgets.css, ["budget", "note"]);
   for (const [name, spec] of Object.entries(budgets.chunks ?? {})) {
-    checkEntry(`chunks.${name}`, spec);
+    entry(`chunks.${name}`, spec, ["budget", "lazy", "note"]);
   }
+  keys("forbidEmbeddedWasm", budgets.forbidEmbeddedWasm, ["marker", "note"]);
   if (budgets.forbidEmbeddedWasm?.marker !== WASM_MARKER) {
     problems.push(`forbidEmbeddedWasm.marker must be exactly '${WASM_MARKER}'`);
   }
+  text("forbidEmbeddedWasm.note", budgets.forbidEmbeddedWasm?.note);
   return problems;
 }
 
 function main() {
+  const budgets = JSON.parse(
+    readFileSync(new URL("../bundle-budgets.json", import.meta.url), "utf8"),
+  );
+  const problems = validateBudgets(budgets);
+  if (problems.length > 0) {
+    for (const problem of problems) console.error(`bundle-budget: ${problem}`);
+    exit(2);
+  }
+
   let manifest;
   try {
     manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"));
   } catch (err) {
     console.error(`bundle-budget: cannot read ${MANIFEST_PATH}: ${err.message}`);
     console.error("bundle-budget: run 'npm run build:budget' first");
-    exit(2);
-  }
-
-  const budgets = JSON.parse(
-    readFileSync(new URL("../bundle-budgets.json", import.meta.url), "utf8"),
-  );
-
-  const problems = validateBudgets(budgets);
-  if (problems.length > 0) {
-    for (const problem of problems) console.error(`bundle-budget: ${problem}`);
     exit(2);
   }
 
