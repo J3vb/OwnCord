@@ -12,6 +12,7 @@
  */
 
 import { createStore } from "@lib/store";
+import { registerSessionReset } from "@lib/sessionRegistry";
 import { connectText } from "../i18n/connect";
 
 export interface BlocksState {
@@ -96,6 +97,7 @@ export function clearBlockedByThem(): void {
 export function resetBlocksStore(): void {
   blocksStore.setState((prev) => ({ ...INITIAL, blockedByMeRev: (prev.blockedByMeRev ?? 0) + 1 }));
 }
+void registerSessionReset("blocks:store", resetBlocksStore); // app-lifetime
 
 /**
  * The composer disable reason for a DM with `recipientId`, or null if unblocked.

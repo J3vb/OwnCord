@@ -77,8 +77,9 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   lower-level module has to trigger a higher one, invert the edge rather than
   import upward: `stores/auth.store.ts` imports neither `voice.store` nor
   `lib/notifications` — `voice.store.ts` registers its logout teardown through
-  `registerVoiceLogoutTeardown` at load, and `main.ts` registers the
-  notification-audio cleanup through `onAuthCleared`. In
+  `registerVoiceLogoutTeardown` at load, and `lib/notifications.ts` registers the
+  notification-audio cleanup through `registerSessionReset`
+  (`lib/sessionRegistry.ts`, the leaf every per-server reset registers with). In
   `components/message-list/`, `attachments.ts` is the leaf every renderer
   imports (it also owns the image lightbox, which `media.ts` re-exports), so it
   must not import a sibling renderer. `madge` still lists cycles that close only

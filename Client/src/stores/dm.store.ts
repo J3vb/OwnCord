@@ -4,6 +4,7 @@
  */
 
 import { createStore } from "@lib/store";
+import { registerSessionReset } from "@lib/sessionRegistry";
 import { channelsStore, removeChannel } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";
 import type { DmChannelPayload } from "@lib/types";
@@ -421,3 +422,10 @@ export function updateDmParticipant(userId: number, patch: Partial<DmUser>): voi
     return changed ? { channels } : prev;
   });
 }
+
+/** Forget the previous server's DM list and unread badges on sign-out or server switch. */
+export function resetDmStore(): void {
+  dmStore.setState(() => INITIAL);
+}
+
+void registerSessionReset("dm:store", resetDmStore); // app-lifetime

@@ -5,11 +5,9 @@
 
 import { createStore } from "@lib/store";
 import type { UploadPolicy, UserWithRole } from "@lib/types";
-import { resetMessagesStore } from "@stores/messages.store";
-import { resetChannelsStore } from "@stores/channels.store";
-import { resetBlocksStore } from "@stores/blocks.store";
-import { setSidebarMode } from "@stores/ui.store";
 import { createLogger } from "@lib/logger";
+import { registerSessionReset, runSessionResets } from "@lib/sessionRegistry";
+import type { SessionResetReason } from "@lib/sessionRegistry";
 
 const log = createLogger("auth.store");
 
@@ -22,7 +20,7 @@ const log = createLogger("auth.store");
  * "server_switch": the user quick-switched to another server — main.ts keeps
  * the departed server's credential so switching back resumes it (B7-13).
  */
-export type LogoutReason = "user" | "protocol_epoch" | "server_switch";
+export type LogoutReason = SessionResetReason;
 
 export interface AuthState {
   readonly token: string | null;
@@ -55,27 +53,27 @@ const INITIAL_STATE: AuthState = {
 
 export const authStore = createStore<AuthState>(INITIAL_STATE);
 
-// Store notifications are deferred; cancellation cannot wait until after a
-// pending request has a chance to repopulate stores that clearAuth just reset.
-const authCleanupListeners = new Set<(reason: LogoutReason) => void>();
+let authClearedSeq = 0;
 
-/** Register application session cleanup that must run synchronously on logout. */
+/** Register application session cleanup that must run synchronously on logout.
+ *  A thin wrapper over the session registry's `session` phase; module-level
+ *  code names its own entry with `registerSessionReset` instead. */
 export function onAuthCleared(listener: (reason: LogoutReason) => void): () => void {
-  authCleanupListeners.add(listener);
-  return () => authCleanupListeners.delete(listener);
+  authClearedSeq += 1;
+  return registerSessionReset(`auth-cleared#${authClearedSeq}`, listener, { phase: "session" });
 }
 
-// voice.store.ts registers its logout teardown here at module load instead of
-// this store importing it: voice.store imports this store, so the direct import
-// was a cycle. main.ts imports voice.store statically, so it is registered
-// before any clearAuth can run; a store that never loaded holds nothing to reset.
+// voice.store.ts registers its pre-logout snapshot here at module load instead
+// of this store importing it: voice.store imports this store, so the direct
+// import was a cycle. Its reset is a registry entry in the `voice` phase.
+// main.ts imports voice.store statically, so it is registered before any
+// clearAuth can run; a store that never loaded holds nothing to reset.
 interface VoiceLogoutTeardown {
-  /** Read before `reset` — the last moment the pre-logout state is knowable. */
+  /** Read before the voice reset — the last moment the pre-logout state is knowable. */
   readonly snapshot: () => {
     readonly currentChannelId: number | null;
     readonly voiceStatus: string;
   };
-  readonly reset: () => void;
 }
 let voiceLogoutTeardown: VoiceLogoutTeardown | null = null;
 
@@ -148,14 +146,6 @@ export function setUploadFileTypes(
  *  logout as module-global state and mount the DM sidebar (with the old
  *  server's DM peer id) on whatever server is signed into next. */
 export function clearAuth(reason: LogoutReason = "user"): void {
-  const cleanups = [...authCleanupListeners];
-  for (const cleanup of cleanups) {
-    try {
-      cleanup(reason);
-    } catch {
-      log.warn("Session cleanup failed during logout");
-    }
-  }
   // livekitSession (and the ~1.3 MB livekit-client SDK behind it) is loaded
   // lazily so it stays out of the startup path. Only import it when there is
   // actually a voice session to leave — otherwise a text-only user who never
@@ -163,19 +153,17 @@ export function clearAuth(reason: LogoutReason = "user"): void {
   // When a voice session exists the module is necessarily already loaded, so
   // this import resolves from the module cache in a microtask.
   const voice = voiceLogoutTeardown?.snapshot();
-  // Snapshot BEFORE the voice reset below clears it — this is the last
-  // moment the pre-logout voice state is knowable.
+  // Snapshot BEFORE the registry's voice reset clears it — this is the last
+  // moment the pre-logout voice state is knowable. It is a read, so it runs
+  // ahead of the `session` phase too; no session entry writes voiceStore.
   const wasInVoice = voice !== undefined && voice.currentChannelId !== null;
   if (voice !== undefined && voice.currentChannelId !== null && voice.voiceStatus !== "idle") {
     void import("@lib/livekitSession")
       .then(({ leaveVoice }) => leaveVoice(false))
       .catch((e) => log.warn("Failed to leave voice session during clearAuth", e));
   }
-  voiceLogoutTeardown?.reset();
-  resetMessagesStore();
-  resetChannelsStore();
-  resetBlocksStore();
-  setSidebarMode("channels");
+  // Every entry is isolated, so authStore below always clears.
+  runSessionResets(reason);
   authStore.setState(() => ({
     ...INITIAL_STATE,
     logoutReason: reason,

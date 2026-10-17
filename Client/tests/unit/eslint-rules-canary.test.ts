@@ -164,6 +164,14 @@ const CANARIES: readonly Canary[] = [
   },
   {
     rule: "local/subscription-result-kept",
+    shape: "registerSessionReset",
+    filePath: "src/stores/messages.store.ts",
+    code: `import { registerSessionReset } from "@lib/sessionRegistry";
+    registerSessionReset("x:y", reset);`,
+    messageId: "discarded",
+  },
+  {
+    rule: "local/subscription-result-kept",
     shape: "store.subscribe",
     filePath: "src/stores/voice.store.ts",
     code: `voiceStore.subscribe(() => {});`,
