@@ -29,6 +29,7 @@ import {
 } from "@lib/livekitSession";
 import { loadPref, savePref } from "@lib/preferences";
 import { voiceText as t } from "../i18n/voice";
+import { formatElapsed, headerStatusText, isConnecting } from "./voiceStatusText";
 import { shareBlockReason } from "../features/voice/shareGate";
 import type { StreamCard } from "./voice-widget/streamCard";
 
@@ -57,29 +58,6 @@ const QUALITY_BARS: Record<QualityLevel, number> = {
   poor: 2,
   bad: 1,
 };
-
-/** Header status text per voice-session lifecycle state
- *  (docs/architecture/ux/voice-and-e2ee.md §2). */
-export function headerStatusText(status: VoiceStatus): string {
-  // i18n-exempt: catalog key assembled from the VoiceStatus wire value
-  return t(`status.${status}`);
-}
-
-/** The join has not reached the room yet: camera and share have nothing to attach to. */
-export function isConnecting(status: VoiceStatus): boolean {
-  return status === "joining" || status === "securing";
-}
-
-/** Format milliseconds elapsed into HH:MM:SS or MM:SS. */
-export function formatElapsed(ms: number): string {
-  const totalSec = Math.floor(ms / 1000);
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = totalSec % 60;
-  const mm = String(m).padStart(2, "0");
-  const ss = String(s).padStart(2, "0");
-  return h > 0 ? `${String(h).padStart(2, "0")}:${mm}:${ss}` : `${mm}:${ss}`;
-}
 
 function swapIcon(btn: HTMLButtonElement, name: IconName): void {
   const existing = btn.querySelector("svg");

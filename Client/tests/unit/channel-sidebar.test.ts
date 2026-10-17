@@ -2209,7 +2209,7 @@ describe("ChannelSidebar", () => {
 
   // ── Voice user volume context menu ──
 
-  it("right-click on other user's voice row opens volume context menu", () => {
+  it("right-click on other user's voice row opens volume context menu", async () => {
     // Set current user to something different from the voice user
     authStore.setState(() => ({
       token: "tok",
@@ -2240,6 +2240,8 @@ describe("ChannelSidebar", () => {
         clientY: 250,
       }),
     );
+    // The menu code loads on its first open (O-6b).
+    await vi.dynamicImportSettled();
 
     const volMenu = document.querySelector(".user-vol-menu");
     expect(volMenu).not.toBeNull();
@@ -2260,7 +2262,7 @@ describe("ChannelSidebar", () => {
    *  by default the one the server computes with no channel override (the
    *  role's MUTE_MEMBERS, ADMINISTRATOR included). Returns the open menu
    *  element (or null). */
-  function openVoiceMenuAs(
+  async function openVoiceMenuAs(
     permissions: number,
     voiceUser: Partial<VoiceStatePayload> = {},
     onVoiceModerate?: Parameters<typeof createChannelSidebar>[0]["onVoiceModerate"],
@@ -2268,7 +2270,7 @@ describe("ChannelSidebar", () => {
     verdict: boolean | null = (permissions &
       (Permission.MUTE_MEMBERS | Permission.ADMINISTRATOR)) !==
       0,
-  ): HTMLElement | null {
+  ): Promise<HTMLElement | null> {
     sidebar.destroy?.();
     setRoles([{ id: 3, name: "Moderator", color: null, permissions }]);
     authStore.setState(() => ({
@@ -2298,11 +2300,13 @@ describe("ChannelSidebar", () => {
 
     const voiceRow = container.querySelector(".voice-user-item") as HTMLElement;
     voiceRow.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    // The menu code loads on its first open (O-6b).
+    await vi.dynamicImportSettled();
     return document.querySelector(".user-vol-menu");
   }
 
-  it("hides the moderation section for a role without MUTE_MEMBERS", () => {
-    const menu = openVoiceMenuAs(Permission.MANAGE_CHANNELS, {}, voiceModCallbacks());
+  it("hides the moderation section for a role without MUTE_MEMBERS", async () => {
+    const menu = await openVoiceMenuAs(Permission.MANAGE_CHANNELS, {}, voiceModCallbacks());
     expect(menu).not.toBeNull();
     expect(menu!.querySelector('[data-action="server-mute"]')).toBeNull();
     expect(menu!.querySelector('[data-action="voice-disconnect"]')).toBeNull();
@@ -2310,8 +2314,8 @@ describe("ChannelSidebar", () => {
     expect(menu!.textContent).toContain("Reset Volume");
   });
 
-  it("follows the channel's verdict, not the role: an override that denies hides the section", () => {
-    const menu = openVoiceMenuAs(
+  it("follows the channel's verdict, not the role: an override that denies hides the section", async () => {
+    const menu = await openVoiceMenuAs(
       Permission.MUTE_MEMBERS,
       {},
       voiceModCallbacks(),
@@ -2322,8 +2326,8 @@ describe("ChannelSidebar", () => {
     expect(menu!.querySelector('[data-action="voice-mod-unavailable"]')).toBeNull();
   });
 
-  it("follows the channel's verdict, not the role: a verdict of true offers the section", () => {
-    const menu = openVoiceMenuAs(
+  it("follows the channel's verdict, not the role: a verdict of true offers the section", async () => {
+    const menu = await openVoiceMenuAs(
       Permission.MANAGE_CHANNELS,
       {},
       voiceModCallbacks(),
@@ -2333,9 +2337,9 @@ describe("ChannelSidebar", () => {
     expect(menu!.querySelector('[data-action="server-mute"]')).not.toBeNull();
   });
 
-  it("offers nothing without a verdict, and says why to a role holding MUTE_MEMBERS", () => {
+  it("offers nothing without a verdict, and says why to a role holding MUTE_MEMBERS", async () => {
     const cb = voiceModCallbacks();
-    const menu = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, testChannels, null);
+    const menu = await openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, testChannels, null);
     expect(menu!.querySelector('[data-action="server-mute"]')).toBeNull();
     expect(menu!.querySelector('[data-action="voice-disconnect"]')).toBeNull();
     const why = menu!.querySelector('[data-action="voice-mod-unavailable"]');
@@ -2346,11 +2350,11 @@ describe("ChannelSidebar", () => {
     (why as HTMLElement).click();
     expect(cb.onServerMute).not.toHaveBeenCalled();
 
-    const member = openVoiceMenuAs(Permission.SEND_MESSAGES, {}, cb, testChannels, null);
+    const member = await openVoiceMenuAs(Permission.SEND_MESSAGES, {}, cb, testChannels, null);
     expect(member!.querySelector('[data-action="voice-mod-unavailable"]')).toBeNull();
   });
 
-  it("reads each channel's verdict: moderating one voice channel is not moderating another", () => {
+  it("reads each channel's verdict: moderating one voice channel is not moderating another", async () => {
     const channels: ReadyChannel[] = [
       ...testChannels.map((ch) => (ch.id === 3 ? { ...ch, can_moderate_voice: false } : ch)),
       {
@@ -2362,55 +2366,62 @@ describe("ChannelSidebar", () => {
         can_moderate_voice: true,
       },
     ];
-    const menu = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, voiceModCallbacks(), channels, null);
+    const menu = await openVoiceMenuAs(
+      Permission.MUTE_MEMBERS,
+      {},
+      voiceModCallbacks(),
+      channels,
+      null,
+    );
     expect(menu!.querySelector('[data-action="server-mute"]')).toBeNull();
   });
 
-  it("takes a live channel_create verdict at the next open, and keeps it when one is absent", () => {
+  it("takes a live channel_create verdict at the next open, and keeps it when one is absent", async () => {
     const cb = voiceModCallbacks();
     expect(
-      openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb)!.querySelector(
+      (await openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb))!.querySelector(
         '[data-action="server-mute"]',
       ),
     ).not.toBeNull();
     const voice = testChannels.find((ch) => ch.id === 3)!;
     const row = (): HTMLElement => container.querySelector(".voice-user-item") as HTMLElement;
-    const reopen = (): HTMLElement | null => {
+    const reopen = async (): Promise<HTMLElement | null> => {
       row().dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+      await vi.dynamicImportSettled();
       return document.querySelector(".user-vol-menu");
     };
 
     // An override edit revokes it (RefreshChannelVisibility's targeted channel_create).
     addChannel({ ...voice, can_moderate_voice: false });
-    expect(reopen()!.querySelector('[data-action="server-mute"]')).toBeNull();
+    expect((await reopen())!.querySelector('[data-action="server-mute"]')).toBeNull();
     // A channel_create without the field changes nothing.
     addChannel({ ...voice });
-    expect(reopen()!.querySelector('[data-action="server-mute"]')).toBeNull();
+    expect((await reopen())!.querySelector('[data-action="server-mute"]')).toBeNull();
     addChannel({ ...voice, can_moderate_voice: true });
-    expect(reopen()!.querySelector('[data-action="server-mute"]')).not.toBeNull();
+    expect((await reopen())!.querySelector('[data-action="server-mute"]')).not.toBeNull();
   });
 
-  it("hides the moderation section when the page wired no callbacks", () => {
-    const menu = openVoiceMenuAs(Permission.MUTE_MEMBERS);
+  it("hides the moderation section when the page wired no callbacks", async () => {
+    const menu = await openVoiceMenuAs(Permission.MUTE_MEMBERS);
     expect(menu).not.toBeNull();
     expect(menu!.querySelector('[data-action="server-mute"]')).toBeNull();
   });
 
-  it("shows the moderation section for a role holding MUTE_MEMBERS", () => {
-    const menu = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, voiceModCallbacks());
+  it("shows the moderation section for a role holding MUTE_MEMBERS", async () => {
+    const menu = await openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, voiceModCallbacks());
     expect(menu).not.toBeNull();
     expect(menu!.querySelector('[data-action="server-mute"]')!.textContent).toBe("Server Mute");
     expect(menu!.querySelector('[data-action="server-deafen"]')!.textContent).toBe("Server Deafen");
     expect(menu!.querySelector('[data-action="voice-disconnect"]')).not.toBeNull();
   });
 
-  it("shows the moderation section for an ADMINISTRATOR role", () => {
-    const menu = openVoiceMenuAs(Permission.ADMINISTRATOR, {}, voiceModCallbacks());
+  it("shows the moderation section for an ADMINISTRATOR role", async () => {
+    const menu = await openVoiceMenuAs(Permission.ADMINISTRATOR, {}, voiceModCallbacks());
     expect(menu!.querySelector('[data-action="server-mute"]')).not.toBeNull();
   });
 
-  it("labels the toggles by the target's current server-imposed state", () => {
-    const menu = openVoiceMenuAs(
+  it("labels the toggles by the target's current server-imposed state", async () => {
+    const menu = await openVoiceMenuAs(
       Permission.MUTE_MEMBERS,
       { muted: true, deafened: true, server_muted: true, server_deafened: true },
       voiceModCallbacks(),
@@ -2421,26 +2432,26 @@ describe("ChannelSidebar", () => {
     );
   });
 
-  it("sends server mute with the channel and target, and disconnect with the target", () => {
+  it("sends server mute with the channel and target, and disconnect with the target", async () => {
     const cb = voiceModCallbacks();
-    const menu = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb);
+    const menu = await openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb);
 
     (menu!.querySelector('[data-action="server-mute"]') as HTMLElement).click();
     expect(cb.onServerMute).toHaveBeenCalledWith(3, 80, true);
 
-    const menu2 = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb);
+    const menu2 = await openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb);
     (menu2!.querySelector('[data-action="voice-disconnect"]') as HTMLElement).click();
     expect(cb.onDisconnect).toHaveBeenCalledWith(80);
   });
 
-  it("greys the moderation rows with a reason while the socket is not connected", () => {
+  it("greys the moderation rows with a reason while the socket is not connected", async () => {
     const cb = voiceModCallbacks();
     const channels: ReadyChannel[] = [
       ...testChannels,
       { id: 5, name: "voice-two", type: "voice", category: "Voice Channels", position: 1 },
     ];
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "reconnecting" }));
-    const menu = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, channels);
+    const menu = await openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, channels);
 
     const why = menu!.querySelector('[data-action="voice-mod-offline"]');
     expect(why!.textContent).toBe(
@@ -2460,14 +2471,14 @@ describe("ChannelSidebar", () => {
     expect(cb.onDisconnect).not.toHaveBeenCalled();
 
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "disconnected" }));
-    const offline = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, channels);
+    const offline = await openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, channels);
     expect(offline!.querySelector('[data-action="voice-mod-offline"]')!.textContent).toBe(
       "Not connected. Voice moderation needs a connection to the server.",
     );
 
     // Back online: the rows are live again and the reason is gone.
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-    const live = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, channels);
+    const live = await openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, channels);
     expect(live!.querySelector('[data-action="voice-mod-offline"]')).toBeNull();
     const mute = live!.querySelector<HTMLButtonElement>('[data-action="server-mute"]')!;
     expect(mute.disabled).toBe(false);
@@ -2475,15 +2486,15 @@ describe("ChannelSidebar", () => {
     expect(cb.onServerMute).toHaveBeenCalledWith(3, 80, true);
   });
 
-  it("offers only the other voice channels as move targets", () => {
+  it("offers only the other voice channels as move targets", async () => {
     const cb = voiceModCallbacks();
-    const menu = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb);
+    const menu = await openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb);
 
     const moveItems = menu!.querySelectorAll("[data-move-channel]");
     // testChannels has one voice channel (id 3) — the one the target is in.
     expect(moveItems.length).toBe(0);
 
-    const menu2 = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, [
+    const menu2 = await openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, [
       ...testChannels,
       { id: 5, name: "voice-two", type: "voice", category: "Voice Channels", position: 1 },
     ]);
@@ -3869,7 +3880,7 @@ describe("ChannelSidebar popovers survive unrelated re-renders (OC-0282)", () =>
     expect(document.querySelector('[data-testid="channel-context-menu"]')).not.toBeNull();
   });
 
-  it("keeps the voice-user volume menu open when an unrelated peer's voice state changes", () => {
+  it("keeps the voice-user volume menu open when an unrelated peer's voice state changes", async () => {
     authStore.setState(() => ({
       token: "tok",
       user: { id: 99, username: "Me", avatar: null, role: "member" },
@@ -3896,6 +3907,7 @@ describe("ChannelSidebar popovers survive unrelated re-renders (OC-0282)", () =>
     voiceRow.dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, clientX: 150, clientY: 250 }),
     );
+    await vi.dynamicImportSettled();
     expect(document.querySelector(".user-vol-menu")).not.toBeNull();
 
     // Unrelated re-render: a DIFFERENT peer joins/toggles state in the same

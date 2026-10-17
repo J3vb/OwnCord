@@ -23,8 +23,9 @@ test.describe("Voice Widget", () => {
     await navigateToMainPage(page);
 
     const widget = page.locator("[data-testid='voice-widget']");
-    await expect(widget).toBeAttached();
-    await expect(widget).not.toHaveClass(/visible/);
+    // The widget now loads on the first voice join, so it is absent (or hidden) here (O-6b).
+    await expect(widget).toHaveCount(0);
+    await expect(widget).not.toBeVisible();
   });
 
   test("appears with full UI when voice_state event is received", async ({ page }) => {
