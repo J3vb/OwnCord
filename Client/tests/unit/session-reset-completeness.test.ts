@@ -55,6 +55,30 @@ import { safetyStore, setReadyNotices } from "../../src/features/safety/store";
 import { memberTimeoutsStore, setMemberTimeouts } from "../../src/features/moderation/store";
 // Loaded for its registrations: the two notification resets.
 import "../../src/lib/notifications";
+import {
+  getCachedReactionUsers,
+  loadReactionUsers,
+  setReactionUsersFetcher,
+} from "../../src/features/messaging/reactionUsers";
+import { buildBlockedUsersSection } from "../../src/features/safety/BlockedUsers";
+import { createAvatarElement } from "../../src/components/message-list/avatar";
+import { isVoiceMovePending, noteVoiceMoved } from "../../src/features/voice/moveHint";
+import { getChannelMutesHost, setChannelMutesHost } from "../../src/lib/channel-mutes";
+import {
+  bindGifFavoritesApi,
+  gifFavoritesAvailable,
+  gifFavoritesStore,
+} from "../../src/stores/gifFavorites.store";
+import {
+  applyFrame,
+  applySnapshot,
+  beginSnapshot,
+  messageRequestsStore,
+} from "../../src/features/message-requests/store";
+import type { MessageRequest } from "../../src/features/message-requests/api";
+import { loadRequests, requestsApi } from "../../src/features/message-requests/sync";
+import type { DispatchApi } from "../../src/features/connection/dispatchContext";
+import type { GifFavoritesApi } from "../../src/lib/gifProvider";
 import type { ReadyMember } from "../../src/lib/types";
 
 interface Probe {
@@ -111,6 +135,29 @@ function withOffsetHeight<T>(height: number, run: () => T): T {
     if (saved !== undefined) Object.defineProperty(proto, "offsetHeight", saved);
     else delete (proto as { offsetHeight?: number }).offsetHeight;
   }
+}
+
+const messageRequest: MessageRequest = {
+  id: 4,
+  channelId: 31,
+  sender: { id: 8, username: "sam", displayName: "" },
+  preview: null,
+  createdAt: "2026-01-01T00:00:00Z",
+};
+
+const blockedUsersApi = {
+  listBlocks: () => new Promise<{ blocked_user_ids: number[] }>(() => {}),
+  unblockUser: () => new Promise<void>(() => {}),
+};
+let blockedUsersTab = new AbortController();
+/** A fresh Blocked users section's Unblock button for user 5, as drawn now. */
+function unblockButtonFor5(): HTMLButtonElement | null {
+  const section = buildBlockedUsersSection(
+    blockedUsersTab.signal,
+    blockedUsersApi,
+    createAvatarElement,
+  );
+  return section.querySelector<HTMLButtonElement>("[data-testid='blocked-user-unblock']");
 }
 
 const mentionChannel: Channel = {
@@ -284,6 +331,87 @@ const PROBES: readonly Probe[] = [
     isInitial: () => vi.getTimerCount() === 0,
   },
   {
+    name: "reactions:users",
+    mutate: async () => {
+      setReactionUsersFetcher(() => Promise.resolve([{ id: 7, username: "alex", avatar: "" }]));
+      await loadReactionUsers(1, 2, "wave");
+      expect(getCachedReactionUsers(2, "wave")).toBeDefined(); // cached: the probe can fail
+      setReactionUsersFetcher(null);
+    },
+    isInitial: () => getCachedReactionUsers(2, "wave") === undefined,
+  },
+  {
+    // The pending set is private; a row drawn from a fresh section shows it as busy.
+    name: "blocked-users:pending",
+    mutate: () => {
+      blockedUsersTab = new AbortController();
+      setUserBlockedByMe(5, true);
+      unblockButtonFor5()!.click();
+      expect(unblockButtonFor5()!.getAttribute("aria-busy")).toBe("true"); // busy: the probe can fail
+    },
+    isInitial: () => {
+      setUserBlockedByMe(5, true);
+      const busy = unblockButtonFor5()!.getAttribute("aria-busy") === "true";
+      blockedUsersTab.abort();
+      return !busy;
+    },
+  },
+  {
+    name: "voice:move-hint",
+    mutate: () => {
+      noteVoiceMoved(5);
+      expect(isVoiceMovePending()).toBe(true);
+    },
+    isInitial: () => !isVoiceMovePending(),
+  },
+  {
+    name: "channel-mutes:host",
+    mutate: () => {
+      setChannelMutesHost("a.example");
+      expect(getChannelMutesHost()).toBe("a.example");
+    },
+    isInitial: () => getChannelMutesHost() === null,
+  },
+  {
+    name: "gif:favorites",
+    mutate: async () => {
+      const api = {
+        gifFavorites: () =>
+          Promise.resolve({
+            favorites: [{ url: "https://g.example/1.gif", preview_url: "", title: "" }],
+          }),
+      } as unknown as GifFavoritesApi;
+      bindGifFavoritesApi(api);
+      await flush();
+      expect(gifFavoritesStore.getState().favorites).toHaveLength(1);
+      expect(gifFavoritesAvailable()).toBe(true);
+    },
+    isInitial: () =>
+      gifFavoritesStore.getState().favorites.length === 0 && !gifFavoritesAvailable(),
+  },
+  {
+    // Before message-requests:store: loading a snapshot also moves that store.
+    name: "message-requests:source",
+    mutate: async () => {
+      await loadRequests({
+        listDmRequests: () => Promise.resolve({ requests: [] }),
+      } as unknown as DispatchApi);
+      expect(requestsApi()).toBeDefined();
+    },
+    isInitial: () => requestsApi() === undefined,
+  },
+  {
+    name: "message-requests:store",
+    mutate: () => {
+      applySnapshot([], beginSnapshot());
+      applyFrame(messageRequest, true);
+      expect(messageRequestsStore.getState().status).toBe("ready");
+    },
+    isInitial: () =>
+      messageRequestsStore.getState().pending.length === 0 &&
+      messageRequestsStore.getState().status === "loading",
+  },
+  {
     name: "safety:store",
     mutate: () =>
       setReadyNotices([
@@ -310,7 +438,11 @@ const EXEMPT: readonly string[] = [
   // the notification tests cover what each does.
   "notifications:audio",
   "notifications:coalescing",
-  // Per-subscriber names built from a counter in auth.store (onAuthCleared).
+  // Its reset is not observable: a kept DM needs the live voice session on that
+  // channel, and the voice reset that follows prunes the set anyway.
+  "dm:kept-calls",
+  // Per-subscriber names built from a counter in auth.store (onAuthCleared);
+  // page-scoped callers only, each removes its own entry with its disposer.
   "auth-cleared#${authClearedSeq}",
 ];
 

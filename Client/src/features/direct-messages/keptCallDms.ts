@@ -16,7 +16,7 @@
  * cleared on sign-out.
  */
 
-import { onAuthCleared } from "@stores/auth.store";
+import { registerSessionReset } from "@lib/sessionRegistry";
 import { voiceStore } from "@stores/voice.store";
 
 const kept = new Set<number>();
@@ -63,4 +63,4 @@ export function resetKeptCallDms(): void {
   stopPruning = null;
 }
 
-void onAuthCleared(resetKeptCallDms); // app-lifetime reset hook, registered at module load
+void registerSessionReset("dm:kept-calls", resetKeptCallDms, { phase: "session" }); // app-lifetime reset hook, registered at module load

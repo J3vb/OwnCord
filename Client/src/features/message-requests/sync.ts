@@ -6,7 +6,7 @@
  */
 
 import { createLogger } from "@lib/logger";
-import { onAuthCleared } from "@stores/auth.store";
+import { registerSessionReset } from "@lib/sessionRegistry";
 import type { DispatchApi } from "../connection/dispatchContext";
 import { mapRequest } from "./api";
 import { applySnapshot, beginSnapshot, failSnapshot } from "./store";
@@ -15,9 +15,13 @@ const log = createLogger("message-requests");
 
 let source: DispatchApi | undefined;
 // App-lifetime reset hook, registered at module load.
-void onAuthCleared(() => {
-  source = undefined;
-});
+void registerSessionReset(
+  "message-requests:source",
+  () => {
+    source = undefined;
+  },
+  { phase: "session" },
+);
 
 /** The client the inbox decides requests with; undefined before the first ready. */
 export function requestsApi(): DispatchApi | undefined {

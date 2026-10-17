@@ -18,6 +18,7 @@
 import { errorText, type ApiClient } from "@lib/api";
 import { createElement, setText } from "@lib/dom";
 import { createLogger } from "@lib/logger";
+import { registerSessionReset } from "@lib/sessionRegistry";
 import { showToast } from "@lib/toast";
 import type { createAvatarElement } from "@components/message-list/avatar";
 import { blocksStore, setBlockedByMe, setUserBlockedByMe } from "@stores/blocks.store";
@@ -74,6 +75,8 @@ function renderLiveViews(): void {
 export function resetPendingUnblocks(): void {
   pending.clear();
 }
+
+void registerSessionReset("blocked-users:pending", resetPendingUnblocks, { phase: "cache" }); // app-lifetime
 
 /** Load the avatar drawer lazily, then build the section. */
 export async function loadBlockedUsersSection(

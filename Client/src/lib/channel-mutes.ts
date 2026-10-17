@@ -19,6 +19,7 @@
  */
 
 import { loadPref, savePref, STORAGE_PREFIX } from "./preferences";
+import { registerSessionReset } from "./sessionRegistry";
 
 /**
  * The timed-mute choices, shortest first. "Until I turn it back on" is the
@@ -82,6 +83,12 @@ export function setChannelMutesHost(host: string | null): void {
   currentHost = host;
   invalidateMuteCache();
 }
+
+// The scope is set by MainPage on mount; a session that ends leaves no server's
+// scope behind (the connect page's Settings would offer its override, F13).
+void registerSessionReset("channel-mutes:host", () => setChannelMutesHost(null), {
+  phase: "cache",
+}); // app-lifetime
 
 /** The host the per-server prefs are currently scoped to. Other per-server
  *  client prefs (the notification level override) read it through this getter

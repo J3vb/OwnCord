@@ -5,6 +5,8 @@
  * startup chunk, the sounds are not.
  */
 
+import { registerSessionReset } from "@lib/sessionRegistry";
+
 let pendingMoveChannelId: number | null = null;
 
 /** A moderator moved this client to `channelId`. */
@@ -24,3 +26,11 @@ export function takeVoiceMoved(channelId: number | null): boolean {
   pendingMoveChannelId = null;
   return moved;
 }
+
+void registerSessionReset(
+  "voice:move-hint",
+  () => {
+    pendingMoveChannelId = null;
+  },
+  { phase: "cache" },
+); // app-lifetime
