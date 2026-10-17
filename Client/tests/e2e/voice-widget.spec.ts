@@ -24,6 +24,7 @@ test.describe("Voice Widget", () => {
 
     const widget = page.locator("[data-testid='voice-widget']");
     // The widget now loads on the first voice join, so it is absent (or hidden) here (O-6b).
+    await expect(widget).toHaveCount(0);
     await expect(widget).not.toBeVisible();
   });
 

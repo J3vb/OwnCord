@@ -70,13 +70,16 @@ describe("per-user volume menu during its load", () => {
     container.remove();
   });
 
-  it("two opens before the code arrives mount one menu", async () => {
+  it("two opens before the code arrives mount one menu, the second open's", async () => {
     mount();
     row().dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }));
     row().dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 9, clientY: 9 }));
     expect(menus()).toHaveLength(0);
     await vi.dynamicImportSettled();
     expect(menus()).toHaveLength(1);
+    const menu = menus()[0] as HTMLElement;
+    expect(menu.style.left).toBe("9px");
+    expect(menu.style.top).toBe("9px");
   });
 
   it("a sidebar destroyed before the code arrives mounts nothing", async () => {

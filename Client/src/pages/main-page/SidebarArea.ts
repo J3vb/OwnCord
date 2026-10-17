@@ -1210,6 +1210,8 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     () => import("@components/VoiceWidget"),
   );
   let voiceWidgetRequested = false;
+  // Not in `children`: the page copies that list at build, before this loads.
+  let voiceWidget: MountableComponent | null = null;
   function loadVoiceWidget(): void {
     if (voiceWidgetRequested || tornDown) return;
     voiceWidgetRequested = true;
@@ -1222,17 +1224,17 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
           return;
         }
         if (tornDown) return;
-        const voiceWidget = mod.createVoiceWidget(voiceWidgetOptions);
+        voiceWidget = mod.createVoiceWidget(voiceWidgetOptions);
         voiceWidget.mount(voiceWidgetSlot);
-        children.push(voiceWidget);
         return;
       });
   }
   unsubscribers.push(
     voiceStore.subscribeSelector(
-      (state) => state.currentChannelId !== null,
-      (inVoice) => {
-        if (inVoice) loadVoiceWidget();
+      (state) => state.currentChannelId,
+      (channelId) => {
+        // A channel switch retries a failed load too.
+        if (channelId !== null) loadVoiceWidget();
       },
     ),
   );
@@ -1361,6 +1363,8 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
 
   unsubscribers.push(() => {
     tornDown = true;
+    voiceWidget?.destroy?.();
+    voiceWidget = null;
     closeQuickSwitch();
   });
 

@@ -45,8 +45,8 @@ const volumeMenuScreen = createLazyScreen(
   "user-volume-menu",
   () => import("./channel-sidebar/volume-menu"),
 );
-/** Latest open request; an earlier one still loading is dropped. */
-let volumeMenuAttempt = 0;
+/** Latest open request per sidebar (keyed by its lifetime signal); an earlier one still loading is dropped. */
+const volumeMenuAttempts = new WeakMap<AbortSignal, number>();
 
 export interface ChannelReorderData {
   readonly channelId: number;
@@ -559,13 +559,19 @@ function renderVoiceChannelItem(
           // loads on its first open.
           const mod = buildVoiceModOptions(channel.id, user, onVoiceModerate);
           const username = user.username || shellText("common.unknown");
-          const attempt = ++volumeMenuAttempt;
+          const attempt = (volumeMenuAttempts.get(lifetimeSignal) ?? 0) + 1;
+          volumeMenuAttempts.set(lifetimeSignal, attempt);
           void volumeMenuScreen
             .load(() => !lifetimeSignal.aborted)
             .then((m) => {
               // A newer open supersedes this one (so a double open mounts one
               // menu), and a destroyed sidebar mounts nothing.
-              if (m === null || attempt !== volumeMenuAttempt || lifetimeSignal.aborted) return;
+              if (
+                m === null ||
+                attempt !== volumeMenuAttempts.get(lifetimeSignal) ||
+                lifetimeSignal.aborted
+              )
+                return;
               // lifetimeSignal (not the per-render `signal`): the menu is
               // mounted on document.body, independent of this row's render,
               // and must not be torn down by an unrelated re-render (OC-0282).

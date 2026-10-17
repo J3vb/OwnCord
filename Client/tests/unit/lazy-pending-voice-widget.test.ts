@@ -248,7 +248,7 @@ describe("SidebarArea voice widget", () => {
 
   const widgetEl = (): HTMLElement | null => container.querySelector(".voice-widget");
 
-  it("a failed import toasts once and the next voice change tries again", async () => {
+  it("a failed import toasts once and a channel switch tries again", async () => {
     build();
     join(5);
     h.gate!.fail();
@@ -256,8 +256,7 @@ describe("SidebarArea voice widget", () => {
     expect(widgetEl()).toBeNull();
 
     h.gate = makeGate();
-    leave();
-    join(5);
+    join(6);
     h.gate.open();
     await vi.waitFor(() => expect(widgetEl()).not.toBeNull());
   });
@@ -319,5 +318,26 @@ describe("SidebarArea voice widget", () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(widgetEl()).toBeNull();
     expect(toast.showToast).not.toHaveBeenCalled();
+  });
+
+  it("page teardown (build-time copies of children and unsubscribers) destroys a late-loaded widget", async () => {
+    build();
+    // What MainPage does: copy both lists once, before the widget loads.
+    const children = [...result!.children];
+    const unsubs = [...result!.unsubscribers];
+    join(5);
+    h.gate!.open();
+    await vi.waitFor(() => expect(widgetEl()).not.toBeNull());
+
+    for (const c of children) c.destroy?.();
+    for (const u of unsubs) u();
+
+    // The widget is removed, and a later state change does not bring it back.
+    // (The lifecycle guard also fails this test if its window listener or
+    // elapsed interval were left live.)
+    expect(widgetEl()).toBeNull();
+    leave();
+    join(7);
+    expect(widgetEl()).toBeNull();
   });
 });

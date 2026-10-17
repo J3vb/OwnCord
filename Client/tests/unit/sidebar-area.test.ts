@@ -393,7 +393,9 @@ describe("SidebarArea", () => {
     it("returns children array with mounted components", async () => {
       const result = createSidebarArea(defaultOpts());
       await enterVoiceAndAwaitWidget();
-      expect(result.children.length).toBeGreaterThanOrEqual(2);
+      // The lazy voice widget is torn down by an unsubscriber, not `children`
+      // (the page copies `children` before it loads).
+      expect(result.children.length).toBeGreaterThanOrEqual(1);
       cleanup(result);
       leaveVoiceChannel();
     });
@@ -1578,10 +1580,15 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("voice widget and user bar are included in children", async () => {
+    it("the user bar is in children and the voice widget is destroyed by the unsubscribers", async () => {
       const result = createSidebarArea(defaultOpts());
       await enterVoiceAndAwaitWidget();
-      expect(result.children.length).toBe(2);
+      expect(result.children.length).toBe(1);
+      const widget = (createVoiceWidget as MockedFn).mock.results.at(-1)!.value as {
+        destroy: ReturnType<typeof vi.fn>;
+      };
+      for (const unsub of result.unsubscribers) unsub();
+      expect(widget.destroy).toHaveBeenCalledOnce();
       cleanup(result);
       leaveVoiceChannel();
     });
