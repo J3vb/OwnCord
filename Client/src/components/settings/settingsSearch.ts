@@ -189,6 +189,7 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("keybinds.communication"),
     s("keybinds.messages"),
     s("keybinds.action.quickSwitcher"),
+    s("keybinds.action.openSettings"),
     s("keybinds.action.searchMessages"),
     s("keybinds.action.closeOverlay"),
     s("keybinds.action.markChannelRead"),

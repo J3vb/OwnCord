@@ -1190,6 +1190,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     unsubscribers.push(
       attachGlobalKeybinds({
         onSearch: () => chatAreaResult.searchCtrl.open(),
+        onOpenSettings: () => openSettings(),
         onToggleMute: () => voiceKeybindActions.onMuteToggle(),
         onToggleDeafen: () => voiceKeybindActions.onDeafenToggle(),
         onToggleCamera: () => voiceKeybindActions.onCameraToggle(),

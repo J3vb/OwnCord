@@ -22,6 +22,7 @@ const { saveGlobalShortcutVk } = await import("../../src/lib/voiceShortcuts");
 
 function makeHandlers(): {
   onSearch: Mock<() => void>;
+  onOpenSettings: Mock<() => void>;
   onToggleMute: Mock<() => void>;
   onToggleDeafen: Mock<() => void>;
   onToggleCamera: Mock<() => void>;
@@ -34,6 +35,7 @@ function makeHandlers(): {
 } {
   return {
     onSearch: vi.fn<() => void>(),
+    onOpenSettings: vi.fn<() => void>(),
     onToggleMute: vi.fn<() => void>(),
     onToggleDeafen: vi.fn<() => void>(),
     onToggleCamera: vi.fn<() => void>(),
@@ -731,6 +733,99 @@ describe("global keybinds", () => {
       keyOn(search, "g", { ctrlKey: true });
 
       expect(h.onTogglePicker).not.toHaveBeenCalled();
+    });
+  });
+  describe("Ctrl+, opens Settings", () => {
+    /** Dispatch on `el` so the target is where focus really is. */
+    function keyOn(el: HTMLElement, init: KeyboardEventInit): KeyboardEvent {
+      if (!el.isConnected) document.body.appendChild(el);
+      el.focus();
+      const event = new KeyboardEvent("keydown", {
+        key: ",",
+        bubbles: true,
+        cancelable: true,
+        ...init,
+      });
+      el.dispatchEvent(event);
+      return event;
+    }
+
+    it("Ctrl+, opens Settings and swallows the browser default", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+
+      const event = press(",");
+
+      expect(h.onOpenSettings).toHaveBeenCalledOnce();
+      expect(event.defaultPrevented).toBe(true);
+    });
+
+    it("Cmd+, does the same (macOS)", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+
+      press(",", { ctrlKey: false, metaKey: true });
+
+      expect(h.onOpenSettings).toHaveBeenCalledOnce();
+    });
+
+    it("a bare comma and Ctrl+Alt+, are not the shortcut", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+
+      const bare = press(",", { ctrlKey: false });
+      press(",", { altKey: true });
+
+      expect(h.onOpenSettings).not.toHaveBeenCalled();
+      expect(bare.defaultPrevented).toBe(false);
+    });
+
+    it("works from the message composer, like Ctrl+F", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+
+      const composer = document.createElement("textarea");
+      composer.className = "msg-textarea";
+      onTestFinished(() => composer.remove());
+      keyOn(composer, { ctrlKey: true });
+
+      expect(h.onOpenSettings).toHaveBeenCalledOnce();
+    });
+
+    it("does nothing while Settings is open (isSuspended)", () => {
+      const h = makeHandlers();
+      let settingsOpen = true;
+      detach = attachGlobalKeybinds({ ...h, isSuspended: () => settingsOpen });
+
+      const event = press(",");
+      expect(h.onOpenSettings).not.toHaveBeenCalled();
+      expect(event.defaultPrevented).toBe(false);
+
+      settingsOpen = false;
+      press(",");
+      expect(h.onOpenSettings).toHaveBeenCalledOnce();
+    });
+
+    it("does nothing while a dialog is open", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+      const dialog = document.createElement("div");
+      dialog.className = "modal-overlay visible";
+      document.body.appendChild(dialog);
+      onTestFinished(() => dialog.remove());
+
+      press(",");
+
+      expect(h.onOpenSettings).not.toHaveBeenCalled();
+    });
+
+    it("ignores an auto-repeating key", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+
+      press(",", { repeat: true });
+
+      expect(h.onOpenSettings).not.toHaveBeenCalled();
     });
   });
 });
