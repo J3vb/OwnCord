@@ -282,6 +282,7 @@ export const shards = {
     "src/features/reports/openers.ts",
   ], // ~1123 mutants (estimated)
   "safety-moderation-5": [
+    "src/features/blocks/blockActions.ts",
     "src/features/message-requests/api.ts",
     "src/features/message-requests/wsHandlers.ts",
     "src/features/moderation/AppealDetail.ts",

@@ -432,6 +432,16 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           onClose: () => {
             closeDmProfile();
           },
+          onToggleBlock: (userId, block) => {
+            void import("../features/blocks/blockActions").then(({ confirmAndToggleBlock }) =>
+              confirmAndToggleBlock(
+                { api, notify: showToast },
+                userId,
+                profileUser.displayName ?? profileUser.username,
+                block,
+              ),
+            );
+          },
         });
         dmProfileSidebar.mount(dmProfileSlot);
 
@@ -838,6 +848,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       // The member list's profile popup Call action opens the DM then starts
       // its call through this, the same startCall the DM header uses (BUG-05).
       onStartCall: () => startCall(),
+      // The DM row menu's Profile: select the DM, then show its panel fresh
+      // (a panel already open for another DM is replaced, not toggled away).
+      onOpenDmProfile: () => {
+        closeDmProfile();
+        toggleDmProfile();
+      },
     });
     children.push(...sidebar.children);
     unsubscribers.push(...sidebar.unsubscribers);

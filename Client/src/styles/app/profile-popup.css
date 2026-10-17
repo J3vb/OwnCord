@@ -167,6 +167,11 @@
 .upp-action-btn:hover {
   background: var(--accent-hover);
 }
+.upp-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: var(--accent);
+}
 @media (prefers-reduced-motion: reduce) {
   .upp-popup {
     transition: none;

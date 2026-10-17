@@ -30,6 +30,9 @@ import {
 import { requestsText } from "../i18n/requests";
 import { voiceText } from "../i18n/voice";
 import { shellText } from "../i18n/shell";
+import { blocksStore } from "@stores/blocks.store";
+import { callUnavailableReason } from "../features/profiles/openUserProfilePopup";
+import { copyWithToast, isDeveloperMode } from "../features/developer-mode/developerTools";
 
 /** One member of a group DM, as far as the sidebar needs to draw them. */
 export interface DmParticipant {
@@ -77,6 +80,15 @@ export interface DmSidebarOptions {
    *  which one it is is the server's call, and the label says so. */
   readonly onCloseDm?: (channelId: number) => void;
   readonly onToggleMute?: (channelId: number) => void;
+  /** Row menu: mark the conversation read. Offered only while it is unread. */
+  readonly onMarkRead?: (channelId: number) => void;
+  /** Row menu, 1:1 only: open this person's profile panel. */
+  readonly onOpenProfile?: (channelId: number) => void;
+  /** Row menu, 1:1 only: start a call in this DM. */
+  readonly onCall?: (channelId: number) => void;
+  /** Row menu, 1:1 only: Block (`block` true) or Unblock the other person. The
+   *  owner confirms a Block. */
+  readonly onToggleBlock?: (userId: number, username: string, block: boolean) => void;
   readonly onRenameGroup?: (channelId: number) => void;
   readonly onBack?: () => void;
   readonly serverName?: string;
@@ -376,6 +388,37 @@ function renderDmItem(
 
   const openDmMenu = (x: number, y: number): void => {
     const items = [];
+    const isGroup = convo.isGroup === true;
+    const id = convo.channelId;
+    if (convo.unread && options.onMarkRead !== undefined) {
+      const markRead = options.onMarkRead;
+      items.push({
+        label: requestsText("dm.markRead"),
+        testId: `dm-mark-read-${id}`,
+        onClick: () => markRead(id),
+      });
+    }
+    if (!isGroup && options.onOpenProfile !== undefined) {
+      const openProfile = options.onOpenProfile;
+      items.push({
+        label: requestsText("dm.profile"),
+        testId: `dm-profile-${id}`,
+        onClick: () => openProfile(id),
+      });
+    }
+    // Someone you blocked (or who blocked you) cannot be called, and nothing
+    // can be dialled while the socket is down: show Call greyed with why.
+    const blockedByMe = blocksStore.getState().blockedByMe.has(convo.userId);
+    if (!isGroup && options.onCall !== undefined) {
+      const call = options.onCall;
+      const reason = callUnavailableReason(convo.userId);
+      items.push({
+        label: requestsText("dm.call"),
+        testId: `dm-call-${id}`,
+        ...(reason === undefined ? {} : { disabled: true, title: reason }),
+        onClick: () => call(id),
+      });
+    }
     if (options.onToggleMute !== undefined) {
       const toggle = options.onToggleMute;
       items.push({
@@ -392,9 +435,25 @@ function renderDmItem(
         onClick: () => rename(convo.channelId),
       });
     }
+    if (!isGroup && options.onToggleBlock !== undefined) {
+      const toggleBlock = options.onToggleBlock;
+      items.push({
+        label: shellText(blockedByMe ? "member.unblock" : "member.block"),
+        danger: !blockedByMe,
+        testId: `dm-block-${id}`,
+        onClick: () => toggleBlock(convo.userId, convo.username, !blockedByMe),
+      });
+    }
+    if (!isGroup && isDeveloperMode()) {
+      items.push({
+        label: shellText("member.copyId"),
+        testId: `dm-copy-id-${id}`,
+        onClick: () =>
+          copyWithToast(String(convo.userId), "toast.userIdCopied", "toast.userIdCopyFailed"),
+      });
+    }
     if (options.onCloseDm !== undefined) {
       const close = options.onCloseDm;
-      const isGroup = convo.isGroup === true;
       items.push({
         label: isGroup ? requestsText("dm.leaveGroup") : requestsText("dm.close"),
         danger: true,

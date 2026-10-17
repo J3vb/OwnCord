@@ -44,7 +44,7 @@ import { createMemberPickerModal } from "./MemberPickerModal";
 import { createPromptModal } from "@lib/modalFactory";
 import type { ModalInstance } from "@lib/modalFactory";
 import { CHANNEL_MUTE_CHANGED, toggleChannelMute } from "@lib/channel-mutes";
-import { markAllRead, unreadChannelIds } from "@lib/read-state";
+import { markAllRead, markChannelRead, unreadChannelIds } from "@lib/read-state";
 import { createSidebarDmSection } from "./SidebarDmSection";
 import { uiStore, setSidebarMode, loadCollapsedCategories } from "@stores/ui.store";
 import { authStore, clearAuth } from "@stores/auth.store";
@@ -107,6 +107,9 @@ export interface SidebarAreaOptions {
   /** Start a call in the currently active DM (MainPage's `startCall`). Used by
    *  the member list's profile popup Call action, which first opens the DM. */
   readonly onStartCall?: () => void;
+  /** Open the profile panel for the active 1:1 DM (the DM row menu's Profile,
+   *  after it has selected that DM). */
+  readonly onOpenDmProfile?: () => void;
 }
 
 export interface SidebarAreaResult {
@@ -708,6 +711,14 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     if (current !== undefined && current.type !== "dm") channelBeforeDm = current.id;
   }
 
+  /** Make `channelId` the active DM; false when it is no longer in the list. */
+  function selectDm(channelId: number): boolean {
+    const dmChannel = dmStore.getState().channels.find((c) => c.channelId === channelId);
+    if (dmChannel === undefined) return false;
+    selectDmConversation(dmChannel, dmDeps);
+    return true;
+  }
+
   function buildDmSidebar(): DmSidebar {
     const serverName = authStore.getState().serverName ?? shellText("common.serverFallback");
     const activeChannelId = channelsStore.getState().activeChannelId;
@@ -726,6 +737,23 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         toggleChannelMute(channelId);
         // Mute state is not in a store, so nothing re-renders on its own.
         refreshDmSidebarRef?.();
+      },
+      onMarkRead: markChannelRead,
+      onOpenProfile: (channelId) => {
+        if (selectDm(channelId)) opts.onOpenDmProfile?.();
+      },
+      onCall: (channelId) => {
+        if (selectDm(channelId)) opts.onStartCall?.();
+      },
+      onToggleBlock: (userId, username, block) => {
+        void import("../../features/blocks/blockActions").then(({ confirmAndToggleBlock }) =>
+          confirmAndToggleBlock(
+            { api, notify: (msg, type) => getToast()?.show(msg, type) },
+            userId,
+            username,
+            block,
+          ),
+        );
       },
       onRenameGroup: (channelId) => renameGroup(channelId),
       onNewDm: () => {

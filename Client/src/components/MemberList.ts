@@ -40,6 +40,9 @@ export interface MemberListOptions {
   ) => Promise<void>;
   readonly onChangeRole: (userId: number, username: string, newRole: string) => Promise<void>;
   readonly onToggleBlock: (userId: number, username: string, block: boolean) => Promise<void>;
+  /** Block / Unblock from the profile popup, which confirms a Block in a
+   *  dialog (the row menu confirms inline). Omitted: the popup has no button. */
+  readonly onBlockFromPopup?: (userId: number, username: string, block: boolean) => void;
   /** Start a DM with a user (wires the profile popup's Message button). */
   readonly onMessageUser?: (userId: number) => void;
   /** Call a user: open (or create) the 1:1 DM with them and start a call in
@@ -299,6 +302,7 @@ function createMemberItem(
         ...(opts.onMessageUser === undefined ? {} : { onMessage: opts.onMessageUser }),
         ...(opts.onCallUser === undefined ? {} : { onCall: opts.onCallUser }),
         ...(opts.onReportUser === undefined ? {} : { onReport: opts.onReportUser }),
+        ...(opts.onBlockFromPopup === undefined ? {} : { onToggleBlock: opts.onBlockFromPopup }),
       },
       fallbackFocus: () =>
         list?.querySelector<HTMLElement>(`[data-testid="member-${member.id}"]`) ??
