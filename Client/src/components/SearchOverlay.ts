@@ -11,6 +11,7 @@ import type { MountableComponent } from "@lib/safe-render";
 import type { SearchResultItem, SearchResponse } from "@lib/types";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { channelsStore } from "@stores/channels.store";
+import { blocksStore } from "@stores/blocks.store";
 import { parseTimestamp, resolveAuthor } from "@lib/formatting";
 import { resolveDisplayName } from "@lib/avatar";
 import { setRovingTabindex, enableRovingNavigation } from "@lib/a11y";
@@ -254,12 +255,20 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
       setText(time, formatTimestamp(r.timestamp));
       header.appendChild(time);
 
-      const content = createElement("div", { class: "search-result-content" });
-      fillHighlighted(
-        content,
-        buildPreview(r.content, terms, messagingText("search.spoiler")),
-        terms,
-      );
+      const blocked = blocksStore.getState().blockedByMe.has(r.user.id);
+      const content = createElement("div", {
+        class: blocked
+          ? "search-result-content search-result-content--blocked"
+          : "search-result-content",
+      });
+      if (blocked) setText(content, messagingText("blocked.message"));
+      else {
+        fillHighlighted(
+          content,
+          buildPreview(r.content, terms, messagingText("search.spoiler")),
+          terms,
+        );
+      }
 
       appendChildren(item, header, content);
 

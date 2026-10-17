@@ -65,11 +65,46 @@ import {
 } from "./attachments";
 import { atReactionLimit, renderReactions, wireReactionControl } from "./reactions";
 
+/** What a row render reads beyond the list's own options. */
+export interface MessageRenderOptions extends MessageListOptions {
+  /** Authors whose messages are hidden, so a reply quoting one shows no content. */
+  readonly blockedUsers?: ReadonlySet<number>;
+}
+
 // -- Composite rendering functions --------------------------------------------
 
 /** Weekday, date and time for a tooltip, in Discord's "F" style. */
 export function fullDateTimeTitle(iso: string): string {
   return formatFullDateTime(parseTimestamp(iso));
+}
+
+/** The header over a run of blocked users' messages, with its Show/Hide toggle. */
+export function renderBlockedRun(
+  item: { readonly firstId: number; readonly count: number; readonly expanded: boolean },
+  onToggle: () => void,
+  signal: AbortSignal,
+): HTMLDivElement {
+  const toggle = createElement(
+    "button",
+    {
+      type: "button",
+      class: "msg-blocked-toggle",
+      "aria-expanded": String(item.expanded),
+      "data-testid": `msg-blocked-toggle-${item.firstId}`,
+    },
+    messagingText(item.expanded ? "blocked.hide" : "blocked.show"),
+  );
+  toggle.addEventListener("click", onToggle, { signal });
+  const run = createElement("div", {
+    class: "msg-blocked-run",
+    "data-testid": `msg-blocked-run-${item.firstId}`,
+  });
+  appendChildren(
+    run,
+    createElement("span", { class: "msg-blocked-text" }, messagingText("blocked.run", item)),
+    toggle,
+  );
+  return run;
 }
 
 export function renderDayDivider(iso: string): HTMLDivElement {
@@ -190,7 +225,7 @@ function renderReplyRef(
   replyToId: number,
   referenced: Message["referencedMessage"],
   allMessages: readonly Message[],
-  opts: MessageListOptions,
+  opts: MessageRenderOptions,
   signal: AbortSignal,
 ): HTMLDivElement {
   const ref = allMessages.find((m) => m.id === replyToId);
@@ -223,7 +258,11 @@ function renderReplyRef(
     },
     { signal },
   );
-  if (ref) {
+  const parentAuthorId = ref?.user.id ?? referenced?.user?.id;
+  if (parentAuthorId !== undefined && opts.blockedUsers?.has(parentAuthorId) === true) {
+    bar.classList.add("msg-reply-ref--blocked");
+    setText(bar, messagingText("blocked.message"));
+  } else if (ref) {
     const plain = Array.from(markdownToPlainText(ref.content, messagingText("spoiler.revealed")))
       .slice(0, 100)
       .join("");
@@ -438,7 +477,7 @@ export function renderMessage(
   msg: Message,
   isGrouped: boolean,
   allMessages: readonly Message[],
-  opts: MessageListOptions,
+  opts: MessageRenderOptions,
   signal: AbortSignal,
   /** The inline editor to host in place of the message body (WP 3A-8). */
   editor?: HTMLElement,
