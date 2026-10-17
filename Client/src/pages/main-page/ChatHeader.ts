@@ -29,6 +29,10 @@ export interface ChatHeaderRefs {
   /** The "Show Member List" toggle for the group member panel. Shown only in a
    *  group DM; the page owns its `aria-pressed`. */
   readonly membersBtn: HTMLButtonElement;
+  /** The "Member List" toggle for the guild member column. Shown only for a
+   *  guild channel in the right-hand layout; `MemberColumn` is the only writer
+   *  of its `hidden` and `aria-pressed`. */
+  readonly memberListBtn: HTMLButtonElement;
   /** Holds the DM partner's avatar (or a group's stack) in place of the "@". */
   readonly avatarEl: HTMLSpanElement;
   /**
@@ -47,6 +51,8 @@ export interface ChatHeaderOptions {
   readonly onToggleDmProfile?: () => void;
   /** Show or hide the group DM member panel. */
   readonly onToggleMemberList?: () => void;
+  /** Show or hide the guild member column. */
+  readonly onToggleGuildMemberList?: () => void;
   /** Start a call in the current DM: join its voice channel and ring. */
   readonly onStartCall?: () => void;
   /** Start a call in the current DM with the camera on. */
@@ -196,6 +202,21 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
     const toggle = opts.onToggleMemberList;
     membersBtn.addEventListener("click", () => toggle());
   }
+  const memberListBtn = createElement("button", {
+    type: "button",
+    class: "profile-btn member-list-btn",
+    title: shellText("members.toggle"),
+    "aria-label": shellText("members.toggle"),
+    "aria-pressed": "false",
+    "aria-controls": "member-column",
+    "data-testid": "member-list-toggle",
+  });
+  memberListBtn.appendChild(createIcon("users", 18));
+  memberListBtn.hidden = true;
+  if (opts.onToggleGuildMemberList !== undefined) {
+    const toggle = opts.onToggleGuildMemberList;
+    memberListBtn.addEventListener("click", () => toggle());
+  }
   const pinBtn = createElement("button", {
     type: "button",
     class: "pin-btn",
@@ -220,7 +241,16 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
       searchInput.blur();
     });
   }
-  appendChildren(tools, searchInput, callBtn, videoCallBtn, profileBtn, membersBtn, pinBtn);
+  appendChildren(
+    tools,
+    searchInput,
+    callBtn,
+    videoCallBtn,
+    profileBtn,
+    membersBtn,
+    memberListBtn,
+    pinBtn,
+  );
 
   appendChildren(header, sidebarToggle, nameGroup, divider, topicEl, tools);
   return {
@@ -233,6 +263,7 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
       videoCallBtn,
       profileBtn,
       membersBtn,
+      memberListBtn,
       avatarEl,
       sidebarToggle,
       nameGroupEl: nameGroup,

@@ -1,12 +1,4 @@
 /* ═══ Responsive ═══ */
-@media (max-width: 1200px) {
-  .member-list {
-    width: 0;
-    padding: 0;
-    overflow: hidden;
-  }
-}
-
 /* The narrow-width drawer's backdrop and toggle. Both exist in the DOM at every
    width; the media rule below is what makes them matter only below 800px, where
    the sidebar itself collapses (WCAG 1.4.10 Reflow). */

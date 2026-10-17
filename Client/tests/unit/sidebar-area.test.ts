@@ -251,6 +251,7 @@ function resetStores(): void {
   }));
   localStorage.removeItem("owncord:member-list-height");
   localStorage.removeItem("owncord:member-list-collapsed");
+  localStorage.removeItem("owncord:settings:memberListLayout");
 }
 
 function resetMocks(): void {
@@ -706,6 +707,80 @@ describe("SidebarArea", () => {
 
       const memberSection = container.querySelector("[data-testid='sidebar-members']");
       expect(memberSection).not.toBeNull();
+
+      cleanup(result);
+    });
+
+    it("right layout mounts no sidebar member section", () => {
+      localStorage.setItem("owncord:settings:memberListLayout", '"right"');
+      const result = createSidebarArea(defaultOpts());
+      container.appendChild(result.sidebarWrapper);
+
+      expect(container.querySelector("[data-testid='sidebar-members']")).toBeNull();
+      expect(createMemberList).not.toHaveBeenCalled();
+      expect(container.querySelector(".sidebar-content-inner")).not.toBeNull();
+
+      cleanup(result);
+    });
+
+    it("syncMemberSection adds and removes the section without remounting the channel list", () => {
+      localStorage.setItem("owncord:settings:memberListLayout", '"right"');
+      const result = createSidebarArea(defaultOpts());
+      container.appendChild(result.sidebarWrapper);
+      const inner = container.querySelector(".sidebar-content-inner");
+      expect(inner).not.toBeNull();
+      expect(createChannelSidebar).toHaveBeenCalledTimes(1);
+
+      // right -> left: the section appears under the channel list.
+      localStorage.setItem("owncord:settings:memberListLayout", '"left"');
+      result.syncMemberSection();
+      result.syncMemberSection(); // idempotent
+      expect(container.querySelectorAll("[data-testid='sidebar-members']").length).toBe(1);
+      expect(container.querySelector(".sidebar-content-inner")).toBe(inner);
+      expect(createMemberList).toHaveBeenCalledTimes(1);
+
+      // left -> right: the section goes and its list is destroyed.
+      const memberDestroy = getMockDestroy(createMemberList as MockedFn);
+      localStorage.setItem("owncord:settings:memberListLayout", '"right"');
+      result.syncMemberSection();
+      expect(container.querySelector("[data-testid='sidebar-members']")).toBeNull();
+      expect(memberDestroy).toHaveBeenCalled();
+      expect(container.querySelector(".sidebar-content-inner")).toBe(inner);
+      expect(createChannelSidebar).toHaveBeenCalledTimes(1);
+
+      cleanup(result);
+    });
+
+    it("syncMemberSection builds nothing in DMs mode, in either layout", () => {
+      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+      const result = createSidebarArea(defaultOpts());
+      container.appendChild(result.sidebarWrapper);
+
+      localStorage.setItem("owncord:settings:memberListLayout", '"left"');
+      result.syncMemberSection();
+      expect(container.querySelector("[data-testid='sidebar-members']")).toBeNull();
+      expect(createMemberList).not.toHaveBeenCalled();
+
+      cleanup(result);
+    });
+
+    it("returning to channels mode follows the stored layout", () => {
+      localStorage.setItem("owncord:settings:memberListLayout", '"right"');
+      const result = createSidebarArea(defaultOpts());
+      container.appendChild(result.sidebarWrapper);
+
+      setSidebarMode("dms");
+      uiStore.flush();
+      setSidebarMode("channels");
+      uiStore.flush();
+      expect(container.querySelector("[data-testid='sidebar-members']")).toBeNull();
+
+      localStorage.setItem("owncord:settings:memberListLayout", '"left"');
+      setSidebarMode("dms");
+      uiStore.flush();
+      setSidebarMode("channels");
+      uiStore.flush();
+      expect(container.querySelectorAll("[data-testid='sidebar-members']").length).toBe(1);
 
       cleanup(result);
     });

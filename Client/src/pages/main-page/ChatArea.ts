@@ -34,6 +34,7 @@ export interface ChatAreaOptions {
   readonly onToggleDmProfile?: () => void;
   /** Show or hide the group DM member panel. */
   readonly onToggleMemberList?: () => void;
+  readonly onToggleGuildMemberList?: () => void;
   /** Start a call in the current DM (join its voice channel + ring). */
   readonly onStartCall?: () => void;
   /** Start a call in the current DM with the camera on. */
@@ -164,6 +165,7 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     },
     onToggleDmProfile: opts.onToggleDmProfile,
     onToggleMemberList: opts.onToggleMemberList,
+    onToggleGuildMemberList: opts.onToggleGuildMemberList,
     onStartCall: opts.onStartCall,
     onStartVideoCall: opts.onStartVideoCall,
     onRenameGroup: opts.onRenameGroup,

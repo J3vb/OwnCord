@@ -92,6 +92,9 @@
   align-items: center;
   justify-content: center;
 }
+.chat-header .ch-tools button[hidden] {
+  display: none;
+}
 .chat-header .ch-tools button:hover {
   background: var(--bg-hover);
   color: var(--text-normal);

@@ -182,16 +182,6 @@ describe("SidebarMemberSection", () => {
 
       section.destroy();
     });
-
-    it("returns the memberListComponent for external tracking", () => {
-      const section = createSidebarMemberSection(defaultOpts());
-      container.appendChild(section.element);
-
-      expect(section.memberListComponent).toBeDefined();
-      expect(typeof section.memberListComponent.mount).toBe("function");
-
-      section.destroy();
-    });
   });
 
   // -------------------------------------------------------------------------

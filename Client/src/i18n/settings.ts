@@ -80,6 +80,10 @@ export const settingsText = defineCatalog("settings", {
   "appearance.timeFormat.desc": "Choose 12-hour or 24-hour clocks for timestamps",
   "appearance.timeFormat.12h": "12-hour",
   "appearance.timeFormat.24h": "24-hour",
+  "appearance.memberLayout": "Member list position",
+  "appearance.memberLayout.desc": "Show the member list beside the chat or under the channels",
+  "appearance.memberLayout.right": "Right side",
+  "appearance.memberLayout.left": "Under channels",
   "appearance.accentColor": "Accent Color",
   "appearance.accentAria": "Custom accent color (hex)",
   "appearance.accentNote":

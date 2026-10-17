@@ -202,6 +202,8 @@ export const shellText = defineCatalog("shell", {
   "invite.loadFailed": "Failed to load invites",
 
   "members.heading": "MEMBERS",
+  "members.region": "Member list",
+  "members.toggle": "Member List",
   "members.empty": "No members online",
   "members.groupHeader": "{role} — {count}",
   "members.offlineGroup": "OFFLINE",

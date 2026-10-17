@@ -1,16 +1,39 @@
 /* ── Member List ── */
 .member-list {
-  width: 240px;
   background: var(--bg-secondary);
   flex-shrink: 0;
   overflow-y: auto;
   padding: 8px 0;
-  transition: width 0.2s;
 }
-.member-list.hidden {
-  width: 0;
-  padding: 0;
-  overflow: hidden;
+/* The right-hand column (3C-6b). MainPage always builds the <aside>; it is
+   hidden until MemberColumn shows it, and holds the panel only while shown. */
+.member-column {
+  display: flex;
+  flex-direction: column;
+  width: 240px;
+  flex-shrink: 0;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-glow, var(--border));
+}
+.member-column[hidden] {
+  display: none;
+}
+.member-column-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scroll-padding-top: 30px;
+}
+.member-column .member-list {
+  width: auto;
+}
+/* The search row lines up with the 48px chat header beside it. */
+.member-column .member-search-wrap {
+  display: flex;
+  align-items: center;
+  height: 48px;
+  margin-top: -8px;
+  box-shadow: var(--elevation-low);
 }
 .sidebar-members-section {
   border-top: 1px solid var(--border-glow, var(--border));

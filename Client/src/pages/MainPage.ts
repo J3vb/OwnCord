@@ -109,6 +109,8 @@ import { createSidebarArea } from "./main-page/SidebarArea";
 import { createTileMenuActions } from "./main-page/tileMenuActions";
 import { createChatArea } from "./main-page/ChatArea";
 import type { SidebarDrawer } from "./main-page/SidebarDrawer";
+import type { MemberColumn } from "./main-page/MemberColumn";
+import { loadMemberLayout, MEMBER_LAYOUT_PREF } from "../features/members/memberLayout";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 import { NAVIGATION_DESTINATIONS } from "../features/navigation/destinations";
 import { createContentNavigator } from "../features/navigation/contentView";
@@ -406,6 +408,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // The narrow-width sidebar drawer (WCAG 1.4.10). Null above 800px in
   // practice, but always created so the breakpoint is decided by CSS, not JS.
   let sidebarDrawer: SidebarDrawer | null = null;
+
+  // The right-hand member column's controller (3C-6b). Loaded on demand; the
+  // <aside> itself always exists so the header toggle's aria-controls resolves.
+  let memberColumn: MemberColumn | null = null;
 
   // ---------------------------------------------------------------------------
   // Helpers
@@ -1003,6 +1009,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onToggleMemberList: () => {
         withGroupPanel((ctrl) => ctrl.toggle(), true);
       },
+      onToggleGuildMemberList: () => {
+        memberColumn?.toggle();
+      },
       onStartCall: () => {
         startCall();
       },
@@ -1062,11 +1071,23 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       fallbackFocus: focusReachable,
     });
 
+    // The member column: always present, hidden until MemberColumn shows it.
+    const memberColumnEl = createElement("aside", {
+      id: "member-column",
+      class: "member-column",
+      "data-testid": "member-column",
+      "aria-label": shellText("members.region"),
+    });
+    memberColumnEl.hidden = true;
+    const memberColumnBody = createElement("div", { class: "member-column-body" });
+    memberColumnEl.appendChild(memberColumnBody);
+
     appendChildren(
       app,
       sidebar.sidebarWrapper,
       chatAreaResult.chatArea,
       contentNav.element,
+      memberColumnEl,
       chatAreaResult.dmProfileSlot,
     );
     root.appendChild(app);
@@ -1088,6 +1109,46 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     unsubscribers.push(() => {
       sidebarDrawer?.destroy();
       sidebarDrawer = null;
+    });
+
+    // The member list lives in exactly one place at a time (MemberList keeps
+    // module-level popup state, so two live instances would close each other's
+    // menus): "left" is SidebarArea's section, "right" is the column. This is
+    // the one layout-change handler, so the order is decided here: the
+    // outgoing host destroys its panel before the incoming host builds one.
+    // The column's own listener ignores the layout key.
+    void import("./main-page/MemberColumn").then(({ createMemberColumn }) => {
+      if (tornDown) return;
+      memberColumn = createMemberColumn({
+        column: memberColumnEl,
+        body: memberColumnBody,
+        button: chatAreaResult.chatHeaderRefs.memberListBtn,
+        buildPanel: sidebar.buildMemberPanel,
+        fallbackFocus: focusReachable,
+      });
+      memberColumn.sync();
+    });
+    const layoutOwner = new Disposable();
+    window.addEventListener(
+      "owncord:pref-change",
+      (e) => {
+        const key =
+          e instanceof CustomEvent ? (e.detail as { key?: string } | null)?.key : undefined;
+        if (key !== MEMBER_LAYOUT_PREF) return;
+        if (loadMemberLayout() === "right") {
+          sidebar.syncMemberSection();
+          memberColumn?.sync();
+        } else {
+          memberColumn?.sync();
+          sidebar.syncMemberSection();
+        }
+      },
+      { signal: layoutOwner.signal },
+    );
+    unsubscribers.push(() => {
+      layoutOwner.destroy();
+      memberColumn?.destroy();
+      memberColumn = null;
     });
 
     // --- Moderation notices (B9-15, Q4): persistent, above the app row ---

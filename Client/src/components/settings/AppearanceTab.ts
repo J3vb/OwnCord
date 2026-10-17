@@ -23,6 +23,11 @@ import {
   MAX_FONT_SIZE_PX,
 } from "@lib/appearance";
 import { getTimeFormat, saveTimeFormat, type TimeFormat } from "@lib/timeFormat";
+import {
+  loadMemberLayout,
+  MEMBER_LAYOUT_PREF,
+  type MemberLayout,
+} from "../../features/members/memberLayout";
 import { appZoom, ZOOM_LEVELS, zoomIndex } from "../../features/zoom";
 import { settingsText as t } from "../../i18n/settings";
 
@@ -263,6 +268,64 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   enableRovingNavigation(timeFormatGroup, "[role='radio']", signal);
   appendChildren(timeFormatRow, timeFormatInfo, timeFormatGroup);
   section.appendChild(timeFormatRow);
+
+  // Member list position (right column / under the channels)
+  const memberLayoutRow = createElement("div", { class: "setting-row" });
+  const memberLayoutInfo = createElement("div", {});
+  appendChildren(
+    memberLayoutInfo,
+    createElement("div", { class: "setting-label" }, t("appearance.memberLayout")),
+    createElement("div", { class: "setting-desc" }, t("appearance.memberLayout.desc")),
+  );
+  const memberLayoutGroup = createElement("div", {
+    class: "level-options",
+    role: "radiogroup",
+    "aria-label": t("appearance.memberLayout"),
+    "data-testid": "member-layout",
+  });
+  const memberLayoutButtons = new Map<MemberLayout, HTMLButtonElement>();
+  const memberLayoutLabels: Record<MemberLayout, string> = {
+    right: t("appearance.memberLayout.right"),
+    left: t("appearance.memberLayout.left"),
+  };
+  const paintMemberLayout = (): void => {
+    const current = loadMemberLayout();
+    for (const [value, button] of memberLayoutButtons) {
+      const on = value === current;
+      button.classList.toggle("active", on);
+      button.setAttribute("aria-checked", String(on));
+    }
+  };
+  for (const value of ["right", "left"] as const) {
+    const button = createElement(
+      "button",
+      {
+        class: "level-opt",
+        type: "button",
+        role: "radio",
+        "aria-checked": "false",
+        tabindex: "-1",
+        "data-testid": `member-layout-${value}`,
+        "data-value": value,
+      },
+      memberLayoutLabels[value],
+    );
+    button.addEventListener(
+      "click",
+      () => {
+        savePref(MEMBER_LAYOUT_PREF, value);
+        paintMemberLayout();
+      },
+      { signal },
+    );
+    memberLayoutButtons.set(value, button);
+    memberLayoutGroup.appendChild(button);
+  }
+  paintMemberLayout();
+  setRovingTabindex(memberLayoutGroup, "[role='radio']");
+  enableRovingNavigation(memberLayoutGroup, "[role='radio']", signal);
+  appendChildren(memberLayoutRow, memberLayoutInfo, memberLayoutGroup);
+  section.appendChild(memberLayoutRow);
 
   // Accent color picker
   const ACCENT_PRESETS: readonly string[] = [

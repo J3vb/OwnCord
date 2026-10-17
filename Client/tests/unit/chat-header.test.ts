@@ -318,6 +318,41 @@ describe("updateChatHeaderForDm", () => {
     expect(refs.topicEl.textContent).toBe("");
   });
 
+  describe("Member List toggle (3C-6b)", () => {
+    it("member list toggle starts hidden with aria-pressed false and aria-controls member-column", () => {
+      const onToggleGuildMemberList = vi.fn();
+      const { element, refs } = buildChatHeader({
+        onTogglePins: vi.fn(),
+        onToggleGuildMemberList,
+      });
+      container.appendChild(element);
+      const btn = element.querySelector<HTMLButtonElement>('[data-testid="member-list-toggle"]')!;
+      expect(btn).toBe(refs.memberListBtn);
+      expect(btn.hidden).toBe(true);
+      expect(btn.getAttribute("aria-pressed")).toBe("false");
+      expect(btn.getAttribute("aria-controls")).toBe("member-column");
+      expect(btn.getAttribute("aria-label")).toBe("Member List");
+      expect(btn.title).toBe("Member List");
+      btn.click();
+      expect(onToggleGuildMemberList).toHaveBeenCalledTimes(1);
+    });
+
+    it("sits after the group members button and before pins, and the DM helper leaves it alone", () => {
+      const { element, refs } = buildChatHeader({ onTogglePins: vi.fn() });
+      const tools = Array.from(element.querySelector(".ch-tools")!.children);
+      expect(tools.indexOf(refs.memberListBtn)).toBe(tools.indexOf(refs.membersBtn) + 1);
+      expect(tools.indexOf(refs.memberListBtn)).toBe(
+        tools.indexOf(element.querySelector('[data-testid="pin-btn"]')!) - 1,
+      );
+      refs.memberListBtn.hidden = false;
+      refs.memberListBtn.setAttribute("aria-pressed", "true");
+      updateChatHeaderForDm(refs, { username: "Bob", status: "Online" });
+      updateChatHeaderForDm(refs, null);
+      expect(refs.memberListBtn.hidden).toBe(false);
+      expect(refs.memberListBtn.getAttribute("aria-pressed")).toBe("true");
+    });
+  });
+
   describe("Show User Profile button (WP 3B-3)", () => {
     it("is hidden in a channel, shown for a 1:1 DM, hidden for a group", () => {
       const { element, refs } = buildChatHeader({
