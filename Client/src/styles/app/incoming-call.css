@@ -16,16 +16,44 @@
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-md);
-  max-width: min(92vw, 460px);
+  max-width: min(92vw, 600px);
 }
-.incoming-call-icon {
+.incoming-call-avatar-slot {
   display: flex;
   align-items: center;
-  color: var(--green);
+  flex-shrink: 0;
+}
+/* A fixed box, so the initial keeps literal px (DESIGN_SYSTEM). The ring is a
+   box-shadow, so the pulse never moves the layout. */
+.incoming-call-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-circle);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 700;
+  font-size: 16px;
+  animation: incoming-call-pulse 1.6s ease-out infinite;
+}
+@keyframes incoming-call-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 55%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 10px transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .incoming-call-avatar {
+    animation: none;
+  }
 }
 .incoming-call-info {
   flex: 1;
-  min-width: 0;
+  min-width: 96px;
 }
 .incoming-call-title {
   font-weight: 600;
@@ -39,8 +67,27 @@
 }
 .incoming-call-actions {
   display: flex;
+  justify-content: flex-end;
   gap: 8px;
   flex-shrink: 0;
+}
+/* Pill-sized like the DM call panel's buttons, not the login form's
+   full-width .btn-primary. */
+.incoming-call-actions .btn {
+  width: auto;
+  min-height: 32px;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.incoming-call-actions .btn-ghost {
+  background: var(--bg-active);
+  color: var(--text-normal);
+}
+.incoming-call-actions .btn-ghost:hover {
+  background: var(--bg-hover);
 }
 
 .call-btn {

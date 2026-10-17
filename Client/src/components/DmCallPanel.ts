@@ -247,6 +247,7 @@ function caption(main: string, sub: string): HTMLElement[] {
 export {
   alertIncomingCall,
   alertMissedCall,
+  alertSupersededCall,
   clearIncomingCall,
 } from "../features/direct-messages/callAlerts";
 
