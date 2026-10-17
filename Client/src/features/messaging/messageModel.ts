@@ -3,6 +3,7 @@
 // extracted from stores/messages.store.ts, which re-exports the types and
 // stays the only import path consumers use.
 import type {
+  CallInfo,
   ChatMessagePayload,
   MessageUser,
   Attachment,
@@ -59,6 +60,10 @@ export interface Message {
   readonly mentions?: readonly number[];
   /** Whether an honoured @everyone/@here is present. Optional, as above. */
   readonly mentionsEveryone?: boolean;
+  /** "call" for a server-written DM call log row; absent for an ordinary message. */
+  readonly kind?: string;
+  /** The call a `kind: "call"` row stands for; the render source, never `content`. */
+  readonly call?: CallInfo;
 }
 
 /** A reaction toggle applied optimistically, awaiting its server echo. Keyed
@@ -155,6 +160,8 @@ export function chatPayloadToMessage(payload: ChatMessagePayload): Message {
     errorCode: null,
     mentions: payload.mentions,
     mentionsEveryone: payload.mentions_everyone,
+    ...(payload.kind !== undefined && { kind: payload.kind }),
+    ...(payload.call !== undefined && { call: payload.call }),
   };
 }
 
@@ -179,6 +186,8 @@ export function messageResponseToMessage(response: MessageResponse): Message {
     errorCode: null,
     mentions: response.mentions,
     mentionsEveryone: response.mentions_everyone,
+    ...(response.kind !== undefined && { kind: response.kind }),
+    ...(response.call !== undefined && { call: response.call }),
   };
 }
 

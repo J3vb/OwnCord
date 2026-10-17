@@ -157,7 +157,7 @@ fn handle_menu_event<R: Runtime>(app_handle: &tauri::AppHandle<R>, id: &str) {
         Some(MenuAction::ToggleWindow) => toggle_window_visibility(app_handle),
         Some(MenuAction::Status(status)) => emit_status_change(app_handle, status),
         Some(MenuAction::Voice(action)) => emit_voice_shortcut(app_handle, action),
-        Some(MenuAction::OpenLogs) => open_log_folder(app_handle),
+        Some(MenuAction::OpenLogs) => open_log_folder_from_tray(app_handle),
         Some(MenuAction::Quit) => {
             log::info!("[exit] Quit chosen from the tray menu");
             app_handle.exit(0);
@@ -166,23 +166,37 @@ fn handle_menu_event<R: Runtime>(app_handle: &tauri::AppHandle<R>, id: &str) {
     }
 }
 
-/// Open the directory the Rust log is written to, so a user whose window never
-/// came up still has a route to the file that explains why.
-fn open_log_folder<R: Runtime>(app: &tauri::AppHandle<R>) {
+/// The directory the Rust log is written to, created if it does not exist yet.
+fn prepare_log_dir<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<std::path::PathBuf, String> {
+    let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// Open the directory the Rust log is written to in the system file manager.
+/// Shared by the tray item and the `open_log_folder` command, so both routes
+/// reach the same folder and report the same error.
+fn open_log_dir<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
-    let opened = app
-        .path()
-        .app_log_dir()
+    let dir = prepare_log_dir(app)?;
+    app.opener()
+        .open_path(dir.to_string_lossy(), None::<&str>)
         .map_err(|e| e.to_string())
-        .and_then(|dir| {
-            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-            app.opener()
-                .open_path(dir.to_string_lossy(), None::<&str>)
-                .map_err(|e| e.to_string())
-        });
-    if let Err(e) = opened {
+}
+
+/// Open the log folder from the tray, so a user whose window never came up
+/// still has a route to the file that explains why.
+fn open_log_folder_from_tray<R: Runtime>(app: &tauri::AppHandle<R>) {
+    if let Err(e) = open_log_dir(app) {
         log::warn!("[tray] cannot open the log folder: {e}");
     }
+}
+
+/// Settings > Diagnostics & logs "Open log folder": the same folder as the tray item, for
+/// desktops with no tray (stock GNOME). The error text reaches the webview.
+#[tauri::command]
+pub fn open_log_folder<R: Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+    open_log_dir(&app).inspect_err(|e| log::warn!("[settings] cannot open the log folder: {e}"))
 }
 
 fn emit_status_change<R: Runtime>(app: &tauri::AppHandle<R>, status: &str) {
@@ -242,5 +256,16 @@ mod tests {
         assert_eq!(menu_action("open_logs"), Some(MenuAction::OpenLogs));
         assert_eq!(menu_action("quit"), Some(MenuAction::Quit));
         assert_eq!(menu_action("nope"), None);
+    }
+
+    #[test]
+    fn log_dir_is_created_and_reused() {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+        let handle = app.handle();
+        let first = prepare_log_dir(handle).expect("log dir is created");
+        assert!(first.is_dir());
+        assert_eq!(prepare_log_dir(handle), Ok(first));
     }
 }

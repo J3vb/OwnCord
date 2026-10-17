@@ -242,6 +242,7 @@ export const shards = {
     "src/features/messaging/liveMessages.ts",
     "src/features/messaging/historyWindows.ts",
     "src/features/messaging/reactionState.ts",
+    "src/features/messaging/activeComposer.ts",
   ], // ~974 mutants (estimated)
   "safety-moderation-1": [
     "src/features/content-consent/nsfw.ts",
@@ -256,6 +257,7 @@ export const shards = {
     "src/features/message-requests/view.ts",
     "src/features/moderation/AppealQueue.ts",
     "src/features/moderation/store.ts",
+    "src/features/moderation/timeoutPresets.ts",
     "src/features/safety/Notices.ts",
     "src/features/safety/store.ts",
     "src/features/zoom/zoom.ts",
@@ -282,6 +284,7 @@ export const shards = {
     "src/features/reports/openers.ts",
   ], // ~1123 mutants (estimated)
   "safety-moderation-5": [
+    "src/features/blocks/blockActions.ts",
     "src/features/message-requests/api.ts",
     "src/features/message-requests/wsHandlers.ts",
     "src/features/moderation/AppealDetail.ts",

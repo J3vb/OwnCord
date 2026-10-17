@@ -28,4 +28,14 @@ export interface LogFiles {
    * not exist yet.
    */
   readNative(): Promise<readonly { readonly name: string; readonly text: string }[]>;
+  /**
+   * Open the Rust log directory in the system file manager (the tray's "Open
+   * log folder", for desktops with no tray). Never rejects: a native failure
+   * comes back as `{ ok: false, error }` for the caller to show.
+   */
+  openFolder(): Promise<OpenLogFolderResult>;
 }
+
+/** Outcome of {@link LogFiles.openFolder}. */
+export type OpenLogFolderResult =
+  { readonly ok: true } | { readonly ok: false; readonly error: string };

@@ -204,8 +204,10 @@ You also need PipeWire for the capture itself.
 
 - **AppImage.** The app updates itself. When your server has a newer client,
   the app offers it. It checks the signature, then replaces the AppImage file.
-- **.deb.** The app cannot update itself. The update notice says "This install
-  cannot update itself." Install the new `.deb` by hand:
+- **.deb.** The app updates itself too. Click Update Now, and the desktop asks
+  once for your administrator password. OwnCord then installs the new package
+  and restarts. This needs a polkit password agent, which every full desktop has. On a bare
+  window manager without one, or if you prefer, install the new `.deb` by hand:
 
   ```bash
   sudo apt install ./OwnCord_<new-version>_amd64.deb
@@ -223,8 +225,9 @@ The app's data folder is `~/.local/share/com.owncord.client/`. Logs are in its
 ~/.local/share/com.owncord.client/logs/owncord-client.log
 ```
 
-The log rolls over at 10 MB and keeps the two previous files. If you have a
-tray, **Open Log Folder** in the tray menu opens this folder. A crash or an
+The log rolls over at 10 MB and keeps the two previous files. **Open Log
+Folder** in Settings, Diagnostics & logs opens this folder, and so does the
+same item in the tray menu if you have a tray. A crash or an
 unexpected exit leaves a last line in the same folder, so attach it when you
 report a problem.
 

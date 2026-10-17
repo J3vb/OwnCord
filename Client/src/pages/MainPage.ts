@@ -432,6 +432,22 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           onClose: () => {
             closeDmProfile();
           },
+          onToggleBlock: (userId, block) => {
+            void import("../features/blocks/blockActions").then(
+              ({ confirmAndToggleBlock }) =>
+                confirmAndToggleBlock(
+                  { api, notify: showToast },
+                  userId,
+                  profileUser.displayName ?? profileUser.username,
+                  block,
+                ),
+              () =>
+                showToast(
+                  shellText(block ? "members.blockFailed" : "members.unblockFailed"),
+                  "error",
+                ),
+            );
+          },
         });
         dmProfileSidebar.mount(dmProfileSlot);
 
@@ -464,6 +480,16 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         if (dmProfileLoad === load) dmProfileLoad = null;
       },
     );
+  }
+
+  /** Join a DM's live call: the call panel's Join strip and a call log row's Join button. */
+  function joinDmCall(channelId: number): void {
+    if (uiStore.getState().connectionStatus !== "connected") {
+      showToast(shellText("channel.notConnected"), "error");
+      return;
+    }
+    cameraOnJoin = null;
+    createSidebarVoiceCallbacks(ws).onVoiceJoin(channelId);
   }
 
   /**
@@ -828,6 +854,16 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       // The member list's profile popup Call action opens the DM then starts
       // its call through this, the same startCall the DM header uses (BUG-05).
       onStartCall: () => startCall(),
+      // The DM row menu's Profile: select the DM, then show its panel fresh
+      // (a panel already open for another DM is replaced, not toggled away).
+      // Deferred a microtask: the store's active-channel listener (which closes
+      // the panel on any DM switch) runs in the microtask selecting the DM queued.
+      onOpenDmProfile: () => {
+        queueMicrotask(() => {
+          closeDmProfile();
+          toggleDmProfile();
+        });
+      },
     });
     children.push(...sidebar.children);
     unsubscribers.push(...sidebar.unsubscribers);
@@ -1267,14 +1303,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         onLeave: () => voiceKeybindActions.onDisconnect(),
         onAccept: (withVideo) => acceptRing(withVideo),
         onDecline: () => ringCtrl?.decline(),
-        onJoin: (channelId) => {
-          if (uiStore.getState().connectionStatus !== "connected") {
-            showToast(shellText("channel.notConnected"), "error");
-            return;
-          }
-          cameraOnJoin = null;
-          createSidebarVoiceCallbacks(ws).onVoiceJoin(channelId);
-        },
+        onJoin: joinDmCall,
         onRingAgain: (channelId) => {
           if (uiStore.getState().connectionStatus !== "connected") {
             showToast(shellText("channel.notConnected"), "error");
@@ -1466,6 +1495,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       chatHeaderRefs: chatAreaResult.chatHeaderRefs,
       onContentGated: closeActiveLightbox,
       focusFallback: focusReachable,
+      onJoinCall: joinDmCall,
     });
 
     // Wire voice error callback to toast

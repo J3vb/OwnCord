@@ -35,8 +35,18 @@ const { mockGetVersion } = vi.hoisted(() => ({
 }));
 vi.mock("../../src/platform/desktop", async (importOriginal) => {
   const real = await importOriginal<typeof import("../../src/platform/desktop")>();
-  return { desktop: { ...real.desktop, appMetadata: { getVersion: mockGetVersion } } };
+  return {
+    desktop: {
+      ...real.desktop,
+      appMetadata: { getVersion: mockGetVersion },
+      logFiles: { ...real.desktop.logFiles, openFolder: mockOpenFolder },
+    },
+  };
 });
+
+const { mockOpenFolder } = vi.hoisted(() => ({
+  mockOpenFolder: vi.fn<() => Promise<{ ok: true } | { ok: false; error: string }>>(),
+}));
 
 const { mockExportSupportBundle } = vi.hoisted(() => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -548,6 +558,39 @@ describe("LogsTab", () => {
       btn.click();
       await vi.waitFor(() => expect(status.textContent).toBe("Export failed: disk full"));
       el.remove();
+    });
+  });
+
+  describe("Open log folder", () => {
+    const build = () => createLogsTab(() => "Logs" as TabName, controller.signal).build();
+    const button = (el: HTMLElement) =>
+      el.querySelector<HTMLButtonElement>("[data-testid='open-log-folder']")!;
+    const status = (el: HTMLElement) => el.querySelector("[data-testid='support-bundle-status']")!;
+
+    it("is a secondary button in the Get help card", () => {
+      const card = build().querySelector<HTMLElement>("[data-testid='get-help']")!;
+      expect(button(card).textContent).toBe("Open Log Folder");
+      expect(button(card).classList.contains("secondary")).toBe(true);
+    });
+
+    it("opens the folder and stays quiet on success", async () => {
+      mockOpenFolder.mockResolvedValue({ ok: true });
+      const el = build();
+      button(el).click();
+      expect(button(el).disabled).toBe(true);
+      await vi.waitFor(() => expect(button(el).disabled).toBe(false));
+      expect(mockOpenFolder).toHaveBeenCalledTimes(1);
+      expect(status(el).textContent).toBe("");
+    });
+
+    it("shows the error inline when the folder cannot be opened", async () => {
+      mockOpenFolder.mockResolvedValue({ ok: false, error: "no file manager" });
+      const el = build();
+      button(el).click();
+      await vi.waitFor(() =>
+        expect(status(el).textContent).toBe("Could not open the log folder: no file manager"),
+      );
+      expect(button(el).disabled).toBe(false);
     });
   });
 

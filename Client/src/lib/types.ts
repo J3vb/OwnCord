@@ -389,6 +389,22 @@ export interface ReadyPayload {
   readonly dm_channels?: readonly DmChannelPayload[];
   /** The caller's unacknowledged warnings (B5-9). Absent from older servers. */
   readonly notices?: readonly ReadyNotice[];
+  /**
+   * Active timeouts (WP 3C-7c): the full list for a moderator, only the
+   * caller's own entry for anyone else. Absent from older servers.
+   */
+  readonly member_timeouts?: readonly MemberTimeoutEntry[];
+}
+
+/** One active timeout: who, and until when (RFC 3339). Never the reason or actor. */
+export interface MemberTimeoutEntry {
+  readonly user_id: number;
+  readonly expires_at: string;
+}
+
+/** member_timeouts (WP 3C-7c): replaces the viewer's list wholesale. */
+export interface MemberTimeoutsPayload {
+  readonly timeouts: readonly MemberTimeoutEntry[];
 }
 
 /** One of ready's notices: never the actor or the report link (Server/ws/serve_ready.go). */
@@ -473,6 +489,16 @@ export interface ReferencedMessage {
   readonly has_attachments: boolean;
 }
 
+/**
+ * The call a `kind: "call"` row stands for (WP 3B-9). `ended_at` is null while
+ * the call is live; `participants` is everyone who was ever in it.
+ */
+export interface CallInfo {
+  readonly started_at: string;
+  readonly ended_at: string | null;
+  readonly participants: readonly number[];
+}
+
 export interface ChatMessagePayload {
   readonly client_message_id?: string;
   readonly id: number;
@@ -505,6 +531,9 @@ export interface ChatMessagePayload {
    * cannot otherwise correct (OC-0271). Absent from older servers.
    */
   readonly mentions_here?: boolean;
+  /** `ChatMessageKind` value ("call" for a DM call log row), open to future kinds; absent for an ordinary message (and from older servers). */
+  readonly kind?: string;
+  readonly call?: CallInfo;
 }
 
 export interface ChatSendOkPayload {
@@ -520,12 +549,15 @@ export interface ChatEditedPayload {
   readonly message_id: number;
   readonly channel_id: number;
   readonly content: string;
-  readonly edited_at: string;
+  /** Null for the end of a call row, which is never shown as an edit. */
+  readonly edited_at: string | null;
   /** Re-resolved mentions for the new content. An edit never re-notifies. */
   readonly mentions?: readonly number[];
   readonly mentions_everyone?: boolean;
   /** See ChatMessagePayload.mentions_here. */
   readonly mentions_here?: boolean;
+  readonly kind?: string;
+  readonly call?: CallInfo;
 }
 
 export interface ChatDeletedPayload {
@@ -1102,6 +1134,7 @@ export type ServerMessage =
   | (WsEnvelope<ReadStatePayload> & { readonly type: "read_state" })
   | (WsEnvelope<ChannelActivityPayload> & { readonly type: "channel_activity" })
   | (WsEnvelope<ModQueuePayload> & { readonly type: "mod_queue" })
+  | (WsEnvelope<MemberTimeoutsPayload> & { readonly type: "member_timeouts" })
   | (WsEnvelope<RolesUpdatePayload> & { readonly type: "roles_update" })
   | (WsEnvelope<EmojiUpdatePayload> & { readonly type: "emoji_update" })
   | (WsEnvelope<UploadPolicyPayload> & { readonly type: "upload_policy" })
@@ -1277,6 +1310,8 @@ export interface MessageResponse {
   /** Server-resolved mentioned user IDs. Absent from older servers. */
   readonly mentions?: readonly number[];
   readonly mentions_everyone?: boolean;
+  readonly kind?: string;
+  readonly call?: CallInfo;
 }
 
 /**

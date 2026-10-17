@@ -51,6 +51,8 @@ and only when it changes something a contributor or fork holder must do
 
 **Desktop UI**
 
+- You can now Block or Unblock someone from their profile card, from a DM's profile panel and from a DM's right-click menu, a Block asks once and an Unblock is one click. That menu also has Mark As Read, Profile, Call and Copy User ID (Developer Mode), and Message and Call on a profile card are greyed out, with the reason, while you're offline or either of you has blocked the other.
+- DM calls now leave a line in the chat: who started it and how long it lasted, or "You missed a call from X" if you didn't pick up. A call that is still going has a Join button. The line can't be edited, replied to or reacted to, and makes no message sound.
 - The DM header now has a **Video Call** button next to Voice Call, shows the person's avatar (or a group's faces) instead of "@", reads "Do Not Disturb" instead of "Dnd", and you can click a group's name to rename it.
 - Private channels now show a small lock over their icon in the channel list, so you can tell at a glance which channels only some members can see. It updates straight away when a channel's permissions change.
 - In a DM call, drag the bottom edge of the call area to make it taller or shorter, as in Discord; the height is remembered, and double-click puts it back.
@@ -58,6 +60,7 @@ and only when it changes something a contributor or fork holder must do
 - Settings → Notifications has an **Unread message badge** switch (on by default). Off, the unread count is cleared from the taskbar or tray icon and stays clear; on again, it shows the current count.
 - The member list sorts each role group A–Z, with Idle and Do Not Disturb people among the Online ones and offline people last. Letter avatars use a fixed colour per person instead of the role colour, role names keep their capitals in the Change Role menu, status tooltips say "Do Not Disturb" instead of "dnd", and the bans list appears as soon as your role is given Ban Members.
 - The Invite Manager can set an invite's expiry (1 hour to 30 days, or never) and max uses, shows the full link and when each invite expires, opens with a ready-to-copy link, shows the server's reason when an invite action fails, and offers Retry if the list cannot load.
+- Right-clicking a member now opens the full menu in Discord's order: Profile, Mention (adds @name to your message box), Message, Call, Server Mute, Deafen and Disconnect for someone in a voice channel, Change Role, **Timeout** (60 seconds to 1 week) or **Remove Timeout**, Force Logout, Ban, Copy User ID and Block. Right-clicking yourself offers Profile and Mention.
 - Closing the window now keeps OwnCord running in the tray (Settings → Advanced → Close to Tray, on by default; Quit in the tray menu exits), and **Start Minimized** keeps the window hidden when OwnCord starts at login. On Linux, closing still quits when the desktop has no tray.
 - Compact mode now shows the time at the start of each message's first line, ahead of the name, instead of hiding it.
 - Settings → Appearance has a **Sync with computer** theme tile that switches between the dark and light themes with your computer's setting, and follows it when it changes.
@@ -67,6 +70,7 @@ and only when it changes something a contributor or fork holder must do
 - Settings → Accessibility has **Always underline links** and a **Saturation** slider (0–100 %) that makes role colours, names and accent buttons more or less vivid without touching images or video. Settings → Text & Images has **Animate emoji**; switched off, animated custom emoji show their first frame.
 - Settings → Appearance has a **Zoom Level** slider (50 %–200 %), and Ctrl+= / Ctrl+- zoom in and out and Ctrl+0 resets, as in Discord. It scales the whole app and is remembered.
 - Linux `.deb` installs now update from the app with one password prompt, instead of telling you to install the new package by hand. The first update onto this version is still manual; if the system cannot ask for a password, the banner says to install by hand.
+- Settings → Diagnostics & logs has an **Open Log Folder** button that opens OwnCord's log folder in your file manager, so you can find the logs without a tray icon (stock GNOME has none). If the folder cannot be opened, the reason shows under the button.
 
 **Voice**
 
@@ -199,6 +203,7 @@ and only when it changes something a contributor or fork holder must do
 - On Linux (X11), the mouse side buttons (Mouse 4 and Mouse 5) can now be bound as the Push to Talk key, as on Windows.
 - On Linux (X11), the Push to Talk key can now be F13 to F24, and a key synced from Windows fires.
 - On Linux, a ringing call's notification now goes away when the ring ends, clicking a notification opens its message however many have piled up, notifications no longer play the desktop's sound on top of OwnCord's, and the AppImage's notifications show the OwnCord icon.
+- Linux: screen-share audio now reaches viewers in stereo instead of mono.
 
 ## v2.3.0-beta.1
 

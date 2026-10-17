@@ -148,6 +148,14 @@
   background: var(--danger-fill);
   color: var(--on-fill);
 }
+.context-menu__item[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.context-menu__item[aria-disabled="true"]:hover {
+  background: transparent;
+  color: var(--text-normal);
+}
 .context-menu__item--pending {
   opacity: 0.7;
   cursor: default;
@@ -548,6 +556,9 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.search-result-content--blocked {
+  font-style: italic;
 }
 
 .search-hit {

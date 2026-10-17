@@ -294,7 +294,8 @@ test.describe("@parity Change Role via member context menu", () => {
 
     // The submenu is hidden until hover (JS mouseenter, not pure CSS :hover).
     await roleTrigger.hover();
-    const submenu = menu.locator(".context-menu__submenu");
+    // Timeout is a second flyout in the same menu, so scope to the Change Role item.
+    const submenu = roleTrigger.locator(".context-menu__submenu");
     await expect(submenu).toBeVisible();
 
     // All three server roles are offered (MOCK_ROLES, minus "owner" — none seeded).

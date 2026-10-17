@@ -4,7 +4,11 @@ import type { MemberListOptions } from "@components/MemberList";
 import { membersStore, updatePresence, updateMemberRole } from "@stores/members.store";
 import type { Member } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
-import { channelsStore, setRoles } from "@stores/channels.store";
+import { setConnectionStatus } from "@stores/ui.store";
+import { channelsStore, setRoles, type Channel } from "@stores/channels.store";
+import { resetVoiceStore, updateVoiceState } from "@stores/voice.store";
+import { setMemberTimeouts } from "../../src/features/moderation/store";
+import { claimComposer } from "../../src/features/messaging/activeComposer";
 import { Permission, type UserStatus } from "../../src/lib/types";
 import { pickAvatarColor } from "@components/message-list/avatar";
 import { applyThemeByName } from "@lib/themes";
@@ -25,6 +29,8 @@ function useDarkSurfaces(): void {
 // MemberList loads the profile popup on first open. Load it up front so its
 // modules' load-time listeners are not counted against the test that opens it.
 import "@components/UserProfilePopup";
+// Likewise the member menu chunk (AdminActions), loaded on the first right-click.
+import "@components/AdminActions";
 
 // jsdom has no ResizeObserver; the member menu re-clamps itself through one.
 // The fake hands the latest observer's callback to tests that resize the menu.
@@ -268,7 +274,7 @@ describe("MemberList", () => {
     expect(bobDot.style.background).toBe("var(--red)");
   });
 
-  it("offers the server's own roles in the Change Role submenu", () => {
+  it("offers the server's own roles in the Change Role submenu", async () => {
     // A hardcoded list left custom roles unassignable — and unresolvable to a
     // role id, so choosing one silently did nothing.
     setRoles([
@@ -288,6 +294,7 @@ describe("MemberList", () => {
 
     const memberItem = container.querySelector('[data-testid="member-3"]') as HTMLDivElement;
     memberItem.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    await vi.dynamicImportSettled();
 
     const submenu = document.body.querySelector(".context-menu__submenu");
     expect(submenu).not.toBeNull();
@@ -368,7 +375,7 @@ describe("MemberList", () => {
     expect(headers.some((h) => h?.includes("PHANTOM"))).toBe(true);
   });
 
-  it("non-admin context menu shows only Block, no admin actions", () => {
+  it("non-admin context menu shows only Block, no admin actions", async () => {
     setTestMembers(testMembers);
     const opts: MemberListOptions = {
       currentUserRole: "member",
@@ -383,13 +390,14 @@ describe("MemberList", () => {
 
     const memberItem = container.querySelector('[data-testid="member-3"]') as HTMLDivElement;
     memberItem.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    await vi.dynamicImportSettled();
 
     const contextMenu = document.body.querySelector(".context-menu");
     expect(contextMenu).not.toBeNull();
     const labels = Array.from(contextMenu!.querySelectorAll(".context-menu__item")).map(
       (i) => i.textContent,
     );
-    expect(labels).toEqual(["Block"]);
+    expect(labels).toEqual(["Profile", "Mention", "Block"]);
 
     document.body.querySelector(".context-menu")?.remove();
   });
@@ -397,7 +405,7 @@ describe("MemberList", () => {
   // At the 940x500 minimum window a member low in the list opened the menu at
   // the pointer with its bottom past the viewport, so Force Logout, Ban and
   // Block could not be reached.
-  it("keeps the context menu inside the viewport near the bottom-right edge", () => {
+  it("keeps the context menu inside the viewport near the bottom-right edge", async () => {
     vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(144);
     vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(180);
     vi.stubGlobal("innerWidth", 940);
@@ -410,6 +418,8 @@ describe("MemberList", () => {
       memberItem.dispatchEvent(
         new MouseEvent("contextmenu", { bubbles: true, clientX: 930, clientY: 430 }),
       );
+
+      await vi.dynamicImportSettled();
       let menu = document.body.querySelector<HTMLElement>(".context-menu")!;
       // Anchored by its bottom edge at the pointer: spans y 286..430, x 752..932.
       expect(menu.style.top).toBe("");
@@ -419,6 +429,8 @@ describe("MemberList", () => {
       memberItem.dispatchEvent(
         new MouseEvent("contextmenu", { bubbles: true, clientX: 100, clientY: 100 }),
       );
+
+      await vi.dynamicImportSettled();
       menu = document.body.querySelector<HTMLElement>(".context-menu")!;
       // Room below the pointer: opens there as before.
       expect(menu.style.top).toBe("100px");
@@ -435,7 +447,7 @@ describe("MemberList", () => {
   // 90 px taller. A menu opened top-anchored in the band just above the fit
   // limit then ran past the bottom of the 940x500 window, taking Confirm Ban
   // and Block with it; a bottom-anchored one can likewise grow past the top.
-  it("re-clamps the context menu into the viewport when the ban form expands", () => {
+  it("re-clamps the context menu into the viewport when the ban form expands", async () => {
     let menuHeight = 144;
     vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(() => menuHeight);
     vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(180);
@@ -450,6 +462,8 @@ describe("MemberList", () => {
       memberItem.dispatchEvent(
         new MouseEvent("contextmenu", { bubbles: true, clientX: 100, clientY: 320 }),
       );
+
+      await vi.dynamicImportSettled();
       let menu = document.body.querySelector<HTMLElement>(".context-menu")!;
       expect(menu.style.top).toBe("320px");
 
@@ -466,6 +480,7 @@ describe("MemberList", () => {
       memberItem.dispatchEvent(
         new MouseEvent("contextmenu", { bubbles: true, clientX: 100, clientY: 430 }),
       );
+      await vi.dynamicImportSettled();
       menu = document.body.querySelector<HTMLElement>(".context-menu")!;
       expect(menu.style.bottom).toBe("70px");
       menuHeight = 470;
@@ -488,7 +503,7 @@ describe("MemberList", () => {
      *  MANAGE_CHANNELS, KICK_MEMBERS, BAN_MEMBERS — no MANAGE_ROLES. */
     const MODERATOR_MASK = 0x000fffff;
 
-    function openMenuAs(roleName: string, permissions: number): string[] {
+    async function openMenuAs(roleName: string, permissions: number): Promise<string[]> {
       setRoles([{ id: 7, name: roleName, color: null, permissions }]);
       setTestMembers(testMembers);
       const opts: MemberListOptions = { ...defaultOpts(), currentUserRole: roleName };
@@ -498,6 +513,7 @@ describe("MemberList", () => {
 
       const memberItem = container.querySelector('[data-testid="member-3"]') as HTMLDivElement;
       memberItem.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+      await vi.dynamicImportSettled();
       const menu = document.body.querySelector(".context-menu");
       expect(menu).not.toBeNull();
       // Submenu role options share the item class; only top-level items count.
@@ -510,31 +526,34 @@ describe("MemberList", () => {
       document.body.querySelector(".context-menu")?.remove();
     });
 
-    it("shows Force Logout and Ban but not Change Role for a moderator mask", () => {
-      const labels = openMenuAs("moderator", MODERATOR_MASK);
+    it("shows Force Logout and Ban but not Change Role for a moderator mask", async () => {
+      const labels = await openMenuAs("moderator", MODERATOR_MASK);
       expect(labels).toContain("Force Logout");
       expect(labels).toContain("Ban");
       expect(labels).not.toContain("Change Role");
       expect(labels).toContain("Block");
     });
 
-    it("shows Change Role only when MANAGE_ROLES is held", () => {
-      const labels = openMenuAs("staff", Permission.MANAGE_ROLES | Permission.KICK_MEMBERS);
+    it("shows Change Role only when MANAGE_ROLES is held", async () => {
+      const labels = await openMenuAs("staff", Permission.MANAGE_ROLES | Permission.KICK_MEMBERS);
       expect(labels).toContain("Change Role");
       expect(labels).toContain("Force Logout");
       expect(labels).not.toContain("Ban");
     });
 
-    it("shows every moderation item for the ADMINISTRATOR bit", () => {
-      const labels = openMenuAs("admin", Permission.ADMINISTRATOR);
+    it("shows every moderation item for the ADMINISTRATOR bit", async () => {
+      const labels = await openMenuAs("admin", Permission.ADMINISTRATOR);
       expect(labels).toEqual(
         expect.arrayContaining(["Change Role", "Force Logout", "Ban", "Block"]),
       );
     });
 
-    it("shows only Block for a role whose mask holds no moderation bits", () => {
-      const labels = openMenuAs("member", Permission.SEND_MESSAGES | Permission.READ_MESSAGES);
-      expect(labels).toEqual(["Block"]);
+    it("shows only Block for a role whose mask holds no moderation bits", async () => {
+      const labels = await openMenuAs(
+        "member",
+        Permission.SEND_MESSAGES | Permission.READ_MESSAGES,
+      );
+      expect(labels).toEqual(["Profile", "Mention", "Block"]);
     });
   });
 
@@ -551,7 +570,11 @@ describe("MemberList", () => {
       ]);
     }
 
-    function openMenuOn(actorRole: string, targetId: number, actorPerms = 0): HTMLElement | null {
+    async function openMenuOn(
+      actorRole: string,
+      targetId: number,
+      actorPerms = 0,
+    ): Promise<HTMLElement | null> {
       seedRanks(actorPerms);
       authStore.setState(() => ({
         token: "tok",
@@ -564,6 +587,7 @@ describe("MemberList", () => {
       memberList.mount(container);
       const item = container.querySelector(`[data-testid="member-${targetId}"]`) as HTMLElement;
       item.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+      await vi.dynamicImportSettled();
       return document.body.querySelector<HTMLElement>(".context-menu");
     }
 
@@ -577,34 +601,34 @@ describe("MemberList", () => {
       document.body.querySelector(".context-menu")?.remove();
     });
 
-    it("offers only roles below the actor's own rank", () => {
-      const menu = openMenuOn("Admin", 4);
+    it("offers only roles below the actor's own rank", async () => {
+      const menu = await openMenuOn("Admin", 4);
       const roleLabels = Array.from(
         menu!.querySelectorAll(".context-menu__submenu .context-menu__item"),
       ).map((i) => i.textContent);
       expect(roleLabels).toEqual(["Moderator", "Member"]);
     });
 
-    it("withholds Change Role, Force Logout and Ban for a member the actor does not outrank", () => {
+    it("withholds Change Role, Force Logout and Ban for a member the actor does not outrank", async () => {
       for (const targetId of [1, 2]) {
-        const menu = openMenuOn("Admin", targetId);
+        const menu = await openMenuOn("Admin", targetId);
         expect(menu).not.toBeNull();
-        expect(topLabels(menu!)).toEqual(["Block"]);
+        expect(topLabels(menu!)).toEqual(["Profile", "Mention", "Block"]);
         document.body.querySelector(".context-menu")?.remove();
         memberList.destroy?.();
         memberList = createMemberList(defaultOpts());
       }
     });
 
-    it("keeps every action for a member ranked below the actor", () => {
-      const menu = openMenuOn("Admin", 3);
+    it("keeps every action for a member ranked below the actor", async () => {
+      const menu = await openMenuOn("Admin", 3);
       expect(topLabels(menu!)).toEqual(
         expect.arrayContaining(["Change Role", "Force Logout", "Ban", "Block"]),
       );
     });
   });
 
-  it("context menu does not appear when right-clicking yourself", () => {
+  it("right-clicking yourself opens Profile and Mention only", async () => {
     // Set authStore so current user is id=1 (Alice)
     authStore.setState(() => ({
       token: "tok",
@@ -629,10 +653,16 @@ describe("MemberList", () => {
     // Right-click on Alice (user id 1 = self)
     const selfItem = container.querySelector('[data-testid="member-1"]') as HTMLDivElement;
     selfItem.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    await vi.dynamicImportSettled();
 
-    // No context menu should appear for yourself
-    const contextMenu = document.body.querySelector(".admin-context-menu, .context-menu");
-    expect(contextMenu).toBeNull();
+    // Yourself: no moderation, Message, Call or Block.
+    const contextMenu = document.body.querySelector(".context-menu");
+    expect(contextMenu).not.toBeNull();
+    const labels = Array.from(contextMenu!.querySelectorAll(".context-menu__item")).map(
+      (i) => i.textContent,
+    );
+    expect(labels).toEqual(["Profile", "Mention"]);
+    contextMenu!.remove();
   });
 
   // The role NAME passed via opts.currentUserRole is a snapshot taken once at
@@ -640,7 +670,7 @@ describe("MemberList", () => {
   // current on every self MEMBER_UPDATE specifically so permission gates can
   // read it live -- this is the one gate that opted out by threading the
   // stale prop instead.
-  it("re-reads the current user's role live from authStore instead of the mount-time opts.currentUserRole snapshot", () => {
+  it("re-reads the current user's role live from authStore instead of the mount-time opts.currentUserRole snapshot", async () => {
     setRoles([{ id: 8, name: "admin", color: null, permissions: Permission.ADMINISTRATOR }]);
     authStore.setState(() => ({
       token: "tok",
@@ -661,6 +691,7 @@ describe("MemberList", () => {
 
     const memberItem = container.querySelector('[data-testid="member-3"]') as HTMLDivElement;
     memberItem.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    await vi.dynamicImportSettled();
     const menu = document.body.querySelector(".context-menu");
     expect(menu).not.toBeNull();
     const labels = Array.from(menu!.children)
@@ -909,6 +940,8 @@ describe("MemberList profile fields", () => {
 
   beforeEach(() => {
     resetStore();
+    // The popup's Message/Call are disabled while offline (WP 3B-2).
+    setConnectionStatus("connected");
     container = document.createElement("div");
     document.body.appendChild(container);
   });
@@ -918,6 +951,7 @@ describe("MemberList profile fields", () => {
     list = null;
     container.remove();
     resetStore();
+    setConnectionStatus("disconnected");
   });
 
   it("renders the display name and falls back to the username", () => {
@@ -1168,5 +1202,282 @@ describe("MemberList profile fields", () => {
     expect(container.querySelector('[data-testid="member-custom-status-1"]')?.textContent).toBe(
       "back in 5",
     );
+  });
+});
+
+describe("MemberList full context menu (3C-3)", () => {
+  let container: HTMLDivElement;
+  let list: ReturnType<typeof createMemberList> | null = null;
+
+  const MODERATE_ONLY = Permission.MODERATE_MEMBERS;
+
+  function seedRanks(): void {
+    setRoles([
+      { id: 1, name: "Owner", color: null, permissions: Permission.ADMINISTRATOR, position: 100 },
+      { id: 2, name: "Admin", color: null, permissions: Permission.ADMINISTRATOR, position: 80 },
+      { id: 3, name: "Moderator", color: null, permissions: MODERATE_ONLY, position: 60 },
+      { id: 4, name: "Member", color: null, permissions: 0, position: 40 },
+    ]);
+  }
+
+  function signInAs(role: string): void {
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 99, username: "Actor", avatar: null, role },
+      serverName: "Test",
+      motd: null,
+      isAuthenticated: true,
+    }));
+  }
+
+  /** Right-click a member and let the lazy menu chunk settle. */
+  async function openMenu(
+    targetId: number,
+    extra: Partial<MemberListOptions> = {},
+  ): Promise<HTMLElement | null> {
+    setTestMembers(testMembers);
+    list = createMemberList({ ...defaultOpts(), ...extra });
+    list.mount(container);
+    const row = container.querySelector(`[data-testid="member-${targetId}"]`) as HTMLElement;
+    row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    await vi.dynamicImportSettled();
+    return document.body.querySelector<HTMLElement>(".context-menu");
+  }
+
+  function topLabels(menu: HTMLElement): string[] {
+    return Array.from(menu.children)
+      .filter((el) => el.classList.contains("context-menu__item"))
+      .map((el) => el.firstChild?.textContent ?? "");
+  }
+
+  const timeoutOpts = (): Partial<MemberListOptions> => ({
+    onTimeoutMember: vi.fn().mockResolvedValue(undefined),
+    onRemoveTimeout: vi.fn().mockResolvedValue(undefined),
+  });
+
+  function makeChannel(id: number, type: Channel["type"]): Channel {
+    return {
+      id,
+      name: `ch-${id}`,
+      type,
+      category: null,
+      topic: "",
+      position: 0,
+      unreadCount: 0,
+      mentionCount: 0,
+      lastMessageId: null,
+      canSend: true,
+      slowMode: 0,
+      nsfw: false,
+      isPrivate: false,
+      voiceMaxUsers: 0,
+      voiceMaxVideo: 0,
+    };
+  }
+
+  function putInVoice(userId: number, channelId: number): void {
+    updateVoiceState({
+      channel_id: channelId,
+      user_id: userId,
+      username: `u${userId}`,
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+    });
+  }
+
+  beforeEach(() => {
+    resetStore();
+    seedRanks();
+    setMemberTimeouts(undefined);
+    resetVoiceStore();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    list?.destroy?.();
+    list = null;
+    document.body.querySelectorAll(".context-menu").forEach((el) => el.remove());
+    container.remove();
+    setMemberTimeouts(undefined);
+    resetVoiceStore();
+    resetStore();
+  });
+
+  // (13)
+  it("offers Timeout only with MODERATE_MEMBERS and a higher rank than the target", async () => {
+    signInAs("Moderator");
+    // Member (rank 40) is below the Moderator: Timeout is offered.
+    let menu = await openMenu(4, timeoutOpts());
+    expect(topLabels(menu!)).toContain("Timeout");
+    list!.destroy?.();
+    menu!.remove();
+
+    // Another Moderator (equal rank) is not.
+    menu = await openMenu(3, timeoutOpts());
+    expect(topLabels(menu!)).not.toContain("Timeout");
+    expect(topLabels(menu!)).not.toContain("Remove Timeout");
+    list!.destroy?.();
+    menu!.remove();
+
+    // Without the permission bit, even a lower-ranked target gets neither.
+    signInAs("Member");
+    menu = await openMenu(5, timeoutOpts());
+    expect(topLabels(menu!)).not.toContain("Timeout");
+  });
+
+  // (14)
+  it.each([
+    ["no timeout view (older server)", undefined, ["Timeout", "Remove Timeout"]],
+    [
+      "target has an entry",
+      [{ user_id: 4, expires_at: "2099-01-01T00:00:00Z" }],
+      ["Remove Timeout"],
+    ],
+    ["target has no entry", [{ user_id: 7, expires_at: "2099-01-01T00:00:00Z" }], ["Timeout"]],
+  ] as const)("timeout state: %s", async (_name, entries, expected) => {
+    signInAs("Moderator");
+    setMemberTimeouts(entries);
+    const menu = await openMenu(4, timeoutOpts());
+    const labels = topLabels(menu!).filter((l) => l === "Timeout" || l === "Remove Timeout");
+    expect(labels).toEqual([...expected]);
+  });
+
+  // (15)
+  it("shows voice rows only for a server voice channel and with voiceModFor options", async () => {
+    signInAs("Admin");
+    channelsStore.setState((prev) => ({
+      ...prev,
+      channels: new Map([
+        [10, makeChannel(10, "voice")],
+        [11, makeChannel(11, "dm")],
+      ]),
+    }));
+    const voiceModFor = vi.fn(() => ({
+      serverMuted: false,
+      serverDeafened: false,
+      moveTargets: [],
+      onServerMute: vi.fn(),
+      onServerDeafen: vi.fn(),
+      onMove: vi.fn(),
+      onDisconnect: vi.fn(),
+    }));
+    const voiceLabels = ["Server Mute", "Server Deafen", "Disconnect"];
+
+    // Not in voice at all.
+    let menu = await openMenu(4, { voiceModFor });
+    expect(topLabels(menu!)).not.toContain("Disconnect");
+    list!.destroy?.();
+    menu!.remove();
+
+    // In a DM call: no voice rows.
+    putInVoice(4, 11);
+    menu = await openMenu(4, { voiceModFor });
+    expect(topLabels(menu!)).not.toContain("Disconnect");
+    list!.destroy?.();
+    menu!.remove();
+    expect(voiceModFor).not.toHaveBeenCalled();
+
+    // In a server voice channel but nothing wired: no voice rows.
+    resetVoiceStore();
+    putInVoice(4, 10);
+    menu = await openMenu(4);
+    expect(topLabels(menu!)).not.toContain("Disconnect");
+    list!.destroy?.();
+    menu!.remove();
+
+    // In a server voice channel with options: the three rows.
+    menu = await openMenu(4, { voiceModFor });
+    expect(topLabels(menu!)).toEqual(expect.arrayContaining(voiceLabels));
+    expect(voiceModFor).toHaveBeenCalledWith(10, expect.objectContaining({ userId: 4 }));
+  });
+
+  // (16)
+  it("the Profile item opens the profile popup and closes the menu", async () => {
+    signInAs("Admin");
+    const menu = await openMenu(4);
+    const profile = menu!.querySelector<HTMLElement>('[data-testid="member-menu-profile"]');
+    expect(profile).not.toBeNull();
+    profile!.click();
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-testid="user-profile-popup"]')).not.toBeNull(),
+    );
+    expect(document.body.querySelector(".context-menu")).toBeNull();
+    document.querySelector('[data-testid="user-profile-popup"]')?.remove();
+    document.querySelector('[data-testid="user-profile-overlay"]')?.remove();
+  });
+
+  it("Message and Call appear only when wired, and Mention writes to the composer", async () => {
+    signInAs("Member");
+    const insertMention = vi.fn(() => true);
+    const release = claimComposer({ insertMention, canMention: () => true });
+    try {
+      const onMessageUser = vi.fn();
+      const menu = await openMenu(4, { onMessageUser });
+      expect(topLabels(menu!)).toEqual(["Profile", "Mention", "Message", "Block"]);
+      const mention = menu!.querySelector<HTMLElement>('[data-testid="member-menu-mention"]')!;
+      expect(mention.getAttribute("aria-disabled")).toBeNull();
+      mention.click();
+      expect(insertMention).toHaveBeenCalledWith("Dave");
+      expect(document.body.querySelector(".context-menu")).toBeNull();
+    } finally {
+      release();
+    }
+  });
+
+  it("greys Mention with a reason when no composer is mounted", async () => {
+    signInAs("Member");
+    const menu = await openMenu(4);
+    const mention = menu!.querySelector<HTMLElement>('[data-testid="member-menu-mention"]')!;
+    expect(mention.getAttribute("aria-disabled")).toBe("true");
+    expect(mention.title).not.toBe("");
+  });
+
+  // (17) edge case 1
+  describe("menu opened again, or list destroyed, while the chunk loads", () => {
+    it("renders one menu, for the second member, when two right-clicks land before the load settles", async () => {
+      signInAs("Admin");
+      setTestMembers(testMembers);
+      list = createMemberList(defaultOpts());
+      list.mount(container);
+      const open = (id: number): void => {
+        container
+          .querySelector(`[data-testid="member-${id}"]`)!
+          .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+      };
+      open(4);
+      open(5);
+      await vi.dynamicImportSettled();
+      const menus = document.body.querySelectorAll(".context-menu");
+      expect(menus).toHaveLength(1);
+      // The surviving menu belongs to the second member: its Profile row opens Eve's card.
+      const profile = menus[0]!.querySelector<HTMLElement>('[data-testid="member-menu-profile"]');
+      expect(profile).not.toBeNull();
+      profile!.click();
+      await vi.waitFor(() =>
+        expect(document.querySelector('[data-testid="user-profile-popup"]')).not.toBeNull(),
+      );
+      expect(document.querySelector('[data-testid="user-profile-popup"]')?.textContent).toContain(
+        "Eve",
+      );
+      document.querySelector('[data-testid="user-profile-popup"]')?.remove();
+      document.querySelector('[data-testid="user-profile-overlay"]')?.remove();
+    });
+
+    it("renders nothing when the list is destroyed before the load settles", async () => {
+      signInAs("Admin");
+      setTestMembers(testMembers);
+      list = createMemberList(defaultOpts());
+      list.mount(container);
+      container
+        .querySelector('[data-testid="member-4"]')!
+        .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+      list.destroy?.();
+      await vi.dynamicImportSettled();
+      expect(document.body.querySelector(".context-menu")).toBeNull();
+    });
   });
 });
