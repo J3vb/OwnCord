@@ -398,6 +398,7 @@ It is still a **beta and a hobby project** — don't use it for anything sensiti
 - **Member actions no longer need the admin network.** Changing a member's role, banning, unbanning and force-logging-out now work from outside `server.admin_allowed_cidrs`, and no longer go through `/admin`, so they work behind a reverse proxy that answers `/admin` with a web page. They accept only this server's own sessions and API tokens, with login, permission and rank checks only.
 - The member list offers Change Role, Force Logout and Ban only on members below your rank, and the role menu lists only roles below your own, instead of offering actions the server would refuse.
 - The Invite button shows only to members who can manage invites, and Copy on an invite gives a shareable `owncord://` link instead of the bare code.
+- The Invite Manager can set an invite's expiry (1 hour to 30 days, or never) and max uses, shows the full link and when each invite expires, opens with a ready-to-copy link, shows the server's reason when an invite action fails, and offers Retry if the list cannot load.
 
 **Voice and video**
 
