@@ -1780,7 +1780,7 @@ List all open DM channels for the authenticated user, ordered by most recent act
 | `name`                 | Optional group name, max 100 characters, one line: runs of spaces collapse, and control characters, line breaks, invisible characters and stacked combining marks are refused. `""` for a 1:1 DM and for an unnamed group. |
 | `is_group`             | True for a group DM. Stored, not derived from the live participant count.                                                                                                                                                  |
 | `owner_id`             | Groups only, omitted for a 1:1 DM: the group's owner, always a current member. The creator at create, then the lowest remaining member id when the owner leaves or their account is erased.                                |
-| `icon`                 | The group's icon as a file URL (`/api/v1/files/{id}`), `""` when it has none and for a 1:1 DM. Always present. Only the group's members can fetch the file, and only while it is the live icon. |
+| `icon`                 | The group's icon as a file URL (`/api/v1/files/{id}`), `""` when it has none and for a 1:1 DM. Always present. Only the group's members can fetch the file, and only while it is the live icon.                            |
 | `unread_count`         | Unread messages for the caller, capped at 100 (a value of 100 means "100 or more") — the same cap as `ready`.                                                                                                              |
 | `mention_count`        | The caller's `read_states.mention_count` for the DM — the same value the `ready` payload's `dm_channels[]` carries.                                                                                                        |
 | `last_read_message_id` | The caller's read pointer (`read_states.last_message_id`) for the DM; `0` when they have never read it.                                                                                                                    |
@@ -2086,12 +2086,12 @@ changes below and from avatar uploads.
 
 #### Errors
 
-| Status | Code           | Reason                                                              |
-| ------ | -------------- | ------------------------------------------------------------------- |
-| 400    | `BAD_REQUEST`  | A 1:1 DM, a missing `file`, or a file that breaks the image rules   |
-| 403    | `TIMED_OUT`    | The caller is timed out                                             |
-| 404    | `NOT_FOUND`    | The caller is not a member, or stopped being one before the commit  |
-| 429    | `RATE_LIMITED` | More than 5 icon uploads in a minute                                |
+| Status | Code           | Reason                                                             |
+| ------ | -------------- | ------------------------------------------------------------------ |
+| 400    | `BAD_REQUEST`  | A 1:1 DM, a missing `file`, or a file that breaks the image rules  |
+| 403    | `TIMED_OUT`    | The caller is timed out                                            |
+| 404    | `NOT_FOUND`    | The caller is not a member, or stopped being one before the commit |
+| 429    | `RATE_LIMITED` | More than 5 icon uploads in a minute                               |
 
 If the group cannot be changed after the file was stored (for instance the caller
 left the group in between) the file and its record are deleted and nothing is
