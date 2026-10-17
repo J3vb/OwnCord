@@ -208,6 +208,30 @@ describe("MemberList", () => {
     expect(letters).toContain("C"); // Charlie
   });
 
+  it("waits for a member avatar to be visible before loading it", () => {
+    const observed: Element[] = [];
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        observe(el: Element): void {
+          observed.push(el);
+        }
+        unobserve(): void {}
+      },
+    );
+    try {
+      setTestMembers([makeMember({ id: 1, username: "Alice", avatar: "/api/v1/files/a" })]);
+      memberList.mount(container);
+
+      const avatar = container.querySelector(".mi-avatar");
+      expect(avatar).not.toBeNull();
+      expect(observed).toContain(avatar);
+      expect(avatar?.querySelector("img")).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("offline members have offline class", () => {
     setTestMembers(testMembers);
     memberList.mount(container);

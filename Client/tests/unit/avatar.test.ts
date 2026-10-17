@@ -236,6 +236,21 @@ describe("createAvatarElement with deferUntilVisible", () => {
     for (const settle of settlers) settle(null);
   });
 
+  it("frees a slot when a fetch fails or throws", async () => {
+    let calls = 0;
+    fetchImageAsObjectUrl.mockImplementation(() => {
+      calls++;
+      if (calls === 1) throw new Error("sync failure");
+      if (calls <= 7) return Promise.reject(new Error("network"));
+      return Promise.resolve(null);
+    });
+    const { createAvatarElement: create } = await load();
+    const els = Array.from({ length: 8 }, (_, i) => mount(create, i));
+    for (const el of els) show(el);
+
+    await vi.waitFor(() => expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(8));
+  });
+
   it("starts no fetch for a wrapper removed before it became visible", async () => {
     fetchImageAsObjectUrl.mockResolvedValue(null);
     const { createAvatarElement: create } = await load();

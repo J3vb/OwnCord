@@ -50,8 +50,9 @@ export interface AvatarOptions {
 
 /** Fetches in flight at once for `deferUntilVisible` avatars. */
 const MAX_CONCURRENT_AVATAR_FETCHES = 6;
-/** How far outside the viewport a row starts loading, so scrolling rarely
- *  shows a letter that is about to become a picture. */
+/** How far outside the viewport a row counts as visible. The root is the
+ *  viewport, so rows clipped by the list's own scroll box still load only as
+ *  they scroll in. */
 const VISIBILITY_ROOT_MARGIN = "200px";
 
 let activeFetches = 0;
@@ -66,7 +67,14 @@ function pumpFetchQueue(): void {
       activeFetches--;
       pumpFetchQueue();
     };
-    job().then(release, release);
+    // A job that throws before returning its promise still frees its slot.
+    let pending: Promise<unknown>;
+    try {
+      pending = job();
+    } catch {
+      pending = Promise.resolve();
+    }
+    pending.then(release, release);
   }
 }
 
