@@ -29,17 +29,14 @@ func (d *DB) Optimize(ctx context.Context) error {
 	}
 	defer func() { _ = conn.Close() }()
 	// analysis_limit is per connection; pinning one connection applies it to
-	// the optimize that follows, and the previous value is restored so the
-	// pooled connection is not left with a changed setting.
-	stmts := []string{
-		fmt.Sprintf("PRAGMA analysis_limit=%d;", optimizeAnalysisLimit),
-		"PRAGMA optimize;",
-		"PRAGMA analysis_limit=0;",
+	// the optimize that follows. The reset runs even when optimize fails or ctx
+	// is cancelled, so the pooled connection is not left with a changed setting.
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf("PRAGMA analysis_limit=%d;", optimizeAnalysisLimit)); err != nil {
+		return fmt.Errorf("optimize: setting analysis_limit: %w", err)
 	}
-	for _, s := range stmts {
-		if _, err := conn.ExecContext(ctx, s); err != nil {
-			return fmt.Errorf("optimize: %s: %w", s, err)
-		}
+	defer func() { _, _ = conn.ExecContext(context.WithoutCancel(ctx), "PRAGMA analysis_limit=0;") }()
+	if _, err := conn.ExecContext(ctx, "PRAGMA optimize;"); err != nil {
+		return fmt.Errorf("optimize: %w", err)
 	}
 	return nil
 }

@@ -169,6 +169,7 @@ func (a *App) startDatabase() error {
 		select {
 		case <-optDone:
 		case <-ctx.Done():
+			a.log.Warn("database optimizer did not stop before the close budget ran out")
 		}
 		return nil
 	})

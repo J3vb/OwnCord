@@ -143,7 +143,7 @@ func replayCopy(frame []byte) []byte {
 		return frame
 	}
 	var payload map[string]json.RawMessage
-	if json.Unmarshal(env["payload"], &payload) != nil {
+	if json.Unmarshal(env["payload"], &payload) != nil || payload == nil {
 		return frame
 	}
 	payload["referenced_message"] = json.RawMessage("null")
@@ -186,7 +186,7 @@ func newReplaySplice(msg []byte) *replaySplice {
 		return nil
 	}
 	var payload map[string]json.RawMessage
-	if json.Unmarshal(env["payload"], &payload) != nil {
+	if json.Unmarshal(env["payload"], &payload) != nil || payload == nil {
 		return nil
 	}
 	payload["referenced_message"] = json.RawMessage("null")

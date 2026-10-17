@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/J3vb/OwnCord/Server/syncutil"
 	"log/slog"
 	"runtime"
 	"strings"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 	"github.com/J3vb/OwnCord/Server/migrations"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 	_ "modernc.org/sqlite" // register the sqlite3 driver
 )
 
