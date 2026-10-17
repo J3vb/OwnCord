@@ -359,6 +359,23 @@ describe("inbox view", () => {
       expect(ids()).toEqual([1]);
     });
 
+    it("moves focus to the list when Retry succeeds while it held focus", async () => {
+      const { api, calls } = deferredApi();
+      applyReadyDmRequests(api);
+      calls[0]!.reject(new Error("HTTP 500"));
+      await settle();
+      open();
+      retry().focus();
+      expect(document.activeElement).toBe(retry());
+
+      retry().click();
+      calls[1]!.resolve([item(1)]);
+      await settle();
+      messageRequestsStore.flush();
+      expect(retry().hidden).toBe(true);
+      expect(document.activeElement).toBe(list());
+    });
+
     it("shows the message and Retry again after a second failure", async () => {
       const { api, calls } = deferredApi();
       applyReadyDmRequests(api);

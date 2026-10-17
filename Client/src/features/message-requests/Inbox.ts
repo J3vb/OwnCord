@@ -148,7 +148,10 @@ export function renderInbox(root: HTMLElement, signal: AbortSignal): void {
         // A view that closed meanwhile has nothing left to repaint.
         if (signal.aborted) return;
         retrying = false;
+        // Success hides the button; keep focus in the view, on the list.
+        const hadFocus = document.activeElement === retry;
         render();
+        if (hadFocus && retry.hidden) list.focus();
       });
     },
     { signal },

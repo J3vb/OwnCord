@@ -271,6 +271,7 @@ import { verifyEphemeralKeySignature } from "@lib/e2eeCrypto";
 import { setMembers } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, resetChannelsStore } from "@stores/channels.store";
+import { keepDmForCall, resetKeptCallDms } from "../../src/features/direct-messages/keptCallDms";
 import type { ReadyMember } from "../../src/lib/types";
 import { ensureLiveKitProxy, getLiveKitProxyPort } from "../../src/platform/desktop/nativeProxies";
 import { takeJoinRefusal } from "../../src/features/voice/joinRequest";
@@ -2241,6 +2242,40 @@ describe("LiveKitSession", () => {
       expect((session as any)._state.type).toBe("idle");
       expect(mockShowActionToast).not.toHaveBeenCalled();
       expect(enableCamera).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("a closed 1:1 kept for its call (WP 3B-5 D14)", () => {
+    // Channel 100 is neither a server channel nor an open DM, as after a local close.
+    async function drop(): Promise<void> {
+      mockVoiceState.currentChannelId = 100;
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn(), getState: () => "connected" } as any);
+      let handler: ((reason?: number) => void) | undefined;
+      mockRoom.on.mockImplementation((event: string, h: any) => {
+        if (event === "disconnected") handler = h;
+        return mockRoom;
+      });
+      await session.handleVoiceToken("test-token", "/livekit", 100, "ws://localhost:7880", true);
+      handler!(/* SERVER_SHUTDOWN */ 1);
+    }
+
+    afterEach(() => {
+      resetKeptCallDms();
+    });
+
+    it("keeps retrying the reconnect after the DM was closed", async () => {
+      mockVoiceState.currentChannelId = 100;
+      keepDmForCall(100);
+      await drop();
+      await vi.advanceTimersByTimeAsync(3100);
+      expect((session as any)._state.type).toBe("connected");
+    });
+
+    it("gives up on a channel that is neither listed nor kept (a group leave)", async () => {
+      await drop();
+      await vi.advanceTimersByTimeAsync(3100);
+      expect((session as any)._state.type).toBe("idle");
     });
   });
 

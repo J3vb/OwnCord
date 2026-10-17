@@ -44,6 +44,9 @@ export interface MemberPickerOptions {
 // createMemberPickerModal
 // ---------------------------------------------------------------------------
 
+/** Rows the roving navigation may land on: a filtered-out row is `hidden`. */
+const VISIBLE_ROW = ".dm-member-picker-item:not([hidden])";
+
 const memberLabel = (m: Member): string => (m.displayName ?? "") || m.username;
 // Reachable people first (online, idle, dnd), then by the name the reader sees.
 const reachable = (m: Member): number =>
@@ -212,9 +215,12 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
           r.label.toLowerCase().includes(q) ||
           r.member.username.toLowerCase().includes(q),
       );
-      listContainer.replaceChildren(...shown.map((r) => r.item));
+      // Hide, don't detach: a row filtered out before its avatar loads still
+      // gets its picture, and the selection marks stay on the elements.
+      for (const r of rows) r.item.hidden = !shown.includes(r);
       emptyNotice.hidden = shown.length > 0;
-      setRovingTabindex(listContainer, ".dm-member-picker-item");
+      for (const r of rows) r.item.setAttribute("tabindex", "-1");
+      setRovingTabindex(listContainer, VISIBLE_ROW);
     }
 
     for (const member of candidates) {
@@ -227,11 +233,13 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
         // so the picker was mouse-only — and it is the only way to start a DM.
         role: "button",
         tabindex: "-1",
-        style: "cursor:pointer;padding:6px 8px;display:flex;align-items:center;gap:8px;",
+        // Layout lives in group-dms.css: an inline display would beat [hidden].
+        style: "cursor:pointer;",
       });
       const avatar = createAvatarElement(member, {
         className: "dm-avatar dm-member-picker-avatar",
         background: pickAvatarColor(member.username),
+        decorative: true,
       });
       const nameEl = createElement("span", {}, label);
       const statusEl = createElement(
@@ -261,16 +269,33 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
     searchInput.addEventListener("input", applyFilter);
     searchInput.addEventListener("keydown", (e: KeyboardEvent) => {
       if (e.key !== "ArrowDown") return;
-      const first = listContainer.querySelector<HTMLElement>(".dm-member-picker-item");
+      const first = listContainer.querySelector<HTMLElement>(VISIBLE_ROW);
       if (first === null) return;
       e.preventDefault();
+      for (const r of rows) r.item.setAttribute("tabindex", "-1");
+      first.setAttribute("tabindex", "0");
       first.focus();
     });
 
     // One Tab stop enters the list; ArrowUp/Down step rows and Enter/Space
     // activate the focused one (a roving list, as the DM sidebar rows do).
+    listContainer.append(...rows.map((r) => r.item));
     applyFilter();
-    enableRovingNavigation(listContainer, ".dm-member-picker-item", pickerOwner.signal, "vertical");
+    // Registered before the roving handler so ArrowUp on the first visible row
+    // returns to the search box instead of clamping in place.
+    listContainer.addEventListener(
+      "keydown",
+      (e: KeyboardEvent) => {
+        if (e.key !== "ArrowUp" || e.altKey || e.ctrlKey || e.metaKey) return;
+        const first = listContainer.querySelector<HTMLElement>(VISIBLE_ROW);
+        if (first === null || e.target !== first) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        searchInput.focus();
+      },
+      { signal: pickerOwner.signal },
+    );
+    enableRovingNavigation(listContainer, VISIBLE_ROW, pickerOwner.signal, "vertical");
 
     // One button for both outcomes, relabelled by the selection size. A
     // separate "make it a group" control would ask the user to declare their

@@ -36,7 +36,7 @@ describe("member picker search, sort and chips", () => {
   const search = (): HTMLInputElement =>
     container.querySelector<HTMLInputElement>("[data-testid='dm-picker-search']")!;
   const rowIds = (): string[] =>
-    [...container.querySelectorAll(".dm-member-picker-item")].map((r) =>
+    [...container.querySelectorAll(".dm-member-picker-item:not([hidden])")].map((r) =>
       r.getAttribute("data-testid")!.replace("dm-picker-member-", ""),
     );
   const type = (value: string): void => {
@@ -166,5 +166,68 @@ describe("member picker search, sort and chips", () => {
     expect(
       (row(3).querySelector(".dm-member-picker-avatar") as HTMLElement).style.background,
     ).not.toBe("");
+  });
+
+  const key = (el: Element, k: string): void => {
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
+  };
+
+  it("keeps filtered-out rows in the DOM, hidden", () => {
+    setup([member({ id: 2, username: "alice" }), member({ id: 3, username: "bob" })]);
+    mount();
+    type("bob");
+    expect(row(2).isConnected).toBe(true);
+    expect(row(2).hidden).toBe(true);
+    expect(row(3).hidden).toBe(false);
+  });
+
+  it("loads the avatar of a row filtered out before the picture arrived", async () => {
+    setup([
+      member({ id: 2, username: "alice", avatar: "/api/v1/files/9" }),
+      member({ id: 3, username: "bob" }),
+    ]);
+    mount();
+    type("bob");
+    await vi.waitFor(() => {
+      expect(row(2).querySelector("img.avatar-img")).not.toBeNull();
+    });
+    // The row text already names the person, so the picture is decorative.
+    expect(row(2).querySelector("img.avatar-img")!.getAttribute("alt")).toBe("");
+  });
+
+  it("ArrowDown from search puts the roving stop on the first visible row", () => {
+    setup([member({ id: 2, username: "alice" }), member({ id: 3, username: "bob" })]);
+    mount();
+    type("bob");
+    key(search(), "ArrowDown");
+    expect(document.activeElement).toBe(row(3));
+    expect(row(3).getAttribute("tabindex")).toBe("0");
+    expect(row(2).getAttribute("tabindex")).toBe("-1");
+  });
+
+  it("ArrowUp on the first visible row returns to the search box", () => {
+    setup([member({ id: 2, username: "alice" }), member({ id: 3, username: "bob" })]);
+    mount();
+    type("bob");
+    key(search(), "ArrowDown");
+    key(row(3), "ArrowUp");
+    expect(document.activeElement).toBe(search());
+  });
+
+  it("arrow navigation skips hidden rows", () => {
+    setup([
+      member({ id: 2, username: "anna" }),
+      member({ id: 3, username: "bob" }),
+      member({ id: 4, username: "anya" }),
+    ]);
+    mount();
+    type("an");
+    expect(rowIds()).toEqual(["2", "4"]);
+    key(search(), "ArrowDown");
+    expect(document.activeElement).toBe(row(2));
+    key(row(2), "ArrowDown");
+    expect(document.activeElement).toBe(row(4));
+    key(row(4), "ArrowDown");
+    expect(document.activeElement).toBe(row(4));
   });
 });

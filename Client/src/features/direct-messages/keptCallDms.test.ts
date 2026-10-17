@@ -37,7 +37,7 @@ describe("keptCallDms", () => {
     leaveVoiceChannel();
     voiceStore.flush();
     expect(isDmKeptForCall(7)).toBe(false);
-    // Rejoining the same channel later must not resurrect it.
+    // After the flushed leave pruned the entry, a new join of channel 7 finds nothing kept.
     joinVoiceChannel(7);
     voiceStore.flush();
     expect(isDmKeptForCall(7)).toBe(false);
@@ -65,8 +65,8 @@ describe("keptCallDms", () => {
     voiceStore.flush();
     keepDmForCall(7);
     clearAuth();
-    voiceStore.flush();
-    // Back in channel 7 afterwards: only a cleared set explains false.
+    // No flush: the voice prune never sees the sign-out's leave, because the
+    // rejoin lands in the same batch (7 to 7). Only the auth hook can clear it.
     joinVoiceChannel(7);
     expect(isDmKeptForCall(7)).toBe(false);
   });

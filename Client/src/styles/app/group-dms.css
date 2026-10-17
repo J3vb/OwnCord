@@ -37,6 +37,16 @@
   padding: 0 4px;
 }
 
+.dm-member-picker-item {
+  cursor: pointer;
+  padding: 6px 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dm-member-picker-item[hidden] {
+  display: none;
+}
 .dm-member-picker-item.selected {
   background: var(--bg-active);
 }
