@@ -18,6 +18,10 @@ export interface Member {
   readonly displayName?: string | null;
   /** Free-text status line shown under the name. Null = unset. */
   readonly customStatus?: string | null;
+  /** Profile text. Null = unset, undefined = never sent (older server). */
+  readonly about?: string | null;
+  /** Account creation time (RFC3339) for "Member since"; undefined = older server. */
+  readonly createdAt?: string;
   /** Long-term E2EE identity public key (base64) for voice TOFU (F3). The store
    *  always sets it (null when the user has not published one); optional only so
    *  the many inline Member test fixtures need not restate it. */
@@ -67,6 +71,8 @@ export function setMembers(members: readonly ReadyMember[]): void {
       displayName: m.display_name ?? null,
       customStatus: m.custom_status ?? null,
       identityPublicKey: m.identity_public_key ?? null,
+      ...(m.about === undefined ? {} : { about: m.about }),
+      ...(m.created_at === undefined ? {} : { createdAt: m.created_at }),
     });
   }
   // Clear all outstanding typing timers
@@ -100,6 +106,8 @@ export function addMember(payload: MemberJoinPayload): void {
       // is what fills this in.
       customStatus: prev.members.get(payload.user.id)?.customStatus ?? null,
       identityPublicKey: payload.user.identity_public_key ?? null,
+      ...(payload.user.about === undefined ? {} : { about: payload.user.about }),
+      ...(payload.user.created_at === undefined ? {} : { createdAt: payload.user.created_at }),
     });
     return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
   });
@@ -133,6 +141,8 @@ export interface MemberProfilePatch {
   readonly avatar: string | null;
   readonly displayName?: string | null;
   readonly identityPublicKey?: string | null;
+  /** Only applied when provided; null clears it. */
+  readonly about?: string | null;
 }
 
 /** Update a member's profile from a user_update event. */
@@ -150,6 +160,7 @@ export function updateMemberProfile(userId: number, patch: MemberProfilePatch): 
         patch.identityPublicKey === undefined
           ? existing.identityPublicKey
           : patch.identityPublicKey,
+      ...(patch.about === undefined ? {} : { about: patch.about }),
     });
     return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
   });

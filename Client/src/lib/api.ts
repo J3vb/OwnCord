@@ -901,6 +901,25 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       });
     },
 
+    /**
+     * Remove the signed-in user's avatar and return the updated user.
+     * `DELETE /users/me/avatar`; an older server answers 405, so fall back to
+     * `PATCH /users/me` with the current username and `avatar: ""`.
+     */
+    async removeAvatar(currentUsername: string, signal?: AbortSignal): Promise<MemberResponse> {
+      try {
+        return await request<MemberResponse>("DELETE", "/users/me/avatar", undefined, signal);
+      } catch (err) {
+        if (!(err instanceof ApiClientError) || err.status !== 405) throw err;
+        return request<MemberResponse>(
+          "PATCH",
+          "/users/me",
+          { username: currentUsername, avatar: "" },
+          signal,
+        );
+      }
+    },
+
     changePassword(
       currentPassword: string,
       newPassword: string,
