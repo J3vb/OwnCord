@@ -45,8 +45,10 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # This file is read from the default branch on a schedule; dev is the
-          # branch the nightly exists to smoke.
-          ref: dev
+          # branch the nightly exists to smoke. A manual run from any other
+          # branch smokes that branch, so a change to the smoke can be tried
+          # before it merges; a manual run from main still smokes dev.
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' && github.sha || 'dev' }}
           persist-credentials: false
 
       # So every run's log states what was smoked, rather than leaving it to be
