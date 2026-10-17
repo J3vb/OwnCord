@@ -26,15 +26,66 @@ import type { GlobalKeysStatus } from "../../platform/contracts/globalShortcuts"
 import { settingsText as t } from "../../i18n/settings";
 import { buildPttControls } from "./pttControls";
 import { KEYBIND_GROUPS, type KeybindGroupId } from "@lib/keybindCatalog";
+import {
+  REBINDABLE_ACTIONS,
+  inAppCtrlShiftVks,
+  loadEffectiveKeybinds,
+  saveKeybind,
+  type RebindableId,
+} from "@lib/keybinds";
+import { beginCapture, buildComboCapture, cancelCapture, type ComboCapture } from "./comboCapture";
 
-/** A catalog group's fixed rows as [action, combo] text. */
-function fixedRows(id: KeybindGroupId): [string, string][] {
+/** The catalog rows that are rebindable here, by their action's catalog key. */
+const REBINDABLE_BY_ACTION_KEY: ReadonlyMap<string, RebindableId> = new Map([
+  ["keybinds.action.toggleCamera", "toggleCamera"],
+  ["keybinds.action.searchMessages", "search"],
+  ["keybinds.action.uploadFile", "uploadFile"],
+  ["keybinds.action.emojiPicker", "emojiPicker"],
+  ["keybinds.action.gifPicker", "gifPicker"],
+]);
+
+/** A catalog group's rows as text, with the rebindable action each one is. */
+function groupRows(
+  id: KeybindGroupId,
+): { label: string; combo: string; action: RebindableId | null }[] {
   const group = KEYBIND_GROUPS.find((g) => g.id === id);
-  return (group?.rows ?? []).map((r): [string, string] => [t(r.action), t(r.combo)]);
+  return (group?.rows ?? []).map((r) => ({
+    label: t(r.action),
+    combo: t(r.combo),
+    action: REBINDABLE_BY_ACTION_KEY.get(r.action) ?? null,
+  }));
 }
 
 export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
+
+  // Every rebindable row, so "Reset all" can redraw them.
+  const captures: ComboCapture[] = [];
+  const captureRow = (action: RebindableId, label: string): HTMLElement => {
+    const capture = buildComboCapture(signal, {
+      action,
+      label,
+      testId: `keybind-${action}`,
+    });
+    captures.push(capture);
+    return capture.element;
+  };
+  /** A group's catalog rows: fixed ones as text, rebindable ones as captures. */
+  const appendGroupRows = (id: KeybindGroupId): void => {
+    for (const { label, combo, action } of groupRows(id)) {
+      if (action !== null) {
+        section.appendChild(captureRow(action, label));
+        continue;
+      }
+      const row = createElement("div", { class: "keybind-row" });
+      appendChildren(
+        row,
+        createElement("span", { class: "setting-label" }, label),
+        createElement("span", { class: "kbd" }, combo),
+      );
+      section.appendChild(row);
+    }
+  };
 
   // ── Push to Talk ──────────────────────────────────────────
   section.append(...buildPttControls(signal));
@@ -60,16 +111,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   );
   section.appendChild(navHeader);
 
-  const navBinds = fixedRows("navigation");
-  for (const [label, shortcut] of navBinds) {
-    const row = createElement("div", { class: "keybind-row" });
-    appendChildren(
-      row,
-      createElement("span", { class: "setting-label" }, label),
-      createElement("span", { class: "kbd" }, shortcut),
-    );
-    section.appendChild(row);
-  }
+  appendGroupRows("navigation");
 
   // ── Communication section ──────────────────────────────────
   section.appendChild(createElement("div", { class: "settings-separator" }));
@@ -89,22 +131,24 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   const comboText = (action: GlobalShortcutAction): string =>
     t("keybinds.globalKey", { key: vkName(globalKeys[action]) });
   const commKbd: Partial<Record<GlobalShortcutAction, HTMLElement>> = {};
-  const commBinds: [string, string, GlobalShortcutAction | null][] = [
-    [t("keybinds.action.toggleMute"), comboText("mute"), "mute"],
-    [t("keybinds.action.toggleDeafen"), comboText("deafen"), "deafen"],
-    ...fixedRows("communication").map(([label, combo]): [string, string, null] => [
-      label,
-      combo,
-      null,
-    ]),
-  ];
-  for (const [label, shortcut, action] of commBinds) {
+  for (const action of ["mute", "deafen"] as const) {
     const row = createElement("div", { class: "keybind-row" });
-    const kbd = createElement("span", { class: "kbd" }, shortcut);
-    if (action !== null) commKbd[action] = kbd;
-    appendChildren(row, createElement("span", { class: "setting-label" }, label), kbd);
+    const kbd = createElement("span", { class: "kbd" }, comboText(action));
+    commKbd[action] = kbd;
+    appendChildren(
+      row,
+      createElement(
+        "span",
+        { class: "setting-label" },
+        t(action === "mute" ? "keybinds.action.toggleMute" : "keybinds.action.toggleDeafen"),
+      ),
+      kbd,
+    );
     section.appendChild(row);
   }
+  appendGroupRows("communication");
+  section.appendChild(captureRow("toggleScreenshare", t("keybinds.action.toggleScreenshare")));
+  section.appendChild(captureRow("disconnect", t("keybinds.action.disconnect")));
 
   section.appendChild(
     createElement(
@@ -115,6 +159,25 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
       t("keybinds.voiceHint"),
     ),
   );
+  section.appendChild(
+    createElement(
+      "div",
+      { class: "keybind-hint", "data-testid": "keybinds-layout-note" },
+      t("keybinds.layoutNote"),
+    ),
+  );
+  // The portal backend: the desktop consumes its own shortcuts in every app,
+  // ours included, so a clash is settled in its favour.
+  const portalPriority = createElement(
+    "div",
+    {
+      class: "keybind-hint",
+      hidden: "",
+      "data-testid": "keybinds-portal-priority",
+    },
+    t("keybinds.portalPriority"),
+  );
+  section.appendChild(portalPriority);
 
   // U6: the global (unfocused) mute/deafen shortcuts are rebindable. Each row
   // captures Ctrl+Shift+<key> from the focused webview, rejects a duplicate or
@@ -174,7 +237,9 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
         button.style.borderColor = "var(--accent)";
         setText(button, t("keybinds.pressKey"));
 
+        let release: (() => void) | null = null;
         const finish = (): void => {
+          release?.();
           stopCapture();
           button.style.borderColor = "";
           setText(button, comboText(action));
@@ -195,7 +260,12 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
           if (vk === null) return; // modifiers and unmapped keys do not bind
           e.preventDefault();
           e.stopPropagation();
-          const reason = shortcutConflict(vk, action, globalKeys);
+          const reason = shortcutConflict(
+            vk,
+            action,
+            globalKeys,
+            inAppCtrlShiftVks(loadEffectiveKeybinds()),
+          );
           if (reason !== null) {
             finish();
             conflict.style.display = "";
@@ -214,6 +284,8 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
             });
         };
         captureState.onKey = onKey;
+        // Starting this capture ends an in-app row's, and the reverse.
+        release = beginCapture(signal, finish);
         document.addEventListener("keydown", onKey, { capture: true, signal });
       },
       { signal },
@@ -323,6 +395,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
       );
     }
     portalSection.style.display = "";
+    portalPriority.hidden = false;
     const { mute, deafen } = status.triggers;
     const muteKbd = commKbd.mute;
     const deafenKbd = commKbd.deafen;
@@ -396,6 +469,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
       // interface): drop its controls and say global keys are off.
       inPortalMode = false;
       portalSection.style.display = "none";
+      portalPriority.hidden = true;
       if (commKbd.mute !== undefined) setText(commKbd.mute, comboText("mute"));
       if (commKbd.deafen !== undefined) setText(commKbd.deafen, comboText("deafen"));
       globalHint.style.display = "";
@@ -446,16 +520,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   );
   section.appendChild(msgHeader);
 
-  const msgBinds = fixedRows("messages");
-  for (const [label, shortcut] of msgBinds) {
-    const row = createElement("div", { class: "keybind-row" });
-    appendChildren(
-      row,
-      createElement("span", { class: "setting-label" }, label),
-      createElement("span", { class: "kbd" }, shortcut),
-    );
-    section.appendChild(row);
-  }
+  appendGroupRows("messages");
 
   section.appendChild(
     createElement(
@@ -466,6 +531,29 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
       t("keybinds.formatHint"),
     ),
   );
+
+  // Back to the shipped keys for every rebindable action. A default that
+  // another binding has since taken loads as unbound (see `parseKeybinds`).
+  const resetAll = createElement(
+    "button",
+    {
+      type: "button",
+      class: "ac-btn secondary",
+      style: "margin-top: 16px;",
+      "data-testid": "keybinds-reset-all",
+    },
+    t("keybinds.resetAll"),
+  );
+  resetAll.addEventListener(
+    "click",
+    () => {
+      cancelCapture(signal);
+      for (const { id } of REBINDABLE_ACTIONS) saveKeybind(id, undefined);
+      for (const capture of captures) capture.refresh();
+    },
+    { signal },
+  );
+  section.appendChild(resetAll);
 
   return section;
 }

@@ -23,11 +23,6 @@ export const GLOBAL_DEAFEN_VK_PREF = "globalDeafenVk";
 export const DEFAULT_GLOBAL_MUTE_VK = 0x4d; // M
 export const DEFAULT_GLOBAL_DEAFEN_VK = 0x44; // D
 
-/** In-app Ctrl+Shift shortcuts a global binding may not claim by default:
- *  camera (Ctrl+Shift+V) and upload (Ctrl+Shift+U). `lib/keybinds.ts`
- *  `inAppCtrlShiftVks` supplies the user's actual set. */
-const RESERVED_VKS: ReadonlySet<number> = new Set([0x56, 0x55]); // V, U
-
 export interface GlobalShortcutVks {
   mute: number;
   deafen: number;
@@ -95,12 +90,16 @@ export function keyEventToVk(event: KeyboardEvent): number | null {
   return vk !== undefined && BINDABLE_VKS.has(vk) ? vk : null;
 }
 
-/** Why `vk` cannot be bound to `action`, or null when it is free. */
+/**
+ * Why `vk` cannot be bound to `action`, or null when it is free. `inAppVks` is
+ * the VK of every in-app binding that is exactly Ctrl+Shift+key
+ * (`lib/keybinds.ts` `inAppCtrlShiftVks`), which a global binding may not claim.
+ */
 export function shortcutConflict(
   vk: number,
   action: GlobalShortcutAction,
   current: GlobalShortcutVks,
-  inAppVks: ReadonlySet<number> = RESERVED_VKS,
+  inAppVks: ReadonlySet<number>,
 ): "duplicate" | "reserved" | null {
   const other = action === "mute" ? current.deafen : current.mute;
   if (vk === other) return "duplicate";

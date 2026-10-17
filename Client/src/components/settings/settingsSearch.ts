@@ -203,6 +203,8 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("keybinds.action.toggleMute"),
     s("keybinds.action.toggleDeafen"),
     s("keybinds.action.toggleCamera"),
+    s("keybinds.action.toggleScreenshare"),
+    s("keybinds.action.disconnect"),
     s("keybinds.action.uploadFile"),
     s("keybinds.action.editLastMessage"),
     s("keybinds.action.bold"),
