@@ -242,6 +242,7 @@ export const shellText = defineCatalog("shell", {
   "dm.renameGroupHint": "Leave it empty to go back to listing the members.",
   "dm.groupNamePlaceholder": "Group name",
   "dm.renameFailed": "Failed to rename group",
+  "dm.iconFailed": "Failed to update the group icon",
 
   "audit.label": "Audit Log",
   "audit.hint": "Open the audit log in the admin panel (opens in your browser)",

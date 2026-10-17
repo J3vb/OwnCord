@@ -115,6 +115,24 @@ describe("group owner_id (WP 3B-11a)", () => {
     expect(only?.ownerId).toBe(9);
   });
 
+  it("maps icon in both mappers, keeping an empty string", () => {
+    handleDmChannelOpen(group({ owner_id: 7, icon: "/api/v1/files/3" }));
+    expect(dmStore.getState().channels[0]?.icon).toBe("/api/v1/files/3");
+    expect(dmChannelFromPayload(group({ icon: "/api/v1/files/4" })).icon).toBe("/api/v1/files/4");
+    expect(dmChannelFromPayload(group({ icon: "" })).icon).toBe("");
+    expect("icon" in dmChannelFromPayload(group())).toBe(false);
+  });
+
+  it("a newer summary replaces the icon, including back to none", () => {
+    handleDmChannelOpen(group({ owner_id: 7, icon: "/api/v1/files/3" }));
+    handleDmChannelOpen(group({ owner_id: 7, icon: "/api/v1/files/5" }));
+    expect(dmStore.getState().channels[0]?.icon).toBe("/api/v1/files/5");
+    handleDmChannelOpen(group({ owner_id: 7, icon: "" }));
+    expect(dmStore.getState().channels[0]?.icon).toBe("");
+    applyReadyDms(ready([group({ owner_id: 7, icon: "/api/v1/files/6" })] as never));
+    expect(dmStore.getState().channels[0]?.icon).toBe("/api/v1/files/6");
+  });
+
   it("a later dm_channel_open without owner_id drops a stale owner", () => {
     handleDmChannelOpen(group({ owner_id: 7 }));
     handleDmChannelOpen(group());

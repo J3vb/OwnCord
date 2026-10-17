@@ -190,6 +190,7 @@ export function buildDmConversations(activeChannelId: number | null): readonly D
     status: (dm.recipient.status as DmConversation["status"]) ?? "offline",
     isGroup: dm.isGroup,
     ...(dm.ownerId !== undefined && { hasOwner: true }),
+    ...(dm.icon !== undefined && dm.icon !== "" && { icon: dm.icon }),
     participants: dm.participants.map((p) => ({
       id: p.id,
       username: (p.displayName ?? "") || p.username,

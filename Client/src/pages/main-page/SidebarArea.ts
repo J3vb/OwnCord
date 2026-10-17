@@ -725,6 +725,30 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     activePrompt = prompt;
   }
 
+  /** Show a group icon failure; null means it worked and the dm_channel_open does the rest. */
+  function showGroupIconResult(error: string | null): void {
+    if (error !== null) getToast()?.show(error, "error");
+  }
+
+  /** Pick, crop and upload a group's icon. The store updates from the dm_channel_open that follows. */
+  function changeGroupIcon(channelId: number): void {
+    void import("../../features/direct-messages/groupIcon").then(
+      async (icon) => {
+        const file = await icon.pickGroupIconFile();
+        if (file === null) return;
+        showGroupIconResult(await icon.uploadGroupIcon(api, channelId, file));
+      },
+      () => showGroupIconResult(shellText("dm.iconFailed")),
+    );
+  }
+
+  function removeGroupIconFor(channelId: number): void {
+    void import("../../features/direct-messages/groupIcon").then(
+      async (icon) => showGroupIconResult(await icon.removeGroupIcon(api, channelId)),
+      () => showGroupIconResult(shellText("dm.iconFailed")),
+    );
+  }
+
   /**
    * Leave DM mode for the channel the user came from. The DM sidebar's back
    * arrow and a content view's Close/Escape (B9-4, Q2) both take this path.
@@ -811,6 +835,8 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         );
       },
       onRenameGroup: (channelId) => renameGroup(channelId),
+      onChangeGroupIcon: (channelId) => changeGroupIcon(channelId),
+      onRemoveGroupIcon: (channelId) => removeGroupIconFor(channelId),
     };
   }
 

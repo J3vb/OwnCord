@@ -1193,6 +1193,32 @@ describe("API Client", () => {
       await expect(api.setGroupDmOwner(11, 4)).resolves.toBeUndefined();
     });
 
+    it("uploadGroupDmIcon posts multipart `file` to /dms/{id}/icon and returns the summary", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ channel_id: 11, icon: "/api/v1/files/9" }));
+      const file = new File(["x"], "group-icon.png", { type: "image/png" });
+      const result = await api.uploadGroupDmIcon(11, file);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/dms/11/icon");
+      expect(fetchCallOpts().method).toBe("POST");
+      const body = fetchCallOpts().body as FormData;
+      expect(body).toBeInstanceOf(FormData);
+      expect((body.get("file") as File).name).toBe("group-icon.png");
+      expect(result).toEqual({ channel_id: 11, icon: "/api/v1/files/9" });
+    });
+
+    it("uploadGroupDmIcon and removeGroupDmIcon resolve undefined on a 204", async () => {
+      mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
+      await expect(api.uploadGroupDmIcon(11, new File(["x"], "a.png"))).resolves.toBeUndefined();
+      await expect(api.removeGroupDmIcon(11)).resolves.toBeUndefined();
+    });
+
+    it("removeGroupDmIcon calls DELETE /dms/{id}/icon", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ channel_id: 11, icon: "" }));
+      const result = await api.removeGroupDmIcon(11);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/dms/11/icon");
+      expect(fetchCallOpts().method).toBe("DELETE");
+      expect(result).toEqual({ channel_id: 11, icon: "" });
+    });
+
     it("removeGroupDmMember calls DELETE /dms/{id}/members/{userId}", async () => {
       mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
       await api.removeGroupDmMember(11, 4);
