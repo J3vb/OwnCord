@@ -30,7 +30,7 @@ func tryLockFile(path string) (func(), error) {
 	)
 	if err != nil {
 		if errors.Is(err, errorSharingViolation) {
-			return nil, errAlreadyLocked
+			return nil, ErrAlreadyLocked
 		}
 		return nil, err
 	}

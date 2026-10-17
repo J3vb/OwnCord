@@ -36,6 +36,10 @@ Usage:
   chatserver restore <file>  Put a database backup back on a server that will
                              not boot (run "chatserver restore" for its own
                              usage; --force to replace the live database).
+  chatserver config reset-overrides [--all] [key ...]
+                             Drop settings saved from the admin panel so
+                             config.yaml applies again (server stopped; run
+                             "chatserver config" for its own usage).
 `
 
 // infoOutput returns the text `args[0]` asks for and true when it is an
@@ -81,6 +85,12 @@ func main() {
 	// it takes the database's process lock so a running server stops it.
 	if len(os.Args) > 1 && os.Args[1] == "restore" {
 		os.Exit(runRestoreCLI(config.DefaultPath, os.Args[2:]))
+	}
+	// `server config reset-overrides` drops settings saved from the admin
+	// panel while the server is stopped (WP 4.7a). Handled before logging
+	// setup for the same reason, and it takes the same process lock.
+	if len(os.Args) > 1 && os.Args[1] == "config" {
+		os.Exit(runConfigCLI(config.DefaultPath, os.Args[2:]))
 	}
 
 	// Create ring buffer for admin log viewer, then build a multi-handler

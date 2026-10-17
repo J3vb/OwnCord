@@ -19,7 +19,7 @@ func tryLockFile(path string) (func(), error) {
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil { //nolint:gosec // G115: fd of a just-opened file is far below int range
 		_ = f.Close()
 		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
-			return nil, errAlreadyLocked
+			return nil, ErrAlreadyLocked
 		}
 		return nil, err
 	}
