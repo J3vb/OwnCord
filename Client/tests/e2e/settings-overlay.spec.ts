@@ -63,6 +63,24 @@ test.describe("Settings Overlay", () => {
     await expect(overlay).not.toHaveClass(/open/);
   });
 
+  test("Ctrl+/ opens the keyboard shortcuts dialog and Ctrl+/ again closes it", async ({
+    page,
+  }) => {
+    const dialog = page.getByRole("dialog", { name: "Keyboard Shortcuts" });
+
+    await page.keyboard.press("Control+/");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText("Show Keyboard Shortcuts")).toBeVisible();
+
+    await page.keyboard.press("Control+/");
+    await expect(dialog).toBeHidden();
+
+    await page.keyboard.press("Control+/");
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+  });
+
   test("lists the app settings in Discord's order", async ({ page }) => {
     await openSettings(page);
 

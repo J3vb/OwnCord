@@ -153,6 +153,7 @@ export const shards = {
     "src/lib/context-menu.ts",
     "src/features/developer-mode/developerTools.ts",
     "src/lib/dialogOpen.ts",
+    "src/lib/keybindCatalog.ts",
     "src/lib/disposable.ts",
     "src/features/messaging/discordTimestamp.ts",
     "src/lib/os-motion.ts",

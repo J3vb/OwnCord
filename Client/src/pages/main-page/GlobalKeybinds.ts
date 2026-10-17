@@ -9,6 +9,9 @@
  * saved state the next join starts with.
  *
  * Ctrl+, (Cmd+, on macOS) opens Settings, including from the message box.
+ * Ctrl+/ (Cmd+/) opens the read-only shortcuts overlay the same way; pressing
+ * it again closes the overlay, which listens for that itself because every
+ * shortcut here stands down while a dialog is open.
  *
  * Escape marks the open channel read (Shift+Escape the whole server) only when
  * nothing else used the key: a dialog or Settings open when it was pressed, or
@@ -53,6 +56,9 @@ export interface GlobalKeybindHandlers {
   /** Ctrl+, (Cmd+, on macOS) — open Settings. Not run while Settings is open
    *  (`isSuspended`) or a dialog is up. */
   readonly onOpenSettings: () => void;
+  /** Ctrl+/ (Cmd+/ on macOS) — open the Keyboard Shortcuts overlay. Not run
+   *  while Settings is open (`isSuspended`) or a dialog is up. */
+  readonly onOpenShortcuts: () => void;
   /** Whether shortcuts should be ignored right now (e.g. settings overlay open). */
   readonly isSuspended?: () => boolean;
   /** The mute/deafen keys of the global shortcut, read on every press so a
@@ -152,6 +158,9 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
       // `isSuspended`, a dialog by the guard above.
       case ",":
         if (!e.repeat) run("open-settings", handlers.onOpenSettings);
+        break;
+      case "/":
+        if (!e.repeat) run("open-shortcuts", handlers.onOpenShortcuts);
         break;
       // Ctrl+M / Ctrl+D: hidden aliases from before the Ctrl+Shift keys.
       // A text field keeps its own Ctrl+D (forward-delete on macOS).

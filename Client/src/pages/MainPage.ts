@@ -1191,6 +1191,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       attachGlobalKeybinds({
         onSearch: () => chatAreaResult.searchCtrl.open(),
         onOpenSettings: () => openSettings(),
+        onOpenShortcuts: () =>
+          void import("@components/ShortcutsOverlay")
+            .then((m) => m.openShortcutsOverlay())
+            .catch((err: unknown) => log.warn("Shortcuts overlay failed to open", err)),
         onToggleMute: () => voiceKeybindActions.onMuteToggle(),
         onToggleDeafen: () => voiceKeybindActions.onDeafenToggle(),
         onToggleCamera: () => voiceKeybindActions.onCameraToggle(),
