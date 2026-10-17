@@ -64,10 +64,15 @@ const host = vi.hoisted(() => ({
   pick: (): Promise<unknown> =>
     Promise.resolve({
       source: "screen:7",
+      quality: "low",
+      fps: 30,
       capture: { fps: 30, maxWidth: 1920, maxHeight: 1080 },
       maxBitrate: 1_500_000,
       maxFramerate: 5,
     }),
+  setScreenQuality: (): Promise<unknown> =>
+    Promise.resolve({ ok: true, sid: "TR_screen2", width: 1920, height: 1080 }),
+  notedQuality: [] as Array<[string, number]>,
   startScreen: (): Promise<unknown> => Promise.resolve({ capture: 4, width: 1280, height: 720 }),
   changeScreen: (): Promise<unknown> => Promise.resolve({ capture: 6, width: 800, height: 600 }),
   pickChange: (): Promise<string | null> => Promise.resolve("window:9"),
@@ -100,9 +105,32 @@ vi.mock("./videoRenderer", () => ({
   },
 }));
 vi.mock("./screenPicker", () => ({
+  // The picker's quality mapping (pinned in screenPicker.test.ts), as a table.
+  shareSettings: (quality: string) =>
+    ({
+      low: {
+        capture: { fps: 5, maxWidth: 1280, maxHeight: 720 },
+        maxBitrate: 1_500_000,
+        maxFramerate: 5,
+        simulcast: false,
+      },
+      medium: {
+        capture: { fps: 30, maxWidth: 1280, maxHeight: 720 },
+        maxBitrate: 3_000_000,
+        maxFramerate: 30,
+        simulcast: true,
+      },
+      high: {
+        capture: { fps: 30, maxWidth: 1920, maxHeight: 1080 },
+        maxBitrate: 6_000_000,
+        maxFramerate: 30,
+        simulcast: true,
+      },
+    })[quality],
   pickScreenSource: () => host.pick(),
   pickChangeSource: () => host.pickChange(),
   noteChangedSource: (source: string) => host.noted.push(source),
+  noteChangedQuality: (quality: string, fps: number) => host.notedQuality.push([quality, fps]),
 }));
 vi.mock("../../../platform/desktop", () => ({
   desktop: {
@@ -207,6 +235,10 @@ vi.mock("../../../platform/desktop", () => ({
         host.calls.push(["changeScreen", args]);
         return host.changeScreen();
       },
+      setScreenQuality: (...args: unknown[]) => {
+        host.calls.push(["setScreenQuality", args]);
+        return host.setScreenQuality();
+      },
       onEvent: (handler: (e: NativeVoiceEnvelope) => void) => {
         host.handlers.add(handler);
         return () => {
@@ -262,6 +294,8 @@ beforeEach(() => {
   host.pick = () =>
     Promise.resolve({
       source: "screen:7",
+      quality: "low",
+      fps: 30,
       capture: { fps: 30, maxWidth: 1920, maxHeight: 1080 },
       maxBitrate: 1_500_000,
       maxFramerate: 5,
@@ -269,6 +303,9 @@ beforeEach(() => {
     });
   host.startScreen = () => Promise.resolve({ capture: 4, width: 1280, height: 720 });
   host.changeScreen = () => Promise.resolve({ capture: 6, width: 800, height: 600 });
+  host.setScreenQuality = () =>
+    Promise.resolve({ ok: true, sid: "TR_screen2", width: 1920, height: 1080 });
+  host.notedQuality.length = 0;
   host.pickChange = () => Promise.resolve("window:9");
   host.publishScreenAudio = () => Promise.resolve("TR_audio");
   host.noted = [];
@@ -1725,6 +1762,155 @@ describe("NativeRoom screen share", () => {
     await changing;
     expect(screen.capture).toBe(4);
     expect(host.calls.at(-1)).toEqual(["stopScreen", [1, 6]]);
+  });
+
+  it("a live quality change sends the preset's capture and encoding with the published codec", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const screen = await share(room);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    expect(screen).toMatchObject({ quality: "low", fps: 30 });
+
+    await screen.setQuality("high", 30, "h264");
+
+    // High at 30 fps: 1080p, 6 Mbps and the lower simulcast layer; the codec
+    // is the one the share goes out with, not the saved preference.
+    expect(host.calls.at(-1)).toEqual([
+      "setScreenQuality",
+      [
+        1,
+        4,
+        { fps: 30, maxWidth: 1920, maxHeight: 1080 },
+        {
+          width: 1280,
+          height: 720,
+          maxBitrate: 6_000_000,
+          maxFramerate: 30,
+          simulcast: true,
+          codec: "h264",
+        },
+      ],
+    ]);
+    // The host sized the capture; the track and the publication follow it.
+    expect(screen).toMatchObject({ quality: "high", fps: 30, width: 1920, height: 1080 });
+    expect(screen.publishEncoding).toEqual({
+      maxBitrate: 6_000_000,
+      maxFramerate: 30,
+      simulcast: true,
+    });
+    expect(screen.captureRequest).toEqual({ fps: 30, maxWidth: 1920, maxHeight: 1080 });
+    const pub = room.localParticipant.getTrackPublication("screen_share")!;
+    expect(pub.trackSid).toBe("TR_screen2");
+    expect(pub.track).toBe(screen);
+    expect(host.notedQuality).toEqual([["high", 30]]);
+    // VP9 and H.265 are not native codecs: they publish as VP8.
+    await screen.setQuality("low", 30, "vp9");
+    expect(host.calls.at(-1)![1][3]).toMatchObject({ codec: "vp8" });
+  });
+
+  it("a refused quality change leaves the share and its quality as they were", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const screen = await share(room);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    host.setScreenQuality = () =>
+      Promise.resolve({ ok: false, stage: "refused", message: "a source change is pending" });
+
+    await expect(screen.setQuality("high", 30, "vp8")).rejects.toMatchObject({
+      name: "ScreenQualityError",
+      stage: "refused",
+    });
+
+    expect(screen).toMatchObject({ quality: "low", fps: 30, width: 1280, height: 720 });
+    expect(screen.captureRequest).toEqual({ fps: 30, maxWidth: 1920, maxHeight: 1080 });
+    expect(room.localParticipant.getTrackPublication("screen_share")!.trackSid).toBe("TR_screen");
+    expect(host.notedQuality).toEqual([]);
+  });
+
+  it("a publish-stage failure throws a typed error that names the stage", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const screen = await share(room);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    host.setScreenQuality = () =>
+      Promise.resolve({ ok: false, stage: "publish", message: "publish failed" });
+
+    await expect(screen.setQuality("high", 30, "vp8")).rejects.toMatchObject({
+      name: "ScreenQualityError",
+      stage: "publish",
+      message: "publish failed",
+    });
+    expect(host.notedQuality).toEqual([]);
+  });
+
+  it("a quality change after a Stop is refused without asking the host", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const screen = await share(room);
+    screen.stop();
+    host.calls.length = 0;
+
+    await expect(screen.setQuality("high", 30, "vp8")).rejects.toMatchObject({ stage: "refused" });
+    expect(names()).not.toContain("setScreenQuality");
+  });
+
+  it("a Stop that overtook the host's reply leaves the stopped share alone", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const screen = await share(room);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    let resolve!: (v: unknown) => void;
+    host.setScreenQuality = () => new Promise((r) => (resolve = r));
+    const changing = screen.setQuality("high", 30, "vp8");
+    await vi.waitFor(() => expect(names()).toContain("setScreenQuality"));
+    screen.stop();
+    resolve({ ok: true, sid: "TR_screen2", width: 1920, height: 1080 });
+    await expect(changing).rejects.toMatchObject({ stage: "refused" });
+
+    expect(screen.quality).toBe("low");
+    expect(host.notedQuality).toEqual([]);
+  });
+
+  it("a codec republish after a quality change publishes the new encoding", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const screen = await share(room);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    await screen.setQuality("high", 30, "vp8");
+
+    await room.localParticipant.unpublishTrack(screen.mediaStreamTrack, false);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+
+    expect(host.calls.at(-1)).toEqual([
+      "publishScreen",
+      [
+        1,
+        4,
+        {
+          width: 1920,
+          height: 1080,
+          maxBitrate: 6_000_000,
+          maxFramerate: 30,
+          simulcast: true,
+          codec: "vp8",
+        },
+      ],
+    ]);
+  });
+
+  it("Change source keeps the changed capture request", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const screen = await share(room);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    await screen.setQuality("medium", 30, "vp8");
+
+    await screen.changeSource();
+
+    expect(host.calls.at(-1)).toEqual([
+      "changeScreen",
+      [1, "window:9", { fps: 30, maxWidth: 1280, maxHeight: 720 }],
+    ]);
   });
 
   it("captures the picked source natively and previews it on the frame socket", async () => {

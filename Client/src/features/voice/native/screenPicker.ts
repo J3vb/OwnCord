@@ -23,20 +23,40 @@ import {
   isScreenShareSimulcast,
 } from "@lib/screenShare";
 import type { NativeVoiceScreenCapture } from "../../../platform/contracts/nativeVoice";
+import type { StreamQuality } from "@lib/screenShare";
 import { getScreenSourcePicker } from "./screenPickerSlot";
 import { captureOptions } from "./screenTrack";
 
-/** A confirmed share: the host source to capture, plus what it should be
- *  captured and published at. Resolved once the user presses Go Live. */
-export interface ScreenSharePick {
-  /** A host source id, or "portal" on Wayland. */
-  source: string;
+/** What a quality and frame-rate choice means for a native share: the host
+ *  capture's pacing and size cap, and the publish encoding. One mapping for the
+ *  picker's pick and for a live quality change. */
+export interface ScreenShareSettings {
   /** Host capture pacing and size cap. */
   capture: NativeVoiceScreenCapture;
   maxBitrate: number;
   maxFramerate: number;
   /** Publish with the 720p 15 fps simulcast layer. */
   simulcast: boolean;
+}
+
+export function shareSettings(quality: StreamQuality, fps: number): ScreenShareSettings {
+  return {
+    capture: captureOptions(getScreenShareCaptureOptions(quality, fps)),
+    maxBitrate: getScreenShareMaxBitrate(quality, fps),
+    maxFramerate: getEffectiveScreenShareFps(quality, fps),
+    simulcast: isScreenShareSimulcast(quality, fps),
+  };
+}
+
+/** A confirmed share: the host source to capture, plus what it should be
+ *  captured and published at. Resolved once the user presses Go Live. */
+export interface ScreenSharePick extends ScreenShareSettings {
+  /** A host source id, or "portal" on Wayland. */
+  source: string;
+  /** The quality and frame-rate choice the settings came from, which the
+   *  stream card's Quality menu shows and changes. */
+  quality: StreamQuality;
+  fps: number;
   /** Share other applications' sound with the picture. Absent when the host
    *  cannot capture it (no PulseAudio-protocol sound server); the Share
    *  audio switch's answer otherwise. */
@@ -88,10 +108,9 @@ export async function pickScreenSource(): Promise<ScreenSharePick | null> {
   if (pick === null) return null;
   lastPick = {
     source: pick.source,
-    capture: captureOptions(getScreenShareCaptureOptions(pick.quality, pick.fps)),
-    maxBitrate: getScreenShareMaxBitrate(pick.quality, pick.fps),
-    maxFramerate: getEffectiveScreenShareFps(pick.quality, pick.fps),
-    simulcast: isScreenShareSimulcast(pick.quality, pick.fps),
+    quality: pick.quality,
+    fps: pick.fps,
+    ...shareSettings(pick.quality, pick.fps),
     // Kept with the pick, so a restart after a reconnect shares audio again.
     ...(pick.audio === undefined ? {} : { audio: pick.audio }),
   };
@@ -125,4 +144,10 @@ export async function pickChangeSource(): Promise<string | null> {
  *  and a failed change leaves the old source in place. */
 export function noteChangedSource(source: string): void {
   if (lastPick !== null) lastPick = { ...lastPick, source };
+}
+
+/** Record the quality the live share now runs at, so a restart after a
+ *  reconnect shares at it, not at the quality it first started with. */
+export function noteChangedQuality(quality: StreamQuality, fps: number): void {
+  if (lastPick !== null) lastPick = { ...lastPick, quality, fps, ...shareSettings(quality, fps) };
 }
