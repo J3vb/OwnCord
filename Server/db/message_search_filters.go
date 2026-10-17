@@ -43,9 +43,20 @@ func HasSearchTerms(text string) bool {
 	return ftsMatchQuery(text) != ""
 }
 
+// rankCandidateCap bounds how many matches a relevance search ranks. FTS5
+// computes BM25 for every match in the corpus (channel_id is not an FTS
+// column) when it consumes ORDER BY rank, so relevance ranks only the newest
+// rankCandidateCap in-scope hits. A var so a test can lower it. The number is
+// also quoted in SearchPage.Recent (models.go) and docs/api.md.
+var rankCandidateCap = 2000
+
 // SearchMessagesFiltered runs the one search query builder. Deleted messages
 // are excluded. With searchable words the order is rank (or newest first when
 // page.Recent); without words it is always newest first, paged by page.Before.
+//
+// Relevance is "best of the newest rankCandidateCap (2,000) matching messages
+// in scope": older matches never appear in a relevance search, only in
+// sort=recent. Below that many hits every match is ranked.
 func (d *DB) SearchMessagesFiltered(ctx context.Context, q SearchQuery, page SearchPage) ([]MessageSearchResult, error) {
 	if len(q.ChannelIDs) == 0 {
 		return nil, fmt.Errorf("SearchMessagesFiltered: %w", ErrSearchUnscoped)
@@ -55,6 +66,12 @@ func (d *DB) SearchMessagesFiltered(ctx context.Context, q SearchQuery, page Sea
 	}
 	match := ftsMatchQuery(q.Text)
 	ranked := match != ""
+	byRank := ranked && !page.Recent
+
+	filter, filterArgs, err := d.searchFilters(ctx, q, ranked)
+	if err != nil {
+		return nil, fmt.Errorf("SearchMessagesFiltered: %w", err)
+	}
 
 	var (
 		sb   strings.Builder
@@ -64,10 +81,16 @@ func (d *DB) SearchMessagesFiltered(ctx context.Context, q SearchQuery, page Sea
 		        m.timestamp, m.mentions_everyone
 		 FROM `)
 	idCol := "m.id"
-	if ranked {
+	switch {
+	case byRank:
+		// CROSS JOIN pins FTS as the driver; the planner otherwise starts from
+		// messages and runs a MATCH per row.
+		idCol = "f.rowid"
+		sb.WriteString("messages_fts f CROSS JOIN messages m ON f.rowid = m.id")
+	case ranked:
 		idCol = "f.rowid"
 		sb.WriteString("messages_fts f JOIN messages m ON f.rowid = m.id")
-	} else {
+	default:
 		sb.WriteString("messages m")
 	}
 	sb.WriteString(` JOIN channels c ON m.channel_id = c.id
@@ -77,34 +100,18 @@ func (d *DB) SearchMessagesFiltered(ctx context.Context, q SearchQuery, page Sea
 		sb.WriteString(" AND messages_fts MATCH ?")
 		args = append(args, match)
 	}
-	sb.WriteString(" AND m.channel_id IN (" + placeholders(len(q.ChannelIDs)) + ")")
-	args = appendIDs(args, q.ChannelIDs)
-	if len(q.AuthorIDs) > 0 {
-		sb.WriteString(" AND m.user_id IN (" + placeholders(len(q.AuthorIDs)) + ")")
-		args = appendIDs(args, q.AuthorIDs)
-	}
-	if q.AfterTS != "" {
-		lo, err := d.firstIDAtOrAfter(ctx, q.AfterTS)
-		if err != nil {
-			return nil, fmt.Errorf("SearchMessagesFiltered: %w", err)
+	sb.WriteString(filter)
+	args = append(args, filterArgs...)
+	if byRank {
+		cutoff, ok, cerr := d.rankCutoff(ctx, match, filter, filterArgs)
+		if cerr != nil {
+			return nil, fmt.Errorf("SearchMessagesFiltered: %w", cerr)
 		}
-		sb.WriteString(" AND m.id >= ? AND m.timestamp >= ?")
-		args = append(args, lo, q.AfterTS)
-	}
-	if q.BeforeTS != "" {
-		hi, err := d.firstIDAtOrAfter(ctx, q.BeforeTS)
-		if err != nil {
-			return nil, fmt.Errorf("SearchMessagesFiltered: %w", err)
+		if ok {
+			sb.WriteString(" AND f.rowid >= ?")
+			args = append(args, cutoff)
 		}
-		sb.WriteString(" AND m.id < ? AND m.timestamp < ?")
-		args = append(args, hi, q.BeforeTS)
 	}
-	extra, extraArgs, err := searchExtraFilters(q)
-	if err != nil {
-		return nil, fmt.Errorf("SearchMessagesFiltered: %w", err)
-	}
-	sb.WriteString(extra)
-	args = append(args, extraArgs...)
 	tail, tailArgs := searchPageSQL(page, idCol, ranked)
 	sb.WriteString(tail)
 	args = append(args, tailArgs...)
@@ -120,6 +127,72 @@ func (d *DB) SearchMessagesFiltered(ctx context.Context, q SearchQuery, page Sea
 		return nil, err
 	}
 	return d.attachSearchMentions(ctx, results)
+}
+
+// searchFilters renders the channel, author, date, has:, mentions: and pinned:
+// predicates as " AND ..." fragments over alias m (and f when ranked), with
+// their bound arguments. It runs once per search so the date bounds probe the
+// id range once, and the result serves both the cutoff and the main query.
+// With an FTS driver (ranked) the date bounds go on f.rowid, which FTS5 takes
+// as a rowid range; SQLite does not carry an m.id bound across the join.
+func (d *DB) searchFilters(ctx context.Context, q SearchQuery, ranked bool) (string, []any, error) {
+	idCol := "m.id"
+	if ranked {
+		idCol = "f.rowid"
+	}
+	var (
+		sb   strings.Builder
+		args []any
+	)
+	sb.WriteString(" AND m.channel_id IN (" + placeholders(len(q.ChannelIDs)) + ")")
+	args = appendIDs(args, q.ChannelIDs)
+	if len(q.AuthorIDs) > 0 {
+		sb.WriteString(" AND m.user_id IN (" + placeholders(len(q.AuthorIDs)) + ")")
+		args = appendIDs(args, q.AuthorIDs)
+	}
+	if q.AfterTS != "" {
+		lo, err := d.firstIDAtOrAfter(ctx, q.AfterTS)
+		if err != nil {
+			return "", nil, err
+		}
+		sb.WriteString(" AND " + idCol + " >= ? AND m.timestamp >= ?")
+		args = append(args, lo, q.AfterTS)
+	}
+	if q.BeforeTS != "" {
+		hi, err := d.firstIDAtOrAfter(ctx, q.BeforeTS)
+		if err != nil {
+			return "", nil, err
+		}
+		sb.WriteString(" AND " + idCol + " < ? AND m.timestamp < ?")
+		args = append(args, hi, q.BeforeTS)
+	}
+	extra, extraArgs, err := searchExtraFilters(q)
+	if err != nil {
+		return "", nil, err
+	}
+	sb.WriteString(extra)
+	return sb.String(), append(args, extraArgs...), nil
+}
+
+// rankCutoff returns the rowid of the rankCandidateCap-th newest in-scope hit.
+// ok is false when fewer hits exist, meaning every match is ranked. The query
+// needs no channels or users join: filter references only m and its own
+// subquery aliases.
+func (d *DB) rankCutoff(ctx context.Context, match, filter string, filterArgs []any) (cutoff int64, ok bool, err error) {
+	query := `SELECT f.rowid FROM messages_fts f CROSS JOIN messages m ON f.rowid = m.id
+		 WHERE m.deleted = 0 AND m.kind = 0 AND messages_fts MATCH ?` + filter +
+		` ORDER BY f.rowid DESC LIMIT 1 OFFSET ?`
+	args := make([]any, 0, len(filterArgs)+2)
+	args = append(args, match)
+	args = append(args, filterArgs...)
+	args = append(args, rankCandidateCap-1)
+	switch err := d.reader.QueryRowContext(ctx, query, args...).Scan(&cutoff); {
+	case errors.Is(err, sql.ErrNoRows):
+		return 0, false, nil
+	case err != nil:
+		return 0, false, fmt.Errorf("rankCutoff: %w", err)
+	}
+	return cutoff, true, nil
 }
 
 // firstIDAtOrAfter returns a message id b such that every message with id < b
