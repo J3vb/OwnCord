@@ -1587,7 +1587,9 @@ Two things it does **not** cover:
 
 What one server can carry on which hardware is in
 [Capacity](capacity.md#sizing-for-10002000-online). That page also has an
-estimate, not yet measured, for 1,000 to 2,000 people online.
+measured 1,000-online result (steady chat holds; a login burst and a
+full reconnect herd miss some of their budgets) and an estimate, not measured,
+for 2,000 people online.
 
 The tested profile is **250 registered users, 100 connections at once and 25
 voice sessions at once, on 2 vCPU and 4 GB RAM**. See
