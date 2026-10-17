@@ -3,6 +3,7 @@ package ws
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"strconv"
 
 	"github.com/J3vb/OwnCord/Server/service"
@@ -229,16 +230,15 @@ func storedCopy(rs *replaySplice, msg, wrapped []byte, seq uint64) []byte {
 		}
 		return replayCopy(wrapped)
 	}
-	out := make([]byte, 0, len(rs.prefix)+len(rs.suffix)+32)
-	out = append(out, rs.prefix...)
+	var mid [32]byte
+	m := mid[:0]
 	if len(rs.prefix) > 1 {
-		out = append(out, ',')
+		m = append(m, ',')
 	}
-	out = append(out, `"seq":`...)
-	out = strconv.AppendUint(out, seq, 10)
+	m = append(m, `"seq":`...)
+	m = strconv.AppendUint(m, seq, 10)
 	if len(rs.suffix) > 1 {
-		out = append(out, ',')
+		m = append(m, ',')
 	}
-	out = append(out, rs.suffix...)
-	return out
+	return slices.Concat(rs.prefix, m, rs.suffix)
 }
