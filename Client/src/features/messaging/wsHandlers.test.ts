@@ -201,6 +201,19 @@ describe("handleMessagingError", () => {
     expect(messagesStore.getState().pendingSends.has("corr-1")).toBe(false);
   });
 
+  it("marks a pending send failed with the busy reason on REQUEST_TIMEOUT", () => {
+    pendingSend("corr-busy");
+
+    expect(handleMessagingError({ code: "REQUEST_TIMEOUT", message: "" }, "corr-busy")).toBe(true);
+
+    expect(messagesStore.getState().pendingSends.has("corr-busy")).toBe(false);
+    const failed = [...messagesStore.getState().messagesByChannel.values()]
+      .flat()
+      .find((m) => m.correlationId === "corr-busy");
+    expect(failed?.status).toBe("failed");
+    expect(failed?.errorCode).toBe("REQUEST_TIMEOUT");
+  });
+
   it("labels a refused pre-restore retry and keeps its text (OC-0476)", () => {
     const floor = Date.now() + 5 * 60 * 1000 + 1000;
     activatePendingMessages({ host: "chat.example", userId: 1 }, me, true, floor);

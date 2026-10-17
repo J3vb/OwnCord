@@ -157,6 +157,7 @@ export const messagingText = defineCatalog("messaging", {
   "send.slowMode": "Slow mode — wait before sending again",
   "send.rateLimited": "You're sending too fast — try again in a moment",
   "send.forbidden": "You don't have permission to post here",
+  "send.requestTimeout": "The server is busy — retry in a moment",
   "send.disconnected": "Disconnected — delivery not confirmed",
   "send.offlineNoRecovery": "Could not save this message — retry now or it is lost on restart",
   "send.network": "Connection problem — delivery not confirmed",

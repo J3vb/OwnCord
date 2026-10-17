@@ -44,7 +44,13 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 	if c.isSendClosed() {
 		return
 	}
-	if h.handleMessageSessionRecheck(c) {
+	// fctx is this frame's database deadline (WP 4.1b). It is derived from the
+	// connection context, so a disconnect still cancels it. Exempt types
+	// (command_deadline.go) dispatch on c.ctx below; handleMessageApply never
+	// sees it, so its events and the voice join keep the connection context.
+	fctx, cancel := context.WithTimeout(c.ctx, wsCommandDeadline)
+	defer cancel()
+	if h.handleMessageSessionRecheck(fctx, c) {
 		return
 	}
 
@@ -54,7 +60,7 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 	}
 	// The app-level heartbeat keeps an idle socket's session sliding (DP-05).
 	if env.Type == MsgTypePing {
-		h.touchSession(c.ctx, c)
+		h.touchSession(fctx, c)
 	}
 
 	// ── Typed command dispatch ───────────────────────────────────────────
@@ -95,7 +101,12 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		VoiceJoinToken: voiceJoinTok,
 	}
 
-	result, dispatched := h.registry.DispatchV2(c.ctx, cmd, info)
+	dispatchCtx := fctx
+	exempt := isCommandDeadlineExempt(env.Type)
+	if exempt {
+		dispatchCtx = c.ctx
+	}
+	result, dispatched := h.registry.DispatchV2(dispatchCtx, cmd, info)
 	if !dispatched {
 		// A registered constructor with no V2 handler is a wiring bug — the
 		// guard test (TestEveryConstructorHasV2Handler) locks this shut.
@@ -108,7 +119,13 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		supersedeDeferredFocus(c)
 	}
 	if result.Error != nil {
-		if ce, ok := errors.AsType[ClientError](result.Error); ok {
+		if !exempt && commandDeadlineExceeded(fctx, result.Error) {
+			// REQUEST_TIMEOUT means "not applied": a transaction whose context
+			// ends before Commit rolls back, and post-commit work is detached.
+			slog.Warn("ws command deadline exceeded",
+				"user_id", c.userID, "msg_type", msgType, "req_id", reqID, "err", result.Error)
+			c.sendMsg(buildErrorMsgWithID(ErrCodeRequestTimeout, "the server is busy, try again", env.ID))
+		} else if ce, ok := errors.AsType[ClientError](result.Error); ok {
 			c.sendMsg(buildErrorMsgWithID(ce.Code, ce.Message, env.ID))
 		} else {
 			slog.Error("ws handler internal error",
@@ -128,9 +145,9 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 }
 
 // handleMessageSessionRecheck performs handleMessage's periodic session
-// revalidation. It reports whether the connection was closed, in which case
+// revalidation on ctx (the frame's deadline). It reports whether the connection was closed, in which case
 // the caller must stop processing the frame.
-func (h *Hub) handleMessageSessionRecheck(c *Client) bool {
+func (h *Hub) handleMessageSessionRecheck(ctx context.Context, c *Client) bool {
 	// Periodic session expiry check: every SessionCheckInterval messages,
 	// re-validate the session token. This catches sessions that are revoked or
 	// expire while the WebSocket connection is still open.
@@ -143,7 +160,7 @@ func (h *Hub) handleMessageSessionRecheck(c *Client) bool {
 	c.mu.Unlock()
 
 	if shouldCheck && c.tokenHash != "" {
-		result, dbErr := h.readers.Dispatch.GetSessionWithBanStatus(c.ctx, c.tokenHash)
+		result, dbErr := h.readers.Dispatch.GetSessionWithBanStatus(ctx, c.tokenHash)
 		if dbErr != nil {
 			// A failed read says nothing about this session's validity —
 			// kicking the client on a transient DB error (SQLITE_BUSY, an

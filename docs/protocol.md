@@ -2671,9 +2671,27 @@ warm resume served by replay never waits for a permit.
 | `SERVER_DEAFENED`          | Self-undeafen refused: a moderator imposed the deafen                                                                                                                                                                                                                            |
 | `SESSION_REPLACED`         | Sent before the close to a connection displaced because the same account connected from another device; the client does not reconnect on its own                                                                                                                                 |
 | `SERVER_BUSY`              | A fresh connect waited too long for a ready-build permit; carries `retry_after_ms`, and the socket closes 1013 (see Fresh-connect admission)                                                                                                                                     |
+| `REQUEST_TIMEOUT`          | A command's database work ran past the per-frame deadline and was not applied; the `error` carries the command's `id` (see Command deadlines). Unlike `SERVER_BUSY` it does not end the connection                                                                               |
 | `ANOTHER_DEVICE_ACTIVE`    | Sent to a wake reconnect (auth `wake: true`) refused because a different session of the same account holds the live connection or a call it parked in the voice grace window; that session is not displaced, and the client does not reconnect until the user chooses "Use here" |
 
 After 10 consecutive invalid JSON messages, the connection is forcibly closed.
+
+### Command deadlines
+
+Each inbound frame's database work (the periodic session recheck, the
+app-level `ping` session touch and the command handler) runs under a 10 s
+deadline, under the 25 s server ping interval. A command that is still failing
+when the deadline passes is answered with `REQUEST_TIMEOUT`, carrying the
+command's `id`, and its effects are not applied: a transaction whose context
+ends before commit is rolled back. Work after a commit (mention badges, push,
+audit rows) is detached from the frame's context, so a deadline that expires
+after the commit still yields the normal success reply and broadcast. A retry
+is safe: `chat_send` dedupes on `client_message_id`, an edit is idempotent, a
+delete answers `ALREADY_DELETED`, a reaction answers `CONFLICT` and `mark_read`
+is idempotent. `voice_mod_mute`, `voice_mod_deafen`, `voice_mod_move`,
+`voice_mod_kick` and `chat_command` are exempt: they pair a database write with
+a LiveKit call or a plugin budget of their own. A client that predates the code
+treats it as an unknown error string.
 
 ---
 

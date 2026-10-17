@@ -426,6 +426,8 @@ function sendErrorReason(code: string | null): string {
       return messagingText("send.rateLimited");
     case "FORBIDDEN":
       return messagingText("send.forbidden");
+    case "REQUEST_TIMEOUT":
+      return messagingText("send.requestTimeout");
     case "OFFLINE":
       return messagingText("send.disconnected");
     case "OFFLINE_NO_RECOVERY":
