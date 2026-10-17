@@ -29,6 +29,9 @@ import (
 
 // DefaultLiveKitVersion is the livekit-server release the server downloads
 // when voice.livekit_version is not set. Bump deliberately with releases.
+// Every other place that pins this version is listed in
+// TestLiveKitPinsAgreeEverywhere (Server/docker_image_test.go); bump them all
+// and run that test.
 const DefaultLiveKitVersion = "1.13.7"
 
 // livekitDownloadBase is the release download URL prefix. Package variable so
