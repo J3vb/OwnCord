@@ -40,6 +40,83 @@ export interface AvatarOptions {
   readonly attrs?: Record<string, string>;
   /** The row beside it already names the person: the picture gets alt="". */
   readonly decorative?: boolean;
+  /**
+   * Start the image fetch only once the wrapper nears the viewport, and run it
+   * through a shared limiter. For long lists (the member list) where one fetch
+   * per row on every rebuild would flood the network. Off by default.
+   */
+  readonly deferUntilVisible?: boolean;
+}
+
+/** Fetches in flight at once for `deferUntilVisible` avatars. */
+const MAX_CONCURRENT_AVATAR_FETCHES = 6;
+/** How far outside the viewport a row starts loading, so scrolling rarely
+ *  shows a letter that is about to become a picture. */
+const VISIBILITY_ROOT_MARGIN = "200px";
+
+let activeFetches = 0;
+const fetchQueue: Array<() => Promise<unknown>> = [];
+
+function pumpFetchQueue(): void {
+  while (activeFetches < MAX_CONCURRENT_AVATAR_FETCHES) {
+    const job = fetchQueue.shift();
+    if (job === undefined) return;
+    activeFetches++;
+    const release = (): void => {
+      activeFetches--;
+      pumpFetchQueue();
+    };
+    job().then(release, release);
+  }
+}
+
+/** Run `job` once fewer than MAX_CONCURRENT_AVATAR_FETCHES are in flight. */
+function enqueueFetch(job: () => Promise<unknown>): void {
+  fetchQueue.push(job);
+  pumpFetchQueue();
+}
+
+const visibilityCallbacks = new Map<Element, () => void>();
+let visibilityObserver: IntersectionObserver | null = null;
+
+function onVisibility(entries: IntersectionObserverEntry[]): void {
+  const observer = visibilityObserver;
+  if (observer === null) return;
+  for (const entry of entries) {
+    const start = visibilityCallbacks.get(entry.target);
+    if (start === undefined) continue;
+    if (!entry.target.isConnected) {
+      visibilityCallbacks.delete(entry.target);
+      observer.unobserve(entry.target);
+    } else if (entry.isIntersecting) {
+      visibilityCallbacks.delete(entry.target);
+      observer.unobserve(entry.target);
+      start();
+    }
+  }
+  // A row removed while off-screen never reports again; drop it here so the
+  // observer does not pin the detached tree.
+  for (const target of visibilityCallbacks.keys()) {
+    if (!target.isConnected) {
+      visibilityCallbacks.delete(target);
+      observer.unobserve(target);
+    }
+  }
+}
+
+/** Call `start` once, when `target` is first near the viewport. Without
+ *  IntersectionObserver (jsdom, old webviews) it runs right away, after a
+ *  microtask so the caller has attached the element first. */
+function whenVisible(target: Element, start: () => void): void {
+  if (typeof IntersectionObserver === "undefined") {
+    queueMicrotask(start);
+    return;
+  }
+  visibilityObserver ??= new IntersectionObserver(onVisibility, {
+    rootMargin: VISIBILITY_ROOT_MARGIN,
+  });
+  visibilityCallbacks.set(target, start);
+  visibilityObserver.observe(target);
 }
 
 /**
@@ -98,7 +175,7 @@ export function createAvatarElement(
   }
 
   const resolved = resolveServerUrl(subject.avatar);
-  void fetchImageAsObjectUrl(resolved).then((objectUrl) => {
+  const swapInImage = (objectUrl: string | null): void => {
     // The row may have been torn down while the fetch was in flight; an
     // element with no parent is one nobody is looking at.
     if (objectUrl === null || !wrapper.isConnected) return;
@@ -115,6 +192,19 @@ export function createAvatarElement(
     letter.remove();
     wrapper.style.background = "transparent";
     wrapper.insertBefore(img, wrapper.firstChild);
+  };
+
+  if (options.deferUntilVisible !== true) {
+    void fetchImageAsObjectUrl(resolved).then(swapInImage);
+    return wrapper;
+  }
+
+  whenVisible(wrapper, () => {
+    enqueueFetch(() => {
+      // Queued behind the cap, the row may be gone by the time it is its turn.
+      if (!wrapper.isConnected) return Promise.resolve();
+      return fetchImageAsObjectUrl(resolved).then(swapInImage);
+    });
   });
 
   return wrapper;
