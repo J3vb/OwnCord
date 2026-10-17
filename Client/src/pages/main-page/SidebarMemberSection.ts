@@ -11,7 +11,6 @@ import { createMemberList } from "@components/MemberList";
 import { buildVoiceModOptions, type VoiceModerationCallbacks } from "@components/ChannelSidebar";
 import { parseTimestamp } from "@lib/formatting";
 import { authStore } from "@stores/auth.store";
-import { setUserBlockedByMe } from "@stores/blocks.store";
 import { channelsStore, getRoleIdByName } from "@stores/channels.store";
 import { membersStore } from "@stores/members.store";
 import { roleHasPermission } from "@lib/permissions";
@@ -20,6 +19,7 @@ import { type ApiClient, ApiClientError, errorText } from "@lib/api";
 import type { ToastContainer } from "@components/Toast";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { shellText } from "../../i18n/shell";
+import type { BlockDeps } from "../../features/blocks/blockActions";
 import { TIMEOUT_PRESETS } from "../../features/moderation/timeoutPresets";
 
 // ---------------------------------------------------------------------------
@@ -75,6 +75,7 @@ export function createSidebarMemberSection(
   opts: SidebarMemberSectionOptions,
 ): SidebarMemberSectionResult {
   const { api, getToast, onMessageUser, onCallUser, onVoiceModerate } = opts;
+  const blockDeps: BlockDeps = { api, notify: (msg, type) => getToast()?.show(msg, type) };
   const unsubs: Array<() => void> = [];
 
   // --- Container ---
@@ -351,23 +352,27 @@ export function createSidebarMemberSection(
         getToast()?.show(msg, "error");
       }
     },
+    // Loaded on first use: the dialog and request code stay out of MainPage.
     onToggleBlock: async (userId, username, block) => {
       try {
-        if (block) {
-          await api.blockUser(userId);
-        } else {
-          await api.unblockUser(userId);
-        }
-        setUserBlockedByMe(userId, block);
+        const { toggleBlock } = await import("../../features/blocks/blockActions");
+        await toggleBlock(blockDeps, userId, username, block);
+      } catch {
         getToast()?.show(
-          shellText(block ? "members.blocked" : "members.unblocked", { username }),
-          "success",
+          shellText(block ? "members.blockFailed" : "members.unblockFailed"),
+          "error",
         );
-      } catch (err) {
-        const fallback = shellText(block ? "members.blockFailed" : "members.unblockFailed");
-        const msg = errorText(err, fallback);
-        getToast()?.show(msg, "error");
       }
+    },
+    onBlockFromPopup: (userId, username, block) => {
+      void import("../../features/blocks/blockActions").then(
+        ({ confirmAndToggleBlock }) => confirmAndToggleBlock(blockDeps, userId, username, block),
+        () =>
+          getToast()?.show(
+            shellText(block ? "members.blockFailed" : "members.unblockFailed"),
+            "error",
+          ),
+      );
     },
     onChangeRole: async (userId, username, newRole) => {
       const roleId = getRoleIdByName(newRole);

@@ -15,6 +15,9 @@ export const requestsText = defineCatalog("requests", {
   "dm.leaveShort": "Leave group",
   "dm.mute": "Mute Conversation",
   "dm.unmute": "Unmute Conversation",
+  "dm.markRead": "Mark As Read",
+  "dm.profile": "Profile",
+  "dm.call": "Call",
   "dm.renameGroup": "Rename Group",
   "dm.leaveGroup": "Leave Group",
   "dm.close": "Close DM",
@@ -37,6 +40,9 @@ export const requestsText = defineCatalog("requests", {
   "profile.notePlaceholder": "Click to add a note",
   "profile.message": " Message",
   "profile.call": " Call",
+  "profile.offlineReason": "You are not connected to the server right now.",
+  "profile.blockedReason":
+    "You can't message or call someone while either of you has blocked the other.",
 
   "picker.title": "New Direct Message",
   "picker.groupHint": "Select one member for a DM, or up to {max} for a group",

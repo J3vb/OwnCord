@@ -145,6 +145,7 @@
 }
 .upp-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 .upp-action-btn {
@@ -166,6 +167,12 @@
 }
 .upp-action-btn:hover {
   background: var(--accent-hover);
+}
+.upp-action-btn:disabled,
+.upp-action-btn[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: var(--accent);
 }
 @media (prefers-reduced-motion: reduce) {
   .upp-popup {

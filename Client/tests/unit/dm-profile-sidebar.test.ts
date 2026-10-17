@@ -14,6 +14,7 @@ vi.mock("@components/message-list/attachments", () => ({
 
 import { createDmProfileSidebar } from "../../src/components/DmProfileSidebar";
 import type { DmProfileData, DmProfileSidebarOptions } from "../../src/components/DmProfileSidebar";
+import { resetBlocksStore, setUserBlockedByMe } from "../../src/stores/blocks.store";
 
 const makeUser = (overrides: Partial<DmProfileData> = {}): DmProfileData => ({
   id: 1,
@@ -474,5 +475,32 @@ describe("DmProfileSidebar", () => {
       localStorage.removeItem("owncord:dm-note:b.example.com:42");
       localStorage.removeItem("owncord:legacy-claim:owncord:dm-note:42");
     }
+  });
+
+  describe("Block / Unblock (WP 3B-2)", () => {
+    beforeEach(() => resetBlocksStore());
+
+    it("shows Block, then Unblock once blocksStore has the user, and reports the toggle", async () => {
+      const onToggleBlock = vi.fn();
+      const sidebar = createDmProfileSidebar(makeOptions({ onToggleBlock }));
+      sidebar.mount(container);
+      const btn = () => container.querySelector<HTMLElement>('[data-testid="dps-block-btn"]');
+      expect(btn()?.textContent).toBe("Block");
+      btn()?.click();
+      expect(onToggleBlock).toHaveBeenCalledExactlyOnceWith(1, true);
+
+      setUserBlockedByMe(1, true);
+      await vi.waitFor(() => expect(btn()?.textContent).toBe("Unblock"));
+      btn()?.click();
+      expect(onToggleBlock).toHaveBeenLastCalledWith(1, false);
+      sidebar.destroy?.();
+    });
+
+    it("has no Block button without a handler", () => {
+      const sidebar = createDmProfileSidebar(makeOptions());
+      sidebar.mount(container);
+      expect(container.querySelector('[data-testid="dps-block-btn"]')).toBeNull();
+      sidebar.destroy?.();
+    });
   });
 });

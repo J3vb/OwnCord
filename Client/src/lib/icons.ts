@@ -79,6 +79,7 @@ export type IconName =
   | "lock"
   | "shield-question"
   | "flag"
+  | "ban"
   | "ellipsis"
   | "zap";
 
@@ -249,6 +250,9 @@ const ICON_PATHS: Record<IconName, string> = {
   lock: `<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>`,
   // More actions (WP 3A-7).
   ellipsis: `<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>`,
+
+  // Block (WP 3B-2).
+  ban: `<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>`,
 
   // Report (B9-10).
   flag: `<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/>`,

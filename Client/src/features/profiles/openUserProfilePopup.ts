@@ -14,6 +14,9 @@ import { membersStore, memberDisplayName, type Member } from "../../stores/membe
 import type { UserProfilePopupComponent } from "../../components/UserProfilePopup";
 import { showToast } from "../../lib/toast";
 import { reportEntryText } from "../../i18n/reportEntry";
+import { requestsText } from "../../i18n/requests";
+import { blocksStore } from "../../stores/blocks.store";
+import { uiStore } from "../../stores/ui.store";
 
 /** What the popup's action buttons do. Each is omitted when the caller has no
  *  handler for it, and all are withheld for the signed-in user's own card. */
@@ -22,6 +25,8 @@ export interface UserProfilePopupCallbacks {
   readonly onCall?: (userId: number) => void;
   /** Receives the display name the popup shows, for the report dialog. */
   readonly onReport?: (userId: number, name: string) => void;
+  /** Block (`block` true) or Unblock, with the display name for the confirm. */
+  readonly onToggleBlock?: (userId: number, name: string, block: boolean) => void;
 }
 
 export interface OpenUserProfilePopupOptions {
@@ -36,6 +41,22 @@ export interface OpenUserProfilePopupOptions {
   readonly fallbackUser?: Member;
   /** A popup still loading when this aborts is dropped instead of mounted. */
   readonly signal?: AbortSignal;
+}
+
+/**
+ * Why Message and Call cannot be used with `userId` right now: the socket is
+ * down, or either side has blocked the other (the store learns the other
+ * direction only once a send was refused). Undefined when nothing is in the
+ * way. Said in a tooltip rather than letting the click fail.
+ */
+export function callUnavailableReason(userId: number): string | undefined {
+  if (uiStore.getState().connectionStatus !== "connected") {
+    return requestsText("profile.offlineReason");
+  }
+  const { blockedByMe, blockedByThem } = blocksStore.getState();
+  return blockedByMe.has(userId) || blockedByThem.has(userId)
+    ? requestsText("profile.blockedReason")
+    : undefined;
 }
 
 let activePopup: UserProfilePopupComponent | null = null;
@@ -66,6 +87,9 @@ export function openUserProfilePopup(options: OpenUserProfilePopupOptions): () =
   const onMessage = isSelf ? undefined : callbacks?.onMessage;
   const onCall = isSelf ? undefined : callbacks?.onCall;
   const onReport = isSelf ? undefined : callbacks?.onReport;
+  const onToggleBlock = isSelf ? undefined : callbacks?.onToggleBlock;
+  const blocked = blocksStore.getState().blockedByMe.has(userId);
+  const unavailableReason = callUnavailableReason(userId);
   const fallbackFocus = options.fallbackFocus;
   const seq = ++popupSeq;
 
@@ -89,6 +113,14 @@ export function openUserProfilePopup(options: OpenUserProfilePopupOptions): () =
         ...(onReport === undefined
           ? {}
           : { onReport: (id: number) => onReport(id, memberDisplayName(live)) }),
+        ...(onToggleBlock === undefined
+          ? {}
+          : {
+              blocked,
+              onToggleBlock: (id: number, block: boolean) =>
+                onToggleBlock(id, memberDisplayName(live), block),
+            }),
+        ...(unavailableReason === undefined ? {} : { unavailableReason }),
         onClose: () => {
           if (activePopup === popup) activePopup = null;
         },
