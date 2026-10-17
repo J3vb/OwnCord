@@ -1,7 +1,9 @@
 /**
  * The read-only Keyboard Shortcuts overlay (Ctrl+/ or Cmd+/), like Discord's.
  * It renders the shared catalog (`lib/keybindCatalog.ts`) that the settings
- * Keybinds tab renders too, plus the current global mute and deafen keys.
+ * Keybinds tab renders too, plus the current global mute and deafen keys. A
+ * rebindable row shows the user's binding as it is when the overlay opens, and
+ * screen share and disconnect appear once they are bound.
  * Loaded on demand from MainPage. The shared modal factory supplies the dialog
  * contract (role, aria-modal, focus trap, Escape, focus restore) and the
  * `.modal-overlay` that `dialogOpen()` counts, so other shortcuts stay quiet
@@ -12,7 +14,9 @@ import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
-import { KEYBIND_GROUPS } from "@lib/keybindCatalog";
+import { KEYBIND_GROUPS, UNBOUND_BY_DEFAULT_ROWS } from "@lib/keybindCatalog";
+import { loadEffectiveKeybinds } from "@lib/keybinds";
+import { comboLabel, comboOrNotSet } from "@lib/keybindLabels";
 import { vkName } from "@lib/ptt";
 import { loadGlobalShortcutVks } from "@lib/voiceShortcuts";
 import { settingsText as t } from "../i18n/settings";
@@ -50,6 +54,7 @@ export function openShortcutsOverlay(): void {
 
   const body = createElement("div", { class: "modal-body" });
   const keys = loadGlobalShortcutVks();
+  const bindings = loadEffectiveKeybinds();
   for (const group of KEYBIND_GROUPS) {
     body.appendChild(createElement("div", { class: "keybind-section-header" }, t(group.title)));
     if (group.id === "communication") {
@@ -64,7 +69,16 @@ export function openShortcutsOverlay(): void {
         ),
       );
     }
-    for (const r of group.rows) body.appendChild(row(t(r.action), t(r.combo)));
+    for (const r of group.rows) {
+      const combo = r.rebindable === undefined ? t(r.combo) : comboOrNotSet(bindings[r.rebindable]);
+      body.appendChild(row(t(r.action), combo));
+    }
+    for (const extra of UNBOUND_BY_DEFAULT_ROWS) {
+      const bound = bindings[extra.rebindable];
+      if (extra.group === group.id && bound !== null) {
+        body.appendChild(row(t(extra.action), comboLabel(bound)));
+      }
+    }
   }
   appendChildren(content, header, body);
 

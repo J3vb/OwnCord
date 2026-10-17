@@ -231,7 +231,7 @@ export function keybindConflict(
 /**
  * The VK of every in-app binding that is exactly Ctrl+Shift+key, mute and
  * deafen excluded. This is what a global mute/deafen binding may not claim
- * (`shortcutConflict`'s optional fourth argument).
+ * (`shortcutConflict`'s fourth argument).
  */
 export function inAppCtrlShiftVks(effective: EffectiveKeybinds): Set<number> {
   const vks = new Set<number>();

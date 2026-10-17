@@ -92,25 +92,27 @@ describe("webview key capture on Windows", () => {
 
 describe("shortcut conflict", () => {
   const current = { mute: 0x4d, deafen: 0x44 };
+  // Today's defaults: the camera on Ctrl+Shift+V and upload on Ctrl+Shift+U.
+  const defaultInApp = inAppCtrlShiftVks(parseKeybinds(undefined, current));
 
   it("rejects a key already bound to the other action", () => {
-    expect(shortcutConflict(0x44, "mute", current)).toBe("duplicate");
-    expect(shortcutConflict(0x4d, "deafen", current)).toBe("duplicate");
+    expect(shortcutConflict(0x44, "mute", current, defaultInApp)).toBe("duplicate");
+    expect(shortcutConflict(0x4d, "deafen", current, defaultInApp)).toBe("duplicate");
   });
 
   it("rejects the in-app camera shortcut (Ctrl+Shift+V)", () => {
-    expect(shortcutConflict(0x56, "mute", current)).toBe("reserved");
-    expect(shortcutConflict(0x56, "deafen", current)).toBe("reserved");
+    expect(shortcutConflict(0x56, "mute", current, defaultInApp)).toBe("reserved");
+    expect(shortcutConflict(0x56, "deafen", current, defaultInApp)).toBe("reserved");
   });
 
   it("rejects the in-app upload shortcut (Ctrl+Shift+U)", () => {
-    expect(shortcutConflict(0x55, "mute", current)).toBe("reserved");
-    expect(shortcutConflict(0x55, "deafen", current)).toBe("reserved");
+    expect(shortcutConflict(0x55, "mute", current, defaultInApp)).toBe("reserved");
+    expect(shortcutConflict(0x55, "deafen", current, defaultInApp)).toBe("reserved");
   });
 
   it("allows a free key, including the action's own current binding", () => {
-    expect(shortcutConflict(0x4b, "mute", current)).toBeNull();
-    expect(shortcutConflict(0x4d, "mute", current)).toBeNull();
+    expect(shortcutConflict(0x4b, "mute", current, defaultInApp)).toBeNull();
+    expect(shortcutConflict(0x4d, "mute", current, defaultInApp)).toBeNull();
   });
 
   it("camera moved off V frees V for mute", () => {

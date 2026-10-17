@@ -22,8 +22,23 @@ import {
 } from "@lib/globalKeys";
 import type { GlobalKeysStatus } from "../../platform/contracts/globalShortcuts";
 import { desktop } from "../../platform/desktop";
+import { REBINDABLE_ACTIONS, loadEffectiveKeybinds } from "@lib/keybinds";
 import { staysAttached, watchGlobalKeys } from "./globalKeysWatch";
+import { actionLabel } from "@lib/keybindLabels";
+import { beginCapture } from "./comboCapture";
 import { settingsText as t } from "../../i18n/settings";
+
+/**
+ * The name of the in-app action bound to `vk`, or null. Push to talk's poller
+ * ignores modifiers, so a key used in any in-app combination clashes with it.
+ */
+function inAppActionOnVk(vk: number): string | null {
+  const effective = loadEffectiveKeybinds();
+  for (const { id } of REBINDABLE_ACTIONS) {
+    if (effective[id]?.vk === vk) return actionLabel(id);
+  }
+  return null;
+}
 
 const delayText = (ms: number): string => t("keybinds.pttReleaseDelay.value", { ms });
 
@@ -57,6 +72,8 @@ export function buildPttControls(signal: AbortSignal): HTMLElement[] {
   // Non-null once the host reports the portal backend.
   let portal: GlobalKeysStatus | null = null;
   let stopKeyCapture: (() => void) | null = null;
+  /** Releases the portal capture's `beginCapture` slot (Clear needs it). */
+  let releaseCapture: (() => void) | null = null;
 
   /** The key button's resting text: the desktop's own trigger on the portal path. */
   const restingKeyText = (): string => {
@@ -131,10 +148,17 @@ export function buildPttControls(signal: AbortSignal): HTMLElement[] {
     pttValue.style.borderColor = "var(--accent)";
     pttValue.style.color = "var(--accent)";
     setText(pttValue, t("keybinds.pressFunctionKey"));
-    const finish = (): void => {
+    // Starting another capture (or a Keybinds row) cancels this one.
+    const release = beginCapture(signal, () => {
+      finish();
+      resetKeyButton();
+    });
+    releaseCapture = release;
+    function finish(): void {
+      release();
       stopKeyCapture?.();
       stopKeyCapture = null;
-    };
+    }
     const onKey = (e: KeyboardEvent): void => {
       if (e.code === "Escape") {
         e.preventDefault();
@@ -148,6 +172,12 @@ export function buildPttControls(signal: AbortSignal): HTMLElement[] {
       e.preventDefault();
       e.stopPropagation();
       finish();
+      const clash = inAppActionOnVk(vk);
+      if (clash !== null) {
+        resetKeyButton();
+        showNote(t("keybinds.pttKeyInUse", { action: clash }));
+        return;
+      }
       void bindPortalKey(vk);
     };
     document.addEventListener("keydown", onKey, { capture: true, signal });
@@ -164,6 +194,7 @@ export function buildPttControls(signal: AbortSignal): HTMLElement[] {
       }
       capturing = true;
       const attempt = ++captureGeneration;
+      showNote(null);
       pttValue.textContent = t("keybinds.pressKey");
       pttValue.style.borderColor = "var(--accent)";
       pttValue.style.color = "var(--accent)";
@@ -180,6 +211,12 @@ export function buildPttControls(signal: AbortSignal): HTMLElement[] {
           if (vk === 0) {
             // Timed out — restore previous value
             setText(pttValue, currentVk !== 0 ? vkName(currentVk) : t("keybinds.notSet"));
+            return;
+          }
+          const clash = inAppActionOnVk(vk);
+          if (clash !== null) {
+            setText(pttValue, restingKeyText());
+            showNote(t("keybinds.pttKeyInUse", { action: clash }));
             return;
           }
           currentVk = vk;
@@ -205,6 +242,8 @@ export function buildPttControls(signal: AbortSignal): HTMLElement[] {
       e.stopPropagation();
       ++captureGeneration;
       capturing = false;
+      releaseCapture?.();
+      releaseCapture = null;
       stopKeyCapture?.();
       stopKeyCapture = null;
       showNote(null);

@@ -199,7 +199,7 @@ export const settingsText = defineCatalog("settings", {
   "keybinds.communication": "Communication",
   "keybinds.messages": "Messages",
   "keybinds.voiceHint":
-    "Mute and Deafen work anywhere; the camera shortcut applies while you are connected to a voice channel.",
+    "Mute and Deafen work anywhere. Camera, screen share and disconnect apply while you are connected to a voice channel.",
   "keybinds.globalHint":
     "Mute and Deafen also work while OwnCord is unfocused — via the global shortcuts you set below (Ctrl + Shift + M / Ctrl + Shift + D by default), or the tray menu. On Linux (X11) the global keys use the key positions of a US layout.",
   "keybinds.globalHintUnsupported":
@@ -207,8 +207,26 @@ export const settingsText = defineCatalog("settings", {
   "keybinds.globalSection": "Global Shortcuts",
   "keybinds.globalConflict": "That combination is already used by another shortcut.",
   "keybinds.globalKey": "Ctrl + Shift + {key}",
-  "keybinds.globalAria": "Global mute keybind — click to rebind",
-  "keybinds.globalDeafenAria": "Global deafen keybind — click to rebind",
+  "keybinds.globalAria": "Global mute keybind",
+  "keybinds.globalDeafenAria": "Global deafen keybind",
+  "keybinds.rebindAria": "{action}: {combo}",
+  "keybinds.resetOne": "Reset",
+  "keybinds.resetAria": "Reset {action} keybind to its default",
+  "keybinds.removeAria": "Remove {action} keybind",
+  "keybinds.resetAll": "Reset all keybinds",
+  "keybinds.mod.ctrl": "Ctrl",
+  "keybinds.mod.shift": "Shift",
+  "keybinds.mod.alt": "Alt",
+  "keybinds.conflictWith": "Already used by {action}.",
+  "keybinds.conflictReserved": "Your system or text editing keeps that combination.",
+  "keybinds.conflictNeedsModifier":
+    "Hold Ctrl or Alt with the key, or use a function key on its own.",
+  "keybinds.conflictFixed": "That combination is a fixed shortcut in OwnCord.",
+  "keybinds.conflictPtt": "That key is used by Push to Talk.",
+  "keybinds.pttKeyInUse": "That key is already used by the {action} keybind.",
+  "keybinds.layoutNote":
+    "On some keyboard layouts these keys can share a physical key with Mute or Deafen, and Mute and Deafen then win.",
+  "keybinds.portalPriority": "Your desktop's own shortcuts take priority over these keys.",
   "keybinds.formatHint":
     "Formatting shortcuts wrap the selected text while the message box has focus. Typing anywhere else in the chat starts a message.",
   "shortcuts.title": "Keyboard Shortcuts",
@@ -228,6 +246,8 @@ export const settingsText = defineCatalog("settings", {
   "keybinds.action.toggleMute": "Toggle Mute",
   "keybinds.action.toggleDeafen": "Toggle Deafen",
   "keybinds.action.toggleCamera": "Toggle Camera",
+  "keybinds.action.toggleScreenshare": "Toggle Screen Share",
+  "keybinds.action.disconnect": "Disconnect from Voice",
   "keybinds.action.uploadFile": "Upload File",
   "keybinds.action.editLastMessage": "Edit Last Message",
   "keybinds.action.bold": "Bold",

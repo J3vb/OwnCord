@@ -1008,6 +1008,62 @@ details.disclose[open] > summary .icon {
   color: var(--text-normal);
 }
 
+.keybind-capture .keybind-row {
+  gap: var(--space-2);
+}
+.keybind-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.kbd.keybind-capture-btn {
+  cursor: pointer;
+  min-width: 80px;
+  text-align: center;
+}
+.kbd.keybind-capture-btn.capturing {
+  border-color: var(--accent);
+}
+.keybind-mini-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.keybind-mini-btn:hover:not(:disabled) {
+  color: var(--text-normal);
+  border-color: var(--text-muted);
+}
+.keybind-mini-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.keybind-alert {
+  margin: 2px 0 0 0;
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+  color: var(--text-danger);
+}
+.keybind-alert[hidden] {
+  display: none;
+}
+.keybind-hint {
+  margin: 4px 0 0 0;
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+  color: var(--text-micro);
+}
+.keybind-hint[hidden] {
+  display: none;
+}
+
 /* ── Safety: My reports (B9-10) ── */
 .my-reports-status {
   margin: var(--space-3) 0;

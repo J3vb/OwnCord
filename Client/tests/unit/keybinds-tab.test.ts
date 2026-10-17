@@ -129,7 +129,10 @@ describe("KeybindsTab", () => {
       )!;
     expect(commRow("Toggle Mute").querySelector(".kbd")!.textContent).toBe("Ctrl + Shift + M");
     expect(commRow("Toggle Deafen").querySelector(".kbd")!.textContent).toBe("Ctrl + Shift + D");
-    expect(commRow("Toggle Camera").querySelector(".kbd")!.textContent).toBe("Ctrl + Shift + V");
+    // The camera row is a capture button now, so it is found by its test id.
+    expect(el.querySelector("[data-testid='keybind-toggleCamera']")!.textContent).toBe(
+      "Ctrl + Shift + V",
+    );
 
     await vi.waitFor(() => expect(mockSupported).toHaveBeenCalled());
     (el.querySelector("[data-testid='keybind-global-deafen']") as HTMLButtonElement).click();
@@ -253,8 +256,9 @@ describe("KeybindsTab", () => {
   it("renders Push to Talk keybind row", () => {
     const el = buildKeybindsTab(new AbortController().signal);
     const rows = el.querySelectorAll(".keybind-row");
-    // 1 PTT + 10 Navigation + 3 Communication + 2 Global + 7 Messages = 23
-    expect(rows.length).toBe(23);
+    // 1 PTT + 10 Navigation + 5 Communication (mute, deafen, camera, screen
+    // share, disconnect) + 2 Global + 7 Messages = 25
+    expect(rows.length).toBe(25);
     const pttLabel = rows[0]!.querySelector(".setting-label");
     expect(pttLabel!.textContent).toBe("Push to Talk");
   });
@@ -902,6 +906,346 @@ describe("KeybindsTab", () => {
         expect(localStorage.getItem("owncord:settings:globalKeysPortalBound")).toBe("true");
         expect(btn.textContent).toBe("Waiting for your desktop...");
       });
+    });
+  });
+});
+
+describe("KeybindsTab rebindable rows (3E-3c-3)", () => {
+  const portalStatus = {
+    backend: "portal",
+    portalVersion: 2,
+    triggers: { ptt: null, mute: null, deafen: null },
+    canConfigure: true,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    statusHandlers.clear();
+    mockStatus.mockImplementation(async () => pollingStatus);
+    mockBindPortal.mockImplementation(async () => pollingStatus);
+    mockSupported.mockImplementation(async () => true);
+    mockPttSupported.mockImplementation(async () => true);
+    mockVkName.mockImplementation((vk: number) => {
+      if (vk >= 0x41 && vk <= 0x5a) return String.fromCharCode(vk);
+      if (vk >= 0x70 && vk <= 0x87) return `F${vk - 0x6f}`;
+      return `Key-${vk}`;
+    });
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  const press = (code: string, init: KeyboardEventInit = {}): void => {
+    document.dispatchEvent(new KeyboardEvent("keydown", { code, bubbles: true, ...init }));
+  };
+  const byId = (el: HTMLElement, id: string): HTMLButtonElement =>
+    el.querySelector(`[data-testid='${id}']`) as HTMLButtonElement;
+  const mount = (): { el: HTMLDivElement; controller: AbortController } => {
+    const controller = new AbortController();
+    return { el: buildKeybindsTab(controller.signal), controller };
+  };
+  const stored = (): Record<string, unknown> =>
+    (
+      JSON.parse(localStorage.getItem("owncord:settings:keybinds") ?? "{}") as {
+        bindings?: Record<string, unknown>;
+      }
+    ).bindings ?? {};
+
+  it("makes camera, screen share, disconnect, search, upload, emoji and GIF capture buttons", () => {
+    const { el } = mount();
+    const shown: Record<string, string> = {
+      toggleCamera: "Ctrl + Shift + V",
+      toggleScreenshare: "Not set",
+      disconnect: "Not set",
+      search: "Ctrl + F",
+      uploadFile: "Ctrl + Shift + U",
+      emojiPicker: "Ctrl + E",
+      gifPicker: "Ctrl + G",
+    };
+    for (const [id, text] of Object.entries(shown)) {
+      const btn = byId(el, `keybind-${id}`);
+      expect(btn.tagName, id).toBe("BUTTON");
+      expect(btn.textContent, id).toBe(text);
+      expect(byId(el, `keybind-${id}-reset`), id).not.toBeNull();
+      expect(byId(el, `keybind-${id}-remove`), id).not.toBeNull();
+    }
+    // Mute and deafen stay display rows that follow the global binding.
+    const mute = [...el.querySelectorAll(".keybind-row")].find(
+      (r) => r.querySelector(".setting-label")?.textContent === "Toggle Mute",
+    )!;
+    expect(mute.querySelector("span.kbd")!.textContent).toBe("Ctrl + Shift + M");
+    expect(mute.querySelector("button")).toBeNull();
+  });
+
+  it("does not list a rebindable action twice", () => {
+    const { el } = mount();
+    const labels = [...el.querySelectorAll(".keybind-row .setting-label")].map(
+      (l) => l.textContent,
+    );
+    for (const label of [
+      "Toggle Camera",
+      "Toggle Screen Share",
+      "Disconnect from Voice",
+      "Search Messages",
+      "Upload File",
+      "Emoji Picker",
+      "GIF Picker",
+    ]) {
+      expect(
+        labels.filter((l) => l === label),
+        label,
+      ).toHaveLength(1);
+    }
+  });
+
+  it("rebinds a row, saves it and shows it", () => {
+    const { el } = mount();
+    byId(el, "keybind-emojiPicker").click();
+    press("KeyJ", { key: "j", ctrlKey: true });
+    expect(byId(el, "keybind-emojiPicker").textContent).toBe("Ctrl + J");
+    expect(stored().emojiPicker).toEqual({ vk: 0x4a, ctrl: true, shift: false, alt: false });
+    // A fresh tab reads it back.
+    expect(byId(mount().el, "keybind-emojiPicker").textContent).toBe("Ctrl + J");
+  });
+
+  it("shows why a combination was refused and keeps the old one", () => {
+    const { el } = mount();
+    byId(el, "keybind-search").click();
+    press("KeyE", { key: "e", ctrlKey: true }); // the emoji picker's
+    expect(byId(el, "keybind-search-alert").textContent).toBe("Already used by Emoji Picker.");
+    expect(byId(el, "keybind-search").textContent).toBe("Ctrl + F");
+    expect(stored().search).toBeUndefined();
+  });
+
+  it("resets one row to its default", () => {
+    const { el } = mount();
+    byId(el, "keybind-gifPicker").click();
+    press("KeyJ", { key: "j", ctrlKey: true });
+    byId(el, "keybind-gifPicker-reset").click();
+    expect(byId(el, "keybind-gifPicker").textContent).toBe("Ctrl + G");
+    expect(stored().gifPicker).toBeUndefined();
+  });
+
+  it("removes a binding", () => {
+    const { el } = mount();
+    byId(el, "keybind-uploadFile-remove").click();
+    expect(byId(el, "keybind-uploadFile").textContent).toBe("Not set");
+    expect(stored().uploadFile).toBeNull();
+  });
+
+  it("resets every rebindable row with Reset all keybinds", () => {
+    const { el } = mount();
+    byId(el, "keybind-search").click();
+    press("KeyJ", { key: "j", ctrlKey: true });
+    byId(el, "keybind-toggleScreenshare").click();
+    press("F6", { key: "F6" });
+    byId(el, "keybind-toggleCamera-remove").click();
+    expect(byId(el, "keybind-toggleScreenshare").textContent).toBe("F6");
+
+    expect(byId(el, "keybinds-reset-all").textContent).toBe("Reset all keybinds");
+    byId(el, "keybinds-reset-all").click();
+    expect(byId(el, "keybind-search").textContent).toBe("Ctrl + F");
+    expect(byId(el, "keybind-toggleScreenshare").textContent).toBe("Not set");
+    expect(byId(el, "keybind-toggleCamera").textContent).toBe("Ctrl + Shift + V");
+    expect(stored()).toEqual({});
+  });
+
+  it("Reset all leaves no default that another binding now holds", () => {
+    const { el } = mount();
+    // Camera leaves V, then global mute takes V.
+    byId(el, "keybind-toggleCamera").click();
+    press("KeyX", { key: "X", ctrlKey: true, shiftKey: true });
+    byId(el, "keybind-global-mute").click();
+    press("KeyV");
+    expect(byId(el, "keybind-global-mute").textContent).toBe("Ctrl + Shift + V");
+
+    byId(el, "keybinds-reset-all").click();
+    expect(byId(el, "keybind-toggleCamera").textContent).toBe("Not set");
+    expect(byId(el, "keybind-toggleCamera-alert").textContent).toBe("Already used by Toggle Mute.");
+    expect(stored().toggleCamera).toBeNull();
+    // The other rows are back on their defaults.
+    expect(byId(el, "keybind-uploadFile").textContent).toBe("Ctrl + Shift + U");
+  });
+
+  it("Reset all unbinds a default that the push-to-talk key now holds", () => {
+    const { el } = mount();
+    byId(el, "keybind-search").click();
+    press("KeyJ", { key: "j", ctrlKey: true });
+    localStorage.setItem("owncord:settings:pttVk", "70"); // F
+    byId(el, "keybinds-reset-all").click();
+    expect(byId(el, "keybind-search").textContent).toBe("Not set");
+    expect(byId(el, "keybind-search-alert").textContent).toBe("That key is used by Push to Talk.");
+    expect(stored().search).toBeNull();
+  });
+
+  it("Reset all judges each default against the other defaults, not their old overrides", () => {
+    const { el } = mount();
+    // Swap: search takes Ctrl+E after emoji moves away.
+    byId(el, "keybind-emojiPicker").click();
+    press("KeyJ", { key: "j", ctrlKey: true });
+    byId(el, "keybind-search").click();
+    press("KeyE", { key: "e", ctrlKey: true });
+    byId(el, "keybinds-reset-all").click();
+    expect(byId(el, "keybind-search").textContent).toBe("Ctrl + F");
+    expect(byId(el, "keybind-emojiPicker").textContent).toBe("Ctrl + E");
+  });
+
+  it("names the combination in each button's accessible name", () => {
+    const { el } = mount();
+    expect(byId(el, "keybind-toggleCamera").getAttribute("aria-label")).toBe(
+      "Toggle Camera: Ctrl + Shift + V",
+    );
+    expect(byId(el, "keybind-global-mute").getAttribute("aria-label")).toBe(
+      "Global mute keybind: Ctrl + Shift + M",
+    );
+    byId(el, "keybind-search").click();
+    expect(byId(el, "keybind-search").getAttribute("aria-label")).toBe(
+      "Search Messages: Press a supported key...",
+    );
+    press("Escape", { key: "Escape" });
+  });
+
+  it("Reset all ends a capture in progress", () => {
+    const { el } = mount();
+    byId(el, "keybind-search").click();
+    byId(el, "keybinds-reset-all").click();
+    expect(byId(el, "keybind-search").textContent).toBe("Ctrl + F");
+    press("KeyJ", { key: "j", ctrlKey: true });
+    expect(stored()).toEqual({});
+  });
+
+  it("an in-app capture and the global capture never run together", () => {
+    const { el } = mount();
+    byId(el, "keybind-search").click();
+    byId(el, "keybind-global-mute").click();
+    expect(byId(el, "keybind-search").textContent).toBe("Ctrl + F");
+    expect(byId(el, "keybind-global-mute").textContent).toBe("Press a supported key...");
+    press("KeyK", { key: "k" });
+    expect(byId(el, "keybind-global-mute").textContent).toBe("Ctrl + Shift + K");
+    expect(stored()).toEqual({});
+  });
+
+  it("the global capture refuses a key an in-app Ctrl+Shift binding holds", () => {
+    const { el } = mount();
+    // Move the camera off V and onto X.
+    byId(el, "keybind-toggleCamera").click();
+    press("KeyX", { key: "X", ctrlKey: true, shiftKey: true });
+    expect(byId(el, "keybind-toggleCamera").textContent).toBe("Ctrl + Shift + X");
+
+    const conflict = el.querySelector<HTMLElement>("[role='alert'][style]")!;
+    byId(el, "keybind-global-mute").click();
+    press("KeyX");
+    expect(conflict.style.display).toBe("");
+    expect(byId(el, "keybind-global-mute").textContent).toBe("Ctrl + Shift + M");
+
+    // V is free now.
+    byId(el, "keybind-global-mute").click();
+    press("KeyV");
+    expect(byId(el, "keybind-global-mute").textContent).toBe("Ctrl + Shift + V");
+  });
+
+  it("the layout note is one plain sentence", () => {
+    const { el } = mount();
+    const note = byId(el, "keybinds-layout-note");
+    expect(note.textContent).toBe(
+      "On some keyboard layouts these keys can share a physical key with Mute or Deafen, and Mute and Deafen then win.",
+    );
+  });
+
+  it("shows the desktop-priority note only on the portal backend", async () => {
+    const polling = mount();
+    await vi.waitFor(() => expect(mockSupported).toHaveBeenCalled());
+    expect(byId(polling.el, "keybinds-portal-priority").hidden).toBe(true);
+
+    mockStatus.mockResolvedValue(portalStatus);
+    const { el } = mount();
+    await vi.waitFor(() => expect(byId(el, "keybinds-portal-priority").hidden).toBe(false));
+    expect(byId(el, "keybinds-portal-priority").textContent).toBe(
+      "Your desktop's own shortcuts take priority over these keys.",
+    );
+    // The portal going away hides it again.
+    for (const handler of statusHandlers) handler(pollingStatus);
+    await vi.waitFor(() => expect(byId(el, "keybinds-portal-priority").hidden).toBe(true));
+  });
+
+  describe("push to talk against in-app keys", () => {
+    const pttButton = (el: HTMLElement): HTMLButtonElement =>
+      el.querySelector('[aria-label="Push to Talk keybind — click to capture"]')!;
+
+    it("the portal capture rejects an F-key a bare in-app binding uses", async () => {
+      mockStatus.mockResolvedValue(portalStatus);
+      const { el } = mount();
+      byId(el, "keybind-toggleScreenshare").click();
+      press("F6", { key: "F6" });
+      expect(byId(el, "keybind-toggleScreenshare").textContent).toBe("F6");
+
+      await vi.waitFor(() => expect(byId(el, "keybinds-portal").style.display).toBe(""));
+      pttButton(el).click();
+      press("F6");
+      const note = byId(el, "ptt-portal-note");
+      expect(note.textContent).toBe("That key is already used by the Toggle Screen Share keybind.");
+      expect(mockBindPortal).not.toHaveBeenCalled();
+      expect(mockUpdatePttKey).not.toHaveBeenCalled();
+      expect(pttButton(el).textContent).toBe("Not set");
+
+      // A free F-key still binds.
+      mockBindPortal.mockResolvedValue({
+        ...portalStatus,
+        triggers: { ptt: "F7", mute: null, deafen: null },
+      });
+      pttButton(el).click();
+      press("F7");
+      await vi.waitFor(() => expect(mockUpdatePttKey).toHaveBeenCalledWith(0x76));
+    });
+
+    it("starting a Keybinds row ends the portal push-to-talk capture", async () => {
+      mockStatus.mockResolvedValue(portalStatus);
+      const { el } = mount();
+      await vi.waitFor(() => expect(byId(el, "keybinds-portal").style.display).toBe(""));
+      pttButton(el).click();
+      expect(pttButton(el).textContent).toBe("Press a function key (F1-F24)...");
+      byId(el, "keybind-search").click();
+      expect(pttButton(el).textContent).toBe("Not set");
+      press("F7"); // only the Keybinds row is listening now
+      expect(mockBindPortal).not.toHaveBeenCalled();
+    });
+
+    it("Clear during a portal capture lets the next capture start cleanly", async () => {
+      mockStatus.mockResolvedValue(portalStatus);
+      const { el } = mount();
+      await vi.waitFor(() => expect(byId(el, "keybinds-portal").style.display).toBe(""));
+      pttButton(el).click();
+      const clear = [...el.querySelectorAll("button")].find((b) => b.textContent === "Clear")!;
+      clear.click();
+      pttButton(el).click();
+      expect(pttButton(el).textContent).toBe("Press a function key (F1-F24)...");
+      press("Escape");
+      expect(pttButton(el).textContent).toBe("Not set");
+    });
+
+    it("the polling capture rejects a key an in-app binding uses", async () => {
+      const { el } = mount();
+      byId(el, "keybind-toggleScreenshare").click();
+      press("F6", { key: "F6" });
+      mockCaptureKeyPress.mockResolvedValue(0x75); // F6
+      pttButton(el).click();
+      await vi.waitFor(() =>
+        expect(byId(el, "ptt-portal-note").textContent).toContain("Toggle Screen Share"),
+      );
+      expect(mockUpdatePttKey).not.toHaveBeenCalled();
+      expect(pttButton(el).textContent).toBe("Not set");
+    });
+
+    it("an in-app rebind onto the push-to-talk key is refused", () => {
+      localStorage.setItem("owncord:settings:pttVk", "117"); // F6
+      const { el } = mount();
+      byId(el, "keybind-toggleScreenshare").click();
+      press("F6", { key: "F6" });
+      expect(byId(el, "keybind-toggleScreenshare-alert").textContent).toBe(
+        "That key is used by Push to Talk.",
+      );
     });
   });
 });
