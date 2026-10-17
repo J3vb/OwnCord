@@ -34,6 +34,15 @@ ignore = [
   # GTK stack that pins glib, and ships no code into the client.
   { id = "RUSTSEC-2024-0370", reason = "unmaintained; Linux GTK build chain only" },
 
+  # zvariant, zvariant_derive and zbus_names were folded into zbus 6.0.0 and are
+  # no longer published on their own. zbus 4 and 5 still depend on them, through
+  # notify-rust, secret-service, tauri-plugin-opener and
+  # tauri-plugin-single-instance, all Linux D-Bus paths. Drop these when every
+  # dependent resolves zbus >= 6.
+  { id = "RUSTSEC-2026-0370", reason = "unmaintained; zvariant via zbus 4/5, Linux D-Bus only" },
+  { id = "RUSTSEC-2026-0371", reason = "unmaintained; zbus_names via zbus 4/5, Linux D-Bus only" },
+  { id = "RUSTSEC-2026-0372", reason = "unmaintained; zvariant_derive via zbus 4/5, Linux D-Bus only" },
+
   # zip archive-extraction advisories, fixed in zip 9.0.0, which no dependent
   # release accepts yet (tauri-plugin-updater 3.0.0-alpha.3 still requires ^4,
   # webrtc-sys-build 0.3.19 requires ^0.6). zip 4.6.1 is compiled only into the

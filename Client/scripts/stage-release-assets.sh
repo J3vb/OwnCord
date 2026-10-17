@@ -68,14 +68,17 @@ case "$os" in
     # the bundler kept them, and the helper's mode and owner, before they ship:
     # a helper that is not root-owned and non-writable would make the client
     # decline to use it, and an update that silently never works is invisible.
+    # Tauri's bundler writes data.tar entries as uid/gid 0 with no owner names
+    # and no leading ./, so dpkg-deb lists them as "0/0 ... usr/lib/...".
+    # Both spellings of root and of the path are accepted.
     listing="$(dpkg-deb -c "${debs[0]}")"
-    helper_line="$(grep -E ' \./usr/lib/owncord-client/owncord-deb-update$' <<<"$listing" || true)"
-    if ! grep -qE '^-rwxr-xr-x root/root ' <<<"$helper_line"; then
-      echo "::error::${debs[0]} must carry ./usr/lib/owncord-client/owncord-deb-update as -rwxr-xr-x root/root, found: ${helper_line:-nothing}"
+    helper_line="$(grep -E ' (\./)?usr/lib/owncord-client/owncord-deb-update$' <<<"$listing" || true)"
+    if ! grep -qE '^-rwxr-xr-x (root/root|0/0) ' <<<"$helper_line"; then
+      echo "::error::${debs[0]} must carry usr/lib/owncord-client/owncord-deb-update as -rwxr-xr-x root/root, found: ${helper_line:-nothing}"
       exit 1
     fi
-    if ! grep -qE '^-rw-r--r-- root/root .* \./usr/share/polkit-1/actions/com\.owncord\.client\.update\.policy$' <<<"$listing"; then
-      echo "::error::${debs[0]} must carry ./usr/share/polkit-1/actions/com.owncord.client.update.policy as -rw-r--r-- root/root"
+    if ! grep -qE '^-rw-r--r-- (root/root|0/0) .* (\./)?usr/share/polkit-1/actions/com\.owncord\.client\.update\.policy$' <<<"$listing"; then
+      echo "::error::${debs[0]} must carry usr/share/polkit-1/actions/com.owncord.client.update.policy as -rw-r--r-- root/root"
       exit 1
     fi
     # Logged so the Version, Depends and Recommends of every build are on record
