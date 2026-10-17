@@ -248,7 +248,7 @@ interface PublishOptions {
   resolution?: { width: number; height: number };
   videoEncoding?: { maxBitrate: number; maxFramerate?: number };
   /** The codec `resolveVideoCodec` chose; the native engine publishes VP8
-   *  unless this is `h264`. */
+   *  unless this is `h264` or `vp9`. */
   videoCodec?: string;
 }
 

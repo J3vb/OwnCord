@@ -864,8 +864,8 @@ test("a browser VP9 camera with the wrong key decodes no VP9 frame natively", as
   expect(fromBrowser.reduce((sum, v) => sum + v.frames, 0)).toBe(0);
 });
 
-// A native VP9 publish (WP M-11b): one L1T3 SVC layer, never simulcast, so the
-// camera is requested with `--simulcast` to prove the host drops it for VP9.
+// A native VP9 publish (WP M-11b) is one L1T3 SVC layer. The camera still asks
+// for `--simulcast`; the Rust unit test proves the host drops it for VP9.
 test("a native VP9 camera decodes in the browser with the same key", async ({ page }) => {
   await gateNativeVp9Encode();
   const key = randomBytes(32).toString("base64");
@@ -983,11 +983,16 @@ test("a native VP9 camera and share with the wrong key are decoded by no one", a
   await page.waitForTimeout(5_000);
   const camera = await readBrowserPeer(page, "user-2");
   const screen = await readBrowserPeer(page, "user-2#screen");
+  // inbound-rtp names the codec even when decryption fails, so a VP8 fallback
+  // cannot pass as this control.
+  await expectBrowserReceivedVp9(page, "camera");
+  await expectBrowserReceivedVp9(page, "screen_share");
   await peer.done;
   // Subscribed to both, and not one frame of either decoded.
   expect(camera.videoFrames).toBe(0);
   expect(screen.videoFrames).toBe(0);
   expect(camera.encErrors).toBeGreaterThan(0);
+  expect(screen.encErrors).toBeGreaterThan(0);
 });
 
 test("a native peer with the wrong key decodes no video and is decoded by no one", async ({
