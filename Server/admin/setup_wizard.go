@@ -317,12 +317,23 @@ func buildConfigPatch(wr *setupWizardRequest, running *config.Config) config.Pat
 // only when base, the configuration with no credential generation, has neither half,
 // which is Patch's rule at config/save.go re-expressed; values are never
 // logged.
-func wizardOverrides(wr *setupWizardRequest, running, base *config.Config) map[string]any {
+//
+// The second result names the keys the wizard chose a new value for but an
+// environment variable pins, so the caller can say they were not saved.
+func wizardOverrides(wr *setupWizardRequest, running, base *config.Config) (map[string]any, []string) {
 	changes := map[string]any{}
+	var pinned []string
 	set := func(key string, value any, differs bool) {
-		if differs && !config.EnvOverridden(key) {
-			changes[key] = value
+		if !differs {
+			return
 		}
+		if config.EnvOverridden(key) {
+			if key != keyLiveKitAPIKey && key != keyLiveKitAPISecret {
+				pinned = append(pinned, key)
+			}
+			return
+		}
+		changes[key] = value
 	}
 	if wr.Port != nil {
 		set("server.port", *wr.Port, *wr.Port != running.Server.Port)
@@ -353,7 +364,8 @@ func wizardOverrides(wr *setupWizardRequest, running, base *config.Config) map[s
 		set(keyLiveKitAPIKey, running.Voice.LiveKitAPIKey, running.Voice.LiveKitAPIKey != "")
 		set(keyLiveKitAPISecret, running.Voice.LiveKitAPISecret, running.Voice.LiveKitAPISecret != "")
 	}
-	return changes
+	slices.Sort(pinned)
+	return changes, pinned
 }
 
 const (
@@ -444,6 +456,22 @@ func wizardChangesRunningConfig(wr *setupWizardRequest, running *config.Config) 
 		return true
 	}
 	return false
+}
+
+// computeContainerRestartURL is computeRestartURL for a container: the browser
+// reaches the server through a published port that need not equal the
+// in-container server.port, so the request's host:port is kept and only the
+// scheme follows the wizard's TLS mode.
+func computeContainerRestartURL(host string, wr *setupWizardRequest, running *config.Config) string {
+	effMode := running.TLS.Mode
+	if wr.TLSMode != nil {
+		effMode = *wr.TLSMode
+	}
+	scheme := "https"
+	if effMode == "off" {
+		scheme = "http"
+	}
+	return scheme + "://" + host + "/admin"
 }
 
 // computeRestartURL builds the admin-panel URL the server will be reachable

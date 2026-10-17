@@ -365,7 +365,11 @@ func setupSaveContainerOverrides(ctx context.Context, setup *service.SetupServic
 	if err != nil {
 		return fail(err)
 	}
-	changes := wizardOverrides(wr, opts.RunningCfg, base)
+	changes, pinned := wizardOverrides(wr, opts.RunningCfg, base)
+	if len(pinned) > 0 {
+		*warnings = append(*warnings,
+			"not saved because an environment variable sets them: "+strings.Join(pinned, ", ")+" — change the environment to change these")
+	}
 	if len(changes) == 0 {
 		return false, ""
 	}
@@ -378,7 +382,7 @@ func setupSaveContainerOverrides(ctx context.Context, setup *service.SetupServic
 	setup.RecordConfigWrite(ctx, uid,
 		"setup wizard wrote "+config.OverridesFileName+" ("+strings.Join(overrideKeyNames(changes), ", ")+")")
 	if wizardOverridesNeedRestart(changes) {
-		return true, computeRestartURL(reqHost, wr, opts.RunningCfg)
+		return true, computeContainerRestartURL(reqHost, wr, opts.RunningCfg)
 	}
 	return false, ""
 }

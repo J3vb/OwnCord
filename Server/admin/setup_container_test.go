@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -55,14 +57,30 @@ func newContainerWizard(t *testing.T, dataDir string) *containerWizard {
 type containerSetupResp struct {
 	Token           string   `json:"token"`
 	RestartRequired bool     `json:"restart_required"`
+	RestartURL      string   `json:"restart_url"`
 	Warnings        []string `json:"warnings"`
 }
 
 func (c *containerWizard) post(t *testing.T, wizard map[string]any) (int, containerSetupResp) {
 	t.Helper()
-	rr := doRequest(t, c.handler, "POST", "/setup", "", map[string]any{
-		"username": "owner", "password": "SecurePass123!", "wizard": wizard,
-	})
+	return c.postHost(t, "", wizard)
+}
+
+// postHost is post with the request's Host header set (empty keeps the
+// httptest default).
+func (c *containerWizard) postHost(t *testing.T, host string, wizard map[string]any) (int, containerSetupResp) {
+	t.Helper()
+	raw, err := json.Marshal(map[string]any{"username": "owner", "password": "SecurePass123!", "wizard": wizard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("POST", "/setup", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	if host != "" {
+		req.Host = host
+	}
+	rr := httptest.NewRecorder()
+	c.handler.ServeHTTP(rr, req)
 	var resp containerSetupResp
 	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
 	return rr.Code, resp
@@ -246,5 +264,97 @@ func TestSetupStatus_DefaultsReportPortLockedInContainer(t *testing.T) {
 	}
 	if present, _ := locked(t, "0"); present {
 		t.Error("port_locked present outside a container")
+	}
+}
+
+func TestSetupWizard_ContainerRestartURLKeepsPublishedPort(t *testing.T) {
+	c := newContainerWizard(t, "")
+	code, resp := c.postHost(t, "localhost:18443", map[string]any{"tls_mode": "off"})
+	if code != http.StatusCreated || !resp.RestartRequired {
+		t.Fatalf("POST /setup = %d restart=%v", code, resp.RestartRequired)
+	}
+	if resp.RestartURL != "http://localhost:18443/admin" {
+		t.Errorf("restart_url = %q, want the request's published port kept", resp.RestartURL)
+	}
+}
+
+func TestSetupWizard_ContainerCredentialsOnlyWriteRequestsNoRestart(t *testing.T) {
+	c := newContainerWizard(t, "")
+	code, resp := c.post(t, map[string]any{"port": 8443, "tls_mode": "self_signed", "upload_max_size_mb": 100})
+	if code != http.StatusCreated {
+		t.Fatalf("POST /setup = %d", code)
+	}
+	got := c.overridesMap(t)
+	if len(got) != 2 || got["voice.livekit_api_key"] == nil || got["voice.livekit_api_secret"] == nil {
+		t.Errorf("overrides keys = %d, want exactly the credential pair", len(got))
+	}
+	if resp.RestartRequired {
+		t.Error("restart_required = true for a credentials-only write")
+	}
+	select {
+	case <-c.restarted:
+		t.Error("restart hook invoked for a credentials-only write")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestSetupWizard_ContainerWritesTLSDomainOnlyForACME(t *testing.T) {
+	t.Run("not acme", func(t *testing.T) {
+		c := newContainerWizard(t, "")
+		if code, _ := c.post(t, map[string]any{"tls_mode": "off", "tls_domain": "chat.example.com"}); code != http.StatusCreated {
+			t.Fatalf("POST /setup = %d", code)
+		}
+		if _, ok := c.overridesMap(t)["tls.domain"]; ok {
+			t.Error("tls.domain written although the effective mode is not acme")
+		}
+	})
+	t.Run("acme", func(t *testing.T) {
+		c := newContainerWizard(t, "")
+		code, resp := c.post(t, map[string]any{"tls_mode": "acme", "tls_domain": "chat.example.com"})
+		if code != http.StatusCreated || len(resp.Warnings) != 0 {
+			t.Fatalf("POST /setup = %d warnings=%v", code, resp.Warnings)
+		}
+		got := c.overridesMap(t)
+		if got["tls.mode"] != "acme" || got["tls.domain"] != "chat.example.com" {
+			t.Errorf("overrides = %v, want tls.mode=acme and tls.domain", got)
+		}
+	})
+}
+
+func TestSetupWizard_ContainerPreviewRefusalIsWarningNoRestart(t *testing.T) {
+	c := newContainerWizard(t, "")
+	// An IPv4 literal passes the wizard's hostname check but not the
+	// overrides rule for tls.domain, so the Preview gate refuses it.
+	code, resp := c.post(t, map[string]any{"tls_mode": "acme", "tls_domain": "192.0.2.1"})
+	if code != http.StatusCreated {
+		t.Fatalf("POST /setup = %d, want 201", code)
+	}
+	if resp.Token == "" || len(resp.Warnings) == 0 || resp.RestartRequired {
+		t.Errorf("token=%q warnings=%v restart=%v, want token, a warning, no restart", resp.Token, resp.Warnings, resp.RestartRequired)
+	}
+	if _, err := os.Stat(c.overrides); !os.IsNotExist(err) {
+		t.Error("overrides file written despite the refusal")
+	}
+	select {
+	case <-c.restarted:
+		t.Error("restart hook invoked after a refused save")
+	case <-time.After(100 * time.Millisecond):
+	}
+	if n, err := c.database.UserCount(context.Background()); err != nil || n != 1 {
+		t.Errorf("user count = %d, err = %v, want 1", n, err)
+	}
+}
+
+func TestSetupWizard_ContainerWarnsAboutEnvPinnedChoices(t *testing.T) {
+	t.Setenv("OWNCORD_VOICE_QUALITY", "medium")
+	t.Setenv("OWNCORD_UPLOAD_MAX_SIZE_MB", "100")
+	c := newContainerWizard(t, "")
+	code, resp := c.post(t, map[string]any{"voice_quality": "high", "upload_max_size_mb": 250, "tls_mode": "off"})
+	if code != http.StatusCreated {
+		t.Fatalf("POST /setup = %d", code)
+	}
+	want := "not saved because an environment variable sets them: upload.max_size_mb, voice.quality — change the environment to change these"
+	if !slices.Contains(resp.Warnings, want) {
+		t.Errorf("warnings = %v, want %q", resp.Warnings, want)
 	}
 }

@@ -335,8 +335,9 @@ The image also sets `OWNCORD_VOICE_UDP_PORT=7882`. All voice media then uses
 that one UDP port instead of the `50000-60000` range. Override either variable
 to change this. LiveKit's credentials and its `livekit.yaml` are kept in
 `/app/data`, the volume. Credentials the setup wizard generates are saved there
-too (in `config-overrides.json`), unless `config.yaml` or the environment
-already supplies them, so they persist once the wizard has run.
+too (in `config-overrides.json`). The pair is saved only when neither half is
+supplied by `config.yaml` or the environment, so they persist once the wizard
+has run.
 
 **Two containers (the compose stack).** The shipped `docker-compose.yml` runs
 `livekit/livekit-server:v1.13.7` as its own container. For the server it
