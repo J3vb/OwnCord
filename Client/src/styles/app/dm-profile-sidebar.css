@@ -1,4 +1,7 @@
 /* ── DM Profile Sidebar ── */
+.dm-profile-slot {
+  display: flex;
+}
 .dm-profile-sidebar {
   width: 340px;
   background: var(--bg-secondary);
