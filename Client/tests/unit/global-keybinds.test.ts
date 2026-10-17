@@ -23,6 +23,7 @@ const { saveGlobalShortcutVk } = await import("../../src/lib/voiceShortcuts");
 function makeHandlers(): {
   onSearch: Mock<() => void>;
   onOpenSettings: Mock<() => void>;
+  onOpenShortcuts: Mock<() => void>;
   onToggleMute: Mock<() => void>;
   onToggleDeafen: Mock<() => void>;
   onToggleCamera: Mock<() => void>;
@@ -36,6 +37,7 @@ function makeHandlers(): {
   return {
     onSearch: vi.fn<() => void>(),
     onOpenSettings: vi.fn<() => void>(),
+    onOpenShortcuts: vi.fn<() => void>(),
     onToggleMute: vi.fn<() => void>(),
     onToggleDeafen: vi.fn<() => void>(),
     onToggleCamera: vi.fn<() => void>(),
@@ -826,6 +828,99 @@ describe("global keybinds", () => {
       press(",", { repeat: true });
 
       expect(h.onOpenSettings).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Ctrl+/ opens the shortcuts overlay", () => {
+    function keyOn(el: HTMLElement, init: KeyboardEventInit): KeyboardEvent {
+      if (!el.isConnected) document.body.appendChild(el);
+      el.focus();
+      const event = new KeyboardEvent("keydown", {
+        key: "/",
+        bubbles: true,
+        cancelable: true,
+        ...init,
+      });
+      el.dispatchEvent(event);
+      return event;
+    }
+
+    it("Ctrl+/ opens it and swallows the browser default", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+
+      const event = press("/");
+
+      expect(h.onOpenShortcuts).toHaveBeenCalledOnce();
+      expect(event.defaultPrevented).toBe(true);
+    });
+
+    it("Cmd+/ does the same (macOS)", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+
+      press("/", { ctrlKey: false, metaKey: true });
+
+      expect(h.onOpenShortcuts).toHaveBeenCalledOnce();
+    });
+
+    it("a bare slash and Ctrl+Alt+/ are not the shortcut", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+
+      const bare = press("/", { ctrlKey: false });
+      press("/", { altKey: true });
+
+      expect(h.onOpenShortcuts).not.toHaveBeenCalled();
+      expect(bare.defaultPrevented).toBe(false);
+    });
+
+    it("works from the message composer", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+      const composer = document.createElement("textarea");
+      composer.className = "msg-textarea";
+      onTestFinished(() => composer.remove());
+
+      keyOn(composer, { ctrlKey: true });
+
+      expect(h.onOpenShortcuts).toHaveBeenCalledOnce();
+    });
+
+    it("does nothing while Settings is open (isSuspended)", () => {
+      const h = makeHandlers();
+      let settingsOpen = true;
+      detach = attachGlobalKeybinds({ ...h, isSuspended: () => settingsOpen });
+
+      const event = press("/");
+      expect(h.onOpenShortcuts).not.toHaveBeenCalled();
+      expect(event.defaultPrevented).toBe(false);
+
+      settingsOpen = false;
+      press("/");
+      expect(h.onOpenShortcuts).toHaveBeenCalledOnce();
+    });
+
+    it("does nothing while a dialog is open", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+      const dialog = document.createElement("div");
+      dialog.className = "modal-overlay visible";
+      document.body.appendChild(dialog);
+      onTestFinished(() => dialog.remove());
+
+      press("/");
+
+      expect(h.onOpenShortcuts).not.toHaveBeenCalled();
+    });
+
+    it("ignores an auto-repeating key", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+
+      press("/", { repeat: true });
+
+      expect(h.onOpenShortcuts).not.toHaveBeenCalled();
     });
   });
 });
