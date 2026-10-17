@@ -73,6 +73,43 @@ export function allCssFiles(manifest) {
   return files;
 }
 
+/** Longest a `note` may be. Notes say what a budget covers; why a budget moved
+ *  goes in the commit and PR that move it (bundle-budget-history.md has the
+ *  reasoning from before 2026-10-17). Every lane appending to one note made
+ *  bundle-budgets.json conflict on nearly every pair of client PRs. */
+export const MAX_NOTE_LENGTH = 300;
+
+/** The base64 encoding of the WASM magic bytes `\0asm`. */
+export const WASM_MARKER = "AGFzbQ";
+
+/** Problems with the shape of bundle-budgets.json, as messages; empty when it
+ *  is well formed. Catches history appended to a note, and anything appended
+ *  to the WASM marker, which would make that check search for text no chunk
+ *  contains. */
+export function validateBudgets(budgets) {
+  const problems = [];
+  const checkEntry = (label, spec) => {
+    if (!Number.isInteger(spec?.budget) || spec.budget <= 0) {
+      problems.push(`${label}: budget must be a positive integer`);
+    }
+    if (typeof spec?.note === "string" && spec.note.length > MAX_NOTE_LENGTH) {
+      problems.push(
+        `${label}: note is ${spec.note.length} characters (max ${MAX_NOTE_LENGTH}); ` +
+          "put the reason for a raise in the commit and PR, not the note",
+      );
+    }
+  };
+  checkEntry("startup", budgets.startup);
+  checkEntry("css", budgets.css);
+  for (const [name, spec] of Object.entries(budgets.chunks ?? {})) {
+    checkEntry(`chunks.${name}`, spec);
+  }
+  if (budgets.forbidEmbeddedWasm?.marker !== WASM_MARKER) {
+    problems.push(`forbidEmbeddedWasm.marker must be exactly '${WASM_MARKER}'`);
+  }
+  return problems;
+}
+
 function main() {
   let manifest;
   try {
@@ -86,6 +123,12 @@ function main() {
   const budgets = JSON.parse(
     readFileSync(new URL("../bundle-budgets.json", import.meta.url), "utf8"),
   );
+
+  const problems = validateBudgets(budgets);
+  if (problems.length > 0) {
+    for (const problem of problems) console.error(`bundle-budget: ${problem}`);
+    exit(2);
+  }
 
   const gz = (file) => gzipSync(readFileSync(`${DIST}/${file}`), { level: 9 }).length;
 

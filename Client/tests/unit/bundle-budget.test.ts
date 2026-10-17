@@ -10,14 +10,17 @@
 //
 // This drives the pure helpers the CLI calls, so it needs no build: feed a
 // fixture manifest and assert the split.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   allCssFiles,
   findEmbeddedWasm,
+  MAX_NOTE_LENGTH,
   startupClosureFiles,
+  validateBudgets,
+  WASM_MARKER,
 } from "../../scripts/bundle-budget.mjs";
 
 /** A manifest shaped like Vite's: an entry linking a JS chunk and a stylesheet,
@@ -70,5 +73,41 @@ describe("embedded WASM scan", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("bundle-budgets.json shape", () => {
+  const real = JSON.parse(
+    readFileSync(join(__dirname, "../../bundle-budgets.json"), "utf8"),
+  ) as Record<string, unknown>;
+  const valid = {
+    startup: { budget: 1000, note: "entry" },
+    css: { budget: 500 },
+    chunks: { MainPage: { budget: 2000, note: "page" } },
+    forbidEmbeddedWasm: { marker: WASM_MARKER },
+  };
+
+  it("accepts the checked-in budgets", () => {
+    expect(validateBudgets(real)).toEqual([]);
+  });
+
+  it("rejects a note that carries raise history", () => {
+    const budgets = {
+      ...valid,
+      chunks: { MainPage: { budget: 2000, note: "x".repeat(MAX_NOTE_LENGTH + 1) } },
+    };
+    expect(validateBudgets(budgets)).toEqual([expect.stringContaining("chunks.MainPage: note is")]);
+  });
+
+  it("rejects text appended to the WASM marker", () => {
+    const budgets = { ...valid, forbidEmbeddedWasm: { marker: `${WASM_MARKER} Raised 1 -> 2 B` } };
+    expect(validateBudgets(budgets)).toEqual([
+      `forbidEmbeddedWasm.marker must be exactly '${WASM_MARKER}'`,
+    ]);
+  });
+
+  it("rejects a missing or non-integer budget", () => {
+    const budgets = { ...valid, css: { budget: 12.5 } };
+    expect(validateBudgets(budgets)).toEqual(["css: budget must be a positive integer"]);
   });
 });
