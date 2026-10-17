@@ -13,6 +13,7 @@ import type { MountableComponent } from "@lib/safe-render";
 import { channelsStore, getChannelsByCategory, categoryLabel } from "@stores/channels.store";
 import { navigateToChannel } from "@lib/channel-navigation";
 import { isChannelMuted } from "@lib/channel-mutes";
+import { HIDE_MUTED_CHANNELS_KEY, hiddenByMute } from "@lib/hide-muted-channels";
 import type { Channel } from "@stores/channels.store";
 import { authStore, getCurrentUser } from "@stores/auth.store";
 import { uiStore, toggleCategory, isCategoryCollapsed } from "@stores/ui.store";
@@ -273,6 +274,12 @@ function rowLooksUnread(channel: Channel): boolean {
   return rowIsUnread(channel) && (!isChannelMuted(channel.id) || channel.mentionCount > 0);
 }
 
+/** Whether a voice channel has people in it, or is the one you are connected to. */
+function voiceChannelOccupied(channelId: number): boolean {
+  const voice = voiceStore.getState();
+  return voice.currentChannelId === channelId || (voice.voiceUsers.get(channelId)?.size ?? 0) > 0;
+}
+
 /**
  * Whether a channel row still shows under a collapsed category: the channel
  * you are viewing, any mention (muted or not, a mention always shows), an
@@ -282,12 +289,7 @@ function rowLooksUnread(channel: Channel): boolean {
 function rowVisibleWhenCollapsed(channel: Channel, activeChannelId: number | null): boolean {
   if (channel.id === activeChannelId) return true;
   if (channel.mentionCount > 0) return true;
-  if (channel.type === "voice") {
-    const voice = voiceStore.getState();
-    return (
-      voice.currentChannelId === channel.id || (voice.voiceUsers.get(channel.id)?.size ?? 0) > 0
-    );
-  }
+  if (channel.type === "voice") return voiceChannelOccupied(channel.id);
   return rowIsUnread(channel) && !isChannelMuted(channel.id);
 }
 
@@ -914,9 +916,14 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
      *  shows a dot while it hides an unread row. */
     function reconcileRows(container: HTMLElement, g: GroupRender): void {
       const collapsed = g.name !== null && isCategoryCollapsed(g.name);
-      const rows = collapsed
-        ? g.channels.filter((ch) => rowVisibleWhenCollapsed(ch, activeChannelId))
-        : g.channels;
+      // Hide Muted Channels drops muted rows here, not from `g.channels`: the
+      // header (kept even when every row is hidden) and the drag-reorder maths
+      // still see the whole category.
+      const rows = g.channels.filter(
+        (ch) =>
+          !hiddenByMute(ch, activeChannelId, voiceChannelOccupied) &&
+          (!collapsed || rowVisibleWhenCollapsed(ch, activeChannelId)),
+      );
       const header = container.parentElement?.querySelector(".category") ?? null;
       if (header !== null) {
         syncHiddenUnreadDot(header, collapsed && hidesUnreadRow(g.channels, activeChannelId));
@@ -1094,8 +1101,17 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     renderChannels(true);
   }
 
+  /** Redraw when the Hide Muted Channels preference flips. */
+  function handlePrefChanged(e: Event): void {
+    const key = (e as CustomEvent<{ key?: string }>).detail?.key;
+    if (key === HIDE_MUTED_CHANNELS_KEY) renderChannels();
+  }
+
   function mount(container: Element): void {
     root = createElement("div", { class: "channel-sidebar", "data-testid": "channel-sidebar" });
+    window.addEventListener("owncord:pref-change", handlePrefChanged, {
+      signal: disposable.signal,
+    });
     // The event is dispatched on window by the mute store, so every writer
     // (context menu, Settings unmute) redraws the rows (F16).
     window.addEventListener(CHANNEL_MUTE_CHANGED, handleMuteChanged, { signal: disposable.signal });

@@ -70,6 +70,7 @@ import { computeKeyFingerprint } from "@lib/e2eeCrypto";
 import { noteJoinFailed, noteJoinSucceeded } from "../../src/features/voice/joinBackoff";
 import { expectConsole } from "../helpers/console";
 import { muteChannel, unmuteChannel, invalidateMuteCache } from "@lib/channel-mutes";
+import { setHideMutedChannels } from "@lib/hide-muted-channels";
 
 function resetStores(): void {
   channelsStore.setState(() => ({
@@ -640,6 +641,195 @@ describe("ChannelSidebar", () => {
   });
 
   // ── WP 2B-5: a collapsed category keeps the rows that matter ──
+
+  // ── WP 3D-4d: Hide Muted Channels ──
+
+  describe("Hide Muted Channels (WP 3D-4d)", () => {
+    const text = (id: number, extra: Partial<ReadyChannel> = {}): ReadyChannel => ({
+      id,
+      name: `text-${id}`,
+      type: "text",
+      category: "Text Channels",
+      position: id,
+      unread_count: 0,
+      last_message_id: 1,
+      ...extra,
+    });
+    const voice = (id: number): ReadyChannel => ({
+      id,
+      name: `voice-${id}`,
+      type: "voice",
+      category: "Voice Channels",
+      position: id,
+    });
+    const rowIds = (): string[] =>
+      Array.from(container.querySelectorAll<HTMLElement>(".channel-item")).map(
+        (el) => el.dataset.channelId ?? "",
+      );
+    const flush = (): void => {
+      channelsStore.flush();
+      voiceStore.flush();
+    };
+
+    beforeEach(() => {
+      localStorage.clear();
+      invalidateMuteCache();
+    });
+
+    afterEach(() => {
+      localStorage.clear();
+      invalidateMuteCache();
+    });
+
+    it("shows muted rows while the preference is off", () => {
+      setChannels([text(1), text(2)]);
+      muteChannel(2);
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["1", "2"]);
+    });
+
+    it("hides a muted channel while the preference is on, and keeps unmuted ones", () => {
+      setChannels([text(1), text(2), text(3)]);
+      muteChannel(2);
+      setHideMutedChannels(true);
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["1", "3"]);
+    });
+
+    it("keeps the muted channel you are viewing", () => {
+      setChannels([text(1), text(2)]);
+      muteChannel(1);
+      muteChannel(2);
+      setHideMutedChannels(true);
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["2"]);
+    });
+
+    it("keeps a muted channel with an unread mention, but not plain unread", () => {
+      setChannels([
+        text(1, { unread_count: 2, mention_count: 1 }),
+        text(2, { unread_count: 5 }),
+        text(3),
+      ]);
+      muteChannel(1);
+      muteChannel(2);
+      setHideMutedChannels(true);
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["1", "3"]);
+    });
+
+    it("keeps a muted voice channel that has people in it, and hides an empty one", () => {
+      setChannels([text(1), voice(10), voice(11)]);
+      muteChannel(10);
+      muteChannel(11);
+      addVoiceUser(10, 30, "alice");
+      setHideMutedChannels(true);
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["1", "10"]);
+    });
+
+    it("keeps the header of a category whose channels are all hidden", () => {
+      setChannels([text(1), voice(10)]);
+      muteChannel(1);
+      setHideMutedChannels(true);
+      sidebar.mount(container);
+      const headers = Array.from(container.querySelectorAll<HTMLElement>(".category")).map(
+        (el) => el.dataset.category,
+      );
+      expect(headers).toEqual(["Text Channels", "Voice Channels"]);
+      expect(rowIds()).toEqual(["10"]);
+      expect(
+        container
+          .querySelector('[data-category="Text Channels"]')
+          ?.parentElement?.querySelector(".category-channels-container")?.children.length,
+      ).toBe(0);
+    });
+
+    it("collapsing a category still works with the preference on", () => {
+      setChannels([text(1), text(2, { unread_count: 3 })]);
+      muteChannel(1);
+      setHideMutedChannels(true);
+      uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set(["Text Channels"]) }));
+      sidebar.mount(container);
+      // Collapsed: only the unread unmuted row remains; the muted one stays hidden.
+      expect(rowIds()).toEqual(["2"]);
+    });
+
+    it("redraws live when the preference is toggled", () => {
+      setChannels([text(1), text(2)]);
+      muteChannel(2);
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["1", "2"]);
+
+      setHideMutedChannels(true);
+      expect(rowIds()).toEqual(["1"]);
+
+      setHideMutedChannels(false);
+      expect(rowIds()).toEqual(["1", "2"]);
+    });
+
+    it("redraws live when a channel is muted and unmuted", () => {
+      setChannels([text(1), text(2)]);
+      setHideMutedChannels(true);
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["1", "2"]);
+
+      muteChannel(2);
+      expect(rowIds()).toEqual(["1"]);
+
+      unmuteChannel(2);
+      expect(rowIds()).toEqual(["1", "2"]);
+    });
+
+    it("redraws live when you switch channels: the one you leave hides, the one you open shows", () => {
+      setChannels([text(1), text(2)]);
+      muteChannel(1);
+      muteChannel(2);
+      setHideMutedChannels(true);
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["1"]);
+
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
+      flush();
+      expect(rowIds()).toEqual(["2"]);
+    });
+
+    it("redraws live when a mention arrives or a voice user joins", () => {
+      setChannels([text(1), text(2), voice(10)]);
+      muteChannel(2);
+      muteChannel(10);
+      setHideMutedChannels(true);
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["1"]);
+
+      channelsStore.setState((prev) => {
+        const channels = new Map(prev.channels);
+        channels.set(2, { ...channels.get(2)!, unreadCount: 1, mentionCount: 1 });
+        return { ...prev, channels };
+      });
+      flush();
+      expect(rowIds()).toEqual(["1", "2"]);
+
+      addVoiceUser(10, 30, "alice");
+      flush();
+      expect(rowIds()).toEqual(["1", "2", "10"]);
+    });
+
+    it("ignores an unrelated preference change", () => {
+      setChannels([text(1), text(2)]);
+      muteChannel(2);
+      setHideMutedChannels(true);
+      sidebar.mount(container);
+      const before = container.querySelector('[data-channel-id="1"]');
+
+      window.dispatchEvent(new CustomEvent("owncord:pref-change", { detail: { key: "fontSize" } }));
+
+      expect(container.querySelector('[data-channel-id="1"]')).toBe(before);
+      expect(rowIds()).toEqual(["1"]);
+    });
+  });
 
   describe("collapsed category shows what matters (WP 2B-5)", () => {
     const text = (id: number, extra: Partial<ReadyChannel> = {}): ReadyChannel => ({
