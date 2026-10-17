@@ -655,6 +655,8 @@ describe("eslint-rules", () => {
         { code: `document.writeln(html);`, errors: [{ messageId: "htmlSink" }] },
         { code: `frame.setAttribute("srcdoc", html);`, errors: [{ messageId: "htmlSink" }] },
         { code: `frame.setAttribute("SrcDoc", html);`, errors: [{ messageId: "htmlSink" }] },
+        { code: "el[`innerHTML`] = html;", errors: [{ messageId: "htmlSink" }] },
+        { code: "frame.setAttribute(`srcdoc`, html);", errors: [{ messageId: "htmlSink" }] },
       ],
     });
   });
@@ -684,6 +686,12 @@ describe("eslint-rules", () => {
         { code: `ws.on("x", fn);`, errors: [{ messageId: "discarded" }] },
         { code: `this.ws.on("x", fn);`, errors: [{ messageId: "discarded" }] },
         { code: `onAuthCleared(reset);`, errors: [{ messageId: "discarded" }] },
+        { code: `store?.subscribe(fn);`, errors: [{ messageId: "discarded" }] },
+        { code: `store.subscribe?.(fn);`, errors: [{ messageId: "discarded" }] },
+        {
+          code: `async function f() { await store.subscribe(fn); }`,
+          errors: [{ messageId: "discarded" }],
+        },
         { code: `void onAuthCleared(reset);`, errors: [{ messageId: "voidNeedsReason" }] },
         {
           code: `// unrelated\n\nvoid store.subscribe(fn);`,

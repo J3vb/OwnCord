@@ -692,13 +692,20 @@ const HTML_SINK_PROPERTIES = new Set(["innerHTML", "outerHTML", "srcdoc"]);
 const HTML_SINK_METHODS = new Set(["insertAdjacentHTML"]);
 const DOCUMENT_WRITE_METHODS = new Set(["write", "writeln"]);
 
-/** The static name of a member's property (`a.b`, `a["b"]`), else null. */
+/** The value of a string literal or a template literal with no `${}`, else null. */
+function staticString(node) {
+  if (node?.type === "Literal" && typeof node.value === "string") return node.value;
+  if (node?.type === "TemplateLiteral" && node.expressions.length === 0) {
+    return node.quasis[0].value.cooked;
+  }
+  return null;
+}
+
+/** The static name of a member's property (`a.b`, `a["b"]`, ``a[`b`]``), else null. */
 function memberName(node) {
   if (node.type !== "MemberExpression") return null;
   if (!node.computed) return node.property.type === "Identifier" ? node.property.name : null;
-  return node.property.type === "Literal" && typeof node.property.value === "string"
-    ? node.property.value
-    : null;
+  return staticString(node.property);
 }
 
 const noRawHtmlSink = {
@@ -735,12 +742,8 @@ const noRawHtmlSink = {
         ) {
           report(node, `document.${name}`);
         } else if (name === "setAttribute") {
-          const [attr] = node.arguments;
-          if (
-            attr?.type === "Literal" &&
-            typeof attr.value === "string" &&
-            attr.value.toLowerCase() === "srcdoc"
-          ) {
+          const attr = staticString(node.arguments[0]);
+          if (attr !== null && attr.toLowerCase() === "srcdoc") {
             report(node, "setAttribute(srcdoc)");
           }
         }
@@ -816,6 +819,9 @@ const subscriptionResultKept = {
           isVoid = true;
           expr = expr.argument;
         }
+        // `await x.subscribe(fn)` and `x?.subscribe(fn)` discard it just the same.
+        if (expr.type === "AwaitExpression") expr = expr.argument;
+        if (expr.type === "ChainExpression") expr = expr.expression;
         if (expr.type !== "CallExpression") return;
         const name = subscriptionName(expr);
         if (name === null) return;
