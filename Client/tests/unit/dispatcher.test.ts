@@ -1048,6 +1048,60 @@ describe("WS Dispatcher", () => {
       expect(channelsStore.getState().channels.get(5)?.mentionCount).toBe(0);
     });
 
+    describe("from a blocked author", () => {
+      beforeEach(() => {
+        setUserBlockedByMe(2, true);
+        onTestFinished(() => setUserBlockedByMe(2, false));
+      });
+
+      it("a direct mention in a channel you are away from raises unread, not a mention", () => {
+        seedChannel();
+        incoming({ content: "ping @alex", mentions: [1] });
+        const ch = channelsStore.getState().channels.get(5);
+        expect(ch?.mentionCount).toBe(0);
+        expect(ch?.unreadCount).toBe(1);
+      });
+
+      it("an @everyone raises unread, not a mention", () => {
+        seedChannel();
+        incoming({ content: "@everyone", mentions_everyone: true });
+        const ch = channelsStore.getState().channels.get(5);
+        expect(ch?.mentionCount).toBe(0);
+        expect(ch?.unreadCount).toBe(1);
+      });
+
+      it("a direct mention in a DM raises the DM's unread count, not its mention count", () => {
+        seedChannel();
+        dmStore.setState(() => ({
+          channels: [
+            {
+              channelId: 50,
+              recipient: { id: 2, username: "bob", avatar: "", status: "online" as const },
+              participants: [],
+              name: "",
+              isGroup: true,
+              lastMessageId: null,
+              lastMessage: "",
+              lastMessageAt: "",
+              unreadCount: 0,
+              mentionCount: 0,
+            },
+          ],
+        }));
+        incoming({ channel_id: 50, content: "ping @alex", mentions: [1] });
+        const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
+        expect(dm?.mentionCount).toBe(0);
+        expect(dm?.unreadCount).toBe(1);
+      });
+
+      it("unblocking restores the badge", () => {
+        seedChannel();
+        setUserBlockedByMe(2, false);
+        incoming({ content: "ping @alex", mentions: [1] });
+        expect(channelsStore.getState().channels.get(5)?.mentionCount).toBe(1);
+      });
+    });
+
     it("still raises the mention badge for a live (non-replayed) @here mention", () => {
       seedChannel();
       incoming({ content: "@here standup", mentions_everyone: true, mentions_here: true });

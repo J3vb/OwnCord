@@ -549,6 +549,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.search-result-content--blocked {
+  font-style: italic;
+}
 
 .search-hit {
   background: color-mix(in srgb, var(--text-warning) 35%, transparent);

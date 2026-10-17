@@ -17,6 +17,7 @@ import {
 } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
+import { blocksStore } from "@stores/blocks.store";
 import { safetyStore } from "../features/safety/store";
 import { registerReadingAnchor } from "../features/messaging/readingAnchor";
 import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup";
@@ -30,6 +31,7 @@ const log = createLogger("message-list");
 import {
   shouldGroup,
   isSameDay,
+  renderBlockedRun,
   renderDayDivider,
   renderNewDivider,
   renderUnreadBar,
@@ -37,6 +39,7 @@ import {
   authorAvatarKey,
   refreshConnectionControls,
   fullDateTimeTitle,
+  type MessageRenderOptions,
 } from "./message-list/renderers";
 import { createAvatarElement, pickAvatarColor } from "./message-list/avatar";
 import { refreshReactionLocks } from "./message-list/reactions";
@@ -159,6 +162,8 @@ const FOLLOW_OWN_SEND_MS = 10_000;
 const SCROLL_BOTTOM_THRESHOLD = 100;
 const JUMP_RECENTRE_MS = 3000;
 
+const blockedUsers = (): ReadonlySet<number> => blocksStore.getState().blockedByMe;
+
 /** The hover bar's "..." button the event came from, if any. */
 function moreButtonOf(target: EventTarget | null): HTMLElement | null {
   return target instanceof Element
@@ -198,12 +203,23 @@ interface VirtualItemNewDivider {
   readonly kind: "new-divider";
 }
 
-type VirtualItem = VirtualItemMessage | VirtualItemDivider | VirtualItemNewDivider;
+/** A run of consecutive messages by blocked authors: the header stands for it
+ *  while collapsed, and sits above its messages while expanded. */
+interface VirtualItemBlockedRun {
+  readonly kind: "blocked-run";
+  readonly firstId: number;
+  readonly lastId: number;
+  readonly count: number;
+  readonly expanded: boolean;
+}
+
+type VirtualItem =
+  VirtualItemMessage | VirtualItemDivider | VirtualItemNewDivider | VirtualItemBlockedRun;
 
 // -- Smart height estimation --------------------------------------------------
 
 function estimateItemHeight(item: VirtualItem): number {
-  if (item.kind === "divider" || item.kind === "new-divider") return 32;
+  if (item.kind !== "message") return 32;
 
   // Non-grouped: min-height 2.75rem (44px @16px root) + margin-top 17px = 61px
   // Grouped: min-height 1.375rem (22px @16px root) + margin-top 0px = 22px
@@ -283,22 +299,51 @@ function focusSurvivingRow(
 // -- Pre-process messages into virtual items ----------------------------------
 
 /** Build virtual items for `messages`, with the NEW divider above index
- *  `newDividerAt` (-1 for none). */
+ *  `newDividerAt` (-1 for none). Consecutive messages by an author in `blocked`
+ *  become one run, broken by a day divider and by the NEW line; it is expanded
+ *  when any of its ids is in `shown`. */
 function buildVirtualItems(
   messages: readonly Message[],
   newDividerAt: number,
+  blocked: ReadonlySet<number>,
+  shown: ReadonlySet<number>,
 ): readonly VirtualItem[] {
   const items: VirtualItem[] = [];
   let lastTimestamp: string | null = null;
   let prevMsg: Message | null = null;
+  let run: Message[] = [];
+  const flushRun = (): void => {
+    if (run.length === 0) return;
+    const expanded = run.some((m) => shown.has(m.id));
+    items.push({
+      kind: "blocked-run",
+      firstId: run[0]!.id,
+      lastId: run[run.length - 1]!.id,
+      count: run.length,
+      expanded,
+    });
+    if (expanded) {
+      for (const message of run) items.push({ kind: "message", message, isGrouped: false });
+    }
+    run = [];
+  };
 
   for (const [i, msg] of messages.entries()) {
-    if (lastTimestamp === null || !isSameDay(lastTimestamp, msg.timestamp)) {
+    const isBlocked = blocked.has(msg.user.id);
+    const newDay = lastTimestamp === null || !isSameDay(lastTimestamp, msg.timestamp);
+    const isFirstUnread = i === newDividerAt;
+    if (newDay || isFirstUnread || !isBlocked) flushRun();
+    if (newDay) {
       items.push({ kind: "divider", timestamp: msg.timestamp });
     }
-    const isFirstUnread = i === newDividerAt;
     if (isFirstUnread) {
       items.push({ kind: "new-divider" });
+    }
+    if (isBlocked) {
+      run.push(msg);
+      lastTimestamp = msg.timestamp;
+      prevMsg = null;
+      continue;
     }
     // A message directly under the NEW line starts a fresh block: rendering it
     // as a grouped continuation of a message from before the line hides both
@@ -312,6 +357,7 @@ function buildVirtualItems(
     lastTimestamp = msg.timestamp;
     prevMsg = msg;
   }
+  flushRun();
   return items;
 }
 
@@ -410,6 +456,14 @@ export type MessageListComponent = MountableComponent & {
 export function createMessageList(options: MessageListOptions): MessageListComponent {
   const disposable = new Disposable();
   const unsubscribers: Array<() => void> = [];
+  /** Message ids of blocked authors whose run the reader opened, for this mount. */
+  const shownBlocked = new Set<number>();
+  const renderOptions: MessageRenderOptions = {
+    ...options,
+    get blockedUsers() {
+      return blockedUsers();
+    },
+  };
   /**
    * One owner per rendered message row, scoping that row's listeners (react/
    * reply/pin/edit/delete/copy-link, reply-ref, reaction chips, ...). A row
@@ -601,11 +655,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // Height estimation (Fenwick tree backed)
   // ---------------------------------------------------------------------------
 
-  /** Render one virtual item — the single place the three item kinds map to DOM. */
+  /** Render one virtual item — the single place the item kinds map to DOM. */
   function renderVirtualItem(item: VirtualItem): HTMLElement {
     if (item.kind === "divider") return renderDayDivider(item.timestamp);
     if (item.kind === "new-divider") return renderNewDivider();
     const owner = new Disposable();
+    if (item.kind === "blocked-run") {
+      const el = renderBlockedRun(item, () => toggleBlockedRun(item), owner.signal);
+      rowOwners.set(el, owner);
+      return el;
+    }
     // The one editor node is re-hosted by every build of its row.
     const editor =
       edit !== null && edit.session !== null && edit.messageId === item.message.id
@@ -615,7 +674,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       item.message,
       item.isGrouped,
       replyParents,
-      options,
+      renderOptions,
       owner.signal,
       editor,
     );
@@ -641,6 +700,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     if (item === undefined) return `idx-${index}`;
     if (item.kind === "divider") return `div-${item.timestamp}`;
     if (item.kind === "new-divider") return "new-divider";
+    if (item.kind === "blocked-run") return `blk-${item.firstId}`;
     // Every unconfirmed optimistic row (addOptimisticMessage) carries
     // id: 0 until confirmSend stamps the real id, so keying purely on
     // message.id would collide two or more pending rows onto the same
@@ -894,6 +954,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const bottom = root.scrollTop + Math.max(root.clientHeight - 1, 0);
     for (let i = Math.min(offsetToIndex(bottom), virtualItems.length - 1); i >= 0; i--) {
       const item = virtualItems[i]!;
+      if (item.kind === "blocked-run" && !item.expanded) {
+        noteVisibleMessageSeen(options.channelId, item.lastId);
+        return;
+      }
       if (item.kind !== "message" || item.message.id <= 0) continue;
       noteVisibleMessageSeen(options.channelId, item.message.id);
       return;
@@ -1334,7 +1398,12 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function rebuildItems(): void {
     replyParents = getChannelMessages(options.channelId);
     allMessages = visibleMessages(replyParents);
-    virtualItems = buildVirtualItems(allMessages, resolveNewDividerIndex(allMessages));
+    virtualItems = buildVirtualItems(
+      allMessages,
+      resolveNewDividerIndex(allMessages),
+      blockedUsers(),
+      shownBlocked,
+    );
 
     seedTree();
   }
@@ -1380,7 +1449,12 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const next = visibleMessages(nextParents);
     if (next.length === 0) return false;
     const prevItems = virtualItems;
-    const nextItems = buildVirtualItems(next, resolveNewDividerIndex(next));
+    const nextItems = buildVirtualItems(
+      next,
+      resolveNewDividerIndex(next),
+      blockedUsers(),
+      shownBlocked,
+    );
     const prevKeys = prevItems.map(keyOf);
     const nextKeys = nextItems.map(keyOf);
     const prevIndex = new Map(prevKeys.map((k, i) => [k, i]));
@@ -1469,11 +1543,13 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // A row stays when nothing it draws changed: its message, its grouping
       // and the parent a reply quotes. A divider with the same key is the same.
       const same =
-        now.kind !== "message" ||
-        (was?.kind === "message" &&
-          was.message === now.message &&
-          was.isGrouped === now.isGrouped &&
-          !quoteChanged(now.message.replyTo));
+        now.kind === "blocked-run"
+          ? was?.kind === "blocked-run" && was.count === now.count && was.expanded === now.expanded
+          : now.kind !== "message" ||
+            (was?.kind === "message" &&
+              was.message === now.message &&
+              was.isGrouped === now.isGrouped &&
+              !quoteChanged(now.message.replyTo));
       if (el !== undefined && same) {
         rows.push(el);
         reused.add(el);
@@ -2268,6 +2344,13 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // affordances (pin/delete), so that case — and only it — falls back to a
     // rebuild.
     lastCanManageMessages = canManageMessages();
+    // A block or an unblock folds or unfolds the author's rows in place.
+    unsubscribers.push(
+      blocksStore.subscribeSelector(
+        (s) => [...s.blockedByMe].toSorted((x, y) => x - y).join(","),
+        () => renderAll(),
+      ),
+    );
     unsubscribers.push(
       membersStore.subscribeSelector(
         (s) => s.roleRevision ?? 0,
@@ -2431,6 +2514,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       const replyTo = Number(bar.dataset["replyTo"] ?? "0");
       const parent = replyParents.find((m) => m.id === replyTo);
       if (parent === undefined || parent.deleted) continue;
+      if (bar.classList.contains("msg-reply-ref--blocked")) continue;
       const roleColor = roleColorVar(getUserRole(parent.user.id));
       const author = resolveAuthor(parent.user);
       const key = authorAvatarKey(author, roleColor);
@@ -2564,8 +2648,42 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const idx = virtualItems.findIndex(
       (item) => item.kind === "message" && item.message.id === messageId,
     );
-    if (idx === -1) return false;
+    if (idx === -1) {
+      if (!expandRunOf(messageId)) return false;
+      rebuildItems();
+      const at = virtualItems.findIndex(
+        (item) => item.kind === "message" && item.message.id === messageId,
+      );
+      return at !== -1 && revealIndex(at, true);
+    }
     return revealIndex(idx, true);
+  }
+
+  /** Message ids of the blocked run spanning `firstId`..`lastId`. */
+  function runIds(firstId: number, lastId: number): number[] {
+    return allMessages.filter((m) => m.id >= firstId && m.id <= lastId).map((m) => m.id);
+  }
+
+  /** Open the collapsed run `messageId` sits in; false when it is in none. */
+  function expandRunOf(messageId: number): boolean {
+    const run = virtualItems.find(
+      (item) =>
+        item.kind === "blocked-run" &&
+        !item.expanded &&
+        item.firstId <= messageId &&
+        messageId <= item.lastId,
+    );
+    if (run?.kind !== "blocked-run") return false;
+    for (const id of runIds(run.firstId, run.lastId)) shownBlocked.add(id);
+    return true;
+  }
+
+  function toggleBlockedRun(run: VirtualItemBlockedRun): void {
+    for (const id of runIds(run.firstId, run.lastId)) {
+      if (run.expanded) shownBlocked.delete(id);
+      else shownBlocked.add(id);
+    }
+    renderAll();
   }
 
   /** Centre row `idx` in the view, rendering it; with `flash`, highlight it too. */

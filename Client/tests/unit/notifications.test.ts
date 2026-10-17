@@ -373,6 +373,84 @@ describe("notifyIncomingMessage", () => {
     });
   });
 
+  describe("a blocked author", () => {
+    async function alerts() {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      const win = getCurrentWindow();
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      (win.requestUserAttention as ReturnType<typeof vi.fn>).mockClear();
+      mockOscillator.start.mockClear();
+      testPrefs.set("desktopNotifications", true);
+      testPrefs.set("flashTaskbar", true);
+      testPrefs.set("notificationSounds", true);
+      return {
+        popup: sendNotification as ReturnType<typeof vi.fn>,
+        flash: win.requestUserAttention as ReturnType<typeof vi.fn>,
+        chime: mockOscillator.start,
+      };
+    }
+
+    afterEach(() => {
+      setBlockedByMe([]);
+    });
+
+    for (const level of ["all", "mentions"]) {
+      it(`raises no popup, flash or chime for a group DM message at the ${level} level`, async () => {
+        const a = await alerts();
+        testPrefs.set("notificationLevel", level);
+        dmStore.setState(() => ({
+          channels: [
+            {
+              channelId: 7,
+              recipient: { id: 2, username: "TestUser", avatar: null, status: "online" },
+              lastMessageId: null,
+              lastMessage: "",
+              lastMessageAt: "",
+              unreadCount: 0,
+              mentionCount: 0,
+              isGroup: true,
+              members: [],
+            } as unknown as DmChannel,
+          ],
+        }));
+        setBlockedByMe([2]);
+        notifyIncomingMessage(
+          makePayload({ channel_id: 7, content: "hi @everyone", mentions_everyone: true }),
+        );
+        await new Promise((r) => setTimeout(r, 50));
+        expect(a.popup).not.toHaveBeenCalled();
+        expect(a.flash).not.toHaveBeenCalled();
+        expect(a.chime).not.toHaveBeenCalled();
+      });
+    }
+
+    it("raises nothing in the active channel while the window is away", async () => {
+      const a = await alerts();
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+      setBlockedByMe([2]);
+      notifyIncomingMessage(makePayload({ channel_id: 1 }));
+      await new Promise((r) => setTimeout(r, 50));
+      expect(a.popup).not.toHaveBeenCalled();
+      expect(a.flash).not.toHaveBeenCalled();
+      expect(a.chime).not.toHaveBeenCalled();
+    });
+
+    it("unblocking restores the alerts", async () => {
+      const a = await alerts();
+      setBlockedByMe([2]);
+      notifyIncomingMessage(makePayload({ channel_id: 1 }));
+      await new Promise((r) => setTimeout(r, 50));
+      expect(a.popup).not.toHaveBeenCalled();
+
+      setBlockedByMe([]);
+      resetNotificationCoalescing();
+      notifyIncomingMessage(makePayload({ channel_id: 1 }));
+      await vi.waitFor(() => expect(a.popup).toHaveBeenCalled());
+      expect(a.chime).toHaveBeenCalled();
+    });
+  });
+
   // NOTE: original title was "does not notify when current user is null" but
   // the code (see the guard clause in notifyIncomingMessage: `currentUser !==
   // null && payload.user.id === currentUser.id`) and the original inline

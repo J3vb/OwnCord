@@ -32,7 +32,7 @@ import {
   updateDmLastMessage,
   updateDmLastMessagePreview,
 } from "../../stores/dm.store";
-import { setUserBlockedByThem } from "../../stores/blocks.store";
+import { blocksStore, setUserBlockedByThem } from "../../stores/blocks.store";
 import type { ConnectionState } from "../../lib/ws";
 import { invalidateReactionUsers } from "./reactionUsers";
 import { parseTimestamp } from "@lib/formatting";
@@ -123,9 +123,12 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
   // either. A direct mention, or an @here/@everyone frame delivered live,
   // is unaffected — mentions_here is only ever set alongside
   // mentions_everyone for an @here (never a plain @everyone) token.
+  // A blocked author never raises one: the server leaves blockers out of its
+  // mention counts, so the badge here must agree with the next `ready`.
   const isMention =
-    mentionsCurrentUser(payload.content, { mentions: payload.mentions }) ||
-    (payload.mentions_everyone === true && !(payload.mentions_here === true && isReplayFrame));
+    !blocksStore.getState().blockedByMe.has(payload.user.id) &&
+    (mentionsCurrentUser(payload.content, { mentions: payload.mentions }) ||
+      (payload.mentions_everyone === true && !(payload.mentions_here === true && isReplayFrame)));
   // P4-03: "active" only means "the reader is watching" while the window is
   // focused (isChannelAway, lib/read-state.ts). A minimised or unfocused window
   // shows nothing, so a message landing in the active channel then must count
