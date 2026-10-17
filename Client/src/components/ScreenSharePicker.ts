@@ -139,7 +139,7 @@ export function showScreenSharePicker(
     let selectedQuality: StreamQuality = opts.defaultQuality;
     let selectedFps: number = opts.defaultFps;
     /** Re-applies the frame-rate gates; set once the Quality step is built. */
-    let syncFpsGates: () => void = () => {};
+    let syncFpsGates: (() => void) | null = null;
     let selectedAudio = true;
     /** Set once the footer is built; the source list is built first, so a
      *  source pre-selection before then is a safe no-op. */
@@ -222,7 +222,7 @@ export function showScreenSharePicker(
         function selectSource(id: string): void {
           selectedSource = id;
           tabSelection.set(activeTab, id);
-          syncFpsGates();
+          syncFpsGates?.();
           for (const card of panel.querySelectorAll<HTMLButtonElement>(".ssp-source")) {
             const on = card.dataset["sourceId"] === id;
             card.setAttribute("aria-checked", String(on));
