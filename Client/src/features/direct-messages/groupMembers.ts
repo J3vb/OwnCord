@@ -15,6 +15,7 @@ import { membersStore, memberDisplayName } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { resolveDisplayName } from "@lib/avatar";
 import { connectText } from "../../i18n/connect";
+import { accountText } from "../../i18n/account";
 import { groupDmText } from "../../i18n/groupDm";
 
 /** One row of the member panel. */
@@ -116,14 +117,20 @@ export function buildGroupPanelView(channelId: number): GroupPanelView | null {
   };
 }
 
-export type GroupAction = "add" | "remove" | "owner";
+export type GroupAction = "add" | "remove" | "owner" | "icon";
 
-/** The text for a failed Add / Remove / Make Owner call. */
+/** The text for a failed Add / Remove / Make Owner call, or a group icon change (`icon`, open to every member, so a 403 is not "owner only"). */
 export function groupActionErrorText(err: unknown, action: GroupAction): string {
   if (!(err instanceof ApiClientError)) return groupDmText("error.generic");
   if (err.status === 429 || err.code === "RATE_LIMITED") return connectText("error.rateLimited");
   if (err.code === "GROUP_DM_FULL") return groupDmText("error.full");
   if (err.code === "TIMED_OUT") return groupDmText("error.timedOut");
+  if (action === "icon") {
+    // The icon is open to every member, so a 403 is not "owner only"; the
+    // server's 400 text is its raw image-rule message, so show our own.
+    if (err.status === 400) return accountText("avatar.unreadable");
+    return groupDmText("error.generic");
+  }
   if (err.status === 403) {
     return action === "add" ? groupDmText("error.cantAdd") : groupDmText("error.notOwner");
   }

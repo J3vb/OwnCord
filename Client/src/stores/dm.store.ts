@@ -39,6 +39,8 @@ export interface DmChannel {
    * that hides Add People, Remove and Make Group Owner.
    */
   readonly ownerId?: number;
+  /** The group's icon file path; "" or absent for none (WP 3B-11b). */
+  readonly icon?: string;
   readonly lastMessageId: number | null;
   /**
    * The current user's read pointer in this DM (see Channel.lastReadMessageId).
@@ -202,6 +204,8 @@ export function dmChannelFromPayload(p: DmChannelPayload): DmChannel {
     name: p.name ?? "",
     isGroup: p.is_group ?? false,
     ...(p.owner_id !== undefined && { ownerId: p.owner_id }),
+    // "" is kept, not dropped: addDmChannel's spread must clear an old icon.
+    ...(p.icon !== undefined && { icon: p.icon }),
     lastMessageId: p.last_message_id,
     lastReadMessageId: p.last_read_message_id,
     lastMessage: p.last_message,

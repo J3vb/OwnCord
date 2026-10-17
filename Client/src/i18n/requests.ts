@@ -19,6 +19,8 @@ export const requestsText = defineCatalog("requests", {
   "dm.profile": "Profile",
   "dm.call": "Call",
   "dm.renameGroup": "Rename Group",
+  "dm.changeGroupIcon": "Change Group Icon",
+  "dm.removeGroupIcon": "Remove Group Icon",
   "dm.leaveGroup": "Leave Group",
   "dm.close": "Close DM",
   "dm.leaveConfirmTitle": "Leave this group?",

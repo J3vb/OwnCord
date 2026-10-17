@@ -3260,6 +3260,32 @@ describe("SidebarArea", () => {
     });
   });
 
+  describe("buildMemberPanel", () => {
+    it("Call opens an existing DM and starts the call (BUG-05)", () => {
+      addDmChannel(
+        makeDm({
+          channelId: 100,
+          recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
+        }),
+      );
+      const onStartCall = vi.fn();
+      const opts = defaultOpts();
+      const result = createSidebarArea({ ...opts, onStartCall });
+      container.appendChild(result.sidebarWrapper);
+
+      const panel = result.buildMemberPanel();
+      const calls = (createMemberList as MockedFn).mock.calls;
+      calls[calls.length - 1]![0].onCallUser(10);
+
+      expect(opts.api.createDm).not.toHaveBeenCalled();
+      expect(onStartCall).toHaveBeenCalledTimes(1);
+      expect(channelsStore.getState().activeChannelId).toBe(100);
+
+      panel.destroy();
+      cleanup(result);
+    });
+  });
+
   // -------------------------------------------------------------------------
   // Create DM error handling
   // -------------------------------------------------------------------------

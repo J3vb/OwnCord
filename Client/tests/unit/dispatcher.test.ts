@@ -4898,7 +4898,7 @@ describe("WS Dispatcher", () => {
   });
 
   // OC-0218: the ready-time GET /blocks and a user-initiated block/unblock
-  // (SidebarMemberSection's onToggleBlock -> setUserBlockedByMe, after its
+  // (memberPanel's onToggleBlock -> setUserBlockedByMe, after its
   // own await api.blockUser/unblockUser) can race. The GET is issued first
   // but its reply can land after the user's own fresher action — applying it
   // unconditionally reverts what the user just did.
@@ -4921,7 +4921,7 @@ describe("WS Dispatcher", () => {
     expect(listBlocks).toHaveBeenCalled();
 
     // While it's in flight, the user clicks "Unblock" on 42 — the same
-    // sequence SidebarMemberSection's onToggleBlock performs once its own
+    // sequence memberPanel's onToggleBlock performs once its own
     // await api.unblockUser resolves.
     setUserBlockedByMe(42, false);
     expect([...blocksStore.getState().blockedByMe]).toEqual([]);

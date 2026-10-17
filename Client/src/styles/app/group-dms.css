@@ -193,3 +193,13 @@
   text-align: left;
   cursor: pointer;
 }
+
+/* A group's uploaded icon replaces the face stack (WP 3B-11b). */
+.dm-avatar-stack .dm-avatar-icon-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: var(--radius-circle);
+}

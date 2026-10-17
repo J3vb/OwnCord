@@ -156,6 +156,7 @@ function buildDmHeaderAvatar(dm: DmChannel, label: string): HTMLElement {
       label,
       "#5865F2",
       "ch-avatar-stack",
+      dm.icon ?? null,
     );
     stack.setAttribute("aria-hidden", "true");
     return stack;
@@ -176,7 +177,7 @@ function buildDmHeaderAvatar(dm: DmChannel, label: string): HTMLElement {
 /** What the header's avatar is drawn from; equal keys mean the same picture. */
 function dmHeaderAvatarKey(dm: DmChannel, label: string): string {
   if (dm.isGroup) {
-    return `g|${label}|${dm.participants.map((p) => `${p.id}:${p.avatar}`).join(",")}`;
+    return `g|${label}|${dm.icon ?? ""}|${dm.participants.map((p) => `${p.id}:${p.avatar}`).join(",")}`;
   }
   const member = membersStore.getState().members.get(dm.recipient.id);
   return `u|${label}|${dm.recipient.id}|${member?.avatar ?? dm.recipient.avatar}`;
