@@ -115,7 +115,7 @@ func (h *Hub) leaveVoiceLocked(c *Client, reason string) {
 func (h *Hub) leaveParkedVoiceLocked(userID int64, reason string) {
 	txn := h.begin(userID)
 	defer txn.end()
-	h.leaveParkedVoice(context.Background(), h.voiceGrace.take(userID), reason)
+	h.leaveParkedVoice(context.Background(), txn.takeParked(0, ""), reason)
 }
 
 // voiceJoinPostCommitRaceHook, when non-nil, runs in voiceJoinPersist after

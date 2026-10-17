@@ -657,6 +657,15 @@ func (h *Hub) DropSocketForTest(c *Client) {
 	}
 }
 
+// leaveVoiceOnDisconnect runs disconnectVoice for a test that drives the
+// socket-teardown voice step directly: it takes the member lock the pumps hold
+// around the real call.
+func (h *Hub) leaveVoiceOnDisconnect(ctx context.Context, c *Client, reason string) {
+	txn := h.begin(c.userID)
+	defer txn.end()
+	h.disconnectVoice(ctx, txn, c, reason)
+}
+
 // NoteChannelActivityForTest records a send with the channel_activity
 // coalescer, as the emit step of a chat_send does.
 func (h *Hub) NoteChannelActivityForTest(channelID, msgID, authorID int64) {

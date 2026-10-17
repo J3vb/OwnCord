@@ -173,7 +173,7 @@ func TestVoiceRegistry_DeleteRowErrorDropsGraceKeepsRow(t *testing.T) {
 	token := f.join(t)
 
 	// Park the membership as a dropped socket would.
-	f.h.voiceGrace.put(f.uid, &voiceGraceEntry{client: f.c, channelID: f.chID, joinToken: token}, func() {})
+	f.h.voiceGrace.put(f.uid, &voiceGraceEntry{client: f.c, snap: slotSnap{chID: f.chID, joinToken: token}}, func() {})
 	t.Cleanup(func() { f.h.voiceGrace.take(f.uid) })
 
 	f.h.voice = failingLeaveStore{VoiceStore: real, err: errBoom}

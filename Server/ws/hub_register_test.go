@@ -156,7 +156,7 @@ func TestRegisterNow_WakeReconnectAnotherSessionGraced_Refused(t *testing.T) {
 
 	parked := NewTestClient(h, 1, make(chan []byte, 8))
 	parked.tokenHash = "session-a"
-	entry := &voiceGraceEntry{client: parked, channelID: 7, joinToken: "jt"}
+	entry := &voiceGraceEntry{client: parked, snap: slotSnap{chID: 7, joinToken: "jt", completed: true}}
 	h.voiceGrace.put(1, entry, func() {})
 	t.Cleanup(func() { h.voiceGrace.take(1) })
 
@@ -183,7 +183,7 @@ func TestRegisterNow_WakeReconnectSameSessionGraced_Inherits(t *testing.T) {
 
 	parked := NewTestClient(h, 1, make(chan []byte, 8))
 	parked.tokenHash = "session-a"
-	h.voiceGrace.put(1, &voiceGraceEntry{client: parked, channelID: 7, joinToken: "jt"}, func() {})
+	h.voiceGrace.put(1, &voiceGraceEntry{client: parked, snap: slotSnap{chID: 7, joinToken: "jt", completed: true}}, func() {})
 
 	wake := NewTestClient(h, 1, make(chan []byte, 8))
 	wake.tokenHash = "session-a"
