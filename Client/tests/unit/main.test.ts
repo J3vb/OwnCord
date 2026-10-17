@@ -1608,6 +1608,26 @@ describe("main.ts render failure recovery (4.12)", () => {
       expect(reload).toHaveBeenCalledTimes(1);
     });
 
+    it("a second click while the leave is pending waits for it too", async () => {
+      let finishLeave!: () => void;
+      mockLeaveVoice.mockReturnValue(
+        new Promise<void>((resolve) => {
+          finishLeave = resolve;
+        }),
+      );
+      const button = await failedMainPage();
+      button.click();
+      await vi.advanceTimersByTimeAsync(100);
+      button.click();
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(reload).not.toHaveBeenCalled();
+      expect(mockLeaveVoice).toHaveBeenCalledTimes(1);
+      finishLeave();
+      await vi.advanceTimersByTimeAsync(10);
+      expect(reload).toHaveBeenCalledTimes(1);
+    });
+
     it("reloads anyway when the voice leave hangs", async () => {
       mockLeaveVoice.mockReturnValue(new Promise<void>(() => {}));
       const button = await failedMainPage();

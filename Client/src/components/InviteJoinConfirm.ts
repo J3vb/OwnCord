@@ -22,15 +22,6 @@ interface OpenDialog {
 }
 let open: OpenDialog | null = null;
 
-/**
- * Close the open dialog without confirming, if there is one. The dialog also
- * does this itself when the session ends, so a prompt about leaving a server
- * can never outlive the session it was about.
- */
-export function closeInviteJoinConfirm(): void {
-  open?.close();
-}
-
 /** Wording overrides; the in-chat chip uses the defaults. */
 export interface InviteConfirmText {
   readonly title?: string;

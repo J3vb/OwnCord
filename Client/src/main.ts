@@ -565,31 +565,42 @@ const RELOAD_VOICE_LEAVE_TIMEOUT_MS = 2000;
 
 // The two ways out of a page that failed to render (the fallback's buttons).
 // F5 and Ctrl+R are blocked, so without these a failed render is a dead end.
-const renderRecovery: RenderRecovery = {
-  reload: async () => {
-    // Leave a call first, the way a logout does, so other members don't see a
-    // ghost in the channel and no native call stays live behind the reloaded
-    // page. The leave is awaited (the native room's disconnect finishes in the
-    // host) but bounded: a hung or failed leave must not strand the user on
-    // the fallback.
-    if (voiceStore.getState().currentChannelId !== null) {
-      ws.send({ type: "voice_leave", payload: {} });
-      leaveVoiceChannel();
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      try {
-        await Promise.race([
-          import("@lib/livekitSession").then(({ leaveVoice }) => leaveVoice(false)),
-          new Promise<void>((resolve) => {
-            timer = setTimeout(resolve, RELOAD_VOICE_LEAVE_TIMEOUT_MS);
-          }),
-        ]);
-      } catch (err) {
-        log.warn("Failed to leave voice before reload", err);
-      } finally {
-        clearTimeout(timer);
-      }
+// One reload at a time: a second click while the voice leave is pending must
+// wait for it too, not reload straight away.
+let reloadInFlight: Promise<void> | null = null;
+
+async function reloadAfterVoiceLeave(): Promise<void> {
+  // Leave a call first, the way a logout does, so other members don't see a
+  // ghost in the channel and no native call stays live behind the reloaded
+  // page. The leave is awaited (the native room's disconnect finishes in the
+  // host) but bounded: a hung or failed leave must not strand the user on
+  // the fallback.
+  if (voiceStore.getState().currentChannelId !== null) {
+    ws.send({ type: "voice_leave", payload: {} });
+    leaveVoiceChannel();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        import("@lib/livekitSession").then(({ leaveVoice }) => leaveVoice(false)),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, RELOAD_VOICE_LEAVE_TIMEOUT_MS);
+        }),
+      ]);
+    } catch (err) {
+      log.warn("Failed to leave voice before reload", err);
+    } finally {
+      clearTimeout(timer);
     }
-    window.location.reload();
+  }
+  window.location.reload();
+}
+
+const renderRecovery: RenderRecovery = {
+  reload: () => {
+    reloadInFlight ??= reloadAfterVoiceLeave().finally(() => {
+      reloadInFlight = null;
+    });
+    return reloadInFlight;
   },
   signOut: () => {
     const wasSignedIn = authStore.getState().isAuthenticated;
