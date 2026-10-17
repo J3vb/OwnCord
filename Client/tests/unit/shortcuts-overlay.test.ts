@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
-import { openShortcutsOverlay } from "../../src/components/ShortcutsOverlay";
+import { closeShortcutsOverlay, openShortcutsOverlay } from "../../src/components/ShortcutsOverlay";
+import { saveGlobalShortcutVk } from "../../src/lib/voiceShortcuts";
 import { KEYBIND_GROUPS } from "../../src/lib/keybindCatalog";
 import { dialogOpen } from "../../src/lib/dialogOpen";
 import { settingsText as t } from "../../src/i18n/settings";
@@ -66,6 +67,30 @@ describe("ShortcutsOverlay", () => {
     expect(rows.get("Toggle Mute")).toBe("Ctrl + Shift + M");
     expect(rows.get("Toggle Deafen")).toBe("Ctrl + Shift + D");
     expect(overlay()!.querySelectorAll("input, select").length).toBe(0);
+  });
+
+  it("reads a rebound mute key when it opens", () => {
+    saveGlobalShortcutVk("mute", 0x4b); // K
+    openShortcutsOverlay();
+    const muteRow = Array.from(overlay()!.querySelectorAll(".keybind-row")).find(
+      (r) => r.querySelector(".setting-label")?.textContent === "Toggle Mute",
+    );
+    expect(muteRow?.querySelector(".kbd")?.textContent).toBe("Ctrl + Shift + K");
+  });
+
+  it("stops listening for Ctrl+/ once closed", () => {
+    openShortcutsOverlay();
+    key({ key: "Escape" });
+    expect(overlay()).toBeNull();
+    expect(key({ key: "/", ctrlKey: true }).defaultPrevented).toBe(false);
+  });
+
+  it("closeShortcutsOverlay closes an open overlay and is safe when none is open", () => {
+    closeShortcutsOverlay();
+    openShortcutsOverlay();
+    closeShortcutsOverlay();
+    expect(overlay()).toBeNull();
+    expect(dialogOpen()).toBe(false);
   });
 
   it("moves focus into the dialog and keeps Tab inside it", () => {

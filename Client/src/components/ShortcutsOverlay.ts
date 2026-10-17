@@ -93,3 +93,8 @@ export function openShortcutsOverlay(): void {
     { signal: owner.signal },
   );
 }
+
+/** Closes the overlay if it is open; the page calls it when it unmounts. */
+export function closeShortcutsOverlay(): void {
+  current?.close();
+}
