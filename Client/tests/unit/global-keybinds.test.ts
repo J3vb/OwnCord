@@ -19,6 +19,7 @@ vi.mock("@stores/voice.store", () => ({
 
 const { attachGlobalKeybinds } = await import("../../src/pages/main-page/GlobalKeybinds");
 const { saveGlobalShortcutVk } = await import("../../src/lib/voiceShortcuts");
+const { parseKeybinds, saveKeybind } = await import("../../src/lib/keybinds");
 
 function makeHandlers(): {
   onSearch: Mock<() => void>;
@@ -216,6 +217,241 @@ describe("global keybinds", () => {
     expect(h.onToggleMute).toHaveBeenCalledOnce();
     expect(h.onToggleDeafen).toHaveBeenCalledOnce();
     expect(h.onToggleCamera).toHaveBeenCalledOnce();
+  });
+
+  describe("rebindable actions", () => {
+    const GLOBALS = { mute: 0x4d, deafen: 0x44 };
+    const F9 = 0x78;
+    const X = 0x58;
+
+    function bindings(
+      overrides: Record<string, { vk: number; ctrl: boolean; shift: boolean; alt: boolean } | null>,
+    ): ReturnType<typeof parseKeybinds> {
+      return parseKeybinds({ v: 1, bindings: overrides }, GLOBALS, 0);
+    }
+
+    function attachWith(
+      h: ReturnType<typeof makeHandlers>,
+      keybinds: () => ReturnType<typeof parseKeybinds>,
+    ): {
+      onToggleScreenshare: Mock<() => void>;
+      onDisconnect: Mock<() => void>;
+    } {
+      const extra = {
+        onToggleScreenshare: vi.fn<() => void>(),
+        onDisconnect: vi.fn<() => void>(),
+      };
+      detach = attachGlobalKeybinds({
+        ...h,
+        ...extra,
+        keybinds,
+        voiceShortcutKeys: () => GLOBALS,
+        isGlobalPollerActive: () => false,
+      });
+      return extra;
+    }
+
+    beforeEach(() => {
+      mockVoiceGetState.mockReturnValue({ currentChannelId: 7 });
+      localStorage.clear();
+    });
+
+    afterEach(() => {
+      localStorage.clear();
+    });
+
+    it("a rebound camera fires on its new key and no longer on Ctrl+Shift+V", () => {
+      const h = makeHandlers();
+      attachWith(h, () =>
+        bindings({ toggleCamera: { vk: X, ctrl: true, shift: true, alt: false } }),
+      );
+
+      const old = press("V", { shiftKey: true, code: "KeyV" });
+      expect(h.onToggleCamera).not.toHaveBeenCalled();
+      expect(old.defaultPrevented).toBe(false);
+
+      const moved = press("X", { shiftKey: true, code: "KeyX" });
+      expect(h.onToggleCamera).toHaveBeenCalledOnce();
+      expect(moved.defaultPrevented).toBe(true);
+    });
+
+    it("an unbound default does nothing and leaves the key alone", () => {
+      const h = makeHandlers();
+      attachWith(h, () => bindings({ search: null }));
+
+      const event = press("f", { code: "KeyF" });
+
+      expect(h.onSearch).not.toHaveBeenCalled();
+      expect(event.defaultPrevented).toBe(false);
+    });
+
+    it("a bare F-key screen share fires in a call", () => {
+      const h = makeHandlers();
+      const extra = attachWith(h, () =>
+        bindings({ toggleScreenshare: { vk: F9, ctrl: false, shift: false, alt: false } }),
+      );
+
+      const event = press("F9", { ctrlKey: false, code: "F9" });
+
+      expect(extra.onToggleScreenshare).toHaveBeenCalledOnce();
+      expect(event.defaultPrevented).toBe(true);
+    });
+
+    it("an Alt+key disconnect fires only in voice and leaves the key alone outside it", () => {
+      const h = makeHandlers();
+      const extra = attachWith(h, () =>
+        bindings({ disconnect: { vk: 0x58, ctrl: false, shift: false, alt: true } }),
+      );
+
+      mockVoiceGetState.mockReturnValue({ currentChannelId: null });
+      const outside = press("x", { ctrlKey: false, altKey: true, code: "KeyX" });
+      expect(extra.onDisconnect).not.toHaveBeenCalled();
+      expect(outside.defaultPrevented).toBe(false);
+
+      mockVoiceGetState.mockReturnValue({ currentChannelId: 7 });
+      const inside = press("x", { ctrlKey: false, altKey: true, code: "KeyX" });
+      expect(extra.onDisconnect).toHaveBeenCalledOnce();
+      expect(inside.defaultPrevented).toBe(true);
+    });
+
+    it("voice-only actions do nothing outside a call, camera included", () => {
+      const h = makeHandlers();
+      const extra = attachWith(h, () =>
+        bindings({ toggleScreenshare: { vk: F9, ctrl: false, shift: false, alt: false } }),
+      );
+      mockVoiceGetState.mockReturnValue({ currentChannelId: null });
+
+      const cam = press("V", { shiftKey: true, code: "KeyV" });
+      const share = press("F9", { ctrlKey: false, code: "F9" });
+
+      expect(h.onToggleCamera).not.toHaveBeenCalled();
+      expect(extra.onToggleScreenshare).not.toHaveBeenCalled();
+      expect(cam.defaultPrevented).toBe(false);
+      expect(share.defaultPrevented).toBe(false);
+    });
+
+    it("swallows an auto-repeating press without toggling", () => {
+      const h = makeHandlers();
+      attachWith(h, () => bindings({}));
+
+      press("V", { shiftKey: true, code: "KeyV" });
+      const repeat = press("V", { shiftKey: true, code: "KeyV", repeat: true });
+
+      expect(h.onToggleCamera).toHaveBeenCalledOnce();
+      expect(repeat.defaultPrevented).toBe(true);
+    });
+
+    it("mute wins when a camera binding shares its Ctrl+Shift key", () => {
+      const h = makeHandlers();
+      attachWith(h, () =>
+        bindings({ toggleCamera: { vk: GLOBALS.mute, ctrl: true, shift: true, alt: false } }),
+      );
+
+      press("M", { shiftKey: true, code: "KeyM" });
+
+      expect(h.onToggleMute).toHaveBeenCalledOnce();
+      expect(h.onToggleCamera).not.toHaveBeenCalled();
+    });
+
+    it("keeps the mute stand-down while the poller is active, ahead of the table", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds({
+        ...h,
+        keybinds: () =>
+          bindings({ toggleCamera: { vk: GLOBALS.mute, ctrl: true, shift: true, alt: false } }),
+        voiceShortcutKeys: () => GLOBALS,
+        isGlobalPollerActive: () => true,
+      });
+
+      const event = press("M", { shiftKey: true, code: "KeyM" });
+
+      expect(h.onToggleMute).not.toHaveBeenCalled();
+      expect(h.onToggleCamera).not.toHaveBeenCalled();
+      expect(event.defaultPrevented).toBe(true);
+    });
+
+    it("ignores a key pressed during an IME composition", () => {
+      const h = makeHandlers();
+      attachWith(h, () => bindings({}));
+
+      const event = press("f", { code: "KeyF", isComposing: true });
+
+      expect(h.onSearch).not.toHaveBeenCalled();
+      expect(event.defaultPrevented).toBe(false);
+    });
+
+    it("does not let Meta stand in for Ctrl", () => {
+      const h = makeHandlers();
+      attachWith(h, () => bindings({}));
+
+      const event = press("f", { ctrlKey: false, metaKey: true, code: "KeyF" });
+
+      expect(h.onSearch).not.toHaveBeenCalled();
+      expect(event.defaultPrevented).toBe(false);
+    });
+
+    it("does not fire behind a dialog", () => {
+      const h = makeHandlers();
+      attachWith(h, () => bindings({}));
+      const dialog = document.createElement("div");
+      dialog.className = "modal-overlay visible";
+      document.body.appendChild(dialog);
+      onTestFinished(() => dialog.remove());
+
+      press("f", { code: "KeyF" });
+
+      expect(h.onSearch).not.toHaveBeenCalled();
+    });
+
+    it("still gives the pickers the text-field rule", () => {
+      const h = makeHandlers();
+      attachWith(h, () => bindings({}));
+      const field = document.createElement("input");
+      document.body.appendChild(field);
+      onTestFinished(() => field.remove());
+
+      field.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "e",
+          code: "KeyE",
+          ctrlKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+      expect(h.onTogglePicker).not.toHaveBeenCalled();
+    });
+
+    it("reads the persisted bindings and drops its cache on a keybinds pref change", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+
+      press("V", { shiftKey: true, code: "KeyV" });
+      expect(h.onToggleCamera).toHaveBeenCalledOnce();
+
+      // saveKeybind dispatches owncord:pref-change for "keybinds".
+      saveKeybind("toggleCamera", { vk: X, ctrl: true, shift: true, alt: false });
+
+      press("V", { shiftKey: true, code: "KeyV" });
+      expect(h.onToggleCamera).toHaveBeenCalledOnce();
+      press("X", { shiftKey: true, code: "KeyX" });
+      expect(h.onToggleCamera).toHaveBeenCalledTimes(2);
+    });
+
+    it("stops listening for pref changes once detached", () => {
+      const h = makeHandlers();
+      const add = vi.spyOn(window, "addEventListener");
+      onTestFinished(() => add.mockRestore());
+      detach = attachGlobalKeybinds(h);
+      const call = add.mock.calls.find(([type]) => type === "owncord:pref-change");
+      const opts = call?.[2] as AddEventListenerOptions | undefined;
+
+      expect(opts?.signal).toBeInstanceOf(AbortSignal);
+      detach();
+      detach = null;
+      expect(opts?.signal?.aborted).toBe(true);
+    });
   });
 
   describe("mute/deafen on the global shortcut binding", () => {

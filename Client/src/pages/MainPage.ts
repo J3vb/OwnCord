@@ -1226,6 +1226,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         onToggleMute: () => voiceKeybindActions.onMuteToggle(),
         onToggleDeafen: () => voiceKeybindActions.onDeafenToggle(),
         onToggleCamera: () => voiceKeybindActions.onCameraToggle(),
+        onToggleScreenshare: () => voiceKeybindActions.onScreenshareToggle(),
+        onDisconnect: () => voiceKeybindActions.onDisconnect(),
         onUploadFile: () => channelCtrl?.openFilePicker(),
         onTogglePicker: (kind) => channelCtrl?.togglePicker(kind),
         onMarkChannelRead: () => channelCtrl?.messageList?.markReadAndJumpToPresent(),

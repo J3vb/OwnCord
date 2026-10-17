@@ -3,8 +3,10 @@
  *
  * Quick Switcher (Ctrl+K) is owned by its own manager; everything else the
  * Keybinds tab lists lives here so the panel and the behaviour can't drift.
- * The camera shortcut no-ops outside a voice channel rather than firing
- * signalling messages into a session that doesn't exist. Mute and deafen work
+ * Camera, screen share and disconnect are rebindable and no-op outside a voice
+ * channel rather than firing signalling messages into a session that doesn't
+ * exist (`lib/keybinds.ts` holds the table of rebindable actions; Meta never
+ * stands in for Ctrl on those). Mute and deafen work
  * anywhere, like the user panel's buttons: outside a call they only change the
  * saved state the next join starts with.
  *
@@ -28,24 +30,43 @@ import { setOwnedTimeout } from "@lib/dom";
 import { createLogger } from "@lib/logger";
 import { voiceStore } from "@stores/voice.store";
 import { dialogOpen, isDisplayed } from "@lib/dialogOpen";
-import { keyEventToVk, loadGlobalShortcutVks, type GlobalShortcutVks } from "@lib/voiceShortcuts";
+import {
+  GLOBAL_DEAFEN_VK_PREF,
+  GLOBAL_MUTE_VK_PREF,
+  keyEventToVk,
+  loadGlobalShortcutVks,
+  type GlobalShortcutVks,
+} from "@lib/voiceShortcuts";
+import {
+  KEYBINDS_PREF,
+  comboFromEvent,
+  comboKey,
+  loadEffectiveKeybinds,
+  type ActionId,
+  type EffectiveKeybinds,
+  type KeyCombo,
+} from "@lib/keybinds";
 import { inputMode } from "@lib/inputMode";
 import { loadPref } from "@lib/preferences";
 
 const log = createLogger("global-keybinds");
 
 export interface GlobalKeybindHandlers {
-  /** Ctrl+F — open the message search overlay. */
+  /** The search binding (default Ctrl+F) — open the message search overlay. */
   readonly onSearch: () => void;
   /** The global mute binding (default Ctrl+Shift+M), or the Ctrl+M alias — toggle mute. */
   readonly onToggleMute: () => void;
   /** The global deafen binding (default Ctrl+Shift+D), or the Ctrl+D alias — toggle deafen. */
   readonly onToggleDeafen: () => void;
-  /** Ctrl+Shift+V — toggle the camera (voice only). */
+  /** The camera binding (default Ctrl+Shift+V) — toggle the camera (voice only). */
   readonly onToggleCamera: () => void;
-  /** Ctrl+Shift+U — open the composer's attachment picker. */
+  /** The screen-share binding (unbound by default) — toggle screen share (voice only). */
+  readonly onToggleScreenshare?: () => void;
+  /** The disconnect binding (unbound by default) — leave the voice channel (voice only). */
+  readonly onDisconnect?: () => void;
+  /** The upload binding (default Ctrl+Shift+U) — open the composer's attachment picker. */
   readonly onUploadFile: () => void;
-  /** Ctrl+E / Ctrl+G — open or close the composer's emoji or GIF picker. */
+  /** The emoji / GIF bindings (default Ctrl+E / Ctrl+G) — open or close the composer's picker. */
   readonly onTogglePicker: (kind: "emoji" | "gif") => void;
   /** Escape — mark the open channel read and return to its newest messages. */
   readonly onMarkChannelRead: () => void;
@@ -76,6 +97,9 @@ export interface GlobalKeybindHandlers {
   /** The mute/deafen keys of the global shortcut, read on every press so a
    *  Settings rebind applies at once. Defaults to the persisted binding. */
   readonly voiceShortcutKeys?: () => GlobalShortcutVks;
+  /** The effective binding of every action, read on every press. Defaults to a
+   *  cached `loadEffectiveKeybinds()` that drops on a `keybinds` preference change. */
+  readonly keybinds?: () => EffectiveKeybinds;
   /** True while the native poller delivers the voice shortcuts itself (it
    *  sees the keys focused or not), so the in-app handler must not toggle too. */
   readonly isGlobalPollerActive?: () => boolean;
@@ -96,18 +120,14 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
     // AltGr arrives as Ctrl+Alt on Windows; a character typed with it (@ on
     // AZERTY) is plain typing, not a shortcut.
     const altGrChar = e.key.length === 1 && e.getModifierState("AltGraph");
-    if ((!e.ctrlKey && !e.metaKey && !e.altKey) || altGrChar) {
-      handlePlainKey(e);
-      return;
-    }
 
     // Alt+↑/↓ (DP-35) steps channels; Alt+Shift+↑/↓ steps unread channels.
-    // Checked before the Ctrl/Meta guard below, which rejects any Alt combo.
-    // A plain Alt+Arrow is not a text-editing shortcut, but AltGr arrives as
-    // ctrlKey+altKey and the composer's own Alt use must win, so Ctrl/Meta or
-    // a text field disqualifies the step rather than swallowing the key. The
-    // message composer is the exception: like Discord, the step works while
-    // typing there (an IME composition still keeps the key).
+    // Checked before the rebindable lookup and the Ctrl/Meta guard below, which
+    // rejects any Alt combo. A plain Alt+Arrow is not a text-editing shortcut,
+    // but AltGr arrives as ctrlKey+altKey and the composer's own Alt use must
+    // win, so Ctrl/Meta or a text field disqualifies the step rather than
+    // swallowing the key. The message composer is the exception: like Discord,
+    // the step works while typing there (an IME composition still keeps the key).
     if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
       // A mention or emoji popup in the composer claims the arrows first.
       if (dialogOpen() || e.isComposing || e.defaultPrevented) return;
@@ -118,6 +138,15 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
       // The switch rebuilds the composer once the store notifies (a microtask
       // later); keep typing in the new one unless focus has moved on since.
       if (fromComposer) setOwnedTimeout(owner.signal, focusNewComposer, 0);
+      return;
+    }
+
+    // Rebindable actions: ahead of handlePlainKey (bare F-key bindings arrive
+    // there) and of the Ctrl/Meta guard (Alt+key bindings).
+    if (!altGrChar && dispatchRebindable(e)) return;
+
+    if ((!e.ctrlKey && !e.metaKey && !e.altKey) || altGrChar) {
+      handlePlainKey(e);
       return;
     }
 
@@ -132,20 +161,13 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
     const run = (label: string, action: () => void): void => runGlobal(e, label, action);
 
     if (e.shiftKey) {
-      if (key === "v") {
-        if (inVoice()) run("toggle-camera", handlers.onToggleCamera);
-        return;
-      }
       // Mute and deafen use the global shortcut's own binding, so the focused
-      // and unfocused keys can never disagree. Other Shift combos fall through.
+      // and unfocused keys can never disagree. Other Shift combos fall through
+      // (the rebindable table already ran above).
       const vk = keyEventToVk(e);
       const keys = (handlers.voiceShortcutKeys ?? loadGlobalShortcutVks)();
       const action = vk === keys.mute ? "mute" : vk === keys.deafen ? "deafen" : null;
-      if (action === null) {
-        // A mute or deafen bound to U before U was reserved keeps it.
-        if (key === "u") run("upload-file", handlers.onUploadFile);
-        return;
-      }
+      if (action === null) return;
       if (handlers.isGlobalPollerActive?.() === true) {
         // The poller fires on exactly Ctrl+Shift; any other combo is not ours.
         if (e.ctrlKey && !e.metaKey) e.preventDefault();
@@ -162,9 +184,6 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
     }
 
     switch (key) {
-      case "f":
-        run("search", handlers.onSearch);
-        break;
       // Ctrl+, opens Settings from anywhere, the message box included: the key
       // has no text-editing meaning, like Ctrl+F. Settings itself is covered by
       // `isSuspended`, a dialog by the guard above.
@@ -183,16 +202,98 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
       case "d":
         if (!isTypingTarget(e.target)) run("toggle-deafen", handlers.onToggleDeafen);
         break;
-      // Ctrl+E / Ctrl+G work from the message box and from an open picker
-      // (to close it or switch), but another text field keeps its own keys.
-      case "e":
-      case "g":
-        if (isTypingTarget(e.target) && !isComposer(e.target) && !inPicker(e.target)) break;
-        run("toggle-picker", () => handlers.onTogglePicker(key === "e" ? "emoji" : "gif"));
-        break;
       default:
         break;
     }
+  };
+
+  // The table the rebindable lookup reads: combo -> action, mute and deafen
+  // left out (they stay on the global binding's own path below). Injected
+  // bindings are rebuilt on every press; the persisted ones are cached and
+  // dropped when a preference they derive from changes.
+  let cachedTable: ReadonlyMap<string, ActionId> | null = null;
+  const currentTable = (): ReadonlyMap<string, ActionId> => {
+    if (handlers.keybinds !== undefined) return buildTable(handlers.keybinds());
+    cachedTable ??= buildTable(loadEffectiveKeybinds());
+    return cachedTable;
+  };
+  const onPrefChange = (e: Event): void => {
+    const key = e instanceof CustomEvent ? (e.detail as { key?: unknown } | null)?.key : undefined;
+    // The effective set also derives from the mute/deafen keys and push to talk.
+    if (
+      key === KEYBINDS_PREF ||
+      key === GLOBAL_MUTE_VK_PREF ||
+      key === GLOBAL_DEAFEN_VK_PREF ||
+      key === "pttVk"
+    ) {
+      cachedTable = null;
+    }
+  };
+
+  /** Run the rebindable action bound to this keydown. True when the key was
+   *  consumed (acted on, or deliberately ignored); false to carry on. */
+  const dispatchRebindable = (e: KeyboardEvent): boolean => {
+    if (e.isComposing || dialogOpen()) return false;
+    const combo = eventCombo(e);
+    if (combo === null) return false;
+    const id = currentTable().get(comboKey(combo));
+    if (id === undefined) return false;
+    // Mute and deafen win a shared Ctrl+Shift key and keep their poller
+    // stand-down in the Ctrl+Shift path below.
+    if (combo.ctrl && combo.shift && !combo.alt) {
+      const keys = (handlers.voiceShortcutKeys ?? loadGlobalShortcutVks)();
+      const vk = keyEventToVk(e);
+      if (vk !== null && (vk === keys.mute || vk === keys.deafen)) return false;
+    }
+    // Voice-only actions do nothing outside a call, and leave the key alone
+    // (Ctrl+Shift+V still pastes plain text there).
+    if (
+      (id === "toggleCamera" || id === "toggleScreenshare" || id === "disconnect") &&
+      !inVoice()
+    ) {
+      return true;
+    }
+    // The pickers fire from the message box or an open picker, not from
+    // another text field.
+    if (
+      (id === "emojiPicker" || id === "gifPicker") &&
+      isTypingTarget(e.target) &&
+      !isComposer(e.target) &&
+      !inPicker(e.target)
+    ) {
+      return false;
+    }
+    // Toggle on the press edge only, not on auto-repeat.
+    if (e.repeat) {
+      e.preventDefault();
+      return true;
+    }
+    switch (id) {
+      case "toggleCamera":
+        runGlobal(e, "toggle-camera", handlers.onToggleCamera);
+        break;
+      case "toggleScreenshare":
+        runGlobal(e, "toggle-screenshare", () => handlers.onToggleScreenshare?.());
+        break;
+      case "disconnect":
+        runGlobal(e, "disconnect", () => handlers.onDisconnect?.());
+        break;
+      case "search":
+        runGlobal(e, "search", handlers.onSearch);
+        break;
+      case "uploadFile":
+        runGlobal(e, "upload-file", handlers.onUploadFile);
+        break;
+      case "emojiPicker":
+        runGlobal(e, "toggle-picker", () => handlers.onTogglePicker("emoji"));
+        break;
+      case "gifPicker":
+        runGlobal(e, "toggle-picker", () => handlers.onTogglePicker("gif"));
+        break;
+      default:
+        return false;
+    }
+    return true;
   };
 
   /** Page keys from the message box scroll the messages; a printable key
@@ -255,7 +356,20 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
   window.addEventListener("keydown", onEscapeCapture, { capture: true, signal: owner.signal });
   window.addEventListener("keydown", onAcceptRingCapture, { capture: true, signal: owner.signal });
   window.addEventListener("keydown", onEscape, { signal: owner.signal });
+  window.addEventListener("owncord:pref-change", onPrefChange, { signal: owner.signal });
   return () => owner.destroy();
+}
+
+/** combo -> action for the rebindable lookup; mute and deafen are left out (they
+ *  stay on the global binding's own path). */
+function buildTable(eff: EffectiveKeybinds): ReadonlyMap<string, ActionId> {
+  const table = new Map<string, ActionId>();
+  for (const id of Object.keys(eff) as ActionId[]) {
+    const combo = eff[id];
+    if (combo === null || id === "toggleMute" || id === "toggleDeafen") continue;
+    table.set(comboKey(combo), id);
+  }
+  return table;
 }
 
 /** Controls that take keys of their own; typing on one of them stays there. */
@@ -281,6 +395,23 @@ function isPttKey(e: KeyboardEvent): boolean {
   if (!inVoice() || inputMode() !== "ptt") return false;
   const vk = loadPref<number>("pttVk", 0);
   return vk !== 0 && e.keyCode === vk;
+}
+
+/**
+ * The in-app combo a keydown represents, or null when it cannot be bound (Meta,
+ * AltGr, a key the table has no VK for). An event with no `code` at all (a
+ * synthetic one) falls back to the layout key, as `e.key` matching always did.
+ */
+function eventCombo(e: KeyboardEvent): KeyCombo | null {
+  const combo = comboFromEvent(e, "inApp");
+  if (combo !== null || e.code !== "") return combo;
+  if (e.metaKey || (e.ctrlKey && e.altKey) || !/^[a-zA-Z0-9]$/.test(e.key)) return null;
+  return {
+    vk: e.key.toUpperCase().charCodeAt(0),
+    ctrl: e.ctrlKey,
+    shift: e.shiftKey,
+    alt: e.altKey,
+  };
 }
 
 /** The message box on screen, when it can be typed into. */
