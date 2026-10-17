@@ -24,11 +24,11 @@ export function requestsApi(): DispatchApi | undefined {
 }
 
 /** Fetch the pending inbox with `api`, and keep it for the inbox's own refetches. */
-export function loadRequests(api: DispatchApi | undefined): void {
-  if (api?.listDmRequests === undefined) return;
+export function loadRequests(api: DispatchApi | undefined): Promise<void> {
+  if (api?.listDmRequests === undefined) return Promise.resolve();
   source = api;
   const token = beginSnapshot();
-  api.listDmRequests().then(
+  return api.listDmRequests().then(
     (r) => applySnapshot(r.requests.map(mapRequest), token),
     (err: unknown) => {
       // A sign-out or profile switch cancelled it; the next session fetches its own.

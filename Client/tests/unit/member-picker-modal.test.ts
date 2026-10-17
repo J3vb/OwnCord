@@ -275,7 +275,7 @@ describe("createMemberPickerModal", () => {
     component.mount(container);
 
     const item = container.querySelector(".dm-member-picker-item");
-    expect(item!.textContent).toContain("online");
+    expect(item!.textContent).toContain("Online");
 
     component.destroy!();
   });
@@ -291,7 +291,7 @@ describe("createMemberPickerModal", () => {
     component.mount(container);
 
     const item = container.querySelector(".dm-member-picker-item");
-    expect(item!.textContent).toContain("offline");
+    expect(item!.textContent).toContain("Offline");
 
     component.destroy!();
   });

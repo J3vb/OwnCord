@@ -692,4 +692,51 @@ describe("showContextMenu", () => {
       fallback.remove();
     });
   });
+
+  describe("checkbox rows", () => {
+    it("a row with `checked` is a menuitemcheckbox carrying aria-checked", () => {
+      showContextMenu({
+        x: 0,
+        y: 0,
+        items: [
+          { label: "On", onClick: vi.fn(), checked: true },
+          { label: "Off", onClick: vi.fn(), checked: false },
+          { label: "Plain", onClick: vi.fn() },
+        ],
+        signal: ac.signal,
+      });
+
+      const rows = Array.from(document.querySelectorAll<HTMLElement>(".context-menu-item"));
+      expect(rows.map((r) => r.getAttribute("role"))).toEqual([
+        "menuitemcheckbox",
+        "menuitemcheckbox",
+        "menuitem",
+      ]);
+      expect(rows.map((r) => r.getAttribute("aria-checked"))).toEqual(["true", "false", null]);
+    });
+
+    it("a click runs onClick and closes the menu; arrow keys reach the row", async () => {
+      const onClick = vi.fn();
+      showContextMenu({
+        x: 0,
+        y: 0,
+        items: [
+          { label: "First", onClick: vi.fn() },
+          { label: "Check", onClick, checked: false },
+        ],
+        signal: ac.signal,
+      });
+      await new Promise((r) => setTimeout(r, 0));
+      (document.activeElement as HTMLElement).dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+      );
+      const row = document.querySelector<HTMLElement>('[role="menuitemcheckbox"]')!;
+      expect(document.activeElement).toBe(row);
+
+      row.click();
+
+      expect(onClick).toHaveBeenCalledOnce();
+      expect(document.querySelector(".context-menu")).toBeNull();
+    });
+  });
 });

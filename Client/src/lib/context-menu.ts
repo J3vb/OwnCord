@@ -29,6 +29,10 @@ export interface ContextMenuItem {
   readonly title?: string;
   /** Rendered in place of the text label (an emoji). */
   readonly content?: Node;
+  /** Makes the row a checkbox (`role="menuitemcheckbox"`); the value is its
+   *  `aria-checked`. A click still closes the menu, so the caller flips the
+   *  state it reads from and the next open shows the new value. */
+  readonly checked?: boolean;
 }
 
 /** A divider between two rows. */
@@ -347,6 +351,10 @@ export function showContextMenu(opts: ContextMenuOptions): void {
       el.setAttribute("aria-label", item.label);
     }
     if (item.title !== undefined) el.title = item.title;
+    if (item.checked !== undefined) {
+      el.setAttribute("role", "menuitemcheckbox");
+      el.setAttribute("aria-checked", String(item.checked));
+    }
     if (disabled) el.setAttribute("aria-disabled", "true");
     el.addEventListener(
       "click",

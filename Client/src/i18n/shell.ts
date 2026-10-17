@@ -163,6 +163,7 @@ export const shellText = defineCatalog("shell", {
   "serverMenu.invite": "Invite People",
   "serverMenu.markRead": "Mark as Read",
   "serverMenu.notifications": "Notification Settings",
+  "serverMenu.hideMuted": "Hide Muted Channels",
   "serverMenu.createChannel": "Create Channel",
   "serverMenu.serverSettings": "Server Settings",
   "invite.invite": "Invite",

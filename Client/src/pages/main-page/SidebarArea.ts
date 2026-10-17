@@ -53,6 +53,7 @@ import { uiStore, setSidebarMode, loadCollapsedCategories, openSettings } from "
 import { authStore, clearAuth } from "@stores/auth.store";
 import { membersStore, getOnlineMembers } from "@stores/members.store";
 import { channelsStore, setActiveChannel, updateChannelPosition } from "@stores/channels.store";
+import { keepDmForCall, releaseKeptDm } from "../../features/direct-messages/keptCallDms";
 import { dmStore, closeDmLocally, restoreDmChannel } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
@@ -682,8 +683,12 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     const channels = dmStore.getState().channels;
     const index = channels.findIndex((c) => c.channelId === channelId);
     const removed = channels[index];
+    // A closed 1:1 keeps its live call through a network blip; a group leave
+    // does not (the server removes the leaver from the call).
+    if (removed !== undefined && !removed.isGroup) keepDmForCall(channelId);
     closeDmLocally(channelId, fallBackFromDm);
     void api.closeDm(channelId).catch(() => {
+      releaseKeptDm(channelId);
       if (removed !== undefined) restoreDmChannel(removed, index);
       getToast()?.show(shellText("dm.leaveFailed"), "error");
     });
