@@ -632,4 +632,64 @@ describe("eslint-rules", () => {
       ],
     });
   });
+
+  it("no-raw-html-sink", () => {
+    ruleTester.run("no-raw-html-sink", localRules.rules["no-raw-html-sink"], {
+      valid: [
+        `el.textContent = text;`,
+        `el.replaceChildren();`,
+        `el.setAttribute("class", "x");`,
+        `el.setAttribute(name, html);`,
+        `const html = el.innerHTML;`,
+        `logger.write("x");`,
+        `el.srcdoc;`,
+      ],
+      invalid: [
+        { code: `el.innerHTML = "";`, errors: [{ messageId: "htmlSink" }] },
+        { code: `el.innerHTML += html;`, errors: [{ messageId: "htmlSink" }] },
+        { code: `el["innerHTML"] = html;`, errors: [{ messageId: "htmlSink" }] },
+        { code: `this.root.outerHTML = html;`, errors: [{ messageId: "htmlSink" }] },
+        { code: `frame.srcdoc = html;`, errors: [{ messageId: "htmlSink" }] },
+        { code: `el.insertAdjacentHTML("beforeend", html);`, errors: [{ messageId: "htmlSink" }] },
+        { code: `document.write(html);`, errors: [{ messageId: "htmlSink" }] },
+        { code: `document.writeln(html);`, errors: [{ messageId: "htmlSink" }] },
+        { code: `frame.setAttribute("srcdoc", html);`, errors: [{ messageId: "htmlSink" }] },
+        { code: `frame.setAttribute("SrcDoc", html);`, errors: [{ messageId: "htmlSink" }] },
+      ],
+    });
+  });
+
+  it("subscription-result-kept", () => {
+    ruleTester.run("subscription-result-kept", localRules.rules["subscription-result-kept"], {
+      valid: [
+        `const off = store.subscribe(fn);`,
+        `const stop = authStore.subscribeSelector(sel, fn);`,
+        `unsubs.push(ws.on("x", fn));`,
+        `unsubs.push(onAuthCleared(reset));`,
+        `function f() { return store.subscribe(fn); }`,
+        `const f = () => onAuthCleared(reset);`,
+        `register(store.subscribe(fn));`,
+        `this.off = this.ws.on("x", fn);`,
+        `appZoom.subscribe(paint, signal);`,
+        `appZoom.subscribe(paint, this.abort.signal);`,
+        `emitter.on("x", fn);`,
+        `button.addEventListener("click", fn);`,
+        `void store.subscribe(fn); // app-lifetime`,
+        `// app-lifetime hook\nvoid onAuthCleared(reset);`,
+      ],
+      invalid: [
+        { code: `store.subscribe(fn);`, errors: [{ messageId: "discarded" }] },
+        { code: `subscribe(fn);`, errors: [{ messageId: "discarded" }] },
+        { code: `authStore.subscribeSelector(sel, fn);`, errors: [{ messageId: "discarded" }] },
+        { code: `ws.on("x", fn);`, errors: [{ messageId: "discarded" }] },
+        { code: `this.ws.on("x", fn);`, errors: [{ messageId: "discarded" }] },
+        { code: `onAuthCleared(reset);`, errors: [{ messageId: "discarded" }] },
+        { code: `void onAuthCleared(reset);`, errors: [{ messageId: "voidNeedsReason" }] },
+        {
+          code: `// unrelated\n\nvoid store.subscribe(fn);`,
+          errors: [{ messageId: "voidNeedsReason" }],
+        },
+      ],
+    });
+  });
 });
