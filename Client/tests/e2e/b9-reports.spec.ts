@@ -124,7 +124,7 @@ async function showErrors(page: Page): Promise<void> {
 
 async function openSafety(page: Page): Promise<Locator> {
   await page.locator("button[aria-label='Settings']").click();
-  await page.getByRole("tab", { name: "Safety" }).click();
+  await page.getByRole("tab", { name: "Privacy & Safety" }).click();
   const section = page.getByRole("region", { name: "My reports" });
   await expect(section.locator(".my-reports-item")).toHaveCount(2);
   return section;

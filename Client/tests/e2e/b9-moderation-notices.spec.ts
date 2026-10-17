@@ -236,7 +236,7 @@ test.describe("B9-15 moderation notices", () => {
     await notice(page, 11).getByRole("button", { name: "View in Safety settings" }).click();
     const overlay = page.locator("[data-testid='settings-overlay']");
     await expect(overlay).toHaveClass(/open/);
-    await expect(page.getByRole("tab", { name: "Safety" })).toHaveAttribute(
+    await expect(page.getByRole("tab", { name: "Privacy & Safety" })).toHaveAttribute(
       "aria-selected",
       "true",
     );

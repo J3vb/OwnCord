@@ -1537,13 +1537,13 @@ describe("SettingsOverlay", () => {
         },
       });
       overlay.mount(container);
-      expect(tabNames().slice(0, 3)).toEqual(["Account", "Safety", "Appearance"]);
+      expect(tabNames().slice(0, 3)).toEqual(["Account", "Privacy & Safety", "Appearance"]);
 
       const tab = container.querySelector<HTMLButtonElement>("#settings-tab-safety")!;
       tab.click();
 
       expect(tab.getAttribute("aria-selected")).toBe("true");
-      expect(container.querySelector(".settings-content h1")?.textContent).toBe("Safety");
+      expect(container.querySelector(".settings-content h1")?.textContent).toBe("Privacy & Safety");
       expect(container.querySelector("[data-testid='inert-safety']")).not.toBeNull();
       expect(container.querySelector(".settings-content")?.getAttribute("aria-labelledby")).toBe(
         "settings-tab-safety",
