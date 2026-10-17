@@ -8,6 +8,7 @@ import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import { createMemberList } from "@components/MemberList";
+import { buildVoiceModOptions, type VoiceModerationCallbacks } from "@components/ChannelSidebar";
 import { parseTimestamp } from "@lib/formatting";
 import { authStore } from "@stores/auth.store";
 import { setUserBlockedByMe } from "@stores/blocks.store";
@@ -15,10 +16,11 @@ import { channelsStore, getRoleIdByName } from "@stores/channels.store";
 import { membersStore } from "@stores/members.store";
 import { roleHasPermission } from "@lib/permissions";
 import { Permission, type AdminUser } from "@lib/types";
-import { type ApiClient, errorText } from "@lib/api";
+import { type ApiClient, ApiClientError, errorText } from "@lib/api";
 import type { ToastContainer } from "@components/Toast";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { shellText } from "../../i18n/shell";
+import { TIMEOUT_PRESETS } from "../../features/moderation/timeoutPresets";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -39,6 +41,9 @@ export interface SidebarMemberSectionOptions {
   /** Call a user: open/create the 1:1 DM and start a call in it (profile
    *  popup's Call button, BUG-05). */
   readonly onCallUser?: (userId: number) => void;
+  /** Senders for the voice moderation rows (Server Mute, Deafen, Disconnect);
+   *  without them the member menu offers none. */
+  readonly onVoiceModerate?: VoiceModerationCallbacks;
 }
 
 export interface SidebarMemberSectionResult {
@@ -69,7 +74,7 @@ function isBanInForce(user: AdminUser): boolean {
 export function createSidebarMemberSection(
   opts: SidebarMemberSectionOptions,
 ): SidebarMemberSectionResult {
-  const { api, getToast, onMessageUser, onCallUser } = opts;
+  const { api, getToast, onMessageUser, onCallUser, onVoiceModerate } = opts;
   const unsubs: Array<() => void> = [];
 
   // --- Container ---
@@ -302,6 +307,11 @@ export function createSidebarMemberSection(
     currentUserRole: authStore.getState().user?.role ?? "member",
     ...(onMessageUser !== undefined ? { onMessageUser } : {}),
     ...(onCallUser !== undefined ? { onCallUser } : {}),
+    ...(onVoiceModerate !== undefined
+      ? {
+          voiceModFor: (channelId, user) => buildVoiceModOptions(channelId, user, onVoiceModerate),
+        }
+      : {}),
     onReportUser: (userId, name) => {
       // The dialog lives as long as this section (resizeOwner is its lifetime).
       import("../../features/reports/openers").then(
@@ -372,6 +382,36 @@ export function createSidebarMemberSection(
       } catch (err) {
         const msg = errorText(err, shellText("members.roleChangeFailed"));
         getToast()?.show(msg, "error");
+      }
+    },
+    // No reason dialog yet: the menu sends an empty reason, which the server accepts.
+    onTimeoutMember: async (userId, username, seconds) => {
+      try {
+        await api.timeoutMember(userId, seconds, "");
+        const preset = TIMEOUT_PRESETS.find((p) => p.seconds === seconds);
+        getToast()?.show(
+          shellText("members.timedOut", {
+            username,
+            length: preset === undefined ? String(seconds) : shellText(preset.key),
+          }),
+          "success",
+        );
+      } catch (err) {
+        getToast()?.show(errorText(err, shellText("members.timeoutFailed")), "error");
+      }
+    },
+    onRemoveTimeout: async (userId, username) => {
+      try {
+        await api.liftTimeout(userId);
+        getToast()?.show(shellText("members.timeoutRemoved", { username }), "success");
+      } catch (err) {
+        // Lifted by someone else, or expired before the click: the next
+        // member_timeouts frame corrects the menu, so this is not an error.
+        if (err instanceof ApiClientError && err.status === 404) {
+          getToast()?.show(shellText("members.notTimedOut", { username }), "info");
+          return;
+        }
+        getToast()?.show(errorText(err, shellText("members.removeTimeoutFailed")), "error");
       }
     },
   });

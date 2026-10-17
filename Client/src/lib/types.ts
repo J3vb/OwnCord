@@ -389,6 +389,22 @@ export interface ReadyPayload {
   readonly dm_channels?: readonly DmChannelPayload[];
   /** The caller's unacknowledged warnings (B5-9). Absent from older servers. */
   readonly notices?: readonly ReadyNotice[];
+  /**
+   * Active timeouts (WP 3C-7c): the full list for a moderator, only the
+   * caller's own entry for anyone else. Absent from older servers.
+   */
+  readonly member_timeouts?: readonly MemberTimeoutEntry[];
+}
+
+/** One active timeout: who, and until when (RFC 3339). Never the reason or actor. */
+export interface MemberTimeoutEntry {
+  readonly user_id: number;
+  readonly expires_at: string;
+}
+
+/** member_timeouts (WP 3C-7c): replaces the viewer's list wholesale. */
+export interface MemberTimeoutsPayload {
+  readonly timeouts: readonly MemberTimeoutEntry[];
 }
 
 /** One of ready's notices: never the actor or the report link (Server/ws/serve_ready.go). */
@@ -1102,6 +1118,7 @@ export type ServerMessage =
   | (WsEnvelope<ReadStatePayload> & { readonly type: "read_state" })
   | (WsEnvelope<ChannelActivityPayload> & { readonly type: "channel_activity" })
   | (WsEnvelope<ModQueuePayload> & { readonly type: "mod_queue" })
+  | (WsEnvelope<MemberTimeoutsPayload> & { readonly type: "member_timeouts" })
   | (WsEnvelope<RolesUpdatePayload> & { readonly type: "roles_update" })
   | (WsEnvelope<EmojiUpdatePayload> & { readonly type: "emoji_update" })
   | (WsEnvelope<UploadPolicyPayload> & { readonly type: "upload_policy" })

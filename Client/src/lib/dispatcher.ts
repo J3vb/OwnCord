@@ -98,7 +98,11 @@ import {
   handleTimedOutRefusal,
   refreshSafetyOnResume,
 } from "../features/safety/wsHandlers";
-import { handleModQueue } from "../features/moderation/wsHandlers";
+import {
+  applyReadyMemberTimeouts,
+  handleMemberTimeouts,
+  handleModQueue,
+} from "../features/moderation/wsHandlers";
 
 /** Unsubscribe all listeners. */
 export type DispatcherCleanup = () => void;
@@ -207,6 +211,7 @@ export function wireDispatcher(
       applyReadyDmRequests(api);
       applyReadyEmoji(api);
       applyReadySafety(api, payload);
+      applyReadyMemberTimeouts(payload);
       // RT-12: if a planned restart took us out of a voice channel, put us
       // back once ready confirms the post-restart world.
       rejoinVoiceAfterRestart(clock, ws, payload);
@@ -294,6 +299,8 @@ export function wireDispatcher(
   unsubs.push(ws.on(S.APPEAL_STATUS, (payload) => handleAppealStatus(api, payload)));
   // mod_queue: a report changed; an open Moderation Center re-reads (B9-11).
   unsubs.push(ws.on(S.MOD_QUEUE, handleModQueue));
+  // member_timeouts: the active-timeout list, replaced wholesale (3C-7c).
+  unsubs.push(ws.on(S.MEMBER_TIMEOUTS, handleMemberTimeouts));
 
   unsubs.push(ws.on(S.MEMBER_UPDATE, handleMemberUpdate));
 

@@ -2300,3 +2300,74 @@ describe("MessageInput", () => {
     });
   });
 });
+
+// (22) the member menu's Mention writes through insertMention (WP 3C-3)
+describe("MessageInput insertMention", () => {
+  let container: HTMLDivElement;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    container.remove();
+  });
+
+  function mountInput(overrides: Partial<MessageInputOptions> = {}) {
+    const comp = createMessageInput(makeOptions(overrides));
+    comp.mount(container);
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    return { comp, textarea };
+  }
+
+  it("inserts '@name ' into an empty composer and parks the caret after it", () => {
+    const { comp, textarea } = mountInput();
+    expect(comp.insertMention("Dave")).toBe(true);
+    expect(textarea.value).toBe("@Dave ");
+    expect(textarea.selectionStart).toBe(6);
+    expect(textarea.selectionEnd).toBe(6);
+    expect(document.activeElement).toBe(textarea);
+    comp.destroy?.();
+  });
+
+  it("adds a leading space after a word, but not after whitespace", () => {
+    const { comp, textarea } = mountInput();
+    textarea.value = "hello";
+    textarea.setSelectionRange(5, 5);
+    comp.insertMention("Dave");
+    expect(textarea.value).toBe("hello @Dave ");
+
+    textarea.value = "hello ";
+    textarea.setSelectionRange(6, 6);
+    comp.insertMention("Eve");
+    expect(textarea.value).toBe("hello @Eve ");
+    comp.destroy?.();
+  });
+
+  it("inserts at the caret, keeping the text after it", () => {
+    const { comp, textarea } = mountInput();
+    textarea.value = "hi  there";
+    textarea.setSelectionRange(3, 3);
+    comp.insertMention("Dave");
+    expect(textarea.value).toBe("hi @Dave  there");
+    expect(textarea.selectionStart).toBe(9);
+    comp.destroy?.();
+  });
+
+  it("returns false and leaves the draft alone while the composer is disabled", () => {
+    const { comp, textarea } = mountInput();
+    comp.setDisabled("You cannot send messages here");
+    expect(comp.insertMention("Dave")).toBe(false);
+    expect(textarea.value).toBe("");
+    comp.setDisabled(null);
+    expect(comp.insertMention("Dave")).toBe(true);
+    comp.destroy?.();
+  });
+
+  it("returns false once the composer is destroyed", () => {
+    const { comp } = mountInput();
+    comp.destroy?.();
+    expect(comp.insertMention("Dave")).toBe(false);
+  });
+});
