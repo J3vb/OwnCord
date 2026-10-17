@@ -133,7 +133,7 @@ export interface NativeVoiceConnected {
 }
 
 /** A video codec the native engine publishes (WP LP-7c). */
-export type NativeVoiceVideoCodec = "vp8" | "h264";
+export type NativeVoiceVideoCodec = "vp8" | "h264" | "vp9";
 
 /** What the native engine can encode beyond VP8 (`h264`, `vp9`) and decode
  *  (`decode`: lowercase codec names from libwebrtc's receiver capabilities). */
@@ -151,7 +151,7 @@ export interface NativeVoiceCameraOptions {
   maxFramerate: number;
   simulcast: boolean;
   /** The codec to publish with. The host defaults to VP8 when it is absent;
-   *  `h264` only goes out when `videoCodecs` said the engine can encode it. */
+   *  `h264` and `vp9` only go out when `videoCodecs` said the engine can encode them. */
   codec: NativeVoiceVideoCodec;
 }
 
@@ -236,7 +236,7 @@ export interface NativeVoiceScreenOptions {
   maxFramerate: number;
   simulcast: boolean;
   /** The codec to publish with. The host defaults to VP8 when it is absent;
-   *  `h264` only goes out when `videoCodecs` said the engine can encode it. */
+   *  `h264` and `vp9` only go out when `videoCodecs` said the engine can encode them. */
   codec: NativeVoiceVideoCodec;
 }
 
