@@ -138,6 +138,34 @@
   border-radius: var(--radius-sm);
 }
 
+/* A run of blocked users' messages, folded to one line. */
+.msg-blocked-run {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 2rem;
+  padding: 0 var(--message-content-right) 0 var(--message-content-left);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.msg-blocked-toggle {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text-link);
+  cursor: pointer;
+}
+.msg-blocked-toggle:hover {
+  text-decoration: underline;
+}
+.msg-blocked-toggle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
 .message {
   padding: 2px var(--message-content-right) 2px var(--message-content-left);
   position: relative;
@@ -487,6 +515,9 @@
 }
 .msg-reply-ref:hover .rr-text {
   color: var(--text-normal);
+}
+.msg-reply-ref--blocked {
+  font-style: italic;
 }
 .msg-reply-ref--deleted {
   cursor: default;
