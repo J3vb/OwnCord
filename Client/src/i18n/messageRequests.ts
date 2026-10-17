@@ -36,5 +36,7 @@ export const messageRequestsText = defineCatalog("messageRequests", {
   "confirm.block.title": "Block {name}?",
   "confirm.block.body":
     "{name} can no longer message you on this server, and this request is removed. They are not told now, but if they message you again they will see it wasn't sent. You can unblock them later.",
+  "confirm.blockUser.body":
+    "{name} can no longer message you on this server. They are not told now, but if they message you again they will see it wasn't sent. You can unblock them later.",
   "confirm.block.confirm": "Block",
 });

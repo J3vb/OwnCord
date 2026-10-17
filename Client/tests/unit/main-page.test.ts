@@ -3142,6 +3142,40 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     });
   });
 
+  it("the DM row menu's Profile on a DM that is not active shows that DM's panel (WP 3B-2)", async () => {
+    const { slot } = mountOnDm();
+    const bob = dmStore.getState().channels[0]!;
+    dmStore.setState(() => ({
+      channels: [
+        bob,
+        {
+          ...bob,
+          channelId: 71,
+          recipient: { id: 8, username: "carol", avatar: "", status: "online" },
+          participants: [{ id: 8, username: "carol", avatar: "", status: "online" }],
+          name: "carol",
+        },
+      ],
+    }));
+    const sidebarOpts = mockCreateSidebarArea.mock.calls.at(-1)![0] as {
+      onOpenDmProfile: () => void;
+    };
+    // What SidebarArea's row menu does: select the DM, then ask for the panel
+    // in the same tick, before the store's listeners have run.
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(71, dmChannel(71, "dm-carol"));
+      return { ...prev, channels: ch };
+    });
+    setActiveChannel(71);
+    sidebarOpts.onOpenDmProfile();
+    await vi.waitFor(() => {
+      expect(slot.querySelector('[data-testid="dps-username"]')?.textContent).toBe("carol");
+    });
+    await settleDmProfileImport();
+    expect(slot.querySelectorAll('[data-testid="dps-username"]')).toHaveLength(1);
+  });
+
   it("the last of several quick DM profile clicks wins, with one panel at most", async () => {
     const { toggle, slot } = mountOnDm();
     toggle();

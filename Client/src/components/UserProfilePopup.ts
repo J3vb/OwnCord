@@ -22,6 +22,7 @@ import { roleColorVar } from "@lib/formatting";
 import { reportEntryText } from "../i18n/reportEntry";
 import { statusLabel } from "../i18n/shell";
 import { requestsText } from "../i18n/requests";
+import { shellText } from "../i18n/shell";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -54,6 +55,14 @@ export interface UserProfilePopupOptions {
   readonly onCall?: (userId: number) => void;
   /** Called when the user clicks "Report" (B9-10); the popup closes first. */
   readonly onReport?: (userId: number) => void;
+  /** Called when the user clicks Block / Unblock (WP 3B-2); the popup closes
+   *  first. `block` is the state asked for. Omitted: no button. */
+  readonly onToggleBlock?: (userId: number, block: boolean) => void;
+  /** Whether the viewer has blocked this user: picks Block or Unblock. */
+  readonly blocked?: boolean;
+  /** Why Message and Call cannot be used right now (offline, or blocked).
+   *  Set: both render disabled with this as their tooltip. */
+  readonly unavailableReason?: string;
   /** Called once when the popup closes, however it was closed. */
   readonly onClose?: () => void;
   /** Where focus goes on close when the opener has left the document. */
@@ -83,6 +92,15 @@ const STATUS_COLORS: Record<UserStatus, string> = {
   // the server maps invisible to offline for everyone else.
   invisible: "var(--text-micro)",
   offline: "var(--text-micro)",
+};
+
+/** aria-disabled, not `disabled`, so the button stays focusable and its
+ *  reason is reachable by keyboard and read by a screen reader. */
+const markUnavailable = (btn: HTMLElement, reason: string, id: string): void => {
+  btn.setAttribute("aria-disabled", "true");
+  btn.setAttribute("aria-describedby", id);
+  btn.title = reason;
+  btn.appendChild(createElement("span", { id, class: "sr-only" }, reason));
 };
 
 /**
@@ -275,6 +293,7 @@ export function createUserProfilePopup(
     // Actions — only render buttons that are actually wired up, so the popup
     // never shows a dead control (e.g. Call or Message on your own profile).
     const actions = createElement("div", { class: "upp-actions" });
+    const unavailable = options.unavailableReason;
 
     if (options.onMessage !== undefined) {
       const onMessage = options.onMessage;
@@ -284,9 +303,13 @@ export function createUserProfilePopup(
       });
       messageBtn.appendChild(createIcon("send", 16));
       messageBtn.appendChild(document.createTextNode(requestsText("profile.message")));
+      if (unavailable !== undefined) {
+        markUnavailable(messageBtn, unavailable, "upp-message-reason");
+      }
       messageBtn.addEventListener(
         "click",
         () => {
+          if (unavailable !== undefined) return;
           onMessage(user.id);
           close();
         },
@@ -303,9 +326,13 @@ export function createUserProfilePopup(
       });
       callBtn.appendChild(createIcon("phone", 16));
       callBtn.appendChild(document.createTextNode(requestsText("profile.call")));
+      if (unavailable !== undefined) {
+        markUnavailable(callBtn, unavailable, "upp-call-reason");
+      }
       callBtn.addEventListener(
         "click",
         () => {
+          if (unavailable !== undefined) return;
           onCall(user.id);
           close();
         },
@@ -334,6 +361,30 @@ export function createUserProfilePopup(
         { signal },
       );
       actions.appendChild(reportBtn);
+    }
+
+    if (options.onToggleBlock !== undefined) {
+      const onToggleBlock = options.onToggleBlock;
+      const block = options.blocked !== true;
+      const blockBtn = createElement("button", {
+        class: "upp-action-btn",
+        "data-testid": "upp-block-btn",
+        ...(block ? { "aria-haspopup": "dialog" } : {}),
+      });
+      blockBtn.appendChild(createIcon("ban", 16));
+      blockBtn.appendChild(
+        document.createTextNode(` ${shellText(block ? "member.block" : "member.unblock")}`),
+      );
+      blockBtn.addEventListener(
+        "click",
+        () => {
+          // Close first, like Report: the confirm returns focus to the opener.
+          close();
+          onToggleBlock(user.id, block);
+        },
+        { signal },
+      );
+      actions.appendChild(blockBtn);
     }
 
     // Assemble the card: a banner strip and a body, with the avatar straddling

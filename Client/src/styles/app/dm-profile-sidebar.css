@@ -112,3 +112,19 @@
   padding: 8px;
   font-family: inherit;
 }
+.dps-block-btn {
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--red);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+.dps-block-btn:hover {
+  background: var(--red);
+  color: var(--on-accent);
+}

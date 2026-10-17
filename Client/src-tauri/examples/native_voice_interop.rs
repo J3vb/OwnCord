@@ -53,10 +53,10 @@
 //! `--screen-audio` (with `--screen`) also publishes the share's audio the way
 //! the app does (`ScreenshareAudio`, 128 kbps, no DTX, no RED), from a
 //! synthetic 2-channel source (440 Hz left, 660 Hz right: CI has no sound
-//! server) and reports its sid as a `screenAudio` event. The browser half
-//! asserts it decodes with the right key, and logs the channel count it
-//! decoded: libwebrtc may negotiate mono until the SDK can signal stereo
-//! (LP-8d).
+//! server) and reports its sid as a `screenAudio` event, with the opus
+//! `channels` and `sdpFmtpLine` the publisher's own sender negotiated (LP-8d:
+//! 2 and `stereo=1` once the vendored SDK signals stereo). The browser half
+//! asserts it decodes with the right key and in stereo.
 //! `--screen-audio-cycles N` (with `--screen-audio`) first publishes and
 //! unpublishes the app's real capture-fed share audio N times (silence here:
 //! no sound server), printing the thread count before and after: each cycle
@@ -391,6 +391,23 @@ mod linux {
         Ok(capture)
     }
 
+    /// The publisher-side opus codec of the share audio `sid`: the SFU's
+    /// answer carries `stereo=1` only when the track was published as stereo
+    /// (LP-8d). The sender's stats appear once the transport is up, so retry
+    /// for a few seconds; a miss reports 0 channels and the reason as the fmtp
+    /// line, which the test then fails on with that text.
+    async fn screen_audio_codec(session: &NativeSession, sid: &str) -> (u32, String) {
+        let mut last = String::new();
+        for _ in 0..50 {
+            match session.screen_audio_codec(sid).await {
+                Ok(codec) => return codec,
+                Err(e) => last = e,
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        (0, last)
+    }
+
     /// Publish running capture `capture`'s video. `width` and `height` are
     /// the synthetic source's own size. Returns the publication's sid.
     async fn publish_screen_video(
@@ -607,8 +624,9 @@ mod linux {
                     .publish_screen_audio_source(capture, source.clone())
                     .await?;
                 stereo = Some(tokio::spawn(play_stereo(source)));
+                let (channels, fmtp) = screen_audio_codec(&session, &sid).await;
                 emit(
-                    serde_json::json!({ "event": { "type": "screenAudio", "phase": "published", "sid": sid } }),
+                    serde_json::json!({ "event": { "type": "screenAudio", "phase": "published", "sid": sid, "channels": channels, "sdpFmtpLine": fmtp } }),
                 );
                 if std::env::args().any(|a| a == "--republish-screen") {
                     // Let the browser subscribe and decode first, so the
@@ -617,8 +635,9 @@ mod linux {
                     session.unpublish_screen_keep_capture(capture).await;
                     tokio::time::sleep(Duration::from_millis(300)).await;
                     publish_screen_video(&mut session, capture, width, height).await?;
+                    let (channels, fmtp) = screen_audio_codec(&session, &sid).await;
                     emit(
-                        serde_json::json!({ "event": { "type": "screenAudio", "phase": "after-republish", "sid": sid } }),
+                        serde_json::json!({ "event": { "type": "screenAudio", "phase": "after-republish", "sid": sid, "channels": channels, "sdpFmtpLine": fmtp } }),
                     );
                     // Then stop the share: the video and its audio both go, and
                     // so does the capture thread.

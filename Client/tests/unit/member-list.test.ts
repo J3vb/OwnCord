@@ -4,6 +4,7 @@ import type { MemberListOptions } from "@components/MemberList";
 import { membersStore, updatePresence, updateMemberRole } from "@stores/members.store";
 import type { Member } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
+import { setConnectionStatus } from "@stores/ui.store";
 import { channelsStore, setRoles, type Channel } from "@stores/channels.store";
 import { resetVoiceStore, updateVoiceState } from "@stores/voice.store";
 import { setMemberTimeouts } from "../../src/features/moderation/store";
@@ -954,6 +955,8 @@ describe("MemberList profile fields", () => {
 
   beforeEach(() => {
     resetStore();
+    // The popup's Message/Call are disabled while offline (WP 3B-2).
+    setConnectionStatus("connected");
     container = document.createElement("div");
     document.body.appendChild(container);
   });
@@ -963,6 +966,7 @@ describe("MemberList profile fields", () => {
     list = null;
     container.remove();
     resetStore();
+    setConnectionStatus("disconnected");
   });
 
   it("renders the display name and falls back to the username", () => {

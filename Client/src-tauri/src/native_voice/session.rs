@@ -639,12 +639,19 @@ pub fn process_threads() -> usize {
 /// `SCREENSHARE_AUDIO_PUBLISH` (screenShare.ts): no DTX, 128 kbps
 /// (`musicHighQualityStereo`) and no RED, which livekit-client leaves off for
 /// a stereo track and the Rust SDK forces off under E2EE anyway.
+///
+/// `stereo` (LP-8d) is the flag of the vendored livekit crate
+/// (`vendor/livekit/OWNCORD-PATCH.md`): it makes the SFU's publisher answer
+/// carry `stereo=1`, so the encoder is built with two channels instead of
+/// downmixing the share to mono. The mic, camera and screen video options
+/// leave it off.
 fn screen_audio_publish_options() -> TrackPublishOptions {
     TrackPublishOptions {
         source: TrackSource::ScreenshareAudio,
         dtx: false,
         red: false,
         audio_encoding: Some(livekit::options::audio::MUSIC_HIGH_QUALITY_STEREO.encoding),
+        stereo: true,
         ..Default::default()
     }
 }
@@ -862,6 +869,13 @@ impl NativeSession {
             .await
             .map_err(|e| e.to_string())?;
         room.e2ee_manager().set_enabled(true);
+        // LP-8d: the share audio's stereo comes from the publish options (the
+        // server's answer), not from this mode; the log records which mode the
+        // server granted, which decides whether a native viewer decodes it.
+        log::info!(
+            "[native_voice] single peer connection active: {}",
+            room.is_single_peer_connection_active()
+        );
         // The join's grant raises no change event, so the webview hears it
         // here, before any event the forwarder sends.
         if let Some(permission) = room.local_participant().permission() {
@@ -1414,6 +1428,35 @@ impl NativeSession {
             Some(VideoPublication::of_capture(sid.clone(), Some(capture)));
         self.share_audio = feed;
         Ok(sid.to_string())
+    }
+
+    /// The opus codec the published screen-share audio `sid` was negotiated
+    /// with, as the sender's stats report it: `(channels, sdp_fmtp_line)`.
+    /// The LP-8d interop example prints it to prove the publisher is stereo.
+    pub async fn screen_audio_codec(&self, sid: &str) -> Result<(u32, String), String> {
+        let publication = self
+            .room
+            .local_participant()
+            .track_publications()
+            .into_values()
+            .find(|p| p.sid().as_str() == sid)
+            .ok_or_else(|| format!("screen audio {sid} is not published"))?;
+        let Some(LocalTrack::Audio(track)) = publication.track() else {
+            return Err(format!("screen audio {sid} has no audio track"));
+        };
+        let stats = track
+            .get_stats()
+            .await
+            .map_err(|e| format!("screen audio stats: {e}"))?;
+        stats
+            .into_iter()
+            .find_map(|s| match s {
+                RtcStats::Codec(c) if c.codec.mime_type.to_ascii_lowercase().contains("opus") => {
+                    Some((c.codec.channels, c.codec.sdp_fmtp_line))
+                }
+                _ => None,
+            })
+            .ok_or_else(|| "screen audio stats carry no opus codec".to_string())
     }
 
     /// Unpublish screen audio `sid` if it is still the published one; a stale
@@ -2443,6 +2486,20 @@ mod tests {
             Some(128_000),
             "musicHighQualityStereo"
         );
+        assert!(opts.stereo, "the share audio asks the SFU for stereo opus");
+    }
+
+    #[test]
+    fn mic_and_video_publish_options_stay_mono() {
+        // TF_STEREO would double the mic's bitrate and switch opus out of
+        // VoIP mode; only the share audio asks for it.
+        assert!(!TrackPublishOptions::default().stereo);
+        assert!(!mic_publish_options(None).stereo);
+        assert!(!mic_publish_options(Some(96_000)).stereo);
+        assert!(!camera_publish_options(&camera(720, true)).stereo);
+        assert!(!camera_publish_options(&camera(1080, false)).stereo);
+        assert!(!screen_publish_options(&screen(true)).stereo);
+        assert!(!screen_publish_options(&screen(false)).stereo);
     }
 
     #[test]
