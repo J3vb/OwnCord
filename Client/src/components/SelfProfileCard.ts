@@ -44,6 +44,8 @@ import { createEmojiPicker } from "@components/EmojiPicker";
 import { createAvatarElement } from "@components/message-list/avatar";
 import { copyWithToast, isDeveloperMode } from "../features/developer-mode/developerTools";
 import { shellText } from "../i18n/shell";
+import { connectText } from "../i18n/connect";
+import { attachLimitHint, collapseSpaces, lineHintText, runeCount } from "@lib/nameLimits";
 
 export interface SelfProfileCardOptions {
   /** The button that opens the card; the card anchors above it and hands
@@ -198,11 +200,18 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
       class: "spc-custom-input",
       type: "text",
       placeholder: shellText("status.customPlaceholder"),
-      maxlength: String(MAX_CUSTOM_STATUS_LEN),
       "aria-label": shellText("status.customLabel"),
       "data-testid": "spc-custom-input",
     });
     input.value = lastCommittedCustom;
+    const customHint = attachLimitHint(input, {
+      max: MAX_CUSTOM_STATUS_LEN,
+      hint: lineHintText(MAX_CUSTOM_STATUS_LEN),
+      countCharacters: true,
+      id: "spc-custom-hint",
+      signal,
+    });
+    customHint.el.dataset["testid"] = "spc-custom-hint";
     const clearBtn = createElement("button", {
       class: "spc-custom-clear",
       type: "button",
@@ -247,13 +256,18 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
     }
     syncClearVisibility();
 
-    function commitCustom(force = false): void {
-      if (cardEl !== card || !enabled) return;
-      // The server collapses runs of whitespace; doing the same here keeps its
-      // echo equal to what we hold.
-      const text = input.value.replace(/\s+/g, " ").trim().slice(0, MAX_CUSTOM_STATUS_LEN);
+    function commitCustom(force = false): boolean {
+      if (cardEl !== card || !enabled) return true;
+      // The collapsed text is what the server stores, so it is what is checked and sent.
+      const text = collapseSpaces(input.value);
+      // Over the limit (a paste past maxlength, a scripted value): the server
+      // would refuse it, so send nothing and leave the text to be shortened.
+      if (runeCount(text) > MAX_CUSTOM_STATUS_LEN) {
+        customHint.showError(connectText("limits.statusTooLong", { max: MAX_CUSTOM_STATUS_LEN }));
+        return false;
+      }
       input.value = text;
-      if (text === lastCommittedCustom && !force) return;
+      if (text === lastCommittedCustom && !force) return true;
       lastCommittedCustom = text;
       paintCustomLine();
       syncClearVisibility();
@@ -264,6 +278,7 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
         text === "" ? undefined : clearAfterSeconds(selectedClearAfter(), new Date()),
       );
       paintClearsLine();
+      return true;
     }
 
     clearAfterSelect.addEventListener(
@@ -281,8 +296,8 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
       (e: KeyboardEvent) => {
         if (e.key === "Enter") {
           e.preventDefault();
-          commitCustom();
-          close();
+          // A refused (over-limit) status keeps the card open with the hint.
+          if (commitCustom()) close();
         } else if (e.key === "Escape") {
           e.preventDefault();
           e.stopPropagation();
@@ -317,6 +332,7 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
       () => {
         if (!enabled) return;
         input.value = "";
+        customHint.reset();
         commitCustom();
         input.focus();
       },
@@ -357,7 +373,7 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
       const start = input.selectionStart ?? input.value.length;
       const end = input.selectionEnd ?? start;
       const next = input.value.slice(0, start) + emoji + input.value.slice(end);
-      if (next.length > MAX_CUSTOM_STATUS_LEN) return;
+      if (runeCount(next) > MAX_CUSTOM_STATUS_LEN) return;
       input.value = next;
       const caret = start + emoji.length;
       input.setSelectionRange(caret, caret);
@@ -669,6 +685,7 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
       card,
       header,
       customRow,
+      customHint.el,
       clearAfterRow,
       createElement("div", { class: "spc-divider" }),
       group,

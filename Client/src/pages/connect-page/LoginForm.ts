@@ -8,6 +8,15 @@ import { normaliseInviteCode } from "@lib/deep-link";
 import type { RegistrationMode } from "@lib/types";
 import type { RecoverContext } from "./RecoverOverlay";
 import { connectText } from "../../i18n/connect";
+import {
+  attachLimitHint,
+  checkNewUsername,
+  toggleDescribedBy,
+  usernameHintText,
+  usernameProblemText,
+  MAX_USERNAME_LEN,
+  type LimitHint,
+} from "@lib/nameLimits";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -244,6 +253,9 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   let formTitle: HTMLHeadingElement;
   let hostInput: HTMLInputElement;
   let usernameInput: HTMLInputElement;
+  // The new-username rules, shown under the field in Register only (an
+  // existing account may predate them, so Login keeps the field unbounded).
+  let usernameHint: LimitHint;
   let passwordInput: HTMLInputElement;
   let inviteGroup: HTMLDivElement;
   let inviteInput: HTMLInputElement;
@@ -400,6 +412,14 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       "",
     );
     usernameInput = qs("input", usernameGroup)!;
+    usernameHint = attachLimitHint(usernameInput, {
+      max: MAX_USERNAME_LEN,
+      hint: usernameHintText(),
+      id: "username-hint",
+      signal,
+    });
+    usernameGroup.appendChild(usernameHint.el);
+    applyUsernameRules();
 
     // Password
     const passwordGroup = buildFormGroup(
@@ -850,16 +870,14 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     }
     for (const input of allFieldInputs()) {
       input.removeAttribute("aria-invalid");
-      if (input.getAttribute("aria-describedby") === errorBanner.id) {
-        input.removeAttribute("aria-describedby");
-      }
+      toggleDescribedBy(input, errorBanner.id, false);
     }
     if (formState === "error" && errorMessage) {
       setText(errorBanner, errorMessage);
       errorBanner.classList.add("visible");
       if (target !== null) {
         target.setAttribute("aria-invalid", "true");
-        target.setAttribute("aria-describedby", errorBanner.id);
+        toggleDescribedBy(target, errorBanner.id, true);
         target.focus();
       }
       // The shakeX animation plays automatically via CSS on .error-banner
@@ -1017,9 +1035,21 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     );
   }
 
+  /** Register holds the username to the new-name rules; Login does not. */
+  function applyUsernameRules(): void {
+    const registering = formMode === "register";
+    usernameHint.el.hidden = !registering;
+    usernameHint.reset();
+    // Login lifts the cap and the hint: nothing may describe the field by it.
+    toggleDescribedBy(usernameInput, usernameHint.el.id, registering);
+    if (registering) usernameInput.maxLength = MAX_USERNAME_LEN;
+    else usernameInput.removeAttribute("maxlength");
+  }
+
   function handleToggleMode(): void {
     cancelAuthBusyRetry?.();
     formMode = formMode === "login" ? "register" : "login";
+    applyUsernameRules();
 
     // A remembered password belongs to an EXISTING account. Carrying the
     // placeholder into Register would submit a fixed, publicly known constant
@@ -1044,7 +1074,12 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     }
   }
 
-  function validateForm(): { message: string; field: FieldId | null } | null {
+  function validateForm(): {
+    message: string;
+    field: FieldId | null;
+    /** The message is shown under the field (its hint); the banner points there. */
+    inline?: boolean;
+  } | null {
     const host = hostInput.value.trim();
     const username = usernameInput.value.trim();
     const password = passwordInput.value;
@@ -1054,6 +1089,14 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     }
     if (!username) {
       return { message: connectText("validation.usernameRequired"), field: "username" };
+    }
+    // A new name is checked against the server's rules; Login sends whatever
+    // the account was created with.
+    if (formMode === "register") {
+      const problem = checkNewUsername(username);
+      if (problem !== null) {
+        return { message: usernameProblemText(problem), field: "username", inline: true };
+      }
     }
     // A saved password is already known-good; it is never re-validated here
     // because its plaintext is not available to this process. The bypass is
@@ -1162,6 +1205,12 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     const validationError = validateForm();
     if (validationError !== null) {
+      if (validationError.inline === true) {
+        // Said once, under the field; the banner points at it.
+        usernameHint.showError(validationError.message);
+        transitionTo("error", connectText("limits.checkField"), validationError.field);
+        return;
+      }
       transitionTo("error", validationError.message, validationError.field);
       return;
     }
@@ -1205,6 +1254,19 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       // Cap length to prevent phishing via server-controlled error messages
       if (message.length > 200) {
         message = message.slice(0, 200) + "...";
+      }
+      // The server refused the name itself (a reserved name, a character the
+      // client check does not mirror): say so under the field and keep what
+      // was typed, so it can be edited rather than retyped.
+      if (
+        formMode === "register" &&
+        err instanceof ApiClientError &&
+        err.code === "INVALID_INPUT" &&
+        /^username\b/i.test(err.message)
+      ) {
+        usernameHint.showError(message);
+        transitionTo("error", connectText("limits.checkField"), "username");
+        return;
       }
       transitionTo("error", message);
     }

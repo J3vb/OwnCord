@@ -469,7 +469,7 @@ describe("main.ts tray status-change routes through the shared PresenceSender (O
     // coalescing retry, and the optimistic update all live inside it.
     const fakeSender: PresenceSender = {
       send: vi.fn(),
-      rollbackTimedOut: vi.fn(),
+      rollbackRefused: vi.fn(),
       destroy: vi.fn(),
     };
     setActivePresenceSender(fakeSender);

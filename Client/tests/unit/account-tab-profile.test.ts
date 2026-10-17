@@ -217,7 +217,7 @@ describe("Account tab profile fields", () => {
     container.appendChild(buildAccountTab(makeOptions(), ac.signal));
     expect(
       container.querySelector('[data-testid="display-name-input"]')?.getAttribute("maxlength"),
-    ).toBe("32");
+    ).toBe("64"); // 2 UTF-16 units per character; the 32-character cap is enforced by count
     expect(container.querySelector('[data-testid="about-input"]')?.getAttribute("maxlength")).toBe(
       "300",
     );

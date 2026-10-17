@@ -144,7 +144,7 @@ describe("presence_update custom_status_expires_in", () => {
 
     sender.send("dnd", "heads down"); // refused: the user is timed out
     expect(sent).toHaveLength(1);
-    sender.rollbackTimedOut("id-1");
+    sender.rollbackRefused("id-1");
 
     expect(loadUserStatus()).toBe("dnd");
     expect(loadStatusTimer()).toEqual({ status: "dnd", until: Date.now() + 3_600_000 });
@@ -159,7 +159,7 @@ describe("presence_update custom_status_expires_in", () => {
     sender.send("dnd", "x"); // optimistic: members entry dnd, baseline online
     saveUserStatus("dnd");
     saveStatusTimer("dnd", Date.now() + 3_600_000);
-    sender.rollbackTimedOut("id-1");
+    sender.rollbackRefused("id-1");
     expect(loadUserStatus()).toBe("online");
     expect(loadStatusTimer()).toBeNull();
     sender.destroy();

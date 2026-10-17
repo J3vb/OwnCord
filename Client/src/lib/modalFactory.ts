@@ -16,6 +16,8 @@ import { Disposable } from "./disposable";
 import { createElement } from "./dom";
 import { applyDialogSemantics, focusDialog, trapFocus } from "./a11y";
 import { connectText } from "../i18n/connect";
+import { attachLimitHint } from "./nameLimits";
+import { showToast } from "./toast";
 
 export interface ModalOptions {
   /** The content element to place inside the modal container. */
@@ -176,8 +178,19 @@ export interface PromptModalOptions {
   readonly placeholder?: string;
   readonly maxLength?: number;
   readonly confirmLabel?: string;
-  /** Called with the trimmed value. Not called when the user cancels. */
-  readonly onSubmit: (value: string) => void;
+  /** Inline rule text under the field. Setting it also gives the field a
+   *  "limit reached" state at `maxLength` and a place for a refusal. */
+  readonly hint?: string;
+  /** Checked before `onSubmit` on the trimmed value; a returned message is
+   *  shown under the field, the value stays and nothing is submitted. */
+  readonly validate?: (value: string) => string | null;
+  /**
+   * Called with the trimmed value. Not called when the user cancels. A
+   * returned promise keeps the prompt open until it settles: a string it
+   * resolves to is shown under the field (the typed value stays); null closes.
+   * A plain return closes at once.
+   */
+  readonly onSubmit: (value: string) => void | Promise<string | null>;
   readonly onClose?: () => void;
   readonly testId?: string;
 }
@@ -218,6 +231,16 @@ export function createPromptModal(
   });
   input.value = options.initialValue ?? "";
   content.appendChild(input);
+  const hint =
+    options.hint === undefined
+      ? null
+      : attachLimitHint(input, {
+          max: options.maxLength ?? 100,
+          countCharacters: true,
+          hint: options.hint,
+          id: "prompt-hint",
+        });
+  if (hint !== null) content.appendChild(hint.el);
 
   const row = createElement("div", {
     style: "display:flex;gap:8px;margin-top:12px;",
@@ -236,15 +259,59 @@ export function createPromptModal(
   row.appendChild(cancel);
   content.appendChild(row);
 
+  let closed = false;
   const instance = createModal(
-    { content, onClose: options.onClose, className: "modal-prompt", ariaLabel: options.title },
+    {
+      content,
+      onClose: () => {
+        closed = true;
+        options.onClose?.();
+      },
+      className: "modal-prompt",
+      ariaLabel: options.title,
+    },
     container,
   );
 
+  let pending = false;
+  // A refusal goes under the field while the prompt is open and has one; when
+  // the prompt was closed mid-request, or has no hint, it is toasted so it is
+  // never silent.
+  const refuse = (message: string): void => {
+    if (!closed && hint !== null) hint.showError(message);
+    else showToast(message, "error");
+  };
   const submit = (): void => {
+    if (pending) return;
     const value = input.value.trim();
-    instance.close();
-    options.onSubmit(value);
+    const problem = options.validate?.(value) ?? null;
+    if (problem !== null) {
+      refuse(problem);
+      return;
+    }
+    const result = options.onSubmit(value);
+    if (!(result instanceof Promise)) {
+      instance.close();
+      return;
+    }
+    pending = true;
+    confirm.disabled = true;
+    void result
+      .then((refusal) => {
+        if (refusal === null) {
+          if (!closed) instance.close();
+        } else {
+          refuse(refusal);
+        }
+      })
+      .catch(() => {
+        // The caller turns its own failures into a refusal string; a rejection
+        // reaching here has no text to show, so leave the prompt open to retry.
+      })
+      .finally(() => {
+        pending = false;
+        confirm.disabled = false;
+      });
   };
   confirm.addEventListener("click", submit);
   cancel.addEventListener("click", () => instance.close());

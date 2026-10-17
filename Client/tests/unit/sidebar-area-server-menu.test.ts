@@ -73,7 +73,7 @@ function opts(): SidebarAreaOptions {
       voice: { tryConsume: vi.fn().mockReturnValue(true) },
       voiceVideo: { tryConsume: vi.fn().mockReturnValue(true) },
     } as never,
-    presenceSender: { send: vi.fn(), rollbackTimedOut: vi.fn(), destroy: vi.fn() },
+    presenceSender: { send: vi.fn(), rollbackRefused: vi.fn(), destroy: vi.fn() },
     getRoot: vi.fn().mockReturnValue(document.createElement("div")),
     getToast: vi.fn().mockReturnValue({ show: vi.fn() }),
   };

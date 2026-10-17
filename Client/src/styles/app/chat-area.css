@@ -48,10 +48,19 @@
   width: 100%;
   height: 100%;
 }
+.chat-header .ch-name-group {
+  min-width: 0;
+  max-width: 70%;
+}
 .chat-header .ch-name {
   font-size: var(--font-size-lg);
   font-weight: 700;
   color: var(--header-primary);
+  /* A group or person name of very wide characters stays in the header. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .chat-header .ch-divider {
   width: 1px;
