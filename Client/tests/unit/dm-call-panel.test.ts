@@ -319,7 +319,7 @@ describe("deriveCallView", () => {
       voice: { currentChannelId: DM, voiceUsers: room(SELF) },
       peerWasHere: true,
     });
-    expect(group).toMatchObject({ kind: "connected", peerLeft: false });
+    expect(group).toMatchObject({ kind: "connected", peerLeft: false, canRingAgain: true });
   });
 
   it("offers Ring again in a group whenever a member is not in the room (3B-8)", () => {
@@ -1356,9 +1356,9 @@ describe("DmCallPanel — group roster (3B-8)", () => {
     expect(tile(root, CARA).classList.contains("dcp-avatar--ringing")).toBe(true);
     expect(greyed(root)).toEqual([OTTO, DAN]);
     expect(tile(root, SELF).classList.contains("dcp-avatar--absent")).toBe(false);
-    const absent = root.querySelector<HTMLElement>(".dcp-person--absent")!;
-    expect(absent.title).toBe("Not in call");
-    expect(absent.querySelector(".sr-only")!.textContent).toBe("Not in call");
+    expect(root.querySelectorAll(".dcp-person--absent")).toHaveLength(2);
+    expect(tile(root, OTTO).title).toBe("Not in call");
+    expect(tile(root, OTTO).querySelector(".sr-only")!.textContent).toBe("Not in call");
   });
 
   it("greys out every other member once the ring went unanswered", () => {
@@ -1415,6 +1415,11 @@ describe("DmCallPanel — group roster (3B-8)", () => {
     const faces = [...root.querySelectorAll<HTMLElement>(".dcp-faces .dcp-avatar")];
     expect(faces.map((e) => Number(e.dataset.userId))).toEqual([OTTO, CARA, DAN]);
     expect(greyed(root)).toEqual([CARA, DAN]);
+    for (const id of [CARA, DAN]) {
+      expect(tile(root, id).title).toBe("Not in call");
+      expect(tile(root, id).querySelector(".sr-only")!.textContent).toBe("Not in call");
+    }
+    expect(tile(root, OTTO).title).toBe("");
   });
 
   it("offers Ring again after a peer leaves, while someone is missing, and re-rings", () => {
@@ -1443,6 +1448,10 @@ describe("DmCallPanel — group roster (3B-8)", () => {
         Number(e.dataset.userId),
       ),
     ).toEqual([CARA, DAN]);
+    for (const id of [CARA, DAN]) {
+      expect(tile(root, id).title).toBe("Not in call");
+      expect(tile(root, id).querySelector(".sr-only")!.textContent).toBe("Not in call");
+    }
   });
 
   it("leaves a 1:1 call without a roster or Ring again", () => {

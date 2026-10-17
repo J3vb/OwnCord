@@ -2194,12 +2194,25 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       voiceUsers: new Map([
         [
           50,
-          new Map([
-            [1, { userId: 1, username: "alice" }],
-            [10, { userId: 10, username: "bob" }],
-          ]),
+          new Map(
+            [
+              [1, "alice"],
+              [10, "bob"],
+            ].map(([userId, username]) => [
+              userId as number,
+              {
+                userId: userId as number,
+                username: username as string,
+                muted: false,
+                deafened: false,
+                speaking: false,
+                camera: false,
+                screenshare: false,
+              },
+            ]),
+          ),
         ],
-      ]) as never,
+      ]),
     }));
     voiceStore.flush();
     const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
@@ -2208,9 +2221,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(again).not.toBeNull();
 
     vi.mocked(ws.send).mockClear();
-    const now = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 4000);
     again.click();
-    now.mockRestore();
     expect(ws.send).toHaveBeenCalledWith({ type: "call_ring", payload: { channel_id: 50 } });
     // Bob is in the call: no ringing state is started over a live call.
     expect(panel.dataset.state).toBe("connected");

@@ -416,6 +416,11 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     const badge = createElement("span", { class: "dcp-avatar-badge" });
     badge.hidden = true;
     wrap.appendChild(badge);
+    if (extra.split(" ").includes(ABSENT_CLASS)) {
+      // Every surface that draws a greyed member (stage, grid tile, live strip).
+      wrap.title = d("notInCall");
+      wrap.appendChild(createElement("span", { class: "sr-only" }, d("notInCall")));
+    }
     avatars.set(userId, { wrap, badge, verify: null, verifyKey: "" });
     return wrap;
   }
@@ -431,10 +436,6 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       resolvePerson(userId, dm, voiceStore.getState(), currentUserId()).name,
     );
     appendChildren(col, avatar(userId, dm, "lg", extra), label);
-    if (absent) {
-      col.title = d("notInCall");
-      col.appendChild(createElement("span", { class: "sr-only" }, d("notInCall")));
-    }
     return col;
   }
 
@@ -644,9 +645,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     const faces = createElement("div", { class: "dcp-faces" });
     for (const id of v.inRoom) faces.appendChild(avatar(id, v.dm, "sm"));
     for (const id of absentMembers(v.dm, v.inRoom)) {
-      const face = avatar(id, v.dm, "sm", ABSENT_CLASS);
-      face.title = d("notInCall");
-      faces.appendChild(face);
+      faces.appendChild(avatar(id, v.dm, "sm", ABSENT_CLASS));
     }
     const text = createElement("div", { class: "dcp-row-text" });
     let hint = d("joinHint");
