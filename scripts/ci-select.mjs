@@ -37,6 +37,8 @@
 //     Client/src/lib/types.ts                  permissions/schema_doc_test.go
 //     Client/src-tauri/tauri.conf.json         updater/tauri_key_contract_test.go
 //     .superpowers/findings-ledger.json        cmd/smoke/drills.go (go run ./cmd/smoke)
+//     Client/tests/e2e/scripts/install-livekit.mjs  docker_image_test.go (LiveKit pin)
+//     Client/voice-join-budget.json            docker_image_test.go (LiveKit pin)
 //     CHANGELOG.md                             admin/changelog_bundle_test.go
 //                                              (the `changelog` capability runs
 //                                              only that test; see CHANGELOG_PATH)
@@ -95,6 +97,9 @@ const SERVER_READS_OUTSIDE = new Set([
   // run the server job. The Go half needs no entry — it lives under Server/,
   // which already selects the job.
   "Client/src/lib/protocolTypes.ts",
+  // Server/docker_image_test.go checks the LiveKit version pinned in each.
+  "Client/tests/e2e/scripts/install-livekit.mjs",
+  "Client/voice-join-budget.json",
 ]);
 
 /**
