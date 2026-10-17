@@ -15,7 +15,7 @@ func (s *MessageService) fillGroupOwner(ctx context.Context, isGroup bool, chann
 	}
 	ownerID, err := s.st.GetGroupDMOwner(ctx, channelID)
 	if err != nil {
-		slog.Info("MessageService.SendMessage GetGroupDMOwner failed, the open carries no owner_id", "err", err, "channel_id", channelID)
+		slog.Warn("MessageService.SendMessage GetGroupDMOwner failed, the open carries no owner_id", "err", err, "channel_id", channelID)
 		return
 	}
 	result.DMOwnerID = ownerID

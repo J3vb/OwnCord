@@ -213,11 +213,6 @@ func MessageKindName(kind int64) string {
 	return ""
 }
 
-// IsGroupEventKind reports whether a stored kind is a group event row.
-func IsGroupEventKind(kind int64) bool {
-	return kind >= MessageKindGroupAdd && kind <= MessageKindGroupIcon
-}
-
 // MessageWithUser joins a Message with the author's public fields.
 type MessageWithUser struct {
 	Message

@@ -246,6 +246,7 @@ func TestMessagesForAPI_GroupRowCarriesKindAndGroupEvent(t *testing.T) {
 	rename := f.insertGroupRow(t, f.alice, db.MessageKindGroupRename, "renamed", nil, &name, 0)
 	cleared := f.insertGroupRow(t, f.alice, db.MessageKindGroupRename, "cleared", nil, &empty, 0)
 	icon := f.insertGroupRow(t, f.alice, db.MessageKindGroupIcon, "icon", nil, nil, 1)
+	iconSet := f.insertGroupRow(t, f.alice, db.MessageKindGroupIcon, "icon set", nil, nil, 0)
 
 	msgs, err := f.database.GetMessagesForAPI(ctx, f.group, 0, 20, f.alice)
 	if err != nil {
@@ -269,6 +270,7 @@ func TestMessagesForAPI_GroupRowCarriesKindAndGroupEvent(t *testing.T) {
 		rename:  {"group_rename", `{"name":"Raid night"}`},
 		cleared: {"group_rename", `{"name":""}`},
 		icon:    {"group_icon", `{"icon_removed":true}`},
+		iconSet: {"group_icon", `{"icon_removed":false}`},
 		plain:   {"", ""},
 	}
 	if len(msgs) != len(want) {

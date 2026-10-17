@@ -589,9 +589,9 @@ server may write them. Nothing writes one yet.
 
 `channels.dm_owner_id` (migration 065) names a group DM's owner. A group with at
 least one member always has an owner who is a member: create sets it to the
-creator, and every transaction that removes a member (a leave, an erasure) runs
-one statement that gives a missing or departed owner to the lowest remaining
-member id.
+creator, a leave runs one statement that gives a missing or departed owner to
+the lowest remaining member id, and an erasure hands each group the erased
+user owned to its lowest remaining member id.
 
 ---
 
