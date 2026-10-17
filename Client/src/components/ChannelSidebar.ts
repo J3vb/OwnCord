@@ -25,6 +25,7 @@ import { openMenuOnKeyboard } from "@lib/context-menu";
 import { showUserVolumeMenu } from "./channel-sidebar/volume-menu";
 import { getUserLocalMute, getUserVolume } from "@lib/livekitSession";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
+import { attachCategoryContextMenu } from "./channel-sidebar/category-menu";
 import { attachChannelContextMenu, CHANNEL_MUTE_CHANGED } from "./channel-sidebar/context-menu";
 import { attachDragHandlers } from "./channel-sidebar/drag-reorder";
 import { attachVoiceUserDrag, markVoiceDropTarget } from "../features/voice/dragMove";
@@ -1069,6 +1070,8 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
         },
         { signal },
       );
+
+      attachCategoryContextMenu(header, arrow, g.name, signal, disposable.signal);
 
       group.appendChild(header);
     }

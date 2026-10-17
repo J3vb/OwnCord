@@ -168,6 +168,17 @@ export function ensureGlobalDragListeners(owner: AbortSignal): void {
       if (dropTargetId === null || dropTargetId === drag.channelId) {
         return;
       }
+      // Text rows always sit above voice rows, so a drop across that line
+      // would renumber positions without moving anything on screen.
+      const dragged = drag.channels.find((c) => c.id === drag.channelId);
+      const target = drag.channels.find((c) => c.id === dropTargetId);
+      if (
+        dragged !== undefined &&
+        target !== undefined &&
+        (dragged.type === "voice") !== (target.type === "voice")
+      ) {
+        return;
+      }
 
       // Compute new order
       const orderedIds = drag.channels.map((ch) => ch.id);

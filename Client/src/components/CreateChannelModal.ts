@@ -18,14 +18,24 @@ import { createModal, type ModalInstance } from "@lib/modalFactory";
 import { errorText } from "@lib/api";
 import type { MountableComponent } from "@lib/safe-render";
 import type { ChannelType } from "@lib/types";
-import { getKnownCategories, UNCATEGORIZED_VOICE_CATEGORY } from "@stores/channels.store";
+import {
+  getKnownCategories,
+  nextPositionInCategory,
+  UNCATEGORIZED_VOICE_CATEGORY,
+} from "@stores/channels.store";
 import { shellText } from "../i18n/shell";
 
 export interface CreateChannelModalOptions {
   /** The category the create affordance was invoked from ("" = uncategorized). */
   readonly category: string;
   /** Called when the user submits the form. */
-  readonly onCreate: (data: { name: string; type: ChannelType; category: string }) => Promise<void>;
+  readonly onCreate: (data: {
+    name: string;
+    type: ChannelType;
+    category: string;
+    /** One past the highest position in the category, so the channel lands last. */
+    position: number;
+  }) => Promise<void>;
   /** Called when the modal is closed without creating. */
   readonly onClose: () => void;
 }
@@ -190,10 +200,13 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
         setText(createBtn, shellText("channelForm.creating"));
 
         try {
+          const type = typeSelect.value as ChannelType;
+          const chosen = categoryInput.value.trim();
           await onCreate({
             name,
-            type: typeSelect.value as ChannelType,
-            category: categoryInput.value.trim(),
+            type,
+            category: chosen,
+            position: nextPositionInCategory(chosen, type),
           });
         } catch (err) {
           errorEl.style.display = "block";

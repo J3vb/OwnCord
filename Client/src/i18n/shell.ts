@@ -61,6 +61,10 @@ export const shellText = defineCatalog("shell", {
   "channel.copyLink": "Copy Link",
   "channel.invite": "Invite People",
   "channel.markRead": "Mark as Read",
+  "category.markRead": "Mark Category as Read",
+  "category.collapse": "Collapse Category",
+  "category.expand": "Expand Category",
+  "category.collapseAll": "Collapse All Categories",
   "channel.moveUp": "Move Up",
   "channel.moveDown": "Move Down",
   "channel.mute": "Mute Channel",
@@ -265,6 +269,7 @@ export const shellText = defineCatalog("shell", {
   "quickSwitch.escapeHint": "Press Escape to cancel",
   "quickSwitcher.label": "Quick switcher",
   "quickSwitcher.placeholder": "Where do you want to go?",
+  "quickSwitcher.noResults": "No results",
 
   "pins.unpinFailed": "Failed to unpin message",
   "pins.loadFailed": "Failed to load pinned messages",

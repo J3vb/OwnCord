@@ -58,6 +58,23 @@ export interface ContextMenuOptions {
   readonly className?: string;
 }
 
+/** The close hook of the open sidebar (channel or category) context menu. */
+let activeSidebarMenuClose: (() => void) | null = null;
+
+/**
+ * Register `close` as the open sidebar menu, closing any previous one first.
+ * Returns the unregister, which the menu's own close calls so it never
+ * clears a successor.
+ */
+export function registerSidebarMenu(close: () => void): () => void {
+  activeSidebarMenuClose?.();
+  document.querySelectorAll(".channel-ctx-menu").forEach((prev) => prev.remove());
+  activeSidebarMenuClose = close;
+  return () => {
+    if (activeSidebarMenuClose === close) activeSidebarMenuClose = null;
+  };
+}
+
 /** Actionable menu rows, in any menu. Disabled rows are not navigable. */
 const MENU_ITEM_SELECTOR = ["menuitem", "menuitemcheckbox"]
   .map((role) => `[role="${role}"]:not([aria-disabled="true"]):not([disabled])`)

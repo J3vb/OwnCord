@@ -146,6 +146,7 @@ describe("CreateChannelModal", () => {
         name: "lounge",
         type: "voice",
         category: "Gaming",
+        position: expect.any(Number),
       });
     });
     modal.destroy?.();
@@ -186,9 +187,54 @@ describe("CreateChannelModal", () => {
         name: "test-channel",
         type: "text",
         category: "Text Channels",
+        position: expect.any(Number),
       });
     });
 
+    modal.destroy?.();
+  });
+
+  it("sends position one past the highest in the category so the channel lands last", async () => {
+    setChannels([
+      { id: 1, name: "a", type: "text", category: "Chat", position: 3 },
+      { id: 2, name: "b", type: "voice", category: "Chat", position: 7 },
+      { id: 3, name: "c", type: "text", category: "Other", position: 40 },
+    ]);
+    const onCreate = vi.fn(async (_data: { position: number; category: string }) => {});
+    const { modal } = makeModal("Chat", { onCreate });
+    (container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement).value =
+      "fresh";
+    (container.querySelector("[data-testid='channel-create-submit']") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(onCreate).toHaveBeenCalled());
+    expect(onCreate.mock.calls[0]![0]).toMatchObject({ category: "Chat", position: 8 });
+    modal.destroy?.();
+  });
+
+  it("counts uncategorized voice channels when creating from the synthetic Voice group", async () => {
+    setChannels([
+      { id: 1, name: "v1", type: "voice", category: null, position: 3 },
+      { id: 2, name: "v2", type: "voice", category: "", position: 5 },
+      { id: 3, name: "t", type: "text", category: null, position: 9 },
+    ]);
+    const onCreate = vi.fn(async (_data: { position: number; category: string }) => {});
+    const { modal } = makeModal(UNCATEGORIZED_VOICE_CATEGORY, { onCreate });
+    (container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement).value =
+      "fresh";
+    (container.querySelector("[data-testid='channel-create-submit']") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(onCreate).toHaveBeenCalled());
+    expect(onCreate.mock.calls[0]![0].position).toBe(6);
+    modal.destroy?.();
+  });
+
+  it("sorts the first channel of a brand-new category below every other channel", async () => {
+    setChannels([{ id: 1, name: "a", type: "text", category: "Chat", position: 3 }]);
+    const onCreate = vi.fn(async (_data: { position: number; category: string }) => {});
+    const { modal } = makeModal("Brand New", { onCreate });
+    (container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement).value =
+      "fresh";
+    (container.querySelector("[data-testid='channel-create-submit']") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(onCreate).toHaveBeenCalled());
+    expect(onCreate.mock.calls[0]![0]).toMatchObject({ position: 4 });
     modal.destroy?.();
   });
 
