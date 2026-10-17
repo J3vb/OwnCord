@@ -99,8 +99,10 @@ connection with `PRAGMA secure_delete = ON` for its duration (HP-4 decision
    cannot be erased (`ErrLastAdmin`);
 2. snapshot the subject's DM channels;
 3. capture the `stored_as` names of every attachment the subject uploaded
-   (the avatar is one) or attached to a message the subject wrote — the file
-   list the job row carries;
+   (the avatar and a group DM icon they set are two) or attached to a message the
+   subject wrote — the file list the job row carries. The icon's `attachments` row
+   goes with the rest, and `channels.dm_icon` (`ON DELETE SET NULL`) then clears
+   the group's icon;
 4. reverse the `read_states.mention_count` bumps the subject's own messages
    made (OC-0294/OC-0293); like the retention sweep, erasure pushes no live
    `mention_count` frame, so an affected reader recovers the lowered total on
@@ -229,7 +231,8 @@ calls `db.DeleteOrphanedAttachments(cutoff = now − 1h)`, one
 `DELETE … RETURNING stored_as` (BUG-132: select and delete are one
 statement) over attachment rows that are unlinked (`message_id IS NULL`) or
 linked to a soft-deleted message, older than the cutoff, and **not** a live
-avatar (`users.avatar` still points at them — `idx_users_avatar`). It then
+avatar (`users.avatar` still points at them — `idx_users_avatar`) and not a live
+group DM icon (`channels.dm_icon` names it, migration 066). It then
 calls `storage.Delete` for each returned file, logging and continuing on
 failure. With no file storage configured the whole step is skipped so the
 rows keep the only handle on the blobs.

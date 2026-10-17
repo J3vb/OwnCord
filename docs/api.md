@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 195 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 197 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -145,6 +145,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/dms/group`                                                  |
 | DELETE  | `/api/v1/dms/{channelId}`                                            |
 | PATCH   | `/api/v1/dms/{channelId}`                                            |
+| DELETE  | `/api/v1/dms/{channelId}/icon`                                       |
+| POST    | `/api/v1/dms/{channelId}/icon`                                       |
 | POST    | `/api/v1/dms/{channelId}/members`                                    |
 | DELETE  | `/api/v1/dms/{channelId}/members/{userId}`                           |
 | PUT     | `/api/v1/dms/{channelId}/owner`                                      |
@@ -1778,6 +1780,7 @@ List all open DM channels for the authenticated user, ordered by most recent act
 | `name`                 | Optional group name, max 100 characters, one line: runs of spaces collapse, and control characters, line breaks, invisible characters and stacked combining marks are refused. `""` for a 1:1 DM and for an unnamed group. |
 | `is_group`             | True for a group DM. Stored, not derived from the live participant count.                                                                                                                                                  |
 | `owner_id`             | Groups only, omitted for a 1:1 DM: the group's owner, always a current member. The creator at create, then the lowest remaining member id when the owner leaves or their account is erased.                                |
+| `icon`                 | The group's icon as a file URL (`/api/v1/files/{id}`), `""` when it has none and for a 1:1 DM. Always present. Only the group's members can fetch the file, and only while it is the live icon. |
 | `unread_count`         | Unread messages for the caller, capped at 100 (a value of 100 means "100 or more") — the same cap as `ready`.                                                                                                              |
 | `mention_count`        | The caller's `read_states.mention_count` for the DM — the same value the `ready` payload's `dm_channels[]` carries.                                                                                                        |
 | `last_read_message_id` | The caller's read pointer (`read_states.last_message_id`) for the DM; `0` when they have never read it.                                                                                                                    |
@@ -2046,6 +2049,84 @@ Limited to 20 group changes per user per minute.
 | 403    | `TIMED_OUT`    | The caller is timed out                  |
 | 404    | `NOT_FOUND`    | The caller or the target is not a member |
 | 429    | `RATE_LIMITED` | More than 20 group changes in a minute   |
+
+---
+
+### POST /api/v1/dms/{channelId}/icon
+
+Set a group DM's icon. Any member may.
+
+**Auth:** Required (any member). Not mounted on a server whose file storage failed to open.
+
+#### Request
+
+`multipart/form-data` with one `file` part, under the same rules as an avatar
+(`POST /api/v1/users/me/avatar`): at most 1 MiB, a PNG, JPEG or WebP image
+(sniffed from the bytes, never from the filename or the client's type), at most
+1024 x 1024 pixels, and it counts against the uploader's storage quota. The
+request body is capped at 2 MiB. Crop to a square client-side.
+
+#### Response 200 OK
+
+The DM summary shape from the caller's seat, with the new `icon`. The file is an
+unlinked attachment that the group names: its members can fetch it from
+`/api/v1/files/{id}` while it is the live icon, and nobody else can (the
+uploader can still read their own file). Every member receives a refreshed
+`dm_channel_open`, then one sequenced `chat_message` of kind `group_icon`
+(author = the caller, `group_event` `{"icon_removed": false}`). A file that
+the icon replaced stops being served to the members and is deleted by the
+orphan sweep. Two members changing the icon at once is not an error: the last
+change to commit is the icon, and each change leaves its own row.
+
+If the change commits but the server cannot then read the summary back, the route
+answers `204 No Content` instead, as the other group routes do.
+
+Limited to 5 uploads per user per minute, on its own limit apart from the group
+changes below and from avatar uploads.
+
+#### Errors
+
+| Status | Code           | Reason                                                              |
+| ------ | -------------- | ------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST`  | A 1:1 DM, a missing `file`, or a file that breaks the image rules   |
+| 403    | `TIMED_OUT`    | The caller is timed out                                             |
+| 404    | `NOT_FOUND`    | The caller is not a member, or stopped being one before the commit  |
+| 429    | `RATE_LIMITED` | More than 5 icon uploads in a minute                                |
+
+If the group cannot be changed after the file was stored (for instance the caller
+left the group in between) the file and its record are deleted and nothing is
+written or sent.
+
+---
+
+### DELETE /api/v1/dms/{channelId}/icon
+
+Remove a group DM's icon. Any member may.
+
+**Auth:** Required (any member)
+
+#### Response 200 OK
+
+The DM summary shape from the caller's seat, with `icon` `""`. Every member
+receives a refreshed `dm_channel_open`, then a `group_icon` row with
+`group_event` `{"icon_removed": true}`. A group that has no icon changes
+nothing: the same `200`, no row and no event. The old file stops being served
+and is deleted by the orphan sweep.
+
+If the change commits but the server cannot then read the summary back, the route
+answers `204 No Content` instead.
+
+Limited to 20 group changes per user per minute, shared with add, remove, owner
+transfer and rename.
+
+#### Errors
+
+| Status | Code           | Reason                                 |
+| ------ | -------------- | -------------------------------------- |
+| 400    | `BAD_REQUEST`  | A 1:1 DM                               |
+| 403    | `TIMED_OUT`    | The caller is timed out                |
+| 404    | `NOT_FOUND`    | The caller is not a member             |
+| 429    | `RATE_LIMITED` | More than 20 group changes in a minute |
 
 ---
 

@@ -53,9 +53,9 @@ func (f groupRowFixture) insertGroupRow(t *testing.T, author, kind int64, conten
 
 func ownerOf(t *testing.T, database *db.DB, channelID int64) int64 {
 	t.Helper()
-	owner, err := database.GetGroupDMOwner(context.Background(), channelID)
+	owner, _, err := database.GetGroupDMMeta(context.Background(), channelID)
 	if err != nil {
-		t.Fatalf("GetGroupDMOwner: %v", err)
+		t.Fatalf("GetGroupDMMeta: %v", err)
 	}
 	return owner
 }
@@ -135,7 +135,7 @@ func TestMigration065_OneToOneHasNoOwner(t *testing.T) {
 		t.Errorf("1:1 DM has an owner")
 	}
 	if got := ownerOf(t, database, ch); got != 0 {
-		t.Errorf("GetGroupDMOwner on a 1:1 = %d, want 0", got)
+		t.Errorf("GetGroupDMMeta on a 1:1 = %d, want 0", got)
 	}
 }
 

@@ -104,6 +104,9 @@ type SendMessageResult struct {
 	// (re)opened for someone, because only then is it needed for the
 	// dm_channel_open payload. 0 otherwise.
 	DMOwnerID int64
+	// DMIconID is the group's icon attachment id, read with DMOwnerID. "" for
+	// none.
+	DMIconID string
 
 	// Attachment data for broadcast.
 	Attachments []db.AttachmentInfo

@@ -253,18 +253,25 @@ func (q *Queries) GetDMParticipantsForUser(ctx context.Context, userID int64) ([
 	return items, nil
 }
 
-const getGroupDMOwner = `-- name: GetGroupDMOwner :one
-SELECT CAST(COALESCE(dm_owner_id, 0) AS INTEGER) AS owner_id
+const getGroupDMMeta = `-- name: GetGroupDMMeta :one
+SELECT CAST(COALESCE(dm_owner_id, 0) AS INTEGER) AS owner_id,
+       CAST(COALESCE(dm_icon, '') AS TEXT)       AS icon_id
 FROM channels
 WHERE id = ? AND is_group = 1
 `
 
-// The owner of a group DM, 0 when the channel is not a group or has no owner.
-func (q *Queries) GetGroupDMOwner(ctx context.Context, id int64) (int64, error) {
-	row := q.db.QueryRowContext(ctx, getGroupDMOwner, id)
-	var owner_id int64
-	err := row.Scan(&owner_id)
-	return owner_id, err
+type GetGroupDMMetaRow struct {
+	OwnerID int64  `json:"ownerId"`
+	IconID  string `json:"iconId"`
+}
+
+// The owner (0 when none) and the icon attachment id (” when none) of a group
+// DM. No row when the channel is not a group.
+func (q *Queries) GetGroupDMMeta(ctx context.Context, id int64) (GetGroupDMMetaRow, error) {
+	row := q.db.QueryRowContext(ctx, getGroupDMMeta, id)
+	var i GetGroupDMMetaRow
+	err := row.Scan(&i.OwnerID, &i.IconID)
+	return i, err
 }
 
 const getUserDMChannelIDs = `-- name: GetUserDMChannelIDs :many
@@ -300,6 +307,7 @@ SELECT
     c.name                                        AS name,
     c.is_group                                    AS is_group,
     CAST(COALESCE(c.dm_owner_id, 0) AS INTEGER)   AS owner_id,
+    CAST(COALESCE(c.dm_icon, '') AS TEXT)         AS icon_id,
     lm.id                                         AS last_message_id,
     COALESCE(lm.content, '')                      AS last_message,
     COALESCE(lm.timestamp, '')                    AS last_message_at,
@@ -327,6 +335,7 @@ type GetUserDMChannelsRow struct {
 	Name              string `json:"name"`
 	IsGroup           int64  `json:"isGroup"`
 	OwnerID           int64  `json:"ownerId"`
+	IconID            string `json:"iconId"`
 	LastMessageID     *int64 `json:"lastMessageId"`
 	LastMessage       string `json:"lastMessage"`
 	LastMessageAt     string `json:"lastMessageAt"`
@@ -353,6 +362,7 @@ func (q *Queries) GetUserDMChannels(ctx context.Context, userID int64) ([]GetUse
 			&i.Name,
 			&i.IsGroup,
 			&i.OwnerID,
+			&i.IconID,
 			&i.LastMessageID,
 			&i.LastMessage,
 			&i.LastMessageAt,

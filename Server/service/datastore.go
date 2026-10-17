@@ -290,7 +290,7 @@ type Store interface {
 	GetDMDeliveryTargets(ctx context.Context, channelID, senderID int64) (isGroup bool, targets []db.DMDeliveryTarget, err error)
 	GetDMRecipient(ctx context.Context, channelID, requestingUserID int64) (*db.User, error)
 	CreateGroupDMChannel(ctx context.Context, name string, ownerID int64, participantIDs []int64) (*db.Channel, error)
-	GetGroupDMOwner(ctx context.Context, channelID int64) (int64, error)
+	GetGroupDMMeta(ctx context.Context, channelID int64) (ownerID int64, iconID string, err error)
 	IsGroupDM(ctx context.Context, channelID int64) (bool, error)
 	GetDMParticipants(ctx context.Context, channelID, viewerID int64) ([]db.DMUser, error)
 
@@ -331,6 +331,7 @@ type Store interface {
 	// avatar check backs the "public exactly while in use" half.
 	IsMessageDeleted(ctx context.Context, id int64) (deleted, found bool, err error)
 	IsAvatarFileURL(ctx context.Context, url string) (bool, error)
+	IsGroupDMIconForUser(ctx context.Context, fileID string, userID int64) (bool, error) // live icon, members only
 	// The per-user upload byte counter (migration 044, B5-2): charged before
 	// a store write, released on a failed one, recounted from the rows on
 	// the maintenance tick. See UploadService.Reserve.

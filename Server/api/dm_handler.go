@@ -70,8 +70,10 @@ var _ dmVoiceEvictor = (*ws.Hub)(nil)
 
 // MountDMRoutes registers DM-related routes onto r.
 // All routes require authentication.
-// hub is used to send real-time WebSocket events on DM close.
-func MountDMRoutes(r chi.Router, database *db.DB, svc *service.Services, broadcaster DMBroadcaster, limiter *auth.RateLimiter) {
+// hub is used to send real-time WebSocket events on DM close. store may be nil,
+// in which case the group icon upload route is not registered: with nowhere to
+// put the bytes, a route that 500s on every call is worse than one that 404s.
+func MountDMRoutes(r chi.Router, database *db.DB, svc *service.Services, broadcaster DMBroadcaster, limiter *auth.RateLimiter, store FileStore) {
 	r.Route("/api/v1/dms", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
 		r.Post("/", handleCreateDM(svc, broadcaster))
@@ -82,6 +84,11 @@ func MountDMRoutes(r chi.Router, database *db.DB, svc *service.Services, broadca
 		r.Post("/{channelId}/members", handleAddGroupMembers(svc, broadcaster, limiter))
 		r.Delete("/{channelId}/members/{userId}", handleRemoveGroupMember(svc, broadcaster, limiter))
 		r.Put("/{channelId}/owner", handleTransferGroupOwner(svc, broadcaster, limiter))
+		r.Delete("/{channelId}/icon", handleDeleteGroupIcon(svc, broadcaster, limiter))
+		if store != nil {
+			r.With(MaxBodySize(avatarMaxBodySize)).
+				Post("/{channelId}/icon", handleUploadGroupIcon(svc, broadcaster, store, limiter))
+		}
 	})
 
 	// User blocking routes — prevent DM creation and messaging.
@@ -342,7 +349,7 @@ func handleCreateGroupDM(svc *service.Services, broadcaster DMBroadcaster) http.
 		broadcastDMOpen(r.Context(), svc, broadcaster, result.Channel.ID, result.ParticipantIDs)
 
 		writeJSON(w, http.StatusCreated,
-			db.NewDMChannelInfo(result.Channel.ID, result.Channel.Name, true, user.ID, result.Participants, user.ID))
+			db.NewDMChannelInfo(result.Channel.ID, result.Channel.Name, true, user.ID, "", result.Participants, user.ID))
 	}
 }
 

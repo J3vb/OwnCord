@@ -42,6 +42,9 @@ type GroupEventRow struct {
 	TargetUserID int64
 	// Name is the new group name of a rename row ("" = removed), else nil.
 	Name *string
+	// IconRemoved is true for an icon row that cleared the icon, false when it
+	// set one (and for every other kind).
+	IconRemoved bool
 }
 
 // GroupChange is the outcome of a membership or rename mutation.
@@ -60,6 +63,7 @@ type groupEventSpec struct {
 	content             string
 	targetUserID        int64
 	name                *string
+	iconRemoved         bool
 }
 
 // inGroupTx runs fn in one serializable write transaction and rolls back on
@@ -93,14 +97,19 @@ func insertGroupEventRow(ctx context.Context, q *dbgen.Queries, spec groupEventS
 	if spec.targetUserID != 0 {
 		target = &spec.targetUserID
 	}
+	var iconRemoved int64
+	if spec.iconRemoved {
+		iconRemoved = 1
+	}
 	if err = q.InsertMessageGroupEvent(ctx, dbgen.InsertMessageGroupEventParams{
-		MessageID: m.ID, TargetUserID: target, Name: spec.name,
+		MessageID: m.ID, TargetUserID: target, Name: spec.name, IconRemoved: iconRemoved,
 	}); err != nil {
 		return nil, fmt.Errorf("insert group event: %w", err)
 	}
 	return &GroupEventRow{
 		MessageID: m.ID, Kind: spec.kind, AuthorID: spec.authorID, Content: spec.content,
 		Timestamp: m.Timestamp, TargetUserID: spec.targetUserID, Name: spec.name,
+		IconRemoved: spec.iconRemoved,
 	}, nil
 }
 

@@ -406,12 +406,12 @@ func MaxBodySize(maxBytes int64) func(http.Handler) http.Handler {
 }
 
 // MaxBodySizeUnless is like MaxBodySize but skips the limit for paths that
-// match any of the given prefixes. Exempted paths apply their own limit via
-// route-scoped middleware.
+// match any of the given prefixes, or a bodyCapExemptPattern. Exempted paths
+// apply their own limit via route-scoped middleware.
 func MaxBodySizeUnless(maxBytes int64, exemptPrefixes ...string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			exempt := false
+			exempt := bodyCapExemptPattern.MatchString(r.URL.Path)
 			for _, prefix := range exemptPrefixes {
 				if strings.HasPrefix(r.URL.Path, prefix) {
 					exempt = true

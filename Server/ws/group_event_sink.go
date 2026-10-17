@@ -7,7 +7,7 @@ import (
 )
 
 // GroupEventRows delivers group DM system rows (group_add, group_remove,
-// group_leave, group_rename) as sequenced chat_message frames to audience. The
+// group_leave, group_rename, group_icon) as sequenced chat_message frames to audience. The
 // REST handler that wrote them calls it after commit, once the refreshed
 // dm_channel_open has been sent, so on each connection the open arrives first
 // and an added user never receives a row for a DM they do not know yet.
@@ -49,12 +49,15 @@ func (h *Hub) GroupEventRows(ctx context.Context, channelID int64, audience []in
 }
 
 // newGroupEventBlock is the group_event object of a row, by kind: add and
-// remove name the target, rename carries the new name ("" = removed), and a
-// leave is the empty object.
+// remove name the target, rename carries the new name ("" = removed), icon says
+// whether the icon was removed, and a leave is the empty object.
 func newGroupEventBlock(r *service.GroupEventRow) *groupEventBlock {
 	switch r.Kind {
 	case string(MessageKindGroupAdd), string(MessageKindGroupRemove):
 		return &groupEventBlock{TargetUserID: r.TargetUserID}
+	case string(MessageKindGroupIcon):
+		removed := r.IconRemoved
+		return &groupEventBlock{IconRemoved: &removed}
 	case string(MessageKindGroupRename):
 		name := ""
 		if r.Name != nil {

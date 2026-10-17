@@ -31,7 +31,11 @@ func TestBodyCapExemptions_RouteEnvelopesReachable(t *testing.T) {
 		{"/api/v1/uploads", http.StatusOK},
 		{"/api/v1/admin/plugins/install", http.StatusOK},
 		{"/api/v1/users/me/avatar", http.StatusOK},
+		{"/api/v1/dms/12/icon", http.StatusOK},
 		// Everything else keeps the global cap.
+		{"/api/v1/dms/12/members", http.StatusRequestEntityTooLarge},
+		{"/api/v1/dms/12/icon/x", http.StatusRequestEntityTooLarge},
+		{"/api/v1/dms/x/icon", http.StatusRequestEntityTooLarge},
 		{"/api/v1/channels/1/messages", http.StatusRequestEntityTooLarge},
 	}
 	for _, tc := range cases {
