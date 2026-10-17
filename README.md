@@ -322,6 +322,10 @@ contributor, the key context: [AGENTS.md](AGENTS.md), [PRD.md](PRD.md),
 and [SECURITY.md](SECURITY.md). Each one lists its sources. If they disagree,
 the code wins, then those sources.
 
+Human contributors can ignore the agent folders and files: `.claude/`,
+`.codex/`, `.agents/`, `AGENTS.md`, the `CLAUDE.md` files and
+`.no-mistakes.yaml`. Nothing in them is needed to build, test or run OwnCord.
+
 ## Update signing (maintainers)
 
 The desktop app and the server use separate update signing keys.
