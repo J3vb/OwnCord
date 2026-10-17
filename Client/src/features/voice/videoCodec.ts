@@ -6,11 +6,12 @@
  * H.264 are the two every shipped client decodes; VP9 and H.265 are options
  * picked only when every peer reports decoding them (H.265 also needs a
  * hardware encoder and a non-Intel GPU, WP M-6). VP8 is the default; H.264
- * lets Windows encode on the graphics card. The Linux native engine has no
- * hardware encoder in its release build: it publishes VP8, or H.264 (software,
- * slower than VP8) or VP9 (software, one L1T3 layer, no simulcast) only when
- * chosen and the engine reports it can encode it. Auto is VP8 there. H.265 is
- * never published on Linux.
+ * lets Windows encode on the graphics card. The Linux native engine publishes
+ * VP8, or H.264 or VP9 (software, one L1T3 layer, no simulcast) only when
+ * chosen and the engine reports it can encode it. Its release build includes
+ * NVENC/NVDEC, used for H.264 when the NVIDIA libraries load; VA-API (Intel,
+ * AMD) is not built yet, and everything else is software (slower than VP8).
+ * Auto is VP8 there. H.265 is never published on Linux.
  */
 
 import { supportsH265, supportsVP9 } from "livekit-client";

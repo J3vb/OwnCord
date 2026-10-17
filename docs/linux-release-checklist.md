@@ -181,6 +181,18 @@ You should see:
 - The sound may be mono for now. That is known and is not a fail.
 - Stop the share. The picture and the sound stop.
 
+On a machine with an NVIDIA graphics card:
+
+- Set Settings → Voice & Video → Video Codec to **H.264** and start a share.
+  The encoder field of the stream's info readout should say
+  `NVIDIA H264 Encoder`, not `OpenH264`, and the other person sees the share.
+  On a machine without NVIDIA, `OpenH264` is expected and H.264 still works.
+- With voice E2EE on, a Windows viewer sees the NVENC share, not a black tile.
+- Receive an H.264 share from Windows and confirm the picture. Setting
+  `LK_DISABLE_NVDEC` turns GPU decode off.
+- Start an H.264 share while OBS or another program that uses NVENC is
+  running. It still works.
+
 ## 10. Pop-out window
 
 Do: open a voice or stream view in its own window with the pop-out button.

@@ -156,7 +156,9 @@ How the script finds a compiler:
    this once, system-wide, and only on the Debian and Ubuntu releases
    apt.llvm.org publishes. Elsewhere, install clang 21 or newer yourself.
 
-It downloads libwebrtc once into `~/.cache/owncord-linux-webrtc`. It prints the
+It downloads libwebrtc and the CUDA headers (for NVIDIA hardware H.264) once
+into `~/.cache/owncord-linux-webrtc`. After pulling this change, run
+`cargo clean -p webrtc-sys` once so the crate rebuilds with them. It prints the
 settings (`CC`, `CXX`, `LK_CUSTOM_WEBRTC`) for the current shell only, so a new
 terminal needs the `eval` again. In CI it writes them to `$GITHUB_ENV`. CI
 caches the libwebrtc folder and installs clang fresh on each run.

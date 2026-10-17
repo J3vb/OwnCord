@@ -312,6 +312,8 @@ jobs:
         uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: Client/src-tauri
+          # See ci.yml: CUDA_HOME gates the NVENC build and build.rs ignores it.
+          env-vars: "CARGO CC CFLAGS CXX CMAKE RUST CUDA_HOME"
           lookup-only: true
 
       - name: Install npm dependencies
@@ -336,6 +338,10 @@ jobs:
       - name: Check the binary's glibc floor
         working-directory: Client
         run: bash scripts/check-glibc-floor.sh src-tauri/target/release/owncord-client
+
+      - name: Check the binary has the NVIDIA encoder
+        working-directory: Client
+        run: bash scripts/check-nvenc-linked.sh src-tauri/target/release/owncord-client
 
       # linuxdeploy bundles the runner's libwayland-* into the AppImage, which
       # breaks Mesa EGL init on newer hosts (white window on Arch/Fedora —
@@ -600,6 +606,8 @@ jobs:
         uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: Client/src-tauri
+          # See ci.yml: CUDA_HOME gates the NVENC build and build.rs ignores it.
+          env-vars: "CARGO CC CFLAGS CXX CMAKE RUST CUDA_HOME"
           lookup-only: true
 
       - name: Install npm dependencies
@@ -621,6 +629,10 @@ jobs:
       - name: Check the binary's glibc floor
         working-directory: Client
         run: bash scripts/check-glibc-floor.sh src-tauri/target/release/owncord-client
+
+      - name: Check the binary has the NVIDIA encoder
+        working-directory: Client
+        run: bash scripts/check-nvenc-linked.sh src-tauri/target/release/owncord-client
 
       # Same strip + re-sign as the x86_64 job — see the comment there.
       - name: Strip host-incompatible libs from AppImage and re-sign
