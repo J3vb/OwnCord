@@ -56,6 +56,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   const navBinds: [string, string][] = [
     [t("keybinds.action.quickSwitcher"), t("keybinds.key.ctrlK")],
     [t("keybinds.action.searchMessages"), t("keybinds.key.ctrlF")],
+    [t("keybinds.action.openSettings"), t("keybinds.key.ctrlComma")],
     [t("keybinds.action.nextChannel"), t("keybinds.key.altArrow")],
     [t("keybinds.action.nextUnreadChannel"), t("keybinds.key.altShiftArrow")],
     [t("keybinds.action.closeOverlay"), t("keybinds.key.escape")],

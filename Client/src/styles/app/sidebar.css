@@ -43,13 +43,41 @@
   font-size: 11px;
   font-weight: 700;
 }
+/* The server name is the server menu's button: same type as before, with a
+   chevron and a hover state that say it opens something. */
 .unified-sidebar-header .server-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0 4px;
+  margin-left: -4px;
+  border-radius: var(--radius-sm);
   color: var(--header-primary);
   font-weight: 700;
   font-size: var(--font-size-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+.unified-sidebar-header .server-name:hover,
+.unified-sidebar-header .server-name[aria-expanded="true"] {
+  background: var(--bg-hover);
+}
+.unified-sidebar-header .server-name-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.unified-sidebar-header .server-name-chevron {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: transform var(--transition-fast);
+}
+.unified-sidebar-header .server-name[aria-expanded="true"] .server-name-chevron {
+  transform: rotate(180deg);
 }
 .unified-sidebar-header .server-online {
   color: var(--text-micro);

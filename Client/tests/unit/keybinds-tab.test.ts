@@ -251,8 +251,8 @@ describe("KeybindsTab", () => {
   it("renders Push to Talk keybind row", () => {
     const el = buildKeybindsTab(new AbortController().signal);
     const rows = el.querySelectorAll(".keybind-row");
-    // 1 PTT + 8 Navigation + 3 Communication + 2 Global + 7 Messages = 21
-    expect(rows.length).toBe(21);
+    // 1 PTT + 9 Navigation + 3 Communication + 2 Global + 7 Messages = 22
+    expect(rows.length).toBe(22);
     const pttLabel = rows[0]!.querySelector(".setting-label");
     expect(pttLabel!.textContent).toBe("Push to Talk");
   });
@@ -488,6 +488,16 @@ describe("KeybindsTab", () => {
     expect(rows.get("Scroll Chat")).toBe("Page Up / Page Down");
     expect(rows.get("Emoji Picker")).toBe("Ctrl + E");
     expect(rows.get("GIF Picker")).toBe("Ctrl + G");
+  });
+
+  it("lists Open Settings on Ctrl + , in the Navigation section", () => {
+    const el = buildKeybindsTab(new AbortController().signal);
+    const row = Array.from(el.querySelectorAll(".keybind-row")).find(
+      (r) => r.querySelector(".setting-label")?.textContent === "Open Settings",
+    );
+    expect(row).toBeDefined();
+    expect(row!.querySelector(".kbd")?.textContent).toBe("Ctrl + ,");
+    expect(row!.className).toBe("keybind-row");
   });
 
   it("renders the composer formatting keybinds and their hint", () => {
