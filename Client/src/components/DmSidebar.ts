@@ -53,6 +53,8 @@ export interface DmConversation {
   readonly isGroup?: boolean;
   /** A group whose server reports an owner (WP 3B-10); drives the leave copy. */
   readonly hasOwner?: boolean;
+  /** The group's uploaded icon (WP 3B-11b): a server file path; absent for none. */
+  readonly icon?: string;
   /** Everyone but the current user. Drives the stack and the count. */
   readonly participants?: readonly DmParticipant[];
   readonly lastMessage: string;
@@ -96,6 +98,10 @@ export interface DmSidebarOptions {
    *  owner confirms a Block. */
   readonly onToggleBlock?: (userId: number, username: string, block: boolean) => void;
   readonly onRenameGroup?: (channelId: number) => void;
+  /** Row menu, groups on a 3B-10 server: pick and upload a new group icon. */
+  readonly onChangeGroupIcon?: (channelId: number) => void;
+  /** Row menu: remove the group icon. Offered only while one is set. */
+  readonly onRemoveGroupIcon?: (channelId: number) => void;
   readonly onBack?: () => void;
   readonly serverName?: string;
 }
@@ -136,6 +142,13 @@ function paintAvatar(el: HTMLElement, avatar: string | null, label: string): voi
 /**
  * The two overlapping faces of a group DM. Shared by the DM row and the chat
  * header so a group looks the same in both.
+ *
+ * A group with an uploaded icon (WP 3B-11b) shows that picture instead of the
+ * faces. The faces are drawn first, so a group is never an empty circle; the
+ * icon is fetched like any avatar and replaces them when it arrives, even if
+ * the stack has been detached meanwhile (the image cache owns the object URL,
+ * so it is not revoked here). If the picture then fails to decode the faces
+ * are drawn again.
  */
 export function buildGroupAvatarStack(
   channelId: number,
@@ -143,20 +156,45 @@ export function buildGroupAvatarStack(
   fallbackLabel: string,
   background: string,
   testId = `dm-avatar-stack-${channelId}`,
+  icon: string | null = null,
 ): HTMLDivElement {
   const stack = createElement("div", {
     class: "dm-avatar dm-avatar-stack",
     "data-testid": testId,
   });
-  const shown = participants.slice(0, 2);
-  // An empty group (every other member has left) still needs a mark, so fall
-  // back to the row's own label rather than rendering an empty circle.
-  const faces = shown.length > 0 ? shown : [{ id: 0, username: fallbackLabel, avatar: null }];
-  faces.forEach((p, i) => {
-    const face = createElement("div", { class: `dm-avatar-face dm-avatar-face-${i}` });
-    face.style.background = background;
-    paintAvatar(face, p.avatar, p.username);
-    stack.appendChild(face);
+  const drawFaces = (): void => {
+    const shown = participants.slice(0, 2);
+    // An empty group (every other member has left) still needs a mark, so fall
+    // back to the row's own label rather than rendering an empty circle.
+    const faces = shown.length > 0 ? shown : [{ id: 0, username: fallbackLabel, avatar: null }];
+    faces.forEach((p, i) => {
+      const face = createElement("div", { class: `dm-avatar-face dm-avatar-face-${i}` });
+      face.style.background = background;
+      paintAvatar(face, p.avatar, p.username);
+      stack.appendChild(face);
+    });
+  };
+  drawFaces();
+  if (!isRenderableAvatar(icon)) return stack;
+  const resolved = resolveServerUrl(icon);
+  void fetchImageAsObjectUrl(resolved).then((objectUrl) => {
+    if (objectUrl === null) return;
+    const img = createElement("img", {
+      src: objectUrl,
+      alt: "",
+      class: "dm-avatar-icon-img",
+      "data-testid": `${testId}-icon`,
+    });
+    recoverEvictedImage(img, { url: resolved });
+    img.addEventListener(
+      "error",
+      () => {
+        stack.replaceChildren();
+        drawFaces();
+      },
+      { once: true },
+    );
+    stack.replaceChildren(img);
   });
   return stack;
 }
@@ -178,6 +216,8 @@ function buildAvatar(convo: DmConversation): HTMLDivElement {
       convo.participants ?? [],
       convo.username,
       avatarBg,
+      undefined,
+      convo.icon ?? null,
     );
   }
 
@@ -204,6 +244,7 @@ function menuConvo(convo: DmConversation): DmMenuConvo {
     username: convo.username,
     isGroup: convo.isGroup === true,
     hasOwner: convo.hasOwner === true,
+    hasIcon: convo.icon !== undefined && convo.icon !== "",
     unread: convo.unread,
     muted,
     mutedUntil: live?.until ?? null,
@@ -409,6 +450,7 @@ function convoSignature(convo: DmConversation): string {
     convo.avatarColor ?? "",
     convo.status ?? "",
     convo.isGroup === true ? "g" : "",
+    convo.icon ?? "",
     (convo.participants ?? []).length,
     convo.active === true ? "a" : "",
     convo.muted === true ? "m" : "",

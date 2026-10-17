@@ -297,6 +297,12 @@ vi.mock("@stores/dm.store", async () => {
   };
 });
 
+const { fetchImageAsObjectUrl } = vi.hoisted(() => ({ fetchImageAsObjectUrl: vi.fn() }));
+vi.mock("@components/message-list/attachments", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@components/message-list/attachments")>()),
+  fetchImageAsObjectUrl,
+}));
+
 vi.mock("@stores/members.store", () => ({
   membersStore: {
     getState: mockMembersStoreGetState,
@@ -2679,6 +2685,78 @@ describe("createChannelController", () => {
       expect(mockUpdateChatHeaderForDm).toHaveBeenLastCalledWith(
         chatHeaderRefs,
         expect.objectContaining({ status: "3 members: You, alice, bob" }),
+      );
+    });
+
+    it("draws a group's icon in the header and redraws it when the summary's icon changes", async () => {
+      fetchImageAsObjectUrl.mockImplementation(async (url: string) => `blob:${url}`);
+      const user = (id: number, username: string) => ({
+        id,
+        username,
+        avatar: "",
+        status: "online",
+      });
+      const group = (icon: string) =>
+        ({
+          channelId: 42,
+          recipient: user(5, "alice"),
+          participants: [user(5, "alice"), user(6, "bob")],
+          name: "Crew",
+          isGroup: true,
+          ownerId: 1,
+          icon,
+          lastMessageId: null,
+          lastMessage: "",
+          lastMessageAt: "",
+          unreadCount: 0,
+        }) as never;
+      mockMembersStoreGetState.mockReturnValue({ members: new Map() });
+      const chatHeaderRefs = {
+        hashEl: document.createElement("span"),
+        nameEl: document.createElement("span"),
+        topicEl: document.createElement("span"),
+        callBtn: document.createElement("button"),
+        videoCallBtn: document.createElement("button"),
+        profileBtn: document.createElement("button"),
+        membersBtn: document.createElement("button"),
+        avatarEl: document.createElement("span"),
+        sidebarToggle: document.createElement("button"),
+        nameGroupEl: document.createElement("div"),
+      };
+      const headerAvatar = (): HTMLElement =>
+        (mockUpdateChatHeaderForDm.mock.calls.at(-1)![1] as { avatar: HTMLElement }).avatar;
+      const flush = async (): Promise<void> => {
+        await Promise.resolve();
+        await Promise.resolve();
+      };
+
+      mockDmStoreGetState.mockReturnValue({ channels: [group("/api/v1/files/1")] });
+      createChannelController(makeOpts({ chatHeaderRefs })).mountChannel(42, "Crew", "dm");
+      const first = headerAvatar();
+      await flush();
+      expect(first.dataset["testid"]).toBe("ch-avatar-stack");
+      expect(first.querySelector("img.dm-avatar-icon-img")?.getAttribute("src")).toContain(
+        "/api/v1/files/1",
+      );
+      expect(first.querySelectorAll(".dm-avatar-face")).toHaveLength(0);
+
+      // The icon is removed: the key changes, so the faces come back.
+      mockDmStoreGetState.mockReturnValue({ channels: [group("")] });
+      for (const cb of dmStoreSubscribers) cb();
+      const cleared = headerAvatar();
+      await flush();
+      expect(cleared).not.toBe(first);
+      expect(cleared.querySelector("img")).toBeNull();
+      expect(cleared.querySelectorAll(".dm-avatar-face")).toHaveLength(2);
+
+      // A different file is a different picture, not the cached element.
+      mockDmStoreGetState.mockReturnValue({ channels: [group("/api/v1/files/2")] });
+      for (const cb of dmStoreSubscribers) cb();
+      const second = headerAvatar();
+      await flush();
+      expect(second).not.toBe(cleared);
+      expect(second.querySelector("img.dm-avatar-icon-img")?.getAttribute("src")).toContain(
+        "/api/v1/files/2",
       );
     });
 

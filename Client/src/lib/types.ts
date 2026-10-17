@@ -887,6 +887,11 @@ export interface DmChannelPayload {
    * WP 3B-10; its absence on a group means member management is unavailable.
    */
   readonly owner_id?: number;
+  /**
+   * The group's icon: "/api/v1/files/{id}", or "" for none. Absent from a
+   * server without WP 3B-10c; absent and "" both mean no icon.
+   */
+  readonly icon?: string;
   readonly last_message_id: number | null;
   readonly last_message: string;
   readonly last_message_at: string;

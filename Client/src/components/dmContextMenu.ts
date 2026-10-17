@@ -24,6 +24,8 @@ export interface DmMenuConvo {
   readonly isGroup: boolean;
   /** The group reports an owner (a server with WP 3B-10): the leave copy says it can be rejoined. */
   readonly hasOwner?: boolean;
+  /** The group has an uploaded icon (WP 3B-11b): the menu offers Remove Group Icon. */
+  readonly hasIcon?: boolean;
   readonly unread: boolean;
   readonly muted: boolean;
   /** When a timed mute ends (epoch ms); null for none or "until turned off". */
@@ -51,6 +53,10 @@ export interface DmMenuActions {
   /** 1:1 only: Block (`block` true) or Unblock the other person. */
   readonly onToggleBlock?: (userId: number, username: string, block: boolean) => void;
   readonly onRenameGroup?: (channelId: number) => void;
+  /** Groups on a 3B-10 server only: pick and upload a new group icon. */
+  readonly onChangeGroupIcon?: (channelId: number) => void;
+  /** Offered only while the group has an icon. */
+  readonly onRemoveGroupIcon?: (channelId: number) => void;
 }
 
 export type DmConfirmLeave = (convo: DmMenuConvo, onClose: (channelId: number) => void) => void;
@@ -194,6 +200,26 @@ export function openDmContextMenu(req: DmContextMenuRequest): void {
       testId: `dm-rename-${id}`,
       onClick: () => rename(id),
     });
+  }
+  // Any member may set or clear the icon, so this is not gated on ownership,
+  // only on the server being one that reports an owner (WP 3B-10).
+  if (isGroup && convo.hasOwner === true) {
+    const change = actions.onChangeGroupIcon;
+    if (change !== undefined) {
+      items.push({
+        label: requestsText("dm.changeGroupIcon"),
+        testId: `dm-change-icon-${id}`,
+        onClick: () => change(id),
+      });
+    }
+    const remove = actions.onRemoveGroupIcon;
+    if (remove !== undefined && convo.hasIcon === true) {
+      items.push({
+        label: requestsText("dm.removeGroupIcon"),
+        testId: `dm-remove-icon-${id}`,
+        onClick: () => remove(id),
+      });
+    }
   }
   if (!isGroup && actions.onToggleBlock !== undefined) {
     const toggleBlock = actions.onToggleBlock;

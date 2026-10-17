@@ -1500,6 +1500,41 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       );
     },
 
+    /**
+     * Set a group DM's icon (WP 3B-11b): multipart `file`, PNG/JPEG/WebP, max
+     * 1 MB and 1024x1024, any member. 200 carries the summary; 204 means the
+     * summary read failed after the commit and the dm_channel_open that follows
+     * carries the state.
+     */
+    uploadGroupDmIcon(
+      channelId: number,
+      file: File,
+      signal?: AbortSignal,
+    ): Promise<GroupDmResponse | undefined> {
+      const formData = new FormData();
+      formData.append("file", file);
+      return request<GroupDmResponse | undefined>(
+        "POST",
+        `/dms/${channelId}/icon`,
+        formData,
+        signal,
+        { multipart: true },
+      );
+    },
+
+    /** Remove a group DM's icon. Any member; a no-op when none is set. 200 carries the summary, 204 none. */
+    removeGroupDmIcon(
+      channelId: number,
+      signal?: AbortSignal,
+    ): Promise<GroupDmResponse | undefined> {
+      return request<GroupDmResponse | undefined>(
+        "DELETE",
+        `/dms/${channelId}/icon`,
+        undefined,
+        signal,
+      );
+    },
+
     /** Remove another member from a group DM. Owner only; removing yourself is a leave (closeDm). */
     removeGroupDmMember(channelId: number, userId: number, signal?: AbortSignal): Promise<void> {
       return request<void>("DELETE", `/dms/${channelId}/members/${userId}`, undefined, signal);

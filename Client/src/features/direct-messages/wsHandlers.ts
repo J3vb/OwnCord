@@ -41,6 +41,8 @@ function mapDmPayload(p: DmChannelPayload): DmChannel {
     name: p.name ?? "",
     isGroup: p.is_group ?? false,
     ...(p.owner_id !== undefined && { ownerId: p.owner_id }),
+    // "" is kept, not dropped: addDmChannel's spread must clear an old icon.
+    ...(p.icon !== undefined && { icon: p.icon }),
     lastMessageId: p.last_message_id,
     lastReadMessageId: p.last_read_message_id,
     lastMessage: p.last_message,
