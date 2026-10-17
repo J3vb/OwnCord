@@ -98,6 +98,17 @@ export function parseMessageLink(url: string): MessageLink | null {
 }
 
 /**
+ * Build the shareable link for a channel: `owncord://channel/<id>`, with
+ * `?host=<host>` naming the server when it is known. The inverse of
+ * {@link parseChannelLink}.
+ */
+export function formatChannelLink(channelId: number, host?: string): string {
+  const base = `${PREFIX}${CHANNEL_ROUTE}/${channelId}`;
+  const trimmed = host?.trim() ?? "";
+  return trimmed === "" ? base : `${base}?host=${encodeURIComponent(trimmed)}`;
+}
+
+/**
  * Parse an `owncord://channel/<channelId>` link, with an optional `?host=`: a
  * call notification's launch URI. Validated exactly as a message permalink is.
  * Returns null for any other route, another scheme, or a non-numeric id. Pure.

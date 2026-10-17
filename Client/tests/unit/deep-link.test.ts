@@ -4,6 +4,7 @@ import {
   parseMessageLink,
   parseChannelLink,
   formatMessageLink,
+  formatChannelLink,
   normaliseInviteCode,
 } from "@lib/deep-link";
 
@@ -202,5 +203,23 @@ describe("parseMessageLink", () => {
       channelId: 5,
       messageId: 42,
     });
+  });
+});
+
+describe("formatChannelLink", () => {
+  it("round-trips through parseChannelLink, host included", () => {
+    expect(formatChannelLink(7)).toBe("owncord://channel/7");
+    expect(parseChannelLink(formatChannelLink(7))).toEqual({ channelId: 7 });
+    const withHost = formatChannelLink(7, "chat.example:8443");
+    expect(withHost).toBe("owncord://channel/7?host=chat.example%3A8443");
+    expect(parseChannelLink(withHost)).toEqual({ channelId: 7, host: "chat.example:8443" });
+  });
+
+  it("encodes a host that would forge a parameter and drops a blank one", () => {
+    expect(parseChannelLink(formatChannelLink(1, "evil.example&x=1#y"))).toEqual({
+      channelId: 1,
+      host: "evil.example&x=1#y",
+    });
+    expect(formatChannelLink(3, "  ")).toBe("owncord://channel/3");
   });
 });

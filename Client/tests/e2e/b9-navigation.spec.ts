@@ -251,9 +251,10 @@ test.describe("Mark Server as Read in the server header", () => {
     const header = page.locator("[data-testid='unified-sidebar'] .unified-sidebar-header");
     const actions = header.locator(".sidebar-header-actions > button:visible");
     const markAll = page.locator("[data-testid='mark-all-read']");
-    const badge = page.locator("[data-channel-id='2'] .unread-badge");
+    // A server channel shows plain unread as a bold name and a pill, not a count.
+    const badge = page.locator("[data-channel-id='2'].unread");
 
-    await expect(badge).toHaveText("2");
+    await expect(badge).toHaveCount(1);
     await expect(actions).toHaveCount(4);
     await expect(actions.nth(0)).toHaveAttribute("data-testid", "mark-all-read");
     await expect(markAll).toHaveAccessibleName("Mark Server as Read");
