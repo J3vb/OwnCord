@@ -12,6 +12,7 @@ import { membersStore } from "@stores/members.store";
 import { voiceStore, isSelfMuted, type VoiceState } from "@stores/voice.store";
 import { openSettings, uiStore } from "@stores/ui.store";
 import { createStatusPicker, type StatusPickerComponent } from "@components/StatusPicker";
+import { createSelfProfileCard, type SelfProfileCard } from "@components/SelfProfileCard";
 import type { UserStatus } from "@lib/types";
 import {
   loadCustomStatus,
@@ -152,6 +153,7 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
   let nameEl: HTMLSpanElement | null = null;
   let statusEl: HTMLSpanElement | null = null;
   let statusPicker: StatusPickerComponent | null = null;
+  let profileCard: SelfProfileCard | null = null;
 
   /** Swap the letter for the uploaded picture, or back again. */
   function renderAvatar(subject: {
@@ -228,6 +230,17 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
     avatarTextEl = createElement("span", {});
     avatarEl.appendChild(avatarTextEl);
 
+    // The avatar and name are one real button that opens your own profile
+    // card. The status dot is a sibling laid over the avatar's corner (a
+    // control cannot nest inside a button) and keeps its own dropdown.
+    const self = createElement("div", { class: "ub-self" });
+    const profileBtn = createElement("button", {
+      class: "ub-profile-btn",
+      type: "button",
+      "aria-haspopup": "dialog",
+      "aria-expanded": "false",
+      "data-testid": "user-bar-profile",
+    });
     const info = createElement("div", { class: "ub-info" });
     nameEl = createElement("span", { class: "ub-name", "data-testid": "user-bar-name" });
     statusEl = createElement("span", { class: "ub-status" });
@@ -259,6 +272,45 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       );
     };
 
+    // One save path for the dropdown and the profile card.
+    function applyStatus(status: UserStatus): void {
+      saveUserStatus(status);
+      updateFromState();
+      const sender = options?.presenceSender;
+      if (sender !== null && sender !== undefined && canSetStatus()) {
+        // No custom_status field: a plain status change must leave whatever
+        // text the user set standing. Routed through the shared sender
+        // (not ws.send directly) so a frame the presence limiter's window
+        // rejects is retried instead of lost — see @lib/presence.
+        sender.send(status);
+      }
+    }
+    function applyCustomStatus(text: string): void {
+      saveCustomStatus(text);
+      const sender = options?.presenceSender;
+      if (sender !== null && sender !== undefined && canSetStatus()) {
+        sender.send(loadUserStatus(), text);
+      }
+    }
+
+    profileCard = createSelfProfileCard({
+      trigger: profileBtn,
+      canSetStatus,
+      // Our own member entry first: the optimistic apply and the server echo
+      // write it, while authStore.user.custom_status only moves at auth_ok
+      // and on a rollback.
+      getCustomStatus: () => {
+        const id = authStore.getState().user?.id;
+        const m = id === undefined ? undefined : membersStore.getState().members.get(id);
+        return m !== undefined
+          ? (m.customStatus ?? "")
+          : (serverCustomStatus() ?? loadCustomStatus());
+      },
+      onStatusChange: applyStatus,
+      onCustomStatusChange: applyCustomStatus,
+    });
+    disposable.onEvent(profileBtn, "click", () => profileCard?.toggle());
+
     statusPicker = createStatusPicker({
       // Start from the stored selection, not a hardcoded "online" — otherwise
       // this picker and the settings Account tab show different statuses.
@@ -272,25 +324,8 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       // says there is nothing to show, which is the one case that must render
       // empty for the picker's clear-it flow to work at all.
       currentCustomStatus: serverCustomStatus() ?? loadCustomStatus(),
-      onStatusChange: (status: UserStatus) => {
-        saveUserStatus(status);
-        updateFromState();
-        const sender = options?.presenceSender;
-        if (sender !== null && sender !== undefined && canSetStatus()) {
-          // No custom_status field: a plain status change must leave whatever
-          // text the user set standing. Routed through the shared sender
-          // (not ws.send directly) so a frame the presence limiter's window
-          // rejects is retried instead of lost — see @lib/presence.
-          sender.send(status);
-        }
-      },
-      onCustomStatusChange: (text: string) => {
-        saveCustomStatus(text);
-        const sender = options?.presenceSender;
-        if (sender !== null && sender !== undefined && canSetStatus()) {
-          sender.send(loadUserStatus(), text);
-        }
-      },
+      onStatusChange: applyStatus,
+      onCustomStatusChange: applyCustomStatus,
     });
     statusPicker.mount(statusPickerWrap);
 
@@ -327,7 +362,8 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       () => updatePickerDisabled(),
     );
 
-    avatarEl.appendChild(statusPickerWrap);
+    appendChildren(profileBtn, avatarEl, info);
+    appendChildren(self, profileBtn, statusPickerWrap);
 
     const buttons = createElement("div", { class: "ub-controls" });
 
@@ -376,7 +412,7 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       buttons.appendChild(disconnectBtn);
     }
 
-    appendChildren(root, avatarEl, info, buttons);
+    appendChildren(root, self, buttons);
 
     // Initial render
     updateFromState();
@@ -418,6 +454,8 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
   }
 
   function destroy(): void {
+    profileCard?.destroy();
+    profileCard = null;
     statusPicker?.destroy?.();
     statusPicker = null;
     disposable.destroy();
