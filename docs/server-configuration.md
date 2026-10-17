@@ -401,33 +401,59 @@ written to the audit log. The full-archive export already ships it beside
 ### If a panel change locks you out
 
 A wrong port, TLS mode, admin allowlist, trusted-proxies list, path or restart
-mode can put the panel out of reach. On the host:
+mode can put the panel out of reach. `chatserver config reset-overrides` drops
+the saved panel settings so `config.yaml` and the environment apply again. Run
+it with the server stopped: it takes the database's process lock and refuses
+while a server is running. It does not read or write `config.yaml`, and it
+prints the names of the keys it removed, never their values.
 
-1. Stop the server.
-2. Edit `<data_dir>/config-overrides.json` and delete the offending key, or
-   delete the whole file to drop every panel override. The file is plain JSON
-   keyed by the dotted config key.
-3. Start the server. `config.yaml` values apply again.
+```bash
+chatserver config reset-overrides                  # the settings that can lock you out
+chatserver config reset-overrides server.port tls.mode   # only the named keys
+chatserver config reset-overrides --all            # every saved panel setting
+```
 
-Without editing the file: set the matching `OWNCORD_*` variable (for example
+- With no arguments it removes the saved values of the lockout-capable keys:
+  the ones the panel asks you to confirm by typing the key name (`server.port`,
+  `tls.mode`, `tls.domain`, `server.admin_allowed_cidrs`,
+  `server.trusted_proxies`, `server.restart_mode`, and the path and certificate
+  keys). Tuning values and the write-only secrets stay.
+- With key names it removes only those keys. A name that is not a
+  panel-editable key is refused.
+- `--all` removes the whole file. If the file cannot be parsed, it is renamed
+  to `config-overrides.json.unreadable-<UTC time>` instead of deleted, because
+  it can hold secrets. Without `--all`, the command refuses an unparseable file
+  and says so.
+- Resetting `server.admin_allowed_cidrs` returns to the `config.yaml` value, or
+  to the default private ranges when `config.yaml` has none. It never leaves an
+  empty list that `config.yaml` did not ask for.
+
+In Docker the entrypoint is the server binary, so the image needs no shell.
+Stop the server first, then run the command against the same volume:
+
+```bash
+docker compose stop owncord
+docker compose run --rm --no-deps owncord config reset-overrides
+docker compose start owncord
+```
+
+With a bare `docker run`, stop the server container and pass the same volume
+and image tag:
+
+```bash
+docker run --rm -v owncord-data:/app/data \
+  ghcr.io/j3vb/owncord-server:<same tag> config reset-overrides
+```
+
+Without the command, you can still edit `<data_dir>/config-overrides.json` on
+the host with the server stopped: delete the offending key, or the whole file.
+The file is plain JSON keyed by the dotted config key.
+
+Without touching the file: set the matching `OWNCORD_*` variable (for example
 `OWNCORD_SERVER_PORT=8443` or
 `OWNCORD_SERVER_ADMIN_ALLOWED_CIDRS=127.0.0.0/8`). The environment always wins
 over the panel. Then reach the panel through an SSH tunnel
 (`ssh -L 8443:127.0.0.1:8443 host`) and reset the key there.
-
-In Docker the file is in the `owncord-data` volume. The image is distroless
-(no shell, no `rm`), so `docker compose exec` cannot delete it; use a
-throwaway container on the same volume while the server is stopped:
-
-```bash
-docker compose stop owncord
-docker run --rm --volumes-from "$(docker compose ps -aq owncord)" \
-  busybox:1.37 rm /app/data/config-overrides.json
-docker compose start owncord
-```
-
-With a bare `docker run`, pass the server container's name to
-`--volumes-from` instead.
 
 With `server.restart_mode: supervised` and no supervisor, the server exits at
 the next restart and nothing starts it again. Start it by hand, then fix the

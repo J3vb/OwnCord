@@ -26,7 +26,8 @@ func TestInfoOutput(t *testing.T) {
 		if !ok {
 			t.Errorf("infoOutput(%q) ok = false, want true", arg)
 		}
-		if !strings.Contains(out, "Usage:") || !strings.Contains(out, "chatserver healthcheck") {
+		if !strings.Contains(out, "Usage:") || !strings.Contains(out, "chatserver healthcheck") ||
+			!strings.Contains(out, "chatserver config reset-overrides") {
 			t.Errorf("infoOutput(%q) = %q, want the usage text", arg, out)
 		}
 	}

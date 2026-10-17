@@ -442,3 +442,69 @@ func TestEnvOverridden(t *testing.T) {
 		t.Error("EnvOverridden(push.enabled) = true with no OWNCORD_PUSH_ENABLED set")
 	}
 }
+
+func TestBaseConfig_IgnoresOverridesLayer(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	cfgPath := filepath.Join(dir, "config.yaml")
+	yaml := "server:\n  data_dir: " + filepath.ToSlash(dataDir) + "\n  port: 9000\nupload:\n  max_size_mb: 20\n"
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	overrides := config.OverridesPath(dataDir)
+	if err := os.MkdirAll(dataDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.SaveOverrides(overrides, map[string]any{"server.port": 9443, "upload.max_size_mb": 50}); err != nil {
+		t.Fatal(err)
+	}
+
+	base, err := config.BaseConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("BaseConfig: %v", err)
+	}
+	if base.Server.Port != 9000 || base.Upload.MaxSizeMB != 20 {
+		t.Errorf("BaseConfig applied the overrides layer: port %d, max_size_mb %d", base.Server.Port, base.Upload.MaxSizeMB)
+	}
+	if base.Server.DataDir != dataDir {
+		t.Errorf("data_dir = %q, want %q", base.Server.DataDir, dataDir)
+	}
+	effective, err := config.Preview(cfgPath, overrides, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if effective.Server.Port != 9443 {
+		t.Errorf("Preview port = %d; the overrides file should still apply there", effective.Server.Port)
+	}
+
+	// An unparseable overrides file does not stop BaseConfig.
+	if err := os.WriteFile(overrides, []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.BaseConfig(cfgPath); err != nil {
+		t.Errorf("BaseConfig with an unparseable overrides file: %v", err)
+	}
+}
+
+func TestBaseConfig_MissingFileIsDefaultsAndCreatesNothing(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	base, err := config.BaseConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("BaseConfig: %v", err)
+	}
+	if base.Server.Port != 8443 || base.Server.DataDir != "data" {
+		t.Errorf("not the defaults: port %d, data_dir %q", base.Server.Port, base.Server.DataDir)
+	}
+	if base.Voice.LiveKitAPIKey != "" || base.Voice.LiveKitAPISecret != "" {
+		t.Error("a LiveKit credential was generated; BaseConfig must leave them as configured")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("BaseConfig created files: %v", entries)
+	}
+}
