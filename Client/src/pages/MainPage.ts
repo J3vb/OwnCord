@@ -1881,12 +1881,22 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       ),
     );
     const prevTileLabels = new Map<number, string>();
+    // A page rebuilt while already in voice (reconnect) loads the grid now.
+    let gridLoadChannel: number | null = voiceStore.getState().currentChannelId;
+    if (gridLoadChannel !== null) chatAreaResult.videoGrid.ensureLoaded();
     // Subscribe to voice store for camera/screenshare state changes, voice
     // channel switches, remote-tile identity changes and who is speaking.
     unsubscribers.push(
       voiceStore.subscribe((state) => {
         try {
           const channelId = state.currentChannelId;
+          // The grid's code loads on a join, so the import overlaps the
+          // connect. Once per channel: a failed import retries on the next
+          // join, not on every voice update (speaking changes fire often).
+          if (channelId !== gridLoadChannel) {
+            gridLoadChannel = channelId;
+            if (channelId !== null) chatAreaResult.videoGrid.ensureLoaded();
+          }
           // Speaking rings on the video tiles: only when who is speaking
           // changes, not on every store update.
           const talking = new Set<number>();
