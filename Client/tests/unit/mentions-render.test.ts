@@ -18,7 +18,10 @@ vi.mock("@lib/livekitSession", () => ({
 import {
   renderMentionSegment,
   renderMessageContent,
+  resyncMentions,
 } from "../../src/components/message-list/content-parser";
+import { setChannelMutesHost } from "../../src/lib/channel-mutes";
+import { setInviteJoinHandler } from "../../src/lib/invite-navigation";
 import { renderMessage } from "../../src/components/message-list/renderers";
 import {
   highlightsCurrentUser,
@@ -352,5 +355,177 @@ describe("mention predicates", () => {
   it("is false when nobody is signed in", () => {
     authStore.setState((prev) => ({ ...prev, user: null }));
     expect(mentionsCurrentUser("hey @me")).toBe(false);
+  });
+});
+
+describe("display names in mentions (P20)", () => {
+  function nameAlice(displayName: string): void {
+    membersStore.setState((prev) => ({
+      ...prev,
+      members: new Map([
+        ...prev.members,
+        [
+          10,
+          {
+            id: 10,
+            username: "alice",
+            displayName,
+            avatar: null,
+            role: "member",
+            status: "online" as const,
+          },
+        ],
+      ]),
+    }));
+  }
+
+  it("shows the display name with the typed @username as the title", () => {
+    nameAlice("Alice W");
+    const mention = render("hey @alice").querySelector<HTMLElement>(".mention");
+    expect(mention?.textContent).toBe("@Alice W");
+    expect(mention?.title).toBe("@alice");
+    expect(mention?.dataset["mention"]).toBe("@alice");
+  });
+
+  it("keeps trailing punctuation after the display name", () => {
+    nameAlice("Alice W");
+    expect(render("hi @alice, ok").textContent).toBe("hi @Alice W, ok");
+    expect(render("bye @alice.").textContent).toContain("@Alice W.");
+  });
+
+  it("drops the title on resync when the display name is cleared", () => {
+    nameAlice("Alice W");
+    const wrap = document.createElement("div");
+    wrap.className = "msg-text";
+    wrap.appendChild(renderMentionSegment("hey @alice"));
+    const root = document.createElement("div");
+    root.appendChild(wrap);
+    nameAlice("alice");
+    resyncMentions(root);
+    const mention = wrap.querySelector(".mention");
+    expect(mention?.textContent).toBe("@alice");
+    expect(mention?.hasAttribute("title")).toBe(false);
+  });
+
+  it("keeps an unknown user as typed", () => {
+    nameAlice("Alice W");
+    expect(render("hey @nobody").textContent).toBe("hey @nobody");
+  });
+
+  it("updates the text on resync when the display name changes, keeping the pill", () => {
+    nameAlice("Alice W");
+    const el = render("hey @alice");
+    nameAlice("Ally");
+    const wrap = document.createElement("div");
+    wrap.className = "msg-text";
+    wrap.append(...Array.from(el.childNodes));
+    const root = document.createElement("div");
+    root.appendChild(wrap);
+    resyncMentions(root);
+    const mention = wrap.querySelector(".mention");
+    expect(mention?.textContent).toBe("@Ally");
+    expect(wrap.textContent).toBe("hey @Ally");
+  });
+});
+
+describe("invite link chip (P29)", () => {
+  const joined: Array<[string, string | undefined]> = [];
+  let unregister: () => void;
+
+  beforeEach(() => {
+    joined.length = 0;
+    unregister = setInviteJoinHandler((code, host) => joined.push([code, host]));
+    setChannelMutesHost("here.example:8443");
+    authStore.setState((prev) => ({ ...prev, serverName: "Here" }));
+  });
+
+  afterEach(() => {
+    unregister();
+    setChannelMutesHost(null);
+    // Close through the dialog so its "one at a time" latch resets.
+    document.querySelector<HTMLElement>("[data-testid='invite-join-cancel']")?.click();
+  });
+
+  it("renders a chip with the host and a Join action", () => {
+    const chip = render("see owncord://invite/abc123?host=there.example").querySelector(
+      ".message-link-chip",
+    );
+    expect(chip?.querySelector(".mlc-channel")?.textContent).toBe("there.example");
+    expect(chip?.querySelector(".mlc-action")?.textContent).toBe("Join");
+  });
+
+  it("says this server when the link names no host", () => {
+    const chip = render("owncord://invite/abc123").querySelector(".message-link-chip");
+    expect(chip?.querySelector(".mlc-channel")?.textContent).toBe("this server");
+  });
+
+  it("has no click action for the server already open", () => {
+    const chip = render("owncord://invite/abc?host=HERE.example:8443").querySelector<HTMLElement>(
+      ".message-link-chip",
+    );
+    expect(chip?.querySelector(".mlc-action")?.textContent).toBe("You're already in this server");
+    expect(chip?.getAttribute("role")).toBeNull();
+    chip?.click();
+    expect(document.querySelector("[data-testid='invite-join-dialog']")).toBeNull();
+    expect(joined).toEqual([]);
+  });
+
+  it("treats a default :443 as the same server", () => {
+    const chip = render("owncord://invite/abc?host=here.example:8443");
+    expect(chip.querySelector(".invite-chip-here")).not.toBeNull();
+    setChannelMutesHost("x.example");
+    const el2 = render("owncord://invite/abc?host=x.example:443");
+    expect(el2.querySelectorAll(".invite-chip-here").length).toBe(2);
+  });
+
+  it("opens the confirm on Enter", async () => {
+    const chip = render("owncord://invite/abc?host=there.example").querySelector<HTMLElement>(
+      ".message-link-chip",
+    );
+    chip?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid='invite-join-dialog']")).not.toBeNull(),
+    );
+  });
+
+  it("does not make an interactive chip inside a masked link", () => {
+    const el = document.createElement("div");
+    el.appendChild(
+      renderMessageContent("[owncord://invite/abc?host=there.example](https://e.example)"),
+    );
+    expect(el.querySelector(".message-link-chip")).toBeNull();
+    expect(el.querySelector("a.masked")?.textContent).toContain("owncord://invite/abc");
+  });
+
+  it("asks before leaving, then runs the invite flow with (code, host)", async () => {
+    const chip = render("owncord://invite/abc123?host=there.example").querySelector<HTMLElement>(
+      ".message-link-chip",
+    );
+    chip?.click();
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid='invite-join-dialog']")).not.toBeNull(),
+    );
+    const dialog = document.querySelector("[data-testid='invite-join-dialog']");
+    expect(dialog?.textContent).toContain("Leave Here to join there.example?");
+    expect(joined).toEqual([]);
+    document.querySelector<HTMLElement>("[data-testid='invite-join-confirm']")?.click();
+    expect(joined).toEqual([["abc123", "there.example"]]);
+  });
+
+  it("does not join when the prompt is cancelled", async () => {
+    render("owncord://invite/abc123?host=there.example")
+      .querySelector<HTMLElement>(".message-link-chip")
+      ?.click();
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid='invite-join-cancel']")).not.toBeNull(),
+    );
+    document.querySelector<HTMLElement>("[data-testid='invite-join-cancel']")?.click();
+    expect(joined).toEqual([]);
+  });
+
+  it("leaves a malformed invite link as plain text", () => {
+    const el = render("owncord://invite/");
+    expect(el.querySelector(".message-link-chip")).toBeNull();
+    expect(el.textContent).toBe("owncord://invite/");
   });
 });

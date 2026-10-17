@@ -288,7 +288,7 @@ export interface MessageMenuAt {
 /** What an Alt+click marks unread must not be: a control with an action of its own. */
 const OWN_ACTION_SELECTOR =
   "a, button, input, textarea, select, img, video, audio, [role='button'], " +
-  ".msg-author, .msg-avatar, .mention, .spoiler";
+  ".msg-author, .msg-avatar, .mention, .message-link-chip, .spoiler";
 
 /**
  * Alt+click on a message row: mark it unread. Does nothing on a link, button,

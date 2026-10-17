@@ -393,6 +393,37 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
+  it("the stream card shows the share's quality in the select and reverts a refused change", async () => {
+    // A Linux share now carries its quality (the native track changes it), so
+    // the card shows the select like a web share's.
+    mockShareQuality.mockReturnValue("high");
+    mockCanChange.mockReturnValueOnce(true);
+    setVoiceChannel(1, []);
+    voiceStore.setState((prev) => ({ ...prev, localScreenshare: true }));
+    voiceStore.flush();
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+    await vi.dynamicImportSettled();
+    const quality = container.querySelector<HTMLSelectElement>(
+      '[data-testid="vw-stream-quality"]',
+    )!;
+    expect(quality.hidden).toBe(false);
+    expect(quality.value).toBe("high");
+
+    // The host refuses: the live quality stays "high", so the select goes back.
+    quality.value = "low";
+    quality.dispatchEvent(new Event("change"));
+    expect(mockSetQuality).toHaveBeenCalledWith("low");
+    await vi.waitFor(() => expect(quality.disabled).toBe(false));
+    expect(quality.value).toBe("high");
+    mockShareQuality.mockReturnValue("medium");
+    widget.destroy?.();
+  });
+
   it("cleans up on destroy", () => {
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),

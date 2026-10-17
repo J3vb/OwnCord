@@ -318,19 +318,21 @@ export class MediaControl {
       void this.disableScreenshare();
   }
 
-  /** Share another window or screen without stopping (web path). */
+  /** Share another window or screen without stopping (the web path swaps the
+   *  browser capture; Linux asks the host to swap its own). */
   async changeScreenshareSource(): Promise<void> {
     const { changeScreenshareSource } = await import("./screenshareChange");
     return changeScreenshareSource(this._screenState, this._videoTrackDeps);
   }
 
-  /** The live share's quality for this share only (web path). */
+  /** The live share's quality for this share only (the web path re-sizes the
+   *  browser capture; Linux has the host re-size and republish its own). */
   async setScreenshareQuality(quality: StreamQuality): Promise<void> {
     const { setScreenshareQuality } = await import("./screenshareChange");
     return setScreenshareQuality(this._screenState, this._videoTrackDeps, quality);
   }
 
-  /** The live share's quality, or null where it cannot be changed. */
+  /** The live share's quality, or null while it is not published. */
   getScreenshareQuality(): StreamQuality | null {
     return this._screenState.quality ?? null;
   }

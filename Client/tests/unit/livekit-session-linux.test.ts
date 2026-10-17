@@ -119,6 +119,8 @@ const host = vi.hoisted(() => ({
   nextSession: 1,
   connectFails: false,
   screens: { portal: true, sources: [] } as { portal: boolean; sources: Array<{ id: string }> },
+  screenQuality: (): Promise<unknown> =>
+    Promise.resolve({ ok: true, sid: "TR_screen2", width: 1920, height: 1080 }),
 }));
 
 vi.mock("../../src/platform/desktop", () => ({
@@ -191,6 +193,10 @@ vi.mock("../../src/platform/desktop", () => ({
       publishScreen: (...args: unknown[]) => {
         host.commands.push(["publishScreen", args]);
         return Promise.resolve("TR_screen");
+      },
+      setScreenQuality: (...args: unknown[]) => {
+        host.commands.push(["setScreenQuality", args]);
+        return host.screenQuality();
       },
       stopScreen: (...args: unknown[]) => {
         host.commands.push(["stopScreen", args]);
@@ -665,6 +671,70 @@ describe("LiveKitSession on the Linux native backend", () => {
       payload: { enabled: false },
     });
     expect(nativeCounters.screenTracks).toBe(0);
+  });
+
+  it("a Linux share shows its picked quality and changes it live through the host", async () => {
+    const ws = { send: vi.fn(() => "req-1"), on: vi.fn() };
+    session.setWsClient(ws as never);
+    await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+    const sharing = session.enableScreenshare();
+    await pressGoLive();
+    await sharing;
+    // The stream card's Quality select reads this: the dialog's pick (the
+    // default, medium), not nothing.
+    expect(session.getScreenshareQuality()).toBe("medium");
+    expect(session.canChangeScreenshareSource()).toBe(true);
+    host.commands.length = 0;
+    const announced = ws.send.mock.calls.length;
+
+    await session.setScreenshareQuality("high");
+
+    expect(host.commands).toEqual([
+      [
+        "setScreenQuality",
+        [
+          1,
+          3,
+          { fps: 30, maxWidth: 1920, maxHeight: 1080 },
+          {
+            width: 1920,
+            height: 1080,
+            maxBitrate: 6_000_000,
+            maxFramerate: 30,
+            simulcast: true,
+            codec: "vp8",
+          },
+        ],
+      ],
+    ]);
+    expect(session.getScreenshareQuality()).toBe("high");
+    // The server hears nothing: the share carries on under the same flag.
+    expect(ws.send).toHaveBeenCalledTimes(announced);
+  });
+
+  it("a refused Linux quality change leaves the quality and the share", async () => {
+    const onError = vi.fn();
+    session.setOnError(onError);
+    const ws = { send: vi.fn(() => "req-1"), on: vi.fn() };
+    session.setWsClient(ws as never);
+    await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+    const sharing = session.enableScreenshare();
+    await pressGoLive();
+    await sharing;
+    const announced = ws.send.mock.calls.length;
+    host.screenQuality = () =>
+      Promise.resolve({ ok: false, stage: "refused", message: "a source change is pending" });
+    try {
+      await session.setScreenshareQuality("high");
+    } finally {
+      host.screenQuality = () =>
+        Promise.resolve({ ok: true, sid: "TR_screen2", width: 1920, height: 1080 });
+    }
+
+    expect(session.getScreenshareQuality()).toBe("medium");
+    expect(onError).toHaveBeenCalledWith("Couldn't change the stream quality");
+    expect(nativeCounters.screenTracks).toBe(1);
+    expect(ws.send).toHaveBeenCalledTimes(announced);
   });
 
   it("a portal that never started shows a soft notice, not a refused share", async () => {
