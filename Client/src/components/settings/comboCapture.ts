@@ -10,7 +10,7 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { vkName } from "@lib/ptt";
+import { actionLabel, comboOrNotSet } from "@lib/keybindLabels";
 import { loadPref } from "@lib/preferences";
 import { keyEventToVk } from "@lib/voiceShortcuts";
 import {
@@ -20,7 +20,6 @@ import {
   keybindConflict,
   loadEffectiveKeybinds,
   saveKeybind,
-  type ActionId,
   type ConflictKind,
   type KeyCombo,
   type KeybindConflict,
@@ -28,34 +27,6 @@ import {
 } from "@lib/keybinds";
 import type { SettingsTextKey } from "@lib/keybindCatalog";
 import { settingsText as t } from "../../i18n/settings";
-
-/** The catalog key of each action's label. */
-const ACTION_LABEL_KEYS: Readonly<Record<ActionId, SettingsTextKey>> = {
-  toggleMute: "keybinds.action.toggleMute",
-  toggleDeafen: "keybinds.action.toggleDeafen",
-  toggleCamera: "keybinds.action.toggleCamera",
-  toggleScreenshare: "keybinds.action.toggleScreenshare",
-  disconnect: "keybinds.action.disconnect",
-  search: "keybinds.action.searchMessages",
-  uploadFile: "keybinds.action.uploadFile",
-  emojiPicker: "keybinds.action.emojiPicker",
-  gifPicker: "keybinds.action.gifPicker",
-};
-
-/** The display name of an action. */
-export function actionLabel(id: ActionId): string {
-  return t(ACTION_LABEL_KEYS[id]);
-}
-
-/** A combo as text: "Ctrl + Shift + V". */
-export function comboLabel(combo: KeyCombo): string {
-  const parts: string[] = [];
-  if (combo.ctrl) parts.push(t("keybinds.mod.ctrl"));
-  if (combo.shift) parts.push(t("keybinds.mod.shift"));
-  if (combo.alt) parts.push(t("keybinds.mod.alt"));
-  parts.push(vkName(combo.vk));
-  return parts.join(" + ");
-}
 
 /** The alert text of each refusal that names no other action. */
 const CONFLICT_TEXT_KEYS: Readonly<Record<Exclude<ConflictKind, "duplicate">, SettingsTextKey>> = {
@@ -108,6 +79,11 @@ export interface ComboCapture {
   element: HTMLElement;
   /** Re-read the saved binding and clear any alert (after an outside change). */
   refresh: () => void;
+  /**
+   * Back to the default for "Reset all". A default that another binding or
+   * push to talk holds now is saved as unbound, with that row's alert saying why.
+   */
+  reset: () => void;
 }
 
 const savedPttVk = (): number => loadPref<number>("pttVk", 0);
@@ -124,7 +100,6 @@ export function buildComboCapture(signal: AbortSignal, opts: ComboCaptureOptions
       type: "button",
       class: "kbd keybind-capture-btn",
       title: t("keybinds.clickToSet"),
-      "aria-label": t("keybinds.rebindAria", { action: label }),
       "data-testid": testId,
     },
     "",
@@ -175,10 +150,16 @@ export function buildComboCapture(signal: AbortSignal, opts: ComboCaptureOptions
     btn.disabled = disabled;
   };
 
+  /** The button's text, and the same in its accessible name. */
+  const show = (text: string): void => {
+    setText(button, text);
+    button.setAttribute("aria-label", t("keybinds.rebindAria", { action: label, combo: text }));
+  };
+
   const render = (): void => {
     const combo = loadEffectiveKeybinds()[action];
     const def = defaultOf(action);
-    setText(button, combo === null ? t("keybinds.notSet") : comboLabel(combo));
+    show(comboOrNotSet(combo));
     const isDefault =
       combo === null || def === null ? combo === def : comboKey(combo) === comboKey(def);
     setDisabled(reset, isDefault);
@@ -237,7 +218,7 @@ export function buildComboCapture(signal: AbortSignal, opts: ComboCaptureOptions
       capturing = true;
       showAlert(null);
       button.classList.add("capturing");
-      setText(button, t("keybinds.pressKey"));
+      show(t("keybinds.pressKey"));
       document.addEventListener("keydown", onKey, { capture: true, signal });
     },
     { signal },
@@ -246,6 +227,7 @@ export function buildComboCapture(signal: AbortSignal, opts: ComboCaptureOptions
   reset.addEventListener(
     "click",
     () => {
+      finish();
       const def = defaultOf(action);
       if (def !== null) {
         // Another binding may have taken the default since.
@@ -265,6 +247,7 @@ export function buildComboCapture(signal: AbortSignal, opts: ComboCaptureOptions
   remove.addEventListener(
     "click",
     () => {
+      finish();
       showAlert(null);
       saveKeybind(action, null);
       render();
@@ -277,6 +260,20 @@ export function buildComboCapture(signal: AbortSignal, opts: ComboCaptureOptions
     element,
     refresh: () => {
       showAlert(null);
+      render();
+    },
+    reset: () => {
+      finish();
+      showAlert(null);
+      saveKeybind(action, undefined);
+      const def = defaultOf(action);
+      if (def !== null) {
+        const conflict = keybindConflict(def, action, loadEffectiveKeybinds(), savedPttVk());
+        if (conflict !== null) {
+          saveKeybind(action, null);
+          showAlert(conflictText(conflict));
+        }
+      }
       render();
     },
   };

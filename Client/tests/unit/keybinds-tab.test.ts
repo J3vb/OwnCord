@@ -1052,6 +1052,61 @@ describe("KeybindsTab rebindable rows (3E-3c-3)", () => {
     expect(stored()).toEqual({});
   });
 
+  it("Reset all leaves no default that another binding now holds", () => {
+    const { el } = mount();
+    // Camera leaves V, then global mute takes V.
+    byId(el, "keybind-toggleCamera").click();
+    press("KeyX", { key: "X", ctrlKey: true, shiftKey: true });
+    byId(el, "keybind-global-mute").click();
+    press("KeyV");
+    expect(byId(el, "keybind-global-mute").textContent).toBe("Ctrl + Shift + V");
+
+    byId(el, "keybinds-reset-all").click();
+    expect(byId(el, "keybind-toggleCamera").textContent).toBe("Not set");
+    expect(byId(el, "keybind-toggleCamera-alert").textContent).toBe("Already used by Toggle Mute.");
+    expect(stored().toggleCamera).toBeNull();
+    // The other rows are back on their defaults.
+    expect(byId(el, "keybind-uploadFile").textContent).toBe("Ctrl + Shift + U");
+  });
+
+  it("Reset all unbinds a default that the push-to-talk key now holds", () => {
+    const { el } = mount();
+    byId(el, "keybind-search").click();
+    press("KeyJ", { key: "j", ctrlKey: true });
+    localStorage.setItem("owncord:settings:pttVk", "70"); // F
+    byId(el, "keybinds-reset-all").click();
+    expect(byId(el, "keybind-search").textContent).toBe("Not set");
+    expect(byId(el, "keybind-search-alert").textContent).toBe("That key is used by Push to Talk.");
+    expect(stored().search).toBeNull();
+  });
+
+  it("Reset all judges each default against the other defaults, not their old overrides", () => {
+    const { el } = mount();
+    // Swap: search takes Ctrl+E after emoji moves away.
+    byId(el, "keybind-emojiPicker").click();
+    press("KeyJ", { key: "j", ctrlKey: true });
+    byId(el, "keybind-search").click();
+    press("KeyE", { key: "e", ctrlKey: true });
+    byId(el, "keybinds-reset-all").click();
+    expect(byId(el, "keybind-search").textContent).toBe("Ctrl + F");
+    expect(byId(el, "keybind-emojiPicker").textContent).toBe("Ctrl + E");
+  });
+
+  it("names the combination in each button's accessible name", () => {
+    const { el } = mount();
+    expect(byId(el, "keybind-toggleCamera").getAttribute("aria-label")).toBe(
+      "Toggle Camera: Ctrl + Shift + V",
+    );
+    expect(byId(el, "keybind-global-mute").getAttribute("aria-label")).toBe(
+      "Global mute keybind: Ctrl + Shift + M",
+    );
+    byId(el, "keybind-search").click();
+    expect(byId(el, "keybind-search").getAttribute("aria-label")).toBe(
+      "Search Messages: Press a supported key...",
+    );
+    press("Escape", { key: "Escape" });
+  });
+
   it("Reset all ends a capture in progress", () => {
     const { el } = mount();
     byId(el, "keybind-search").click();
@@ -1143,6 +1198,18 @@ describe("KeybindsTab rebindable rows (3E-3c-3)", () => {
       pttButton(el).click();
       press("F7");
       await vi.waitFor(() => expect(mockUpdatePttKey).toHaveBeenCalledWith(0x76));
+    });
+
+    it("starting a Keybinds row ends the portal push-to-talk capture", async () => {
+      mockStatus.mockResolvedValue(portalStatus);
+      const { el } = mount();
+      await vi.waitFor(() => expect(byId(el, "keybinds-portal").style.display).toBe(""));
+      pttButton(el).click();
+      expect(pttButton(el).textContent).toBe("Press a function key (F1-F24)...");
+      byId(el, "keybind-search").click();
+      expect(pttButton(el).textContent).toBe("Not set");
+      press("F7"); // only the Keybinds row is listening now
+      expect(mockBindPortal).not.toHaveBeenCalled();
     });
 
     it("the polling capture rejects a key an in-app binding uses", async () => {

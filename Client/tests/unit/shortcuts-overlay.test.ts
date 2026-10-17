@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { closeShortcutsOverlay, openShortcutsOverlay } from "../../src/components/ShortcutsOverlay";
 import { saveGlobalShortcutVk } from "../../src/lib/voiceShortcuts";
+import { saveKeybind } from "../../src/lib/keybinds";
 import { KEYBIND_GROUPS } from "../../src/lib/keybindCatalog";
 import { dialogOpen } from "../../src/lib/dialogOpen";
 import { settingsText as t } from "../../src/i18n/settings";
@@ -67,6 +68,36 @@ describe("ShortcutsOverlay", () => {
     expect(rows.get("Toggle Mute")).toBe("Ctrl + Shift + M");
     expect(rows.get("Toggle Deafen")).toBe("Ctrl + Shift + D");
     expect(overlay()!.querySelectorAll("input, select").length).toBe(0);
+  });
+
+  const labelled = (): Map<string | null | undefined, string | null | undefined> =>
+    new Map(
+      Array.from(overlay()!.querySelectorAll(".keybind-row")).map((r) => [
+        r.querySelector(".setting-label")?.textContent,
+        r.querySelector(".kbd")?.textContent,
+      ]),
+    );
+
+  it("shows a rebound row's binding, not its default", () => {
+    saveKeybind("search", { vk: 0x4a, ctrl: true, shift: false, alt: false });
+    saveKeybind("emojiPicker", null);
+    openShortcutsOverlay();
+    const rows = labelled();
+    expect(rows.get("Search Messages")).toBe("Ctrl + J");
+    expect(rows.get("Emoji Picker")).toBe("Not set");
+    expect(rows.get("GIF Picker")).toBe("Ctrl + G");
+  });
+
+  it("lists screen share and disconnect only once they are bound", () => {
+    openShortcutsOverlay();
+    expect(labelled().has("Toggle Screen Share")).toBe(false);
+    expect(labelled().has("Disconnect from Voice")).toBe(false);
+    closeShortcutsOverlay();
+
+    saveKeybind("toggleScreenshare", { vk: 0x75, ctrl: false, shift: false, alt: false });
+    openShortcutsOverlay();
+    expect(labelled().get("Toggle Screen Share")).toBe("F6");
+    expect(labelled().has("Disconnect from Voice")).toBe(false);
   });
 
   it("reads a rebound mute key when it opens", () => {

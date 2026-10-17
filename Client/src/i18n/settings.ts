@@ -190,7 +190,7 @@ export const settingsText = defineCatalog("settings", {
   "keybinds.communication": "Communication",
   "keybinds.messages": "Messages",
   "keybinds.voiceHint":
-    "Mute and Deafen work anywhere; the camera shortcut applies while you are connected to a voice channel.",
+    "Mute and Deafen work anywhere. Camera, screen share and disconnect apply while you are connected to a voice channel.",
   "keybinds.globalHint":
     "Mute and Deafen also work while OwnCord is unfocused — via the global shortcuts you set below (Ctrl + Shift + M / Ctrl + Shift + D by default), or the tray menu. On Linux (X11) the global keys use the key positions of a US layout.",
   "keybinds.globalHintUnsupported":
@@ -198,9 +198,9 @@ export const settingsText = defineCatalog("settings", {
   "keybinds.globalSection": "Global Shortcuts",
   "keybinds.globalConflict": "That combination is already used by another shortcut.",
   "keybinds.globalKey": "Ctrl + Shift + {key}",
-  "keybinds.globalAria": "Global mute keybind — click to rebind",
-  "keybinds.globalDeafenAria": "Global deafen keybind — click to rebind",
-  "keybinds.rebindAria": "{action} keybind — click to rebind",
+  "keybinds.globalAria": "Global mute keybind",
+  "keybinds.globalDeafenAria": "Global deafen keybind",
+  "keybinds.rebindAria": "{action}: {combo}",
   "keybinds.resetOne": "Reset",
   "keybinds.resetAria": "Reset {action} keybind to its default",
   "keybinds.removeAria": "Remove {action} keybind",

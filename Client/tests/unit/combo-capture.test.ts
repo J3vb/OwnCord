@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { buildComboCapture, comboLabel } from "../../src/components/settings/comboCapture";
+import { buildComboCapture } from "../../src/components/settings/comboCapture";
+import { comboLabel } from "../../src/lib/keybindLabels";
 import { loadEffectiveKeybinds, saveKeybind } from "../../src/lib/keybinds";
 
 describe("buildComboCapture", () => {
@@ -240,6 +241,23 @@ describe("buildComboCapture", () => {
     ).toBeNull();
     reset.click();
     expect(button.textContent).toBe("Ctrl + F");
+  });
+
+  it("Reset and Remove end a capture in progress on their row", () => {
+    const { button, reset, remove } = mount("search", "Search Messages", "cap-search");
+    button.click();
+    reset.disabled = false;
+    reset.click();
+    expect(button.classList.contains("capturing")).toBe(false);
+    press("KeyJ", ctrlJ);
+    expect(button.textContent).toBe("Ctrl + F"); // no longer listening
+
+    button.click();
+    remove.click();
+    expect(button.classList.contains("capturing")).toBe(false);
+    press("KeyJ", ctrlJ);
+    expect(button.textContent).toBe("Not set");
+    expect(loadEffectiveKeybinds().search).toBeNull();
   });
 
   it("starting a second capture cancels the first", () => {

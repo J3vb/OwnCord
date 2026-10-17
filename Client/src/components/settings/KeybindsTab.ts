@@ -25,7 +25,7 @@ import { staysAttached, watchGlobalKeys } from "./globalKeysWatch";
 import type { GlobalKeysStatus } from "../../platform/contracts/globalShortcuts";
 import { settingsText as t } from "../../i18n/settings";
 import { buildPttControls } from "./pttControls";
-import { KEYBIND_GROUPS, type KeybindGroupId } from "@lib/keybindCatalog";
+import { KEYBIND_GROUPS, UNBOUND_BY_DEFAULT_ROWS, type KeybindGroupId } from "@lib/keybindCatalog";
 import {
   REBINDABLE_ACTIONS,
   inAppCtrlShiftVks,
@@ -35,15 +35,6 @@ import {
 } from "@lib/keybinds";
 import { beginCapture, buildComboCapture, cancelCapture, type ComboCapture } from "./comboCapture";
 
-/** The catalog rows that are rebindable here, by their action's catalog key. */
-const REBINDABLE_BY_ACTION_KEY: ReadonlyMap<string, RebindableId> = new Map([
-  ["keybinds.action.toggleCamera", "toggleCamera"],
-  ["keybinds.action.searchMessages", "search"],
-  ["keybinds.action.uploadFile", "uploadFile"],
-  ["keybinds.action.emojiPicker", "emojiPicker"],
-  ["keybinds.action.gifPicker", "gifPicker"],
-]);
-
 /** A catalog group's rows as text, with the rebindable action each one is. */
 function groupRows(
   id: KeybindGroupId,
@@ -52,7 +43,7 @@ function groupRows(
   return (group?.rows ?? []).map((r) => ({
     label: t(r.action),
     combo: t(r.combo),
-    action: REBINDABLE_BY_ACTION_KEY.get(r.action) ?? null,
+    action: r.rebindable ?? null,
   }));
 }
 
@@ -147,8 +138,11 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
     section.appendChild(row);
   }
   appendGroupRows("communication");
-  section.appendChild(captureRow("toggleScreenshare", t("keybinds.action.toggleScreenshare")));
-  section.appendChild(captureRow("disconnect", t("keybinds.action.disconnect")));
+  for (const extra of UNBOUND_BY_DEFAULT_ROWS) {
+    if (extra.group === "communication") {
+      section.appendChild(captureRow(extra.rebindable, t(extra.action)));
+    }
+  }
 
   section.appendChild(
     createElement(
@@ -228,6 +222,11 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
       },
       comboText(action),
     );
+    const show = (text: string): void => {
+      setText(button, text);
+      button.setAttribute("aria-label", t("keybinds.rebindAria", { action: aria, combo: text }));
+    };
+    show(comboText(action));
     button.addEventListener(
       "click",
       () => {
@@ -235,14 +234,14 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
         conflict.style.display = "none";
         captureState.binding = action;
         button.style.borderColor = "var(--accent)";
-        setText(button, t("keybinds.pressKey"));
+        show(t("keybinds.pressKey"));
 
         let release: (() => void) | null = null;
         const finish = (): void => {
           release?.();
           stopCapture();
           button.style.borderColor = "";
-          setText(button, comboText(action));
+          show(comboText(action));
         };
 
         const onKey = (e: KeyboardEvent): void => {
@@ -532,8 +531,10 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
     ),
   );
 
-  // Back to the shipped keys for every rebindable action. A default that
-  // another binding has since taken loads as unbound (see `parseKeybinds`).
+  // Back to the shipped keys for every rebindable action. Every override is
+  // dropped first, then each row checks its default against the others, mute,
+  // deafen and push to talk: a default that one of them holds now is saved as
+  // unbound, and that row says why. (`parseKeybinds` does not check defaults.)
   const resetAll = createElement(
     "button",
     {
@@ -549,7 +550,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
     () => {
       cancelCapture(signal);
       for (const { id } of REBINDABLE_ACTIONS) saveKeybind(id, undefined);
-      for (const capture of captures) capture.refresh();
+      for (const capture of captures) capture.reset();
     },
     { signal },
   );
