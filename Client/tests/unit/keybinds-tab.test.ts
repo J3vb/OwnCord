@@ -47,6 +47,8 @@ vi.mock("../../src/platform/desktop/globalShortcuts", () => ({
 }));
 
 import { buildKeybindsTab } from "../../src/components/settings/KeybindsTab";
+import { KEYBIND_GROUPS } from "../../src/lib/keybindCatalog";
+import { settingsText as t } from "../../src/i18n/settings";
 
 describe("KeybindsTab", () => {
   beforeEach(() => {
@@ -251,8 +253,8 @@ describe("KeybindsTab", () => {
   it("renders Push to Talk keybind row", () => {
     const el = buildKeybindsTab(new AbortController().signal);
     const rows = el.querySelectorAll(".keybind-row");
-    // 1 PTT + 9 Navigation + 3 Communication + 2 Global + 7 Messages = 22
-    expect(rows.length).toBe(22);
+    // 1 PTT + 10 Navigation + 3 Communication + 2 Global + 7 Messages = 23
+    expect(rows.length).toBe(23);
     const pttLabel = rows[0]!.querySelector(".setting-label");
     expect(pttLabel!.textContent).toBe("Push to Talk");
   });
@@ -498,6 +500,31 @@ describe("KeybindsTab", () => {
     expect(row).toBeDefined();
     expect(row!.querySelector(".kbd")?.textContent).toBe("Ctrl + ,");
     expect(row!.className).toBe("keybind-row");
+  });
+
+  it("lists Show Keyboard Shortcuts on Ctrl + / in the Navigation section", () => {
+    const el = buildKeybindsTab(new AbortController().signal);
+    const row = Array.from(el.querySelectorAll(".keybind-row")).find(
+      (r) => r.querySelector(".setting-label")?.textContent === "Show Keyboard Shortcuts",
+    );
+    expect(row).toBeDefined();
+    expect(row!.querySelector(".kbd")?.textContent).toBe("Ctrl + /");
+  });
+
+  it("renders every catalog row, in catalog order within each group", () => {
+    const el = buildKeybindsTab(new AbortController().signal);
+    const rendered = Array.from(el.querySelectorAll(".keybind-row")).map(
+      (r) =>
+        `${r.querySelector(".setting-label")?.textContent}|${r.querySelector(".kbd")?.textContent}`,
+    );
+    let from = 0;
+    for (const group of KEYBIND_GROUPS) {
+      for (const r of group.rows) {
+        const at = rendered.indexOf(`${t(r.action)}|${t(r.combo)}`, from);
+        expect(at, t(r.action)).toBeGreaterThanOrEqual(from);
+        from = at;
+      }
+    }
   });
 
   it("renders the composer formatting keybinds and their hint", () => {

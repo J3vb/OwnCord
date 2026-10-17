@@ -25,6 +25,13 @@ import { staysAttached, watchGlobalKeys } from "./globalKeysWatch";
 import type { GlobalKeysStatus } from "../../platform/contracts/globalShortcuts";
 import { settingsText as t } from "../../i18n/settings";
 import { buildPttControls } from "./pttControls";
+import { KEYBIND_GROUPS, type KeybindGroupId } from "@lib/keybindCatalog";
+
+/** A catalog group's fixed rows as [action, combo] text. */
+function fixedRows(id: KeybindGroupId): [string, string][] {
+  const group = KEYBIND_GROUPS.find((g) => g.id === id);
+  return (group?.rows ?? []).map((r): [string, string] => [t(r.action), t(r.combo)]);
+}
 
 export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
@@ -53,17 +60,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   );
   section.appendChild(navHeader);
 
-  const navBinds: [string, string][] = [
-    [t("keybinds.action.quickSwitcher"), t("keybinds.key.ctrlK")],
-    [t("keybinds.action.searchMessages"), t("keybinds.key.ctrlF")],
-    [t("keybinds.action.openSettings"), t("keybinds.key.ctrlComma")],
-    [t("keybinds.action.nextChannel"), t("keybinds.key.altArrow")],
-    [t("keybinds.action.nextUnreadChannel"), t("keybinds.key.altShiftArrow")],
-    [t("keybinds.action.closeOverlay"), t("keybinds.key.escape")],
-    [t("keybinds.action.markChannelRead"), t("keybinds.key.escape")],
-    [t("keybinds.action.markServerRead"), t("keybinds.key.shiftEscape")],
-    [t("keybinds.action.scrollChat"), t("keybinds.key.pageUpDown")],
-  ];
+  const navBinds = fixedRows("navigation");
   for (const [label, shortcut] of navBinds) {
     const row = createElement("div", { class: "keybind-row" });
     appendChildren(
@@ -95,7 +92,11 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   const commBinds: [string, string, GlobalShortcutAction | null][] = [
     [t("keybinds.action.toggleMute"), comboText("mute"), "mute"],
     [t("keybinds.action.toggleDeafen"), comboText("deafen"), "deafen"],
-    [t("keybinds.action.toggleCamera"), t("keybinds.key.ctrlShiftV"), null],
+    ...fixedRows("communication").map(([label, combo]): [string, string, null] => [
+      label,
+      combo,
+      null,
+    ]),
   ];
   for (const [label, shortcut, action] of commBinds) {
     const row = createElement("div", { class: "keybind-row" });
@@ -445,15 +446,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   );
   section.appendChild(msgHeader);
 
-  const msgBinds: [string, string][] = [
-    [t("keybinds.action.uploadFile"), t("keybinds.key.ctrlShiftU")],
-    [t("keybinds.action.emojiPicker"), t("keybinds.key.ctrlE")],
-    [t("keybinds.action.gifPicker"), t("keybinds.key.ctrlG")],
-    [t("keybinds.action.editLastMessage"), t("keybinds.key.arrowUp")],
-    [t("keybinds.action.bold"), t("keybinds.key.ctrlB")],
-    [t("keybinds.action.italic"), t("keybinds.key.ctrlI")],
-    [t("keybinds.action.underline"), t("keybinds.key.ctrlU")],
-  ];
+  const msgBinds = fixedRows("messages");
   for (const [label, shortcut] of msgBinds) {
     const row = createElement("div", { class: "keybind-row" });
     appendChildren(

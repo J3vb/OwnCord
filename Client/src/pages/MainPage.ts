@@ -1201,10 +1201,25 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     // The rest of the shortcuts listed on the settings Keybinds tab.
     const voiceKeybindActions = createVoiceWidgetCallbacks(ws, limiters);
+    let shortcutsOverlay: typeof import("@components/ShortcutsOverlay") | null = null;
+    let shortcutsClosed = false;
+    unsubscribers.push(() => {
+      shortcutsClosed = true;
+      shortcutsOverlay?.closeShortcutsOverlay();
+    });
     unsubscribers.push(
       attachGlobalKeybinds({
         onSearch: () => chatAreaResult.searchCtrl.open(),
         onOpenSettings: () => openSettings(),
+        onOpenShortcuts: () =>
+          void import("@components/ShortcutsOverlay")
+            .then((m) => {
+              // The page may have unmounted while the chunk loaded.
+              if (shortcutsClosed) return;
+              shortcutsOverlay = m;
+              m.openShortcutsOverlay();
+            })
+            .catch((err: unknown) => log.warn("Shortcuts overlay failed to open", err)),
         onToggleMute: () => voiceKeybindActions.onMuteToggle(),
         onToggleDeafen: () => voiceKeybindActions.onDeafenToggle(),
         onToggleCamera: () => voiceKeybindActions.onCameraToggle(),
