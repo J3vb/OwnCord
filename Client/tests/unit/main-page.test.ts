@@ -194,7 +194,7 @@ const { mockReturnToChannel, mockRememberChannel, mockRenameGroup, inertModerati
     mockRememberChannel: vi.fn(),
     inertModeration: { signals: [] as AbortSignal[] },
     // Every member-list instance either host built, and how many were destroyed.
-    memberPanels: { created: 0, destroyed: 0 },
+    memberPanels: { created: 0, destroyed: 0, events: [] as string[] },
   }));
 
 vi.mock("../../src/pages/main-page/SidebarArea", () => ({
@@ -206,6 +206,7 @@ vi.mock("../../src/pages/main-page/SidebarArea", () => ({
       const element = document.createElement("div");
       element.dataset["testid"] = "member-list";
       memberPanels.created += 1;
+      memberPanels.events.push("create");
       let destroyed = false;
       return {
         element,
@@ -213,6 +214,7 @@ vi.mock("../../src/pages/main-page/SidebarArea", () => ({
           if (destroyed) return;
           destroyed = true;
           memberPanels.destroyed += 1;
+          memberPanels.events.push("destroy");
           element.remove();
         },
       };
@@ -4033,6 +4035,14 @@ describe("MainPage — member list placement (3C-6b)", () => {
     expect(column.hidden).toBe(true);
     expect(column.parentElement).toBe(container.querySelector('[data-testid="app-layout"]'));
     expect(column.querySelector(".member-column-body")).not.toBeNull();
+  });
+
+  it("each layout flip destroys the old member list before it creates the new one", () => {
+    for (const layout of ["right", "left", "right", "left"] as const) {
+      memberPanels.events.length = 0;
+      flip(layout);
+      expect(memberPanels.events).toEqual(["destroy", "create"]);
+    }
   });
 
   it("switching layout leaves exactly one member-list in the document", () => {
