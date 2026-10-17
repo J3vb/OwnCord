@@ -74,3 +74,50 @@
   font-size: var(--font-size-xs);
   color: var(--text-muted);
 }
+.invite-item__code,
+.invite-manager__featured-link {
+  overflow-wrap: anywhere;
+}
+.invite-manager__featured {
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.invite-manager__featured-label {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.invite-manager__featured-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.invite-manager__featured-link {
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: var(--font-size-md);
+  color: var(--header-primary);
+  font-weight: 600;
+}
+.invite-manager__featured-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.modal-footer .invite-manager__field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-right: auto;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.invite-manager__error {
+  text-align: center;
+  color: var(--text-danger);
+  padding: 8px 0;
+}

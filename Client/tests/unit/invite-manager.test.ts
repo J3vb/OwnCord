@@ -67,13 +67,13 @@ describe("InviteManager", () => {
     mgr.destroy?.();
   });
 
-  it("masks codes (first 3 + ... + last 3)", () => {
+  it("shows the whole code rather than a masked one", () => {
     const opts = makeOptions({ invites: [makeInvite({ code: "abcdefghi" })] });
     const mgr = createInviteManager(opts);
     mgr.mount(container);
 
     const codeEl = container.querySelector(".invite-item__code");
-    expect(codeEl?.textContent).toBe("abc...ghi");
+    expect(codeEl?.textContent).toBe("abcdefghi");
 
     mgr.destroy?.();
   });
@@ -217,7 +217,9 @@ describe("InviteManager", () => {
 
   it("create failure calls onError", async () => {
     const opts = makeOptions({
-      onCreateInvite: vi.fn(() => Promise.reject(new Error("fail"))),
+      onCreateInvite: vi.fn(
+        () => Promise.reject("fail") /* non-Error: falls back to the generic text */,
+      ),
     });
     const mgr = createInviteManager(opts);
     mgr.mount(container);
@@ -278,7 +280,9 @@ describe("InviteManager", () => {
 
   it("revoke failure calls onError", async () => {
     const opts = makeOptions({
-      onRevokeInvite: vi.fn(() => Promise.reject(new Error("fail"))),
+      onRevokeInvite: vi.fn(
+        () => Promise.reject("fail") /* non-Error: falls back to the generic text */,
+      ),
     });
     const mgr = createInviteManager(opts);
     mgr.mount(container);
@@ -292,5 +296,102 @@ describe("InviteManager", () => {
     });
 
     mgr.destroy?.();
+  });
+
+  describe("create options, link and expiry", () => {
+    const mounted: Array<{ destroy?: () => void }> = [];
+    afterEach(() => {
+      for (const m of mounted.splice(0)) m.destroy?.();
+    });
+    const mountMgr = (o: Partial<InviteManagerOptions>) => {
+      const mgr = createInviteManager(makeOptions(o));
+      mgr.mount(container);
+      mounted.push(mgr);
+      return mgr;
+    };
+    const clickCreate = async () => {
+      container.querySelector<HTMLButtonElement>(".invite-manager__create")!.click();
+      await Promise.resolve();
+    };
+
+    it("create sends 168 h / unlimited by default", async () => {
+      const onCreateInvite = vi.fn(() => Promise.resolve(makeInvite({ code: "n" })));
+      mountMgr({ onCreateInvite });
+      await clickCreate();
+      expect(onCreateInvite).toHaveBeenCalledWith({ expiresInHours: 168, maxUses: 0 });
+    });
+
+    it("create sends the chosen expiry and max uses", async () => {
+      const onCreateInvite = vi.fn(() => Promise.resolve(makeInvite({ code: "n" })));
+      mountMgr({ onCreateInvite });
+      const set = (id: string, v: string) => {
+        container.querySelector<HTMLSelectElement>(`#${id}`)!.value = v;
+      };
+      set("invite-expiry", "0");
+      set("invite-max-uses", "10");
+      await clickCreate();
+      expect(onCreateInvite).toHaveBeenCalledWith({ expiresInHours: 0, maxUses: 10 });
+    });
+
+    it("row shows the full link and expiry", () => {
+      mountMgr({
+        invites: [
+          makeInvite({
+            code: "abcdefghijklmnop",
+            expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString(),
+          }),
+        ],
+        formatLink: (c) => `owncord://invite/${c}`,
+      });
+      const row = container.querySelector(".invite-item")!;
+      expect(row.querySelector(".invite-item__code")!.textContent).toBe(
+        "owncord://invite/abcdefghijklmnop",
+      );
+      expect(row.querySelector(".invite-item__meta")!.textContent).toContain("Expires in 7 days");
+      expect(row.querySelector(".invite-item__meta")!.textContent).toContain("3 / 10 uses");
+    });
+
+    it("shows Never expires and plain uses when unlimited", () => {
+      mountMgr({ invites: [makeInvite({ expiresAt: null, maxUses: null })] });
+      const meta = container.querySelector(".invite-item__meta")!.textContent;
+      expect(meta).toContain("Never expires");
+      expect(meta).toContain("3 uses");
+    });
+
+    it("features the chosen invite with a Copy button", () => {
+      const onCopyLink = vi.fn();
+      mountMgr({ featuredCode: "abc123xyz", onCopyLink });
+      container.querySelector<HTMLButtonElement>(".invite-manager__featured-copy")!.click();
+      expect(onCopyLink).toHaveBeenCalledWith("abc123xyz");
+    });
+
+    it("shows the server error text when create fails", async () => {
+      const onError = vi.fn();
+      mountMgr({
+        onCreateInvite: vi.fn(() => Promise.reject(new Error("Invite limit reached"))),
+        onError,
+      });
+      await clickCreate();
+      await Promise.resolve();
+      expect(onError).toHaveBeenCalledWith("Invite limit reached");
+    });
+
+    it("shows the server error text when revoke fails", async () => {
+      vi.useFakeTimers();
+      try {
+        const onError = vi.fn();
+        mountMgr({
+          onRevokeInvite: vi.fn(() => Promise.reject(new Error("Not allowed"))),
+          onError,
+        });
+        const btn = container.querySelector<HTMLButtonElement>(".invite-item__revoke")!;
+        btn.click();
+        btn.click();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(onError).toHaveBeenCalledWith("Not allowed");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });
