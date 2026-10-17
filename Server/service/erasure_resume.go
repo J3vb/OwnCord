@@ -80,7 +80,16 @@ func (s *ErasureService) Erase(ctx context.Context, userID int64) error {
 	if !s.claim(userID) {
 		return fmt.Errorf("%w: user %d is already being erased", ErrErasureInProgress, userID)
 	}
-	defer s.release(userID)
+	// One defer, in this order: release the claim, then wake. A wake sent
+	// while the claim is still held can be taken by the maintenance loop,
+	// which then skips the user and leaves the job to the next tick.
+	wake := false
+	defer func() {
+		s.release(userID)
+		if wake {
+			s.RequestResume()
+		}
+	}()
 
 	// The marker goes down first, pending, so a crash between the lock and
 	// the marker cannot leave an erasure that a restore could undo. A
@@ -133,7 +142,7 @@ func (s *ErasureService) Erase(ctx context.Context, userID int64) error {
 			slog.Warn("erasure: a stage failed after the lock; the maintenance loop finishes the erasure", "user_id", userID, "err", err)
 			err = fmt.Errorf("%w: user %d: %w", ErrErasureInProgress, userID, err)
 		}
-		s.RequestResume()
+		wake = true
 		return err
 	}
 	s.confirmMarker(bg, userID, token)
@@ -232,6 +241,9 @@ func (s *ErasureService) Resume(ctx context.Context) (int, error) {
 // somebody else is driving the user or already finished the job.
 func (s *ErasureService) resumeQueued(ctx context.Context, job *db.ErasureJob) (bool, error) {
 	if !s.claim(job.UserID) {
+		// Whoever holds the claim may be about to give the job up; make
+		// sure the loop looks again soon rather than at the next tick.
+		s.RequestResume()
 		return false, nil
 	}
 	defer s.release(job.UserID)

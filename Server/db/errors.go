@@ -7,6 +7,10 @@ import (
 
 // Sentinel errors for the db package. Use errors.Is() to check.
 var (
+	// ErrAccountErasing is returned when a session cannot be issued because
+	// the account's deletion is being completed.
+	ErrAccountErasing = errors.New("account deletion in progress")
+
 	// ErrNotFound indicates the requested resource does not exist.
 	ErrNotFound = errors.New("not found")
 	// ErrReactionLimit means a new emoji was refused because the message already

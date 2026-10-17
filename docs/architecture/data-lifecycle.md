@@ -103,7 +103,10 @@ stages:
 - **Lock** (`db.EraseAccountLock`, one transaction, the point of no return):
   the last-admin guard (step 1 below), then a `queued` `erasure_jobs` row for
   the subject (or the one already there), and the subject's `sessions`,
-  `api_tokens` and `partial_auth_challenges` deleted. Outside the database the
+  `api_tokens` and `partial_auth_challenges` deleted; from then on sign-in is
+  refused while the account deletion is being completed (`db.CreateSession`
+  writes no session for a user with a `queued` job, `db.ErrAccountErasing`).
+  Outside the database the
   service then disconnects the subject's socket
   (`Hub.DisconnectRevokedUser`) and flushes the mention-badge worker again for
   any send in flight at the lock.

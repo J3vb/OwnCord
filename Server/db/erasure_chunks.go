@@ -276,3 +276,18 @@ func appendErasureJobFiles(ctx context.Context, tx *sql.Tx, userID int64, names 
 	}
 	return nil
 }
+
+// sessionRowID reads the id of the session row InsertSession wrote. Sign-in
+// is refused while an account deletion is being completed: the insert writes
+// no row for a user with a queued erasure job, reported as ErrAccountErasing.
+func sessionRowID(res sql.Result, err error, userID int64) (int64, error) {
+	if err != nil {
+		return 0, fmt.Errorf("CreateSession: %w", err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return 0, fmt.Errorf("CreateSession rows: %w", err)
+	} else if n == 0 {
+		return 0, fmt.Errorf("CreateSession user %d: %w", userID, ErrAccountErasing)
+	}
+	return res.LastInsertId()
+}

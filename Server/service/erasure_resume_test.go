@@ -290,3 +290,80 @@ func TestErasureService_InFlightUserIsNotDrivenTwice(t *testing.T) {
 		t.Error("the account survived")
 	}
 }
+
+// The wake Erase sends must find the user already released: a loop that
+// resumes the moment it is woken completes the job without waiting for a
+// tick, and a wake that loses the claim to a live holder is re-armed.
+func TestErasureService_WakeFindsTheUserReleased(t *testing.T) {
+	defer func(prev time.Duration) { eraseInlineBudget = prev }(eraseInlineBudget)
+	eraseInlineBudget = -time.Second
+	database := newTestDB(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	dir := t.TempDir()
+	uid, _ := seedErasureMember(t, database, dir)
+	svc := NewErasureService(database)
+	svc.SetFiles(newTestStorage(t, dir))
+
+	// A stand-in for the maintenance loop: resume on every wake, no ticker.
+	loopDone := make(chan struct{})
+	go func() {
+		defer close(loopDone)
+		for {
+			select {
+			case <-svc.WakeCh():
+				_, _ = svc.Resume(ctx)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	defer func() {
+		cancel()
+		<-loopDone
+	}()
+
+	if err := svc.Erase(ctx, uid); !errors.Is(err, ErrErasureInProgress) {
+		t.Fatalf("Erase = %v, want ErrErasureInProgress", err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for !accountGone(t, database, uid) {
+		if time.Now().After(deadline) {
+			t.Fatal("the woken loop did not complete the erasure without a tick")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// A skipped queued job re-arms the wake.
+	uid2, _ := seedSecondMember(t, database)
+	if _, err := database.EraseAccountLock(ctx, uid2, true); err != nil {
+		t.Fatal(err)
+	}
+	if !svc.claim(uid2) {
+		t.Fatal("claim refused")
+	}
+	// Drain whatever wake is pending, then skip the claimed user.
+	select {
+	case <-svc.WakeCh():
+	default:
+	}
+	cancel()
+	<-loopDone
+	if done, err := svc.Resume(context.Background()); done != 0 || err != nil {
+		t.Fatalf("Resume = %d, %v", done, err)
+	}
+	select {
+	case <-svc.WakeCh():
+	default:
+		t.Error("a queued job skipped for a live claim did not re-arm the wake")
+	}
+	svc.release(uid2)
+}
+
+func seedSecondMember(t *testing.T, database *db.DB) (int64, error) {
+	t.Helper()
+	uid, err := database.CreateUser(context.Background(), "second-member", "hash", 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return uid, nil
+}

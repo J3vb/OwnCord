@@ -559,3 +559,32 @@ func TestMaintenance_LoopResumesAnErasureOnWake(t *testing.T) {
 		t.Errorf("the account after the resume = %v, %v; want erased", u, err)
 	}
 }
+
+// A resumed erasure drain ends when the loop is told to stop: the queued job
+// is left for the next start.
+func TestMaintenance_StopEndsAResumedErasureDrain(t *testing.T) {
+	database := newMaintenanceTestDB(t)
+	ctx := t.Context()
+	if _, err := database.CreateUser(ctx, "stop-owner", "x", 1); err != nil {
+		t.Fatal(err)
+	}
+	member, err := database.CreateUser(ctx, "stop-member", "x", 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{Upload: config.UploadConfig{StorageDir: t.TempDir(), MaxSizeMB: 1}}
+	m := newMaintenance(slog.Default(), cfg, database, service.New(database, auth.NewRateLimiter()))
+	stopCtx, stop := context.WithCancel(ctx)
+	m.erasureCtx = stopCtx
+	if _, err := database.EraseAccountLock(ctx, member, true); err != nil {
+		t.Fatal(err)
+	}
+	stop()
+	if err := m.resumeErasure(ctx); err == nil {
+		t.Error("resumeErasure after stop = nil, want the drain cut short")
+	}
+	jobs, err := database.ListUnfinishedErasureJobs(ctx)
+	if err != nil || len(jobs) != 1 || jobs[0].State != db.ErasureStateQueued {
+		t.Errorf("jobs after the stopped resume = %+v, %v; want the one queued job kept", jobs, err)
+	}
+}
