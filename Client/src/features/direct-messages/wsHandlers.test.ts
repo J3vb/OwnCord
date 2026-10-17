@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { applyReadyBlocks, applyReadyDms, handleDmChannelOpen } from "./wsHandlers";
-import { dmStore } from "../../stores/dm.store";
+import { dmStore, dmChannelFromPayload } from "../../stores/dm.store";
 import { channelsStore, resetChannelsStore } from "../../stores/channels.store";
 import type { Channel } from "../../stores/channels.store";
 import { blocksStore, resetBlocksStore, setUserBlockedByThem } from "../../stores/blocks.store";
@@ -65,6 +65,60 @@ describe("handleDmChannelOpen", () => {
         mentionCount: 0,
       },
     ]);
+  });
+});
+
+describe("group owner_id (WP 3B-11a)", () => {
+  const carol = { id: 8, username: "carol", avatar: "", status: "online" };
+  const dave = { id: 9, username: "dave", avatar: "", status: "offline" };
+  const group = (over: Record<string, unknown> = {}): Payload<"dm_channel_open"> => ({
+    channel_id: 6,
+    recipient,
+    recipients: [recipient, carol],
+    name: "Crew",
+    is_group: true,
+    last_message_id: null,
+    last_message: "",
+    last_message_at: "",
+    unread_count: 0,
+    ...over,
+  });
+
+  it("maps owner_id to ownerId on dm_channel_open and on ready", () => {
+    handleDmChannelOpen(group({ owner_id: 8 }));
+    expect(dmStore.getState().channels[0]?.ownerId).toBe(8);
+
+    dmStore.setState(() => ({ channels: [] }));
+    applyReadyDms(ready([group({ owner_id: 7 })] as Payload<"ready">["dm_channels"]));
+    expect(dmStore.getState().channels[0]?.ownerId).toBe(7);
+  });
+
+  it("leaves ownerId unset for a server without it, and for a 1:1", () => {
+    handleDmChannelOpen(group());
+    expect("ownerId" in dmStore.getState().channels[0]!).toBe(false);
+    handleDmChannelOpen(group({ channel_id: 7, is_group: false, recipients: [recipient] }));
+    expect("ownerId" in dmStore.getState().channels[0]!).toBe(false);
+  });
+
+  it("dmChannelFromPayload (the REST mapper) maps it the same way", () => {
+    expect(dmChannelFromPayload(group({ owner_id: 8 })).ownerId).toBe(8);
+    expect("ownerId" in dmChannelFromPayload(group())).toBe(false);
+  });
+
+  it("a later dm_channel_open replaces the participants and the owner", () => {
+    handleDmChannelOpen(group({ owner_id: 7 }));
+    handleDmChannelOpen(group({ recipients: [recipient, dave], owner_id: 9 }));
+
+    const [only, ...rest] = dmStore.getState().channels;
+    expect(rest).toEqual([]);
+    expect(only?.participants.map((p) => p.id)).toEqual([7, 9]);
+    expect(only?.ownerId).toBe(9);
+  });
+
+  it("a later dm_channel_open without owner_id drops a stale owner", () => {
+    handleDmChannelOpen(group({ owner_id: 7 }));
+    handleDmChannelOpen(group());
+    expect("ownerId" in dmStore.getState().channels[0]!).toBe(false);
   });
 });
 

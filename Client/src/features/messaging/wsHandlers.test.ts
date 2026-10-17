@@ -692,3 +692,22 @@ describe("handleChatMessage counts the active channel while its live tail is out
     expect(channel().unreadCount).toBe(0);
   });
 });
+
+describe("handleChatMessage counts a group row as unread (WP 3B-11a)", () => {
+  afterEach(() => setDmChannels([]));
+
+  it("raises the unread badge of a background group DM for each group kind", () => {
+    authStore.setState((prev) => ({ ...prev, user: { ...me, role: "member" } }));
+    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 99 }));
+    seedDm(0, "", "");
+    const kinds = ["group_add", "group_remove", "group_leave", "group_rename", "group_icon"];
+    kinds.forEach((kind, i) => {
+      handleChatMessage(createReconnectClock(), {
+        ...chat(10 + i, `2026-03-15T10:00:0${i}Z`),
+        kind,
+        group_event: { target_user_id: 3 },
+      });
+    });
+    expect(dm().unreadCount).toBe(kinds.length);
+  });
+});

@@ -96,6 +96,7 @@ import { createChannelController } from "./main-page/ChannelController";
 import type { ChannelController } from "./main-page/ChannelController";
 import { createUpdateNotifier } from "@components/UpdateNotifier";
 import type { DmProfileData, DmProfileSidebarComponent } from "@components/DmProfileSidebar";
+import type { GroupMemberPanelController } from "./main-page/GroupMemberPanelController";
 import { createIncomingCallBanner } from "@components/IncomingCallBanner";
 import type { IncomingCallBannerComponent } from "@components/IncomingCallBanner";
 import { createRingController, createOutgoingCall } from "@lib/call-ring";
@@ -342,6 +343,49 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
    *  and closeDmProfile clears it, so the import mounts only if it is still
    *  the current load when it resolves. */
   let dmProfileLoad: object | null = null;
+
+  // Group DM member panel (WP 3B-11a): mounted in the same slot as the 1:1
+  // profile panel, only one of the two showing at a time.
+  // The controller's code loads the first time a group DM is on screen, so a
+  // session that never opens one never pays for it.
+  let groupPanelCtrl: GroupMemberPanelController | null = null;
+  let groupPanelLoad: Promise<void> | null = null;
+  /** The header's "Show Member List" toggle; its aria-pressed follows the panel. */
+  let dmMembersBtn: HTMLButtonElement | null = null;
+
+  /** Run `act` on the group panel controller, loading it first if a group DM
+   *  is active (or `force`d by the header toggle). With no controller and no
+   *  group on screen there is nothing to sync or close, so nothing loads. */
+  function withGroupPanel(act: (ctrl: GroupMemberPanelController) => void, force = false): void {
+    if (groupPanelCtrl !== null) {
+      act(groupPanelCtrl);
+      return;
+    }
+    const active = getActiveChannel();
+    const groupActive =
+      active !== null &&
+      active.type === "dm" &&
+      dmStore.getState().channels.some((c) => c.channelId === active.id && c.isGroup);
+    if (!force && !groupActive) return;
+    groupPanelLoad ??= import("./main-page/GroupMemberPanelController").then(
+      ({ createGroupMemberPanelController }) => {
+        if (tornDown) return;
+        groupPanelCtrl = createGroupMemberPanelController({
+          api,
+          getSlot: () => dmProfileSlot,
+          getButton: () => dmMembersBtn,
+          notify: (message) => showToast(message, "error"),
+        });
+      },
+      () => {
+        // The chunk could not load; a later group switch or click retries.
+        groupPanelLoad = null;
+      },
+    );
+    void groupPanelLoad.then(() => {
+      if (groupPanelCtrl !== null) act(groupPanelCtrl);
+    });
+  }
 
   // B9-4: the content view (Message Requests, Moderation) shown in place of
   // the chat column. Created in mount, once the chat column exists.
@@ -956,6 +1000,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onToggleDmProfile: () => {
         toggleDmProfile();
       },
+      onToggleMemberList: () => {
+        withGroupPanel((ctrl) => ctrl.toggle(), true);
+      },
       onStartCall: () => {
         startCall();
       },
@@ -969,6 +1016,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     });
     dmProfileSlot = chatAreaResult.dmProfileSlot;
     dmProfileBtn = chatAreaResult.chatHeaderRefs.profileBtn;
+    dmMembersBtn = chatAreaResult.chatHeaderRefs.membersBtn ?? null;
     children.push(...chatAreaResult.children);
     unsubscribers.push(...chatAreaResult.unsubscribers);
     videoGrid = chatAreaResult.videoGrid;
@@ -1918,6 +1966,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             // (rebuilt for the new person) while the saved preference is on, a
             // group or a server channel hides it without changing the preference.
             syncDmProfileToActive();
+            withGroupPanel((ctrl) => ctrl.syncToActive());
             channelCtrl?.mountChannel(
               active.id,
               resolveChannelName(active.id, active.name, active.type),
@@ -1929,6 +1978,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             // previous channel's MessageList/composer stayed mounted and
             // enabled against a channel the server no longer recognizes.
             closeDmProfile();
+            withGroupPanel((ctrl) => ctrl.close());
             channelCtrl?.destroyChannel();
           }
         } catch (err) {
@@ -1947,6 +1997,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       );
       // A 1:1 DM already active at mount opens its remembered panel.
       syncDmProfileToActive();
+      withGroupPanel((ctrl) => ctrl.syncToActive());
     }
   }
 
@@ -2022,6 +2073,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       videoGrid = null;
 
       closeDmProfile();
+      groupPanelCtrl?.destroy();
+      groupPanelCtrl = null;
+      dmMembersBtn = null;
       dmProfileSlot = null;
 
       for (const child of children) {

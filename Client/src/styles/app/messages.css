@@ -1645,6 +1645,31 @@ ul.md-list-nested {
   margin-left: auto;
 }
 
+/* Group DM system row (WP 3B-11a): the same one-line record as a call row */
+.message.group-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 0;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.group-row .gr-icon {
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+}
+.group-row .gr-text {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.group-row .gr-time {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
 /* Message hover actions */
 .msg-actions-bar {
   position: absolute;

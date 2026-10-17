@@ -510,6 +510,18 @@ export interface CallInfo {
   readonly participants: readonly number[];
 }
 
+/**
+ * The payload of a group DM system row (WP 3B-11a), by `kind`: `target_user_id`
+ * for group_add / group_remove, `name` for group_rename ("" = the name was
+ * removed), `icon_removed` for group_icon, nothing for group_leave. The render
+ * source for those rows; `content` is only an English fallback sentence.
+ */
+export interface GroupEventInfo {
+  readonly target_user_id?: number;
+  readonly name?: string;
+  readonly icon_removed?: boolean;
+}
+
 export interface ChatMessagePayload {
   readonly client_message_id?: string;
   readonly id: number;
@@ -545,6 +557,8 @@ export interface ChatMessagePayload {
   /** `ChatMessageKind` value ("call" for a DM call log row), open to future kinds; absent for an ordinary message (and from older servers). */
   readonly kind?: string;
   readonly call?: CallInfo;
+  /** See GroupEventInfo; present on a group DM system row only. */
+  readonly group_event?: GroupEventInfo;
 }
 
 export interface ChatSendOkPayload {
@@ -868,6 +882,11 @@ export interface DmChannelPayload {
   readonly name?: string;
   /** True for a group DM. Absent from pre-group servers, which had none. */
   readonly is_group?: boolean;
+  /**
+   * The group's owner (user id). Groups only, and only from a server with
+   * WP 3B-10; its absence on a group means member management is unavailable.
+   */
+  readonly owner_id?: number;
   readonly last_message_id: number | null;
   readonly last_message: string;
   readonly last_message_at: string;
@@ -1326,6 +1345,8 @@ export interface MessageResponse {
   readonly mentions_everyone?: boolean;
   readonly kind?: string;
   readonly call?: CallInfo;
+  /** See GroupEventInfo; present on a group DM system row only. */
+  readonly group_event?: GroupEventInfo;
 }
 
 /**

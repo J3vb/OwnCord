@@ -111,3 +111,85 @@
   flex-shrink: 0;
   overflow: hidden;
 }
+
+/* ── Group member panel (WP 3B-11a) ─────────────────────────────────────── */
+.group-member-panel {
+  width: 260px;
+}
+.group-member-panel .gm-body {
+  overflow-y: auto;
+  flex: 1;
+  padding: 16px 0;
+}
+.group-member-panel .gm-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  /* Right padding clears the panel's close button. */
+  padding: 0 44px 8px 16px;
+}
+.group-member-panel .gm-heading {
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.group-member-panel .gm-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-normal);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+.group-member-panel .gm-add:hover {
+  background: var(--bg-hover);
+}
+.group-member-panel .gm-crown {
+  display: inline-flex;
+  color: var(--yellow);
+  margin-left: auto;
+}
+.group-member-panel .gm-more {
+  display: inline-flex;
+  margin-left: auto;
+  padding: 2px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+}
+.group-member-panel .gm-crown + .gm-more {
+  margin-left: 4px;
+}
+.group-member-panel .group-member-item:hover .gm-more,
+.group-member-panel .group-member-item:focus-within .gm-more,
+.group-member-panel .gm-more:focus-visible {
+  opacity: 1;
+}
+.dm-member-picker-error {
+  color: var(--red);
+  font-size: var(--font-size-sm);
+  margin: 8px 0 0;
+}
+.group-member-panel .gm-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}

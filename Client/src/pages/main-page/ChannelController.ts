@@ -6,6 +6,7 @@
 
 import { clearChildren, createElement, setText } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
+import { isServerRowKind } from "@lib/messageKind";
 import { createModal } from "@lib/modalFactory";
 import { createLogger } from "@lib/logger";
 import type { MountableComponent } from "@lib/safe-render";
@@ -1871,7 +1872,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           // acks it, so editing it would send chat_edit for a message that
           // does not exist yet.
           // A server-written row (a DM call log) is never editable.
-          if (m.user.id === myId && !m.deleted && m.status === "sent" && m.kind === undefined) {
+          if (m.user.id === myId && !m.deleted && m.status === "sent" && !isServerRowKind(m.kind)) {
             messageList?.startEdit(m.id);
             break;
           }

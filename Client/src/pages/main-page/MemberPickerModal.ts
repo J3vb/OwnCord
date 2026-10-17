@@ -12,6 +12,7 @@
 
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createModal } from "@lib/modalFactory";
+import { showToast } from "@lib/toast";
 import type { ModalInstance } from "@lib/modalFactory";
 import { Disposable } from "@lib/disposable";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
@@ -38,6 +39,18 @@ export interface MemberPickerOptions {
   readonly onSelectGroup?: (userIds: readonly number[], name: string) => void;
   /** Called when the modal is dismissed (cancel or overlay click). */
   readonly onClose: () => void;
+  /**
+   * Add mode (WP 3B-11a): pick people to add to an existing group. Setting
+   * `onAdd` makes the picker multi-select with an "Add" button and no group
+   * name; `onSelect` and `onSelectGroup` are not called. `onAdd` resolves to
+   * null on success (the picker closes) or the error text to show in the
+   * picker, which then stays open with the selection intact.
+   */
+  readonly onAdd?: (userIds: readonly number[]) => Promise<string | null>;
+  /** Add mode: members who are already in the group; they are not listed. */
+  readonly excludeIds?: ReadonlySet<number>;
+  /** Add mode: how many more people fit. Defaults to the group-create limit. */
+  readonly maxSelect?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -58,8 +71,15 @@ const reachable = (m: Member): number =>
  */
 export function createMemberPickerModal(opts: MemberPickerOptions): MountableComponent {
   let modalInstance: ModalInstance | null = null;
+  // Set once the modal is dismissed or destroyed, so a late answer to an add
+  // that was still in flight does not touch a picker nobody can see.
+  let closed = false;
   const selected = new Set<number>();
-  const multi = opts.onSelectGroup !== undefined;
+  const adding = opts.onAdd !== undefined;
+  const multi = adding || opts.onSelectGroup !== undefined;
+  const maxPicks = adding
+    ? (opts.maxSelect ?? MAX_GROUP_DM_PARTICIPANTS - 1)
+    : MAX_GROUP_DM_PARTICIPANTS - 1;
   // Owns the list's roving-navigation listener; dies with the modal.
   const pickerOwner = new Disposable();
 
@@ -68,13 +88,19 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
     const currentUserId = authStore.getState().user?.id ?? 0;
 
     const content = createElement("div", { style: "padding:20px;" });
-    const title = createElement("h3", {}, requestsText("picker.title"));
+    const title = createElement(
+      "h3",
+      {},
+      adding ? requestsText("picker.addTitle") : requestsText("picker.title"),
+    );
     const subtitle = createElement(
       "p",
       { style: "color:var(--text-secondary);font-size:0.85rem;margin:0 0 8px;" },
-      multi
-        ? requestsText("picker.groupHint", { max: String(MAX_GROUP_DM_PARTICIPANTS - 1) })
-        : requestsText("picker.singleHint"),
+      adding
+        ? requestsText("picker.addHint", { max: String(maxPicks) })
+        : multi
+          ? requestsText("picker.groupHint", { max: String(MAX_GROUP_DM_PARTICIPANTS - 1) })
+          : requestsText("picker.singleHint"),
     );
     const listContainer = createElement("div", {
       class: "dm-member-picker-list",
@@ -101,22 +127,30 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
         style: "margin-top:10px;width:100%;",
         "data-testid": "dm-picker-create",
       },
-      requestsText("picker.create"),
+      adding ? requestsText("picker.add") : requestsText("picker.create"),
     );
     confirmBtn.style.display = "none";
+    // Add mode: a server refusal lands here, in the picker, not in a toast.
+    const errorEl = createElement(
+      "p",
+      { class: "dm-member-picker-error", role: "alert", "data-testid": "dm-picker-error" },
+      "",
+    );
+    errorEl.hidden = true;
 
     const close = (): void => {
       modalInstance?.close();
     };
 
     const refreshControls = (): void => {
-      const isGroup = selected.size >= 2;
+      const isGroup = !adding && selected.size >= 2;
       // The name field appears only once the selection is actually a group:
       // the server refuses to name a two-person DM, so offering the field
       // there would be offering something that cannot take effect.
       nameInput.style.display = isGroup ? "" : "none";
       confirmBtn.style.display = selected.size >= 1 ? "" : "none";
       renderChips();
+      if (adding) return;
       setText(
         confirmBtn,
         isGroup
@@ -158,7 +192,7 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
     const rowById = new Map<number, PickerRow>();
 
     const candidates = [...members.values()]
-      .filter((m) => m.id !== currentUserId)
+      .filter((m) => m.id !== currentUserId && opts.excludeIds?.has(m.id) !== true)
       .toSorted(
         (a, b) =>
           reachable(a) - reachable(b) ||
@@ -174,8 +208,9 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
         refreshControls();
         return;
       }
-      // The cap counts the creator too, so the picker allows one fewer.
-      if (selected.size >= MAX_GROUP_DM_PARTICIPANTS - 1) return;
+      // The cap counts the creator too, so the picker allows one fewer; add
+      // mode is limited to the slots the group has left.
+      if (selected.size >= maxPicks) return;
       selected.add(member.id);
       item.classList.add("selected");
       refreshControls();
@@ -303,6 +338,30 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
     confirmBtn.addEventListener("click", () => {
       const ids = [...selected];
       if (ids.length === 0) return;
+      if (opts.onAdd !== undefined) {
+        const onAdd = opts.onAdd;
+        errorEl.hidden = true;
+        confirmBtn.disabled = true;
+        onAdd(ids)
+          .then((failure) => {
+            if (closed) {
+              // Dismissed while the add was in flight: say how it ended.
+              if (failure !== null) showToast(failure, "error");
+              return;
+            }
+            if (failure === null) {
+              close();
+              return;
+            }
+            setText(errorEl, failure);
+            errorEl.hidden = false;
+            confirmBtn.disabled = false;
+          })
+          .catch(() => {
+            confirmBtn.disabled = false;
+          });
+        return;
+      }
       if (ids.length === 1) {
         close();
         opts.onSelect(ids[0]!);
@@ -331,7 +390,8 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
       chips,
       listContainer,
       emptyNotice,
-      nameInput,
+      ...(adding ? [] : [nameInput]),
+      errorEl,
       confirmBtn,
       cancelBtn,
     );
@@ -339,7 +399,10 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
     modalInstance = createModal(
       {
         content,
-        onClose: opts.onClose,
+        onClose: () => {
+          closed = true;
+          opts.onClose();
+        },
         className: "dm-member-picker-modal",
       },
       container,
@@ -348,6 +411,7 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
   }
 
   function destroy(): void {
+    closed = true;
     selected.clear();
     pickerOwner.destroy();
     if (modalInstance !== null) {

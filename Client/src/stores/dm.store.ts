@@ -33,6 +33,12 @@ export interface DmChannel {
   readonly name: string;
   /** True for a group DM (3+ participants at creation). */
   readonly isGroup: boolean;
+  /**
+   * The group's owner (user id). Present only for a group on a server with
+   * member management (WP 3B-10); its absence is the feature-detection signal
+   * that hides Add People, Remove and Make Group Owner.
+   */
+  readonly ownerId?: number;
   readonly lastMessageId: number | null;
   /**
    * The current user's read pointer in this DM (see Channel.lastReadMessageId).
@@ -195,6 +201,7 @@ export function dmChannelFromPayload(p: DmChannelPayload): DmChannel {
     participants,
     name: p.name ?? "",
     isGroup: p.is_group ?? false,
+    ...(p.owner_id !== undefined && { ownerId: p.owner_id }),
     lastMessageId: p.last_message_id,
     lastReadMessageId: p.last_read_message_id,
     lastMessage: p.last_message,

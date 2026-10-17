@@ -7,6 +7,8 @@
 
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { isServerRowKind } from "@lib/messageKind";
+import { groupRowIcon, groupRowText } from "./groupRows";
 import { connectionLockReason, messageActionGates } from "./message-actions";
 import { QUICK_REACTIONS, emojiNode, quickReactionEmojiForPass } from "./quick-reactions";
 import { messagesStore, type Message } from "@stores/messages.store";
@@ -392,6 +394,29 @@ function renderCallRow(
   return el;
 }
 
+/**
+ * A group DM system row (WP 3B-11a): add, remove, leave, rename, icon. A
+ * one-line record like a call row, drawn from `kind` + `groupEvent` alone. The
+ * group name is set as text, so it is never parsed as markdown or mentions.
+ */
+function renderGroupRow(msg: Message, text: string): HTMLDivElement {
+  const el = createElement("div", {
+    class: "message group-row",
+    "data-testid": `message-${msg.id}`,
+  });
+  const icon = createElement("span", { class: "gr-icon" });
+  icon.appendChild(createIcon(groupRowIcon(msg.kind), 16));
+  const body = createElement("span", { class: "gr-text" });
+  setText(body, text);
+  const time = createElement(
+    "span",
+    { class: "gr-time", title: fullDateTimeTitle(msg.timestamp) },
+    formatMessageTimestamp(msg.timestamp),
+  );
+  appendChildren(el, icon, body, time);
+  return el;
+}
+
 /** Map a send-failure error code to a short, user-facing reason. */
 function sendErrorReason(code: string | null): string {
   switch (code) {
@@ -492,12 +517,15 @@ export function renderMessage(
     return renderSystemMessage(msg);
   }
 
-  // A call log row is drawn from kind + call alone. Any other kind (a future
-  // one) falls back to plain system text; so does a call row with no `call`.
-  if (msg.kind !== undefined) {
+  // A call log row is drawn from kind + call alone, and a group DM row from
+  // kind + groupEvent. Any other kind (a future one) falls back to plain system
+  // text; so does a call row with no `call`. An empty kind counts as unset.
+  if (isServerRowKind(msg.kind)) {
     if (msg.kind === "call" && msg.call !== undefined) {
       return renderCallRow(msg, msg.call, opts, signal);
     }
+    const groupText = groupRowText(msg, opts.currentUserId);
+    if (groupText !== null) return renderGroupRow(msg, groupText);
     const fallback = renderSystemMessage(msg);
     fallback.dataset["testid"] = `message-${msg.id}`;
     return fallback;

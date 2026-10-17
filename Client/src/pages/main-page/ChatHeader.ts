@@ -26,6 +26,9 @@ export interface ChatHeaderRefs {
   /** The "Show User Profile" toggle for the DM profile panel. Shown only in a
    *  1:1 DM (a group has no profile); the page owns its `aria-pressed`. */
   readonly profileBtn: HTMLButtonElement;
+  /** The "Show Member List" toggle for the group member panel. Shown only in a
+   *  group DM; the page owns its `aria-pressed`. */
+  readonly membersBtn: HTMLButtonElement;
   /** Holds the DM partner's avatar (or a group's stack) in place of the "@". */
   readonly avatarEl: HTMLSpanElement;
   /**
@@ -42,6 +45,8 @@ export interface ChatHeaderOptions {
   readonly onTogglePins: () => void;
   readonly onSearchFocus?: () => void;
   readonly onToggleDmProfile?: () => void;
+  /** Show or hide the group DM member panel. */
+  readonly onToggleMemberList?: () => void;
   /** Start a call in the current DM: join its voice channel and ring. */
   readonly onStartCall?: () => void;
   /** Start a call in the current DM with the camera on. */
@@ -177,6 +182,20 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
     const toggle = opts.onToggleDmProfile;
     profileBtn.addEventListener("click", () => toggle());
   }
+  const membersBtn = createElement("button", {
+    type: "button",
+    class: "profile-btn members-btn",
+    title: requestsText("group.showMembers"),
+    "aria-label": requestsText("group.showMembers"),
+    "aria-pressed": "false",
+    "data-testid": "dm-members-btn",
+  });
+  membersBtn.appendChild(createIcon("user", 18));
+  membersBtn.style.display = "none";
+  if (opts.onToggleMemberList !== undefined) {
+    const toggle = opts.onToggleMemberList;
+    membersBtn.addEventListener("click", () => toggle());
+  }
   const pinBtn = createElement("button", {
     type: "button",
     class: "pin-btn",
@@ -201,7 +220,7 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
       searchInput.blur();
     });
   }
-  appendChildren(tools, searchInput, callBtn, videoCallBtn, profileBtn, pinBtn);
+  appendChildren(tools, searchInput, callBtn, videoCallBtn, profileBtn, membersBtn, pinBtn);
 
   appendChildren(header, sidebarToggle, nameGroup, divider, topicEl, tools);
   return {
@@ -213,6 +232,7 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
       callBtn,
       videoCallBtn,
       profileBtn,
+      membersBtn,
       avatarEl,
       sidebarToggle,
       nameGroupEl: nameGroup,
@@ -320,6 +340,7 @@ export function updateChatHeaderForDm(refs: ChatHeaderRefs, recipient: ChatHeade
     refs.callBtn.style.display = "";
     refs.videoCallBtn.style.display = "";
     refs.profileBtn.style.display = recipient.isGroup === true ? "none" : "";
+    refs.membersBtn.style.display = recipient.isGroup === true ? "" : "none";
   } else {
     setChatHeaderChannelType(refs, undefined);
     refs.hashEl.style.display = "";
@@ -329,5 +350,6 @@ export function updateChatHeaderForDm(refs: ChatHeaderRefs, recipient: ChatHeade
     refs.callBtn.style.display = "none";
     refs.videoCallBtn.style.display = "none";
     refs.profileBtn.style.display = "none";
+    refs.membersBtn.style.display = "none";
   }
 }

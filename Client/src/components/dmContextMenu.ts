@@ -22,6 +22,8 @@ export interface DmMenuConvo {
   readonly userId: number;
   readonly username: string;
   readonly isGroup: boolean;
+  /** The group reports an owner (a server with WP 3B-10): the leave copy says it can be rejoined. */
+  readonly hasOwner?: boolean;
   readonly unread: boolean;
   readonly muted: boolean;
   /** When a timed mute ends (epoch ms); null for none or "until turned off". */
@@ -75,7 +77,9 @@ export function openLeaveConfirm(
     createElement(
       "p",
       { class: "modal-danger-text" },
-      requestsText("dm.leaveConfirmBody", { name: convo.username }),
+      requestsText(convo.hasOwner === true ? "dm.leaveConfirmBodyRejoin" : "dm.leaveConfirmBody", {
+        name: convo.username,
+      }),
     ),
   );
   const footer = createElement("div", { class: "modal-footer" });
