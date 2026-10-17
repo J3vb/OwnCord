@@ -1576,7 +1576,7 @@ describe("MemberList rows update in place (3C-4a)", () => {
     }
   });
 
-  it("focus stays on a row when another member changes status", () => {
+  it("focus stays on a row when another member changes status or joins", () => {
     mountWith(testMembers);
     row(3).focus();
     expect(document.activeElement).toBe(row(3));
@@ -1584,10 +1584,12 @@ describe("MemberList rows update in place (3C-4a)", () => {
     membersStore.flush();
     updatePresence(6, "dnd");
     membersStore.flush();
+    setTestMembers([...testMembers, makeMember({ id: 50, username: "Newbie" })]);
+    membersStore.flush();
     expect(document.activeElement).toBe(row(3));
   });
 
-  it("an open member menu survives another member's presence change, and Escape refocuses its row", async () => {
+  it("an open member menu survives another member's presence change or join, and Escape refocuses its row", async () => {
     authStore.setState(() => ({
       token: "tok",
       user: { id: 99, username: "Actor", avatar: null, role: "admin" },
@@ -1604,6 +1606,8 @@ describe("MemberList rows update in place (3C-4a)", () => {
 
     updatePresence(1, "offline");
     membersStore.flush();
+    setTestMembers([...testMembers, makeMember({ id: 50, username: "Newbie" })]);
+    membersStore.flush();
     expect(document.body.querySelector(".context-menu")).toBe(menu);
     expect(row(5).isConnected).toBe(true);
 
@@ -1612,11 +1616,13 @@ describe("MemberList rows update in place (3C-4a)", () => {
     expect(document.activeElement).toBe(row(5));
   });
 
-  it("a first right-click whose menu module loads after a presence update still opens", async () => {
+  it("a first right-click whose menu module loads after a presence update and a join still opens", async () => {
     mountWith(testMembers);
     row(5).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
-    // The presence update lands before the lazy module settles.
+    // A presence update and a join land before the lazy module settles.
     updatePresence(1, "offline");
+    membersStore.flush();
+    setTestMembers([...testMembers, makeMember({ id: 50, username: "Newbie" })]);
     membersStore.flush();
     await vi.dynamicImportSettled();
     expect(document.body.querySelector(".context-menu")).not.toBeNull();

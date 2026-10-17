@@ -191,7 +191,8 @@ describe("reconcileChildren", () => {
     );
     for (let round = 0; round < 200; round++) {
       const next = current.filter(() => rand() > 0.15);
-      for (let id = 100 * round; id < 100 * round + Math.floor(rand() * 4); id++) {
+      const inserts = Math.floor(rand() * 4);
+      for (let id = 1000 + 100 * round; id < 1000 + 100 * round + inserts; id++) {
         next.splice(Math.floor(rand() * (next.length + 1)), 0, id);
       }
       for (let i = next.length - 1; i > 0; i--) {
