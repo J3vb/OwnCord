@@ -19,6 +19,8 @@ const state = vi.hoisted(() => ({
   cameraSid: "",
   screen: { sources: null as unknown, started: null as unknown, sid: "" },
   changeRefusal: null as string | null,
+  qualitySet: null as unknown,
+  qualityRejection: undefined as unknown,
   audioRefusal: null as string | null,
   cameraChangeRefusal: null as string | null,
   micTest: 0,
@@ -71,6 +73,13 @@ vi.mock("@tauri-apps/api/core", () => ({
       const refusal = state.audioRefusal;
       state.audioRefusal = null;
       return refusal === null ? Promise.resolve(state.screen.sid) : Promise.reject(refusal);
+    }
+    if (cmd === "native_voice_set_screen_quality") {
+      const rejection = state.qualityRejection;
+      state.qualityRejection = undefined;
+      return rejection === undefined
+        ? Promise.resolve(state.qualitySet)
+        : Promise.reject(rejection);
     }
     if (cmd === "native_voice_change_camera") {
       const refusal = state.cameraChangeRefusal;
@@ -137,6 +146,12 @@ describeNativeVoiceSuite(async () => {
       },
       refusesScreenChange(reason) {
         state.changeRefusal = reason;
+      },
+      setsScreenQualityAs(set) {
+        state.qualitySet = set;
+      },
+      rejectsScreenQuality(rejection) {
+        state.qualityRejection = rejection;
       },
       refusesScreenAudio(reason) {
         state.audioRefusal = reason;

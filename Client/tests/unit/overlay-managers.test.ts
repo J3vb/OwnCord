@@ -22,7 +22,11 @@ const {
   mockSearchOverlayDestroy,
   mockSetActiveChannel,
   mockSetMessagePinned,
+  mockCanManageInvites,
+  mockMe,
 } = vi.hoisted(() => ({
+  mockMe: { value: "me" },
+  mockCanManageInvites: { value: true },
   mockLogError: vi.fn(),
   mockInviteManagerMount: vi.fn(),
   mockInviteManagerDestroy: vi.fn(),
@@ -104,6 +108,14 @@ vi.mock("@stores/messages.store", async () => {
     setMessagePinned: mockSetMessagePinned,
   };
 });
+
+vi.mock("@stores/auth.store", () => ({
+  authStore: { getState: () => ({ user: { username: mockMe.value } }) },
+}));
+
+vi.mock("@lib/permissions", () => ({
+  canManageInvites: () => mockCanManageInvites.value,
+}));
 
 vi.mock("@lib/toast", () => ({
   initToast: vi.fn(),
@@ -215,7 +227,7 @@ describe("createInviteManagerController", () => {
       getInvites: vi
         .fn()
         .mockResolvedValue([
-          makeInviteResponse({ code: "live1" }),
+          makeInviteResponse({ code: "live1", max_uses: null, creator_username: "me" }),
           makeInviteResponse({ code: "dead1", revoked: true }),
         ]),
     });
@@ -235,12 +247,15 @@ describe("createInviteManagerController", () => {
 
   it("filters out expired invites so Copy cannot hand out a dead code (F4)", async () => {
     const api = makeMockApi({
-      getInvites: vi
-        .fn()
-        .mockResolvedValue([
-          makeInviteResponse({ code: "live1", expires_at: "2099-01-01T00:00:00Z" }),
-          makeInviteResponse({ code: "expired1", expires_at: "2000-01-01T00:00:00Z" }),
-        ]),
+      getInvites: vi.fn().mockResolvedValue([
+        makeInviteResponse({
+          code: "live1",
+          max_uses: null,
+          creator_username: "me",
+          expires_at: "2099-01-01T00:00:00Z",
+        }),
+        makeInviteResponse({ code: "expired1", expires_at: "2000-01-01T00:00:00Z" }),
+      ]),
     });
 
     const controller = createInviteManagerController({
@@ -298,7 +313,126 @@ describe("createInviteManagerController", () => {
     expect(mockLogError).not.toHaveBeenCalled();
   });
 
-  it("shows toast when open fails to load invites", async () => {
+  it("opening with no live invite creates exactly one (7 days, no limit) and features it", async () => {
+    const api = makeMockApi({
+      getInvites: vi.fn().mockResolvedValue([]),
+      createInvite: vi.fn().mockResolvedValue(makeInviteResponse({ code: "fresh1" })),
+    });
+    const controller = createInviteManagerController({ api: api as never, getRoot: () => root });
+    await controller.open();
+    expect(api.createInvite).toHaveBeenCalledTimes(1);
+    expect(api.createInvite).toHaveBeenCalledWith({ expires_in_hours: 168, max_uses: 0 });
+    const opts = (createInviteManager as Mock).mock.calls[0]![0] as {
+      invites: Array<{ code: string }>;
+      featuredCode: string;
+    };
+    expect(opts.featuredCode).toBe("fresh1");
+    expect(opts.invites.map((i) => i.code)).toEqual(["fresh1"]);
+  });
+
+  it("opening with a live invite creates none and features the newest live one", async () => {
+    const api = makeMockApi({
+      getInvites: vi.fn().mockResolvedValue([
+        makeInviteResponse({
+          id: 1,
+          code: "old",
+          max_uses: null,
+          creator_username: "me",
+          created_at: "2026-01-01T00:00:00Z",
+        }),
+        makeInviteResponse({
+          id: 2,
+          code: "newer",
+          max_uses: null,
+          creator_username: "me",
+          created_at: "2026-02-01T00:00:00Z",
+        }),
+        // expires within 24 h: not live for this purpose
+        makeInviteResponse({
+          id: 3,
+          code: "soon",
+          max_uses: null,
+          creator_username: "me",
+          created_at: "2026-03-01T00:00:00Z",
+          expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+        }),
+      ]),
+    });
+    const controller = createInviteManagerController({ api: api as never, getRoot: () => root });
+    await controller.open();
+    expect(api.createInvite).not.toHaveBeenCalled();
+    const opts = (createInviteManager as Mock).mock.calls[0]![0] as { featuredCode: string };
+    expect(opts.featuredCode).toBe("newer");
+  });
+
+  it("another member's live invite and my own limited invite do not count as the fresh link", async () => {
+    const api = makeMockApi({
+      getInvites: vi
+        .fn()
+        .mockResolvedValue([
+          makeInviteResponse({ id: 1, code: "theirs", max_uses: null, creator_username: "other" }),
+          makeInviteResponse({ id: 2, code: "limited", max_uses: 1, creator_username: "me" }),
+        ]),
+      createInvite: vi.fn().mockResolvedValue(makeInviteResponse({ code: "mine-new" })),
+    });
+    const controller = createInviteManagerController({ api: api as never, getRoot: () => root });
+    await controller.open();
+    expect(api.createInvite).toHaveBeenCalledTimes(1);
+    const opts = (createInviteManager as Mock).mock.calls[0]![0] as { featuredCode: string };
+    expect(opts.featuredCode).toBe("mine-new");
+  });
+
+  it("a failed create-on-open still opens the manager with the list and toasts the reason", async () => {
+    const api = makeMockApi({
+      getInvites: vi
+        .fn()
+        .mockResolvedValue([makeInviteResponse({ code: "theirs", creator_username: "other" })]),
+      createInvite: vi.fn().mockRejectedValue(new Error("Invite limit reached")),
+    });
+    const controller = createInviteManagerController({ api: api as never, getRoot: () => root });
+    await controller.open();
+    expect(api.createInvite).toHaveBeenCalledTimes(1);
+    const opts = (createInviteManager as Mock).mock.calls[0]![0] as {
+      invites: Array<{ code: string }>;
+      featuredCode: string | null;
+    };
+    expect(opts.featuredCode).toBeNull();
+    expect(opts.invites.map((i) => i.code)).toEqual(["theirs"]);
+    expect(mockShowToast).toHaveBeenCalledWith("Invite limit reached", "error");
+    controller.cleanup();
+  });
+
+  it("does not open or create anything without MANAGE_INVITES", async () => {
+    mockCanManageInvites.value = false;
+    try {
+      const api = makeMockApi({ getInvites: vi.fn().mockResolvedValue([]) });
+      const controller = createInviteManagerController({ api: api as never, getRoot: () => root });
+      await controller.open();
+      expect(api.getInvites).not.toHaveBeenCalled();
+      expect(api.createInvite).not.toHaveBeenCalled();
+    } finally {
+      mockCanManageInvites.value = true;
+    }
+  });
+
+  it("a load failure shows an inline Retry that reloads", async () => {
+    const getInvites = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("boom"))
+      .mockResolvedValue([makeInviteResponse()]);
+    const api = makeMockApi({ getInvites });
+    const controller = createInviteManagerController({ api: api as never, getRoot: () => root });
+    await controller.open();
+    const retry = [...root.querySelectorAll("button")].find((b) => b.textContent === "Retry");
+    expect(retry).toBeDefined();
+    retry!.click();
+    await vi.waitFor(() => expect(createInviteManager).toHaveBeenCalledOnce());
+    expect(getInvites).toHaveBeenCalledTimes(2);
+    expect(root.textContent).not.toContain("Retry");
+    controller.cleanup();
+  });
+
+  it("shows the inline error, not a duplicate toast, when open fails to load invites", async () => {
     const api = makeMockApi({
       getInvites: vi.fn().mockRejectedValue(new Error("load failed")),
     });
@@ -310,7 +444,9 @@ describe("createInviteManagerController", () => {
 
     await controller.open();
 
-    expect(mockShowToast).toHaveBeenCalledWith("Failed to load invites", "error");
+    expect(mockShowToast).not.toHaveBeenCalled();
+    expect(root.textContent).toContain("Failed to load invites");
+    controller.cleanup();
   });
 });
 
@@ -1527,11 +1663,11 @@ describe("createInviteManagerController (additional)", () => {
     await controller.open();
 
     const opts = (createInviteManager as Mock).mock.calls[0]![0] as {
-      onCreateInvite: () => Promise<unknown>;
+      onCreateInvite: (p: { expiresInHours: number; maxUses: number }) => Promise<unknown>;
     };
 
-    const result = await opts.onCreateInvite();
-    expect(api.createInvite).toHaveBeenCalledWith({});
+    const result = await opts.onCreateInvite({ expiresInHours: 24, maxUses: 5 });
+    expect(api.createInvite).toHaveBeenCalledWith({ expires_in_hours: 24, max_uses: 5 });
     expect((result as { code: string }).code).toBe("new123");
   });
 

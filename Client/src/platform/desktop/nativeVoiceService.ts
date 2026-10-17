@@ -17,6 +17,8 @@ import type {
   NativeMicTestEnvelope,
   NativeVoiceEnvelope,
   NativeVoiceResources,
+  NativeVoiceScreenQualityResult,
+  NativeVoiceScreenQualitySet,
   NativeVoiceScreenSources,
   NativeVoiceScreenStarted,
   NativeVoiceStats,
@@ -48,6 +50,19 @@ function listenLate<T>(name: string, handler: (payload: T) => void): () => void 
     unlisten?.();
     unlisten = null;
   };
+}
+
+/** The host rejects a quality change with `{stage, message}`; anything else
+ *  (an older host, a broken IPC) changed nothing we can vouch for, so it is
+ *  a refusal. */
+function qualityFailure(err: unknown): NativeVoiceScreenQualityResult {
+  if (typeof err === "object" && err !== null && "stage" in err && "message" in err) {
+    const { stage, message } = err;
+    if ((stage === "refused" || stage === "publish") && typeof message === "string") {
+      return { ok: false, stage, message };
+    }
+  }
+  return { ok: false, stage: "refused", message: err instanceof Error ? err.message : String(err) };
 }
 
 export const nativeVoice: NativeVoice = {
@@ -139,6 +154,19 @@ export const nativeVoice: NativeVoice = {
     }
   },
   stopScreen: (session, capture) => invoke<void>("native_voice_stop_screen", { session, capture }),
+  async setScreenQuality(session, capture, options, publish) {
+    try {
+      const set = await invoke<NativeVoiceScreenQualitySet>("native_voice_set_screen_quality", {
+        session,
+        capture,
+        options,
+        publish,
+      });
+      return { ok: true, ...set };
+    } catch (err) {
+      return qualityFailure(err);
+    }
+  },
   async changeCamera(session, source, capture) {
     try {
       return await invoke<NativeVoiceCameraStarted>("native_voice_change_camera", {

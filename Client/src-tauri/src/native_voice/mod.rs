@@ -38,7 +38,9 @@ use mic_test::{
     MIC_TEST_EVENT, MIC_TEST_IN_CALL,
 };
 use serde::Serialize;
-use session::{AudioOptions, CameraOptions, Event, NativeSession, Resources, ScreenOptions};
+use session::{
+    AudioOptions, CameraOptions, Event, NativeSession, QualityError, Resources, ScreenOptions,
+};
 use tauri::{AppHandle, Emitter, Runtime};
 use tokio::sync::Mutex;
 
@@ -983,6 +985,44 @@ pub async fn native_voice_change_screen(
         width,
         height,
     })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenQualitySet {
+    /// The new publication's sid; the old one is gone.
+    sid: String,
+    /// The size the capture now delivers, which the share is published at.
+    width: u32,
+    height: u32,
+}
+
+/// Change the quality of the live, published screen share `capture`: re-size
+/// and re-pace its running capture (no new pick, no portal dialog) and
+/// publish it again with `publish` at that size, which gives viewers a new
+/// sid. The session stays held throughout, so a stop, source change or leave
+/// queued behind it releases the new publication and one that came first
+/// makes this refuse. Rejects `{stage: "refused"}` with nothing changed
+/// (no published share, a stale `capture`, a source change pending) or
+/// `{stage: "publish"}` once the screen video is unpublished (the capture
+/// and the share audio stay up: stop the screen or retry the publish).
+#[tauri::command]
+pub async fn native_voice_set_screen_quality(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    capture: u64,
+    options: screen::CaptureOptions,
+    publish: ScreenOptions,
+) -> Result<ScreenQualitySet, QualityError> {
+    let (sid, width, height) = state
+        .inner
+        .lock()
+        .await
+        .current(session)
+        .map_err(QualityError::Refused)?
+        .set_screen_quality(capture, options, publish)
+        .await?;
+    Ok(ScreenQualitySet { sid, width, height })
 }
 
 /// Publish running capture `capture` as the screen share; returns its sid.

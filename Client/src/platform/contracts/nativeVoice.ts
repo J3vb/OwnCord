@@ -240,6 +240,24 @@ export interface NativeVoiceScreenOptions {
   codec: NativeVoiceVideoCodec;
 }
 
+/** What a live quality change published: the new publication's sid and the
+ *  size the capture now delivers. */
+export interface NativeVoiceScreenQualitySet {
+  sid: string;
+  width: number;
+  height: number;
+}
+
+/** The outcome of `setScreenQuality`. `refused`: nothing changed and the
+ *  share goes on (no published share, a stale capture, a source change
+ *  pending, or a host that rejected without a stage). `publish`: the
+ *  republish failed and only the screen video is unpublished: the capture
+ *  and the share audio stay up, so the caller must `stopScreen` or retry
+ *  `publishScreen`. */
+export type NativeVoiceScreenQualityResult =
+  | ({ ok: true } & NativeVoiceScreenQualitySet)
+  | { ok: false; stage: "refused" | "publish"; message: string };
+
 /** What the settings tab's mic test starts with (Linux only). */
 export interface NativeMicTestOptions {
   /** `listDevices` ids; empty selects the host default. */
@@ -488,6 +506,18 @@ export interface NativeVoice {
     source: string,
     capture: NativeVoiceScreenCapture,
   ): Promise<NativeVoiceScreenStarted>;
+  /** Change the quality of the live, published share `capture` without a
+   *  new pick: the running capture is re-paced and re-capped to `capture`'s
+   *  `NativeVoiceScreenCapture`, then published again with `publish` at the
+   *  size it now delivers (the host's `publish.width`/`height` is the
+   *  fallback), which gives viewers a new sid. The share audio is untouched.
+   *  Never rejects: see `NativeVoiceScreenQualityResult`. */
+  setScreenQuality(
+    session: number,
+    capture: number,
+    options: NativeVoiceScreenCapture,
+    publish: NativeVoiceScreenOptions,
+  ): Promise<NativeVoiceScreenQualityResult>;
   /** Use camera `source` instead under the live, published camera: a new
    *  capture starts beside it and takes the publication over (same sid, same
    *  preview socket) once its first frame arrives, then the old capture
