@@ -479,4 +479,64 @@ describe("UserProfilePopup profile fields", () => {
 
     popup.destroy?.();
   });
+
+  describe("block and availability (WP 3B-2)", () => {
+    const mountPopup = (extra: Partial<Parameters<typeof createUserProfilePopup>[0]> = {}) => {
+      const popup = createUserProfilePopup({
+        user: makeUser(),
+        anchorX: 10,
+        anchorY: 10,
+        onMessage: vi.fn(),
+        onCall: vi.fn(),
+        ...extra,
+      });
+      popup.mount(container);
+      return popup;
+    };
+    const btn = (id: string) => container.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`);
+
+    it("shows Block, or Unblock when blocked, and calls onToggleBlock once", () => {
+      const onToggleBlock = vi.fn();
+      const popup = mountPopup({ onToggleBlock, blocked: false });
+      expect(btn("upp-block-btn")?.textContent).toContain("Block");
+      btn("upp-block-btn")?.click();
+      expect(onToggleBlock).toHaveBeenCalledExactlyOnceWith(42, true);
+      popup.destroy?.();
+
+      const again = vi.fn();
+      const popup2 = mountPopup({ onToggleBlock: again, blocked: true });
+      expect(btn("upp-block-btn")?.textContent).toContain("Unblock");
+      btn("upp-block-btn")?.click();
+      expect(again).toHaveBeenCalledExactlyOnceWith(42, false);
+      popup2.destroy?.();
+    });
+
+    it("has no Block button without a handler", () => {
+      const popup = mountPopup();
+      expect(btn("upp-block-btn")).toBeNull();
+      popup.destroy?.();
+    });
+
+    it("disables Message and Call with the reason as their tooltip", () => {
+      const onMessage = vi.fn();
+      const onCall = vi.fn();
+      const popup = mountPopup({ onMessage, onCall, unavailableReason: "Offline right now" });
+      for (const id of ["upp-message-btn", "upp-call-btn"]) {
+        expect(btn(id)?.getAttribute("aria-disabled")).toBe("true");
+        expect(btn(id)?.getAttribute("aria-describedby")).toBeTruthy();
+        expect(btn(id)?.title).toBe("Offline right now");
+        btn(id)?.click();
+      }
+      expect(onMessage).not.toHaveBeenCalled();
+      expect(onCall).not.toHaveBeenCalled();
+      popup.destroy?.();
+    });
+
+    it("leaves Message and Call enabled with no reason", () => {
+      const popup = mountPopup();
+      expect(btn("upp-message-btn")?.hasAttribute("aria-disabled")).toBe(false);
+      expect(btn("upp-call-btn")?.title).toBe("");
+      popup.destroy?.();
+    });
+  });
 });

@@ -22,7 +22,8 @@ import {
   resolveServerUrl,
 } from "./message-list/attachments";
 import { migrateLegacyValue } from "@lib/legacyKeyMigration";
-import { statusLabel } from "../i18n/shell";
+import { blocksStore } from "@stores/blocks.store";
+import { shellText, statusLabel } from "../i18n/shell";
 import { requestsText } from "../i18n/requests";
 
 // ---------------------------------------------------------------------------
@@ -45,6 +46,9 @@ export interface DmProfileData {
 export interface DmProfileSidebarOptions {
   readonly user: DmProfileData;
   readonly onClose: () => void;
+  /** Block (`block` true) or Unblock this user (WP 3B-2). The owner confirms a
+   *  Block; the label follows `blocksStore`. Omitted: no button. */
+  readonly onToggleBlock?: (userId: number, block: boolean) => void;
   /**
    * The connected server's host, used to scope the note's localStorage key.
    * User ids are per-server, so without this a note about user 5 on one
@@ -327,6 +331,34 @@ export function createDmProfileSidebar(
     );
 
     appendChildren(content, noteTitle, noteInput);
+
+    // Block / Unblock. The label follows blocksStore, so it flips when the
+    // owner's request lands and stays put when it fails.
+    if (options.onToggleBlock !== undefined) {
+      const onToggleBlock = options.onToggleBlock;
+      const blockBtn = createElement("button", {
+        class: "dps-block-btn",
+        type: "button",
+        "data-testid": "dps-block-btn",
+      });
+      const paint = (): void => {
+        setText(
+          blockBtn,
+          shellText(
+            blocksStore.getState().blockedByMe.has(user.id) ? "member.unblock" : "member.block",
+          ),
+        );
+      };
+      paint();
+      blockBtn.addEventListener(
+        "click",
+        () => onToggleBlock(user.id, !blocksStore.getState().blockedByMe.has(user.id)),
+        { signal },
+      );
+      const unsub = blocksStore.subscribe(paint);
+      signal.addEventListener("abort", unsub, { once: true });
+      content.append(makeDivider(), blockBtn);
+    }
 
     panel.appendChild(content);
     container.appendChild(panel);
