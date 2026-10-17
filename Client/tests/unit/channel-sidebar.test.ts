@@ -782,6 +782,29 @@ describe("ChannelSidebar", () => {
       expect(rowIds()).toEqual(["1", "2"]);
     });
 
+    it("a focused row that hides moves focus to the row that took its place", () => {
+      setChannels([text(1), text(2), text(3)]);
+      setHideMutedChannels(true);
+      sidebar.mount(container);
+      container.querySelector<HTMLElement>('[data-channel-id="2"]')!.focus();
+
+      muteChannel(2);
+
+      expect(rowIds()).toEqual(["1", "3"]);
+      expect(document.activeElement).toBe(container.querySelector('[data-channel-id="3"]'));
+    });
+
+    it("the last focused row that hides moves focus to the row before it", () => {
+      setChannels([text(1), text(2)]);
+      setHideMutedChannels(true);
+      sidebar.mount(container);
+      container.querySelector<HTMLElement>('[data-channel-id="2"]')!.focus();
+
+      muteChannel(2);
+
+      expect(document.activeElement).toBe(container.querySelector('[data-channel-id="1"]'));
+    });
+
     it("redraws live when you switch channels: the one you leave hides, the one you open shows", () => {
       setChannels([text(1), text(2)]);
       muteChannel(1);

@@ -27,7 +27,7 @@
     color 0.1s ease;
 }
 .context-menu-item[aria-checked="true"]::after {
-  content: "\2713";
+  content: "\2713" / "";
   margin-left: auto;
 }
 .context-menu-item:hover {

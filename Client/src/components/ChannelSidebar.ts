@@ -944,6 +944,9 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
           : null;
       const losesFocus =
         focusedRow !== null && !rows.some((ch) => String(ch.id) === focusedRow.dataset.channelId);
+      const lostIndex = losesFocus
+        ? Array.from(container.querySelectorAll(".channel-item")).indexOf(focusedRow)
+        : -1;
       reconcileChildren(container, rows, {
         key: (ch) => String(ch.id),
         signature: (ch) => channelRowSignature(ch, activeChannelId, g.orderIds, voiceTick),
@@ -978,7 +981,14 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
         dispose: disposeOwned,
       });
       if (losesFocus) {
-        header?.querySelector<HTMLElement>(".category-arrow")?.focus();
+        // A hidden muted row in an expanded list hands focus to the row that
+        // took its place; otherwise to the category's arrow.
+        const left = container.querySelectorAll<HTMLElement>(".channel-item");
+        const next =
+          !collapsed && left.length > 0
+            ? left[Math.min(Math.max(lostIndex, 0), left.length - 1)]
+            : null;
+        (next ?? header?.querySelector<HTMLElement>(".category-arrow"))?.focus();
       }
     }
 
