@@ -72,6 +72,8 @@ export function buildPttControls(signal: AbortSignal): HTMLElement[] {
   // Non-null once the host reports the portal backend.
   let portal: GlobalKeysStatus | null = null;
   let stopKeyCapture: (() => void) | null = null;
+  /** Releases the portal capture's `beginCapture` slot (Clear needs it). */
+  let releaseCapture: (() => void) | null = null;
 
   /** The key button's resting text: the desktop's own trigger on the portal path. */
   const restingKeyText = (): string => {
@@ -151,6 +153,7 @@ export function buildPttControls(signal: AbortSignal): HTMLElement[] {
       finish();
       resetKeyButton();
     });
+    releaseCapture = release;
     function finish(): void {
       release();
       stopKeyCapture?.();
@@ -239,6 +242,8 @@ export function buildPttControls(signal: AbortSignal): HTMLElement[] {
       e.stopPropagation();
       ++captureGeneration;
       capturing = false;
+      releaseCapture?.();
+      releaseCapture = null;
       stopKeyCapture?.();
       stopKeyCapture = null;
       showNote(null);

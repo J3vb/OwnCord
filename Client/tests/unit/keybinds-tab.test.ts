@@ -1212,6 +1212,19 @@ describe("KeybindsTab rebindable rows (3E-3c-3)", () => {
       expect(mockBindPortal).not.toHaveBeenCalled();
     });
 
+    it("Clear during a portal capture lets the next capture start cleanly", async () => {
+      mockStatus.mockResolvedValue(portalStatus);
+      const { el } = mount();
+      await vi.waitFor(() => expect(byId(el, "keybinds-portal").style.display).toBe(""));
+      pttButton(el).click();
+      const clear = [...el.querySelectorAll("button")].find((b) => b.textContent === "Clear")!;
+      clear.click();
+      pttButton(el).click();
+      expect(pttButton(el).textContent).toBe("Press a function key (F1-F24)...");
+      press("Escape");
+      expect(pttButton(el).textContent).toBe("Not set");
+    });
+
     it("the polling capture rejects a key an in-app binding uses", async () => {
       const { el } = mount();
       byId(el, "keybind-toggleScreenshare").click();
