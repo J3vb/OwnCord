@@ -55,7 +55,8 @@ export function rangeFor(
   pinned: readonly number[] = [],
 ): VirtualRange {
   const count = countOf(offsets);
-  if (count === 0 || !(viewport > 0) || !Number.isFinite(top)) return EMPTY;
+  if (count === 0 || !(viewport > 0) || !Number.isFinite(viewport) || !Number.isFinite(top))
+    return EMPTY;
   const bottom = top + viewport;
   const pad = Math.max(0, Math.floor(overscan));
   const first = indexAt(offsets, top);

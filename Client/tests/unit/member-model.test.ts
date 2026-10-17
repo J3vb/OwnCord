@@ -154,19 +154,25 @@ describe("memberModel", () => {
     );
     const counter = countingCompare();
     const model = buildModel(members, ROLES, counter.compare);
+    // A full rebuild makes exactly the comparator calls of a fresh build.
+    const fullBuildCalls = (next: Map<number, Member>, roles: readonly ReadyRole[]): number => {
+      const ref = countingCompare();
+      buildModel(next, roles, ref.compare);
+      return ref.calls();
+    };
 
     // roles: a new reference swaps group order and colours, so no delta applies
     const reordered: readonly ReadyRole[] = [ROLES[2]!, ROLES[1]!, ROLES[0]!];
     let start = counter.calls();
     const swapped = updateModel(model, members, reordered, counter.compare);
-    expect(counter.calls() - start).toBeGreaterThan(2000 / 20);
+    expect(counter.calls() - start).toBe(fullBuildCalls(members, reordered));
     expect(flattenModel(swapped, "")).toEqual(buildItems(members, reordered, ""));
 
     // snapshot: every object replaced
     const snapshot = new Map([...members].map(([id, m]) => [id, { ...m }]));
     start = counter.calls();
     const rebuilt = updateModel(model, snapshot, ROLES, counter.compare);
-    expect(counter.calls() - start).toBeGreaterThan(100);
+    expect(counter.calls() - start).toBe(fullBuildCalls(snapshot, ROLES));
     expect(rebuilt.members).toBe(snapshot);
     expect(flattenModel(rebuilt, "")).toEqual(buildItems(snapshot, ROLES, ""));
 
@@ -176,7 +182,7 @@ describe("memberModel", () => {
       batch.set(id, { ...members.get(id)!, status: "offline" });
     start = counter.calls();
     const bulk = updateModel(model, batch, ROLES, counter.compare);
-    expect(counter.calls() - start).toBeGreaterThan(100);
+    expect(counter.calls() - start).toBe(fullBuildCalls(batch, ROLES));
     expect(flattenModel(bulk, "")).toEqual(buildItems(batch, ROLES, ""));
 
     // exactly the cap stays incremental

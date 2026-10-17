@@ -41,6 +41,7 @@ describe("rangeFor", () => {
     expect(rangeFor(offsets, 100, 0, 5, [3])).toEqual(empty);
     expect(rangeFor(offsets, 100, -5, 5)).toEqual(empty);
     expect(rangeFor(offsets, Number.NaN, 100, 5)).toEqual(empty);
+    expect(rangeFor(offsets, 100, Number.POSITIVE_INFINITY, 5)).toEqual(empty);
     expect(rangeFor(buildOffsets([]), 0, 100, 5)).toEqual(empty);
   });
 });
