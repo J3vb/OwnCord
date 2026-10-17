@@ -650,7 +650,7 @@ export class LiveKitSession {
     // Only arm this when the poller is confirmed live (setPttPollingLive) —
     // gating on the stored key alone would close the mic permanently on
     // platforms where PTT can never actually report state (macOS's
-    // is_key_down stub, pure-Wayland Linux with no XWayland).
+    // is_key_down stub, Wayland Linux while the portal backend is not live).
     // Record the gate in pttGated, NEVER in localMuted: localMuted means "the
     // user muted themselves". The microphone is enabled either way, behind
     // the gate (AudioPipeline.setPttGated), and a press only opens the gate.
