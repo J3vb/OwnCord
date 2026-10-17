@@ -277,7 +277,11 @@ function createMemberItem(
 
   const avatar = createAvatarElement(
     { username: shown.username, displayName: shown.displayName, avatar: shown.avatar },
-    { className: "mi-avatar", background: pickAvatarColor(shown.username) },
+    {
+      className: "mi-avatar",
+      background: pickAvatarColor(shown.username),
+      deferUntilVisible: true,
+    },
   );
 
   const statusDot = createElement("div", {
