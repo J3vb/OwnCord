@@ -351,6 +351,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   const handedOff = new Set<DraftUpload>();
   /** References to picker close functions, set by mount() for destroy() to call. */
   let cleanupPickers: (() => void) | null = null;
+  /** Pending animation frame for a coalesced textarea resize, or null. */
+  let resizeFrame: number | null = null;
   /** Timer IDs for cleanup on destroy. */
   const activeTimers: Set<ReturnType<typeof setTimeout>> = new Set();
 
@@ -687,10 +689,42 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     replyBar?.classList.remove("visible");
   }
 
-  function autoResize(): void {
+  /** The one auto/measure cycle: setting "auto" then reading scrollHeight
+   *  forces a synchronous layout, so it runs once per frame at most. Any
+   *  frame still pending is dropped, its work done here. */
+  function measureTextarea(): void {
+    if (resizeFrame !== null) {
+      cancelAnimationFrame(resizeFrame);
+      resizeFrame = null;
+    }
     if (textarea === null) return;
     textarea.style.height = "auto";
     textarea.style.height = `${Math.min(textarea.scrollHeight, MAX_TEXTAREA_HEIGHT)}px`;
+  }
+
+  /** Programmatic changes (send, draft restore, completions, formatting)
+   *  resize synchronously so the next read sees the final height. */
+  function autoResize(): void {
+    if (textarea === null) return;
+    measureTextarea();
+    updateCounter();
+    options.onDraftChange?.();
+  }
+
+  /** Typing: the counter and draft hook stay per-keystroke, but the layout
+   *  measure is coalesced to one per animation frame (before paint, so the
+   *  user sees the same height as a synchronous resize). A textarea never
+   *  measured yet gets its first height at once. */
+  function autoResizeOnInput(): void {
+    if (textarea === null) return;
+    if (textarea.style.height === "") {
+      autoResize();
+      return;
+    }
+    resizeFrame ??= requestAnimationFrame(() => {
+      resizeFrame = null;
+      measureTextarea();
+    });
     updateCounter();
     options.onDraftChange?.();
   }
@@ -1460,7 +1494,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     textarea.addEventListener(
       "input",
       () => {
-        autoResize();
+        autoResizeOnInput();
         maybeEmitTyping();
         syncAutocomplete();
         // An edit is the user acting on the refusal, so the line goes away.
@@ -1793,6 +1827,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // Clear all pending timers
     for (const t of activeTimers) clearTimeout(t);
     activeTimers.clear();
+    if (resizeFrame !== null) {
+      cancelAnimationFrame(resizeFrame);
+      resizeFrame = null;
+    }
     // SRV-05: an unmount must not leave an upload running against a composer
     // that no longer exists, unless getDraft() handed it to the draft.
     for (const att of pendingAttachments) {
