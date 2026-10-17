@@ -66,6 +66,13 @@ vi.mock("@tauri-apps/plugin-deep-link", () => ({
   getCurrent: vi.fn().mockResolvedValue(null),
   onOpenUrl: (...args: unknown[]) => mockOnOpenUrl(...args),
 }));
+// The Reload recovery leaves a call through this lazily imported module.
+const { mockLeaveVoice } = vi.hoisted(() => ({
+  mockLeaveVoice: vi.fn((..._args: unknown[]): Promise<void> => Promise.resolve()),
+}));
+vi.mock("@lib/livekitSession", () => ({
+  leaveVoice: (...args: unknown[]) => mockLeaveVoice(...args),
+}));
 vi.mock("@lib/message-navigation", () => ({ jumpToMessage: vi.fn() }));
 vi.mock("@components/CertMismatchModal", () => ({
   createCertMismatchModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
@@ -1429,6 +1436,85 @@ describe("main.ts external invite link asks before leaving the signed-in server 
     expect(page.applyInviteLink).toHaveBeenCalledWith("SECOND", "second.example");
   });
 
+  it("also asks while the connected overlay is up, before the main page mounts", async () => {
+    const handler = await signedIn();
+    // Back to the connect page, then sign in again and stop at auth_ok: the
+    // session is live but the router is still on the connect page.
+    clearAuth();
+    await vi.advanceTimersByTimeAsync(50);
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    mockLogin.mockResolvedValue({ token: "t2", requires_2fa: false });
+    await capturedConnectCallbacks.onLogin!("server-b.example:8443", "alex", "hunter2");
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        payload: {
+          user: { id: 1, username: "alex", avatar: null, role: "member" },
+          server_name: "Server B",
+          motd: "",
+        },
+      }),
+    );
+    expect(authStore.getState().isAuthenticated).toBe(true);
+    const connect = vi.mocked(createConnectPage);
+    connect.mockClear();
+
+    handler(["owncord://invite/ABC123?host=other.example"]);
+    await dialogShows("You'll leave Server B.");
+    expect(authStore.getState().isAuthenticated).toBe(true);
+
+    clickDialog("cancel");
+    expect(authStore.getState().isAuthenticated).toBe(true);
+    expect(connect).not.toHaveBeenCalled();
+    expectConsole("warn", /\[main\] Credential delete failed/);
+  });
+
+  it("closes a dialog left open when the session ends, so its confirm cannot fire", async () => {
+    const handler = await signedIn();
+    handler(["owncord://invite/ABC123?host=other.example"]);
+    await dialogShows("other.example");
+    const confirm = document.querySelector<HTMLButtonElement>(
+      '[data-testid="invite-join-confirm"]',
+    )!;
+
+    clearAuth();
+    await vi.advanceTimersByTimeAsync(50);
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+
+    expect(dialogEl()).toBeNull();
+    // Even a click on the detached button does nothing.
+    const page = vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+      applyInviteLink: ReturnType<typeof vi.fn>;
+    };
+    page.applyInviteLink.mockClear();
+    confirm.click();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(page.applyInviteLink).not.toHaveBeenCalled();
+    expect(authStore.getState().logoutReason).not.toBe("server_switch");
+  });
+
+  it("returns focus to Cancel when a second link rewrites the dialog", async () => {
+    const handler = await signedIn();
+    handler(["owncord://invite/FIRST?host=first.example"]);
+    await dialogShows("first.example");
+    const confirm = document.querySelector<HTMLButtonElement>(
+      '[data-testid="invite-join-confirm"]',
+    )!;
+    confirm.focus();
+    expect(document.activeElement).toBe(confirm);
+
+    handler(["owncord://invite/SECOND?host=second.example"]);
+    await dialogShows("second.example");
+
+    expect(document.activeElement).toBe(
+      document.querySelector('[data-testid="invite-join-cancel"]'),
+    );
+    clickDialog("cancel");
+  });
+
   it("says the call ends too when the user is in voice", async () => {
     const handler = await signedIn();
     voiceStore.setState((s) => ({ ...s, currentChannelId: 9 }));
@@ -1465,8 +1551,90 @@ describe("main.ts render failure recovery (4.12)", () => {
     );
     expect(signOut?.textContent).toBe("Sign out");
     expect(authStore.getState().isAuthenticated).toBe(true);
+    vi.mocked(createConnectPage).mockClear();
     signOut!.click();
     expect(authStore.getState().isAuthenticated).toBe(false);
+    await vi.advanceTimersByTimeAsync(50);
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    // The connect page is back and the fallback is gone.
+    expect(createConnectPage).toHaveBeenCalled();
+    expect(app.querySelector('[data-testid="render-fallback-sign-out"]')).toBeNull();
+    expect(app.textContent).not.toContain("Something went wrong");
+  });
+
+  describe("Reload", () => {
+    const reload = vi.fn();
+    beforeEach(() => {
+      reload.mockReset();
+      mockLeaveVoice.mockReset().mockResolvedValue(undefined);
+      vi.stubGlobal("location", { ...window.location, reload });
+    });
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      voiceStore.setState((s) => ({ ...s, currentChannelId: null }));
+    });
+
+    async function failedMainPage(): Promise<HTMLButtonElement> {
+      vi.mocked(createMainPage).mockImplementationOnce(
+        () =>
+          ({
+            mount: () => {
+              throw new Error("mount blew up");
+            },
+            destroy: vi.fn(),
+          }) as never,
+      );
+      await signedInWithDeepLinkHandler("server-a.example:8443", "Server A");
+      expectConsole("error", "Component mount failed");
+      voiceStore.setState((s) => ({ ...s, currentChannelId: 9 }));
+      return document.querySelector<HTMLButtonElement>('[data-testid="render-fallback-reload"]')!;
+    }
+
+    it("waits for the voice leave to finish before reloading", async () => {
+      let finishLeave!: () => void;
+      mockLeaveVoice.mockReturnValue(
+        new Promise<void>((resolve) => {
+          finishLeave = resolve;
+        }),
+      );
+      const button = await failedMainPage();
+      button.click();
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(mockLeaveVoice).toHaveBeenCalledWith(false);
+      expect(reload).not.toHaveBeenCalled();
+      finishLeave();
+      await vi.advanceTimersByTimeAsync(10);
+      expect(reload).toHaveBeenCalledTimes(1);
+    });
+
+    it("reloads anyway when the voice leave hangs", async () => {
+      mockLeaveVoice.mockReturnValue(new Promise<void>(() => {}));
+      const button = await failedMainPage();
+      button.click();
+      await vi.advanceTimersByTimeAsync(1900);
+      expect(reload).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(200);
+      expect(reload).toHaveBeenCalledTimes(1);
+    });
+
+    it("reloads anyway when the voice leave throws", async () => {
+      mockLeaveVoice.mockRejectedValue(new Error("native gone"));
+      const button = await failedMainPage();
+      button.click();
+      await vi.advanceTimersByTimeAsync(100);
+      expectConsole("warn", /Failed to leave voice before reload/);
+      expect(reload).toHaveBeenCalledTimes(1);
+    });
+
+    it("reloads at once, with no voice leave, when not in a call", async () => {
+      const button = await failedMainPage();
+      voiceStore.setState((s) => ({ ...s, currentChannelId: null }));
+      button.click();
+      await vi.advanceTimersByTimeAsync(10);
+      expect(mockLeaveVoice).not.toHaveBeenCalled();
+      expect(reload).toHaveBeenCalledTimes(1);
+    });
   });
 });
 

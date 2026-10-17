@@ -514,7 +514,7 @@ export class LiveKitSession {
       rejoinVoice: () => {
         // The rejoin's join brings back what the drop stopped, as a reconnect does.
         const lost = this._lostOnReconnect;
-        this.leaveVoice(false, true);
+        void this.leaveVoice(false, true);
         this._lostOnReconnect = lost;
         this._rejoinPending = true;
         setVoiceStatus("joining");
@@ -855,19 +855,21 @@ export class LiveKitSession {
     this._remoteTracks.dropUnpublishedWatches();
   }
 
-  leaveVoice(sendWs = true, keepWatched = false): void {
+  /** Resolves once the room's disconnect has completed (the native room's,
+   *  once the host acknowledged it); never rejects. */
+  leaveVoice(sendWs = true, keepWatched = false): Promise<void> {
     this._rejoinPending = false;
     this._lostOnReconnect = null;
     dismissMediaLostNotice();
     if (!keepWatched) this._remoteTracks.clearWatched();
     this._media.stopCodecSwitch();
-    this._lifecycle.leaveVoice(sendWs);
+    return this._lifecycle.leaveVoice(sendWs);
   }
 
   /** Stays on the facade: past leaveVoice(false) it only clears the session's
    *  own configuration fields, which the room lifecycle does not own. */
   cleanupAll(): void {
-    this.leaveVoice(false);
+    void this.leaveVoice(false);
     // leaveVoice() already transitions state to "idle".
     // Clear non-connection fields (config / callbacks / infrastructure).
     this.onErrorCallback = null;

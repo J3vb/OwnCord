@@ -8,6 +8,7 @@
 import { Disposable } from "@lib/disposable";
 import { appendChildren, createElement } from "@lib/dom";
 import { createModal } from "@lib/modalFactory";
+import { onAuthCleared } from "@stores/auth.store";
 import { messagingText } from "../i18n/messaging";
 
 /** The open dialog's live parts, so a later request can take it over. */
@@ -15,9 +16,20 @@ interface OpenDialog {
   title: HTMLElement;
   body: HTMLElement;
   confirm: HTMLElement;
+  cancel: HTMLElement;
   onConfirm: () => void;
+  close: () => void;
 }
 let open: OpenDialog | null = null;
+
+/**
+ * Close the open dialog without confirming, if there is one. The dialog also
+ * does this itself when the session ends, so a prompt about leaving a server
+ * can never outlive the session it was about.
+ */
+export function closeInviteJoinConfirm(): void {
+  open?.close();
+}
 
 /** Wording overrides; the in-chat chip uses the defaults. */
 export interface InviteConfirmText {
@@ -42,6 +54,8 @@ export function confirmInviteJoin(
     open.body.textContent = body;
     open.confirm.textContent = confirmLabel;
     open.onConfirm = onConfirm;
+    // The text changed under the user: put them back on the safe choice.
+    open.cancel.focus();
     return;
   }
   const owner = new Disposable();
@@ -66,14 +80,24 @@ export function confirmInviteJoin(
   const content = createElement("div");
   appendChildren(content, header, bodyEl, footer);
 
-  const dialog: OpenDialog = { title: titleEl, body: bodyText, confirm, onConfirm };
+  const dialog: OpenDialog = {
+    title: titleEl,
+    body: bodyText,
+    confirm,
+    cancel,
+    onConfirm,
+    close: () => modal.close(),
+  };
   open = dialog;
+  // Any end of the session (logout, 401, server switch) drops the prompt.
+  const stopAuthWatch = onAuthCleared(() => modal.close());
   const modal = createModal({
     content,
     ariaLabelledBy: "invite-join-title",
     overlayAttrs: { "data-testid": "invite-join-dialog" },
     onClose: () => {
       open = null;
+      stopAuthWatch();
       owner.destroy();
     },
   });

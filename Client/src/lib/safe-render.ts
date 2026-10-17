@@ -20,7 +20,7 @@ export interface MountableComponent {
  */
 export interface RenderRecovery {
   /** Leave any call, then reload the page. */
-  readonly reload: () => void;
+  readonly reload: () => void | Promise<void>;
   /** End the session and return to the connect page. */
   readonly signOut: () => void;
 }
@@ -43,7 +43,11 @@ export function safeMount(
   }
 }
 
-function recoveryButton(label: string, testId: string, action: () => void): HTMLButtonElement {
+function recoveryButton(
+  label: string,
+  testId: string,
+  action: () => void | Promise<void>,
+): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
   button.style.cssText =
@@ -52,7 +56,10 @@ function recoveryButton(label: string, testId: string, action: () => void): HTML
   button.textContent = label;
   button.addEventListener("click", () => {
     try {
-      action();
+      const done = action();
+      if (done instanceof Promise) {
+        done.catch((err: unknown) => log.error("Recovery action failed", err));
+      }
     } catch (err) {
       log.error("Recovery action failed", err);
     }

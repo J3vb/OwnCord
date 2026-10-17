@@ -219,6 +219,7 @@ vi.mock("@lib/dispatcher", async () => {
 import { mockInvoke, emitTauriEvent } from "./helpers/ws-mocks";
 import { expectConsole } from "../helpers/console";
 import { authStore, clearAuth } from "@stores/auth.store";
+import { createConnectPage } from "@pages/ConnectPage";
 
 beforeAll(async () => {
   document.body.innerHTML = '<div id="app"></div>';
@@ -270,11 +271,16 @@ describe("main.ts when the main page chunk fails to load", () => {
     expectConsole("error", /Main page failed to load/);
 
     expect(authStore.getState().isAuthenticated).toBe(true);
+    vi.mocked(createConnectPage).mockClear();
     signOut!.click();
     expect(authStore.getState().isAuthenticated).toBe(false);
     // Sign out is a real logout: it removes the saved credential (the unit
     // credential store here has nothing to remove).
     await vi.advanceTimersByTimeAsync(10);
     expectConsole("warn", /Credential delete failed/);
+    // The connect page is mounted again and the fallback is gone.
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    expect(createConnectPage).toHaveBeenCalled();
+    expect(app.querySelector('[data-testid="render-fallback-sign-out"]')).toBeNull();
   });
 });

@@ -560,16 +560,34 @@ async function checkHealth(
 // a stale mount is discarded when a newer navigation supersedes it.
 let navGeneration = 0;
 
+/** Longest Reload waits for the voice leave before reloading regardless. */
+const RELOAD_VOICE_LEAVE_TIMEOUT_MS = 2000;
+
 // The two ways out of a page that failed to render (the fallback's buttons).
 // F5 and Ctrl+R are blocked, so without these a failed render is a dead end.
 const renderRecovery: RenderRecovery = {
-  reload: () => {
+  reload: async () => {
     // Leave a call first, the way a logout does, so other members don't see a
-    // ghost in the channel once the page is gone.
+    // ghost in the channel and no native call stays live behind the reloaded
+    // page. The leave is awaited (the native room's disconnect finishes in the
+    // host) but bounded: a hung or failed leave must not strand the user on
+    // the fallback.
     if (voiceStore.getState().currentChannelId !== null) {
-      voiceSessionLeave(false); // false: we send voice_leave below
       ws.send({ type: "voice_leave", payload: {} });
       leaveVoiceChannel();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          import("@lib/livekitSession").then(({ leaveVoice }) => leaveVoice(false)),
+          new Promise<void>((resolve) => {
+            timer = setTimeout(resolve, RELOAD_VOICE_LEAVE_TIMEOUT_MS);
+          }),
+        ]);
+      } catch (err) {
+        log.warn("Failed to leave voice before reload", err);
+      } finally {
+        clearTimeout(timer);
+      }
     }
     window.location.reload();
   },
@@ -1585,12 +1603,15 @@ function handleMessageDeepLink(
   openMessageTarget(channelId, messageId, host);
 }
 // An invite link from outside the app (the OS, a browser, another program)
-// would otherwise end the signed-in session the moment it arrives. While the
-// main page is showing, ask first; Cancel leaves everything as it is and the
+// would otherwise end the signed-in session the moment it arrives. While
+// signed in (or signing in), ask first; Cancel leaves everything as it is and the
 // link is dropped. Elsewhere (connect page) nothing is lost, so it runs as
 // before. A second link while the dialog is open replaces the first.
 function handleExternalInviteLink(code: string, host?: string): void {
-  if (activePage !== "main") {
+  // Signed in, or signing in (the connect call is in flight, or the connected
+  // overlay is still up before the main page mounts): taking the link ends
+  // that session, so ask. Otherwise nothing is lost and it runs as before.
+  if (activePage !== "main" && !authStore.getState().isAuthenticated && lastConnectHost === "") {
     handleInviteDeepLink(code, host);
     return;
   }

@@ -266,7 +266,7 @@ export function handleVoiceMoved(
   // this frame sees the move and stays silent.
   noteVoiceMoved(payload.to_channel_id);
   void livekitSession().then(({ leaveVoice }) => {
-    leaveVoice(false);
+    void leaveVoice(false);
     leaveVoiceChannel();
     joinVoiceChannel(payload.to_channel_id);
     noteJoinSent(ws.send({ type: "voice_join", payload: { channel_id: payload.to_channel_id } }));
@@ -468,7 +468,7 @@ export function handleVoiceJoinRollback(payload: Payload<"error">, id: string | 
     noteJoinFailed();
     void livekitSession().then(({ isVoiceSessionActive, leaveVoice, failPendingRejoin }) => {
       failPendingRejoin();
-      if (isVoiceSessionActive()) leaveVoice(true);
+      if (isVoiceSessionActive()) void leaveVoice(true);
     });
     leaveVoiceChannel();
   }
