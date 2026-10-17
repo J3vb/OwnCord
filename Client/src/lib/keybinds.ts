@@ -193,6 +193,9 @@ const FIXED_COMBO_KEYS: ReadonlySet<string> = new Set([
   comboKey(ctrl(0x55)), // composer underline
   comboKey(ctrl(0x4d)), // Ctrl+M alias of mute
   comboKey(ctrl(0x44)), // Ctrl+D alias of deafen
+  comboKey(ctrl(0xbc)), // Ctrl+, opens Settings
+  comboKey(ctrl(0xbf)), // Ctrl+/ shortcuts overlay
+  comboKey(ctrl(0x0d)), // Ctrl+Enter accepts a ringing call
   ...[VK_UP, VK_DOWN].flatMap((vk) => [
     comboKey({ vk, ctrl: false, shift: false, alt: true }),
     comboKey({ vk, ctrl: false, shift: true, alt: true }),
