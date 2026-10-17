@@ -76,6 +76,7 @@ export const shards = {
     "src/features/voice/e2eeWorker.ts",
     "src/features/voice/native/counters.ts",
     "src/features/voice/native/devices.ts",
+    "src/features/voice/native/micProbe.ts",
   ], // ~1094 mutants (estimated)
   "audio-media-1": [
     "src/lib/micProcessor.ts",

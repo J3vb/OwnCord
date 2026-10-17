@@ -249,6 +249,8 @@ export interface NativeMicTestOptions {
   outputGain: number;
   /** The voice gate's threshold on the web path's scale; 0 is no gate. */
   threshold: number;
+  /** Capture and report levels only: no output is opened or played. */
+  monitor?: boolean;
 }
 
 /** A live change to a running mic test. */
@@ -501,7 +503,8 @@ export interface NativeVoice {
   setDevice(session: number, kind: "audioinput" | "audiooutput", deviceId: string): Promise<void>;
   /** Start the mic test: the chosen microphone, with the call's processing,
    *  gain and voice gate, played back on the chosen output (the echo
-   *  canceller gets no reference). Replaces a running test. Resolves with the
+   *  canceller gets no reference); `monitor` skips the output and only
+   *  reports levels. Replaces a running test or monitor. Resolves with the
    *  test's id once the streams are open; rejects with the host's reason, a
    *  call in progress being `NATIVE_MIC_TEST_IN_CALL`. */
   startMicTest(options: NativeMicTestOptions): Promise<number>;
