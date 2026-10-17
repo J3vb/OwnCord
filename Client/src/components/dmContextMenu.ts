@@ -171,16 +171,14 @@ export function openDmContextMenu(req: DmContextMenuRequest): void {
       ...(convo.muted || muteFor === undefined
         ? {}
         : {
-            submenu: muteChoices().map(
-              (choice): ContextMenuItem => ({
-                label: choice.label,
-                testId: `dm-mute-for-${choice.durationMs ?? "forever"}-${id}`,
-                onClick: () =>
-                  choice.durationMs === undefined
-                    ? setMute(id, true)
-                    : muteFor(id, choice.durationMs),
-              }),
-            ),
+            submenu: muteChoices().map((choice): ContextMenuItem => ({
+              label: choice.label,
+              testId: `dm-mute-for-${choice.durationMs ?? "forever"}-${id}`,
+              onClick: () =>
+                choice.durationMs === undefined
+                  ? setMute(id, true)
+                  : muteFor(id, choice.durationMs),
+            })),
           }),
       onClick: () => setMute(id, !convo.muted),
     });
