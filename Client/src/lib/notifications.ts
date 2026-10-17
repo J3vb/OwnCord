@@ -100,8 +100,8 @@ function chimeEnabled(mentioned: boolean): boolean {
  * taskbar, and play sound based on user preferences.
  *
  * Should be called from the dispatcher when a chat_message arrives.
- * Skips notifications for the current user's own messages and when
- * the window is focused on the message's channel; while focused on another
+ * Skips notifications for the current user's own messages, for authors the
+ * user has blocked, and when the window is focused on the message's channel; while focused on another
  * channel, only the chime may play.
  */
 export function notifyIncomingMessage(payload: ChatMessagePayload): void {
@@ -113,6 +113,9 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
 
   // Don't notify for own messages
   if (currentUser !== null && payload.user.id === currentUser.id) return;
+
+  // Nor for a blocked author: no popup, flash or chime at any level
+  if (blocksStore.getState().blockedByMe.has(payload.user.id)) return;
 
   // Don't notify if the window is focused AND the message is in the active
   // channel — UNLESS that channel is showing a detached around-window
