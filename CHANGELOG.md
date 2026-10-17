@@ -56,6 +56,7 @@ and only when it changes something a contributor or fork holder must do
 - Settings → Notifications has an **App sounds volume** slider for every OwnCord sound, and a switch for each one (message, mention, incoming call, outgoing call, join/leave, mute/deafen, stream). Everything starts at today's volume with every sound on.
 - Settings → Notifications has an **Unread message badge** switch (on by default). Off, the unread count is cleared from the taskbar or tray icon and stays clear; on again, it shows the current count.
 - The member list sorts each role group A–Z, with Idle and Do Not Disturb people among the Online ones and offline people last. Letter avatars use a fixed colour per person instead of the role colour, role names keep their capitals in the Change Role menu, status tooltips say "Do Not Disturb" instead of "dnd", and the bans list appears as soon as your role is given Ban Members.
+- The Invite Manager can set an invite's expiry (1 hour to 30 days, or never) and max uses, shows the full link and when each invite expires, opens with a ready-to-copy link, shows the server's reason when an invite action fails, and offers Retry if the list cannot load.
 - Closing the window now keeps OwnCord running in the tray (Settings → Advanced → Close to Tray, on by default; Quit in the tray menu exits), and **Start Minimized** keeps the window hidden when OwnCord starts at login. On Linux, closing still quits when the desktop has no tray.
 - Compact mode now shows the time at the start of each message's first line, ahead of the name, instead of hiding it.
 - Settings → Appearance has a **Sync with computer** theme tile that switches between the dark and light themes with your computer's setting, and follows it when it changes.
@@ -398,7 +399,6 @@ It is still a **beta and a hobby project** — don't use it for anything sensiti
 - **Member actions no longer need the admin network.** Changing a member's role, banning, unbanning and force-logging-out now work from outside `server.admin_allowed_cidrs`, and no longer go through `/admin`, so they work behind a reverse proxy that answers `/admin` with a web page. They accept only this server's own sessions and API tokens, with login, permission and rank checks only.
 - The member list offers Change Role, Force Logout and Ban only on members below your rank, and the role menu lists only roles below your own, instead of offering actions the server would refuse.
 - The Invite button shows only to members who can manage invites, and Copy on an invite gives a shareable `owncord://` link instead of the bare code.
-- The Invite Manager can set an invite's expiry (1 hour to 30 days, or never) and max uses, shows the full link and when each invite expires, opens with a ready-to-copy link, shows the server's reason when an invite action fails, and offers Retry if the list cannot load.
 
 **Voice and video**
 
