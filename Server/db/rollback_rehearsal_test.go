@@ -210,6 +210,92 @@ func checkActorTokenColumnGone(t *testing.T, d *DB) {
 	}
 }
 
+// iconSeed holds the rows seedLiveGroupIcon wrote, so the 066 check can find
+// them and remove them again before the round trip compares row counts.
+type iconSeed struct {
+	channelID  int64
+	attachment string
+	users      []int64
+}
+
+// seedLiveGroupIcon makes a group DM with a live icon and its group_icon row.
+func seedLiveGroupIcon(t *testing.T, d *DB) iconSeed {
+	t.Helper()
+	ctx := context.Background()
+	a, err := d.CreateUser(ctx, "rehearsal-icon-a", "hash", 4)
+	if err != nil {
+		t.Fatalf("seeding icon user: %v", err)
+	}
+	b, err := d.CreateUser(ctx, "rehearsal-icon-b", "hash", 4)
+	if err != nil {
+		t.Fatalf("seeding icon user: %v", err)
+	}
+	c, err := d.CreateUser(ctx, "rehearsal-icon-c", "hash", 4)
+	if err != nil {
+		t.Fatalf("seeding icon user: %v", err)
+	}
+	ch, err := d.CreateGroupDMChannel(ctx, "", a, []int64{a, b, c})
+	if err != nil {
+		t.Fatalf("seeding group DM: %v", err)
+	}
+	const att = "rehearsal-icon-att"
+	if err = d.CreateAttachment(ctx, att, a, "i.png", "stored-i", "image/png", 1, nil, nil); err != nil {
+		t.Fatalf("seeding icon attachment: %v", err)
+	}
+	if _, err = d.SetGroupDMIcon(ctx, ch.ID, a, new(att), "changed the group icon."); err != nil {
+		t.Fatalf("seeding live icon: %v", err)
+	}
+	return iconSeed{channelID: ch.ID, attachment: att, users: []int64{a, b, c}}
+}
+
+// checkGroupIconReversed asserts the 066 reversal removed the icon rows and
+// their detail but kept the attachment and left the foreign keys intact, then
+// removes the seed so the later row counts match the snapshot's.
+func checkGroupIconReversed(t *testing.T, d *DB, seed iconSeed) {
+	t.Helper()
+	count := func(query string, args ...any) int {
+		t.Helper()
+		var n int
+		if err := d.writer.QueryRow(query, args...).Scan(&n); err != nil {
+			t.Fatalf("%s: %v", query, err)
+		}
+		return n
+	}
+	if n := count(`SELECT COUNT(*) FROM messages WHERE kind = 6`); n != 0 {
+		t.Errorf("%d kind 6 rows survive the 066 reversal", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM message_group_events WHERE message_id NOT IN (SELECT id FROM messages)`); n != 0 {
+		t.Errorf("%d group event rows outlive their message after the 066 reversal", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM attachments WHERE id = ?`, seed.attachment); n != 1 {
+		t.Errorf("the icon attachment was not kept by the 066 reversal (count %d)", n)
+	}
+	rows, err := d.writer.Query(`PRAGMA foreign_key_check`)
+	if err != nil {
+		t.Fatalf("foreign_key_check: %v", err)
+	}
+	violations := 0
+	for rows.Next() {
+		violations++
+	}
+	_ = rows.Close()
+	if violations != 0 {
+		t.Errorf("foreign_key_check reports %d violations after the 066 reversal", violations)
+	}
+
+	if _, err = d.writer.Exec(`DELETE FROM channels WHERE id = ?`, seed.channelID); err != nil {
+		t.Fatalf("removing the icon seed channel: %v", err)
+	}
+	if _, err = d.writer.Exec(`DELETE FROM attachments WHERE id = ?`, seed.attachment); err != nil {
+		t.Fatalf("removing the icon seed attachment: %v", err)
+	}
+	for _, u := range seed.users {
+		if _, err = d.writer.Exec(`DELETE FROM users WHERE id = ?`, u); err != nil {
+			t.Fatalf("removing the icon seed user: %v", err)
+		}
+	}
+}
+
 func TestMigrationRollbackRehearsalOnAlphaSnapshot(t *testing.T) {
 	database := openSnapshotCopy(t)
 
@@ -250,10 +336,12 @@ func TestMigrationRollbackRehearsalOnAlphaSnapshot(t *testing.T) {
 	}
 
 	seedAuditTokenRows(t, database)
+	iconRows := seedLiveGroupIcon(t, database)
 
 	postChecks := map[string]func(*testing.T, *DB){
 		"042_audit_actor_token_backfill.down.sql": checkActorTokensMovedBack,
 		"041_audit_actor_token.down.sql":          checkActorTokenColumnGone,
+		"066_group_dm_icon.down.sql":              func(t *testing.T, d *DB) { checkGroupIconReversed(t, d, iconRows) },
 	}
 	for _, reversal := range rollback.Order {
 		raw, err := rollback.FS.ReadFile(reversal)

@@ -60,6 +60,7 @@ SELECT
     c.name                                        AS name,
     c.is_group                                    AS is_group,
     CAST(COALESCE(c.dm_owner_id, 0) AS INTEGER)   AS owner_id,
+    CAST(COALESCE(c.dm_icon, '') AS TEXT)         AS icon_id,
     lm.id                                         AS last_message_id,
     COALESCE(lm.content, '')                      AS last_message,
     COALESCE(lm.timestamp, '')                    AS last_message_at,
@@ -117,8 +118,10 @@ INSERT OR IGNORE INTO dm_open_state (user_id, channel_id)
 SELECT ?1, ?2
 WHERE EXISTS (SELECT 1 FROM dm_participants WHERE user_id = ?1 AND channel_id = ?2);
 
--- name: GetGroupDMOwner :one
--- The owner of a group DM, 0 when the channel is not a group or has no owner.
-SELECT CAST(COALESCE(dm_owner_id, 0) AS INTEGER) AS owner_id
+-- name: GetGroupDMMeta :one
+-- The owner (0 when none) and the icon attachment id ('' when none) of a group
+-- DM. No row when the channel is not a group.
+SELECT CAST(COALESCE(dm_owner_id, 0) AS INTEGER) AS owner_id,
+       CAST(COALESCE(dm_icon, '') AS TEXT)       AS icon_id
 FROM channels
 WHERE id = ? AND is_group = 1;

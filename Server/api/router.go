@@ -227,7 +227,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// beside them — mounted after hub creation so real-time
 	// dm_channel_close/dm_channel_open/dm_request events reach WebSocket
 	// clients.
-	routerDMRoutes(r, database, svc, hub, limiter)
+	routerDMRoutes(r, database, svc, hub, limiter, profileStore)
 
 	// Channel, message and NSFW-acknowledgement REST routes — mounted after hub
 	// creation so a message purge or an nsfw_ack can broadcast through it.
@@ -398,7 +398,7 @@ func routerMiddleware(r chi.Router, cfg *config.Config) {
 	proxyNets := parseCIDRList(cfg.Server.TrustedProxies)
 	r.Use(requestLogger(proxyNets)) // structured request/response logging
 	r.Use(SecurityHeadersWithTLS(cfg.TLS.Mode))
-	r.Use(MaxBodySizeUnless(defaultMaxBodySize, bodyCapExemptPrefixes...))
+	r.Use(MaxBodySizeUnless(defaultMaxBodySize, bodyCapExemptPattern, bodyCapExemptPrefixes...))
 
 	// Coraza WAF — opt-in via config.
 	if cfg.Server.WAFEnabled {
@@ -483,8 +483,8 @@ func routerUploadRoutes(r chi.Router, sessions *service.SessionService, limiter 
 // routerChannelRoutes mounts the channel/message REST surface and B5-7's NSFW
 // acknowledgement toggle beside it — both need the hub to fan out real-time
 // events (chat_bulk_deleted, nsfw_ack).
-func routerDMRoutes(r chi.Router, database *db.DB, svc *service.Services, hub *ws.Hub, limiter *auth.RateLimiter) {
-	MountDMRoutes(r, database, svc, hub, limiter)
+func routerDMRoutes(r chi.Router, database *db.DB, svc *service.Services, hub *ws.Hub, limiter *auth.RateLimiter, store FileStore) {
+	MountDMRoutes(r, database, svc, hub, limiter, store)
 	MountDMRequestRoutes(r, svc, hub)
 }
 

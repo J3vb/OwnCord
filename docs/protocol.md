@@ -574,6 +574,13 @@ group owners". The owner is set to the creator at create and handed to the
 lowest remaining member id when the owner leaves or is erased. `GET /dms` and
 every `dm_channel_open` carry it too.
 
+A group entry also carries `icon`, the group's icon as a file URL
+(`/api/v1/files/{id}`), `""` when it has none. Unlike `owner_id` it is present on
+every DM entry, `""` for a 1:1 DM, so a client reads an absent key as an older
+server. Load it as an uploaded avatar URL is loaded. Only the group's members
+can fetch it, and only while it is the live icon, so a client that loses access
+(removed, or the icon replaced) falls back to the stacked avatars.
+
 A DM's `mention_count` is the same `read_states.mention_count` the channel list
 carries. It used to be absent here, so a DM mention badge silently reset to 0 on
 every reconnect; the ready payload now ships the stored value. A DM's
@@ -720,7 +727,7 @@ otherwise.
 uploads it did not attach, listed in request order without repeats. The message
 was stored and broadcast without those files. An id lands here when it was
 swept as an unlinked upload, belongs to another user, is already attached to a
-message, is a live avatar, or does not exist; the server gives no reason per
+message, is a live avatar or group icon, or does not exist; the server gives no reason per
 id, and the list only ever contains ids the sender sent. A deduplicated ack
 carries the same list as the original ack, derived from the message's stored
 attachments. When every requested id is skipped and the send has no text, no
@@ -795,7 +802,10 @@ it, sent to the members after the change, so it is replayed on reconnect:
   The removed member does not receive it.
 - `group_leave` — a member left (`DELETE /dms/{id}`). The last leaver writes none.
 - `group_rename` — a changed name (`PATCH /dms/{id}`). An unchanged name writes none.
-- `group_icon` — written by the icon routes, which are not part of this release.
+- `group_icon` — the icon was set (`POST /dms/{id}/icon`, `group_event.icon_removed`
+  `false`) or removed (`DELETE /dms/{id}/icon`, `true`). Removing an icon the group
+  does not have writes none. The row carries no icon URL: the icon is in the
+  summary, and a replaced icon stops being served.
 
 Within one change the refreshed `dm_channel_open` is sent to every member before
 the row, so a newly added user hears of the DM first. An owner transfer
@@ -2300,7 +2310,7 @@ Delivered only to `target_user_id`, with the sender attached:
 
 Sent when a DM is opened, created, auto-reopened by an incoming message or call ring, or has
 its membership changed (a group created, renamed, left, a member added or removed,
-or the owner changed). A group's payload carries `owner_id` (see `ready`). It is
+or the owner or the icon changed). A group's payload carries `owner_id` and `icon` (see `ready`). It is
 always the full summary from the receiving member's seat, so a client replaces its
 stored summary wholesale.
 
@@ -2656,7 +2666,7 @@ warm resume served by replay never waits for a permit.
 | `CONFLICT`                 | Duplicate reaction or constraint violation                                                                                                                                                                                                                                       |
 | `ALREADY_DELETED`          | The target message is already soft-deleted (the WebSocket twin of REST's `409 ALREADY_DELETED`)                                                                                                                                                                                  |
 | `REACTION_LIMIT`           | A `reaction_add` with a new emoji on a message that already has 20 different ones. No `reaction_update` is sent. Refines `BAD_REQUEST`.                                                                                                                                          |
-| `ATTACHMENTS_UNAVAILABLE`  | A `chat_send` with no text whose every attachment was skipped (swept, foreign, already attached, a live avatar or missing). No message is delivered and no ids are returned; the client holds the list. Refines `BAD_REQUEST`.                                                   |
+| `ATTACHMENTS_UNAVAILABLE`  | A `chat_send` with no text whose every attachment was skipped (swept, foreign, already attached, a live avatar or group icon, or missing). No message is delivered and no ids are returned; the client holds the list. Refines `BAD_REQUEST`.                                    |
 | `SERVER_MUTED`             | Self-unmute refused: a moderator imposed the mute                                                                                                                                                                                                                                |
 | `SERVER_DEAFENED`          | Self-undeafen refused: a moderator imposed the deafen                                                                                                                                                                                                                            |
 | `SESSION_REPLACED`         | Sent before the close to a connection displaced because the same account connected from another device; the client does not reconnect on its own                                                                                                                                 |

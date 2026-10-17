@@ -76,6 +76,7 @@ type Channel struct {
 	Nsfw            int64   `json:"nsfw"`
 	IsGroup         int64   `json:"isGroup"`
 	DmOwnerID       *int64  `json:"dmOwnerId"`
+	DmIcon          *string `json:"dmIcon"`
 }
 
 type ChannelOverride struct {

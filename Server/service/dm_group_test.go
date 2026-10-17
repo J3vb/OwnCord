@@ -44,9 +44,9 @@ func (f *groupMembershipFixture) members(t *testing.T) []int64 {
 
 func (f *groupMembershipFixture) ownerID(t *testing.T) int64 {
 	t.Helper()
-	owner, err := f.database.GetGroupDMOwner(context.Background(), f.dm)
+	owner, _, err := f.database.GetGroupDMMeta(context.Background(), f.dm)
 	if err != nil {
-		t.Fatalf("GetGroupDMOwner: %v", err)
+		t.Fatalf("GetGroupDMMeta: %v", err)
 	}
 	return owner
 }

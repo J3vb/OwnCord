@@ -116,7 +116,8 @@ CREATE TABLE IF NOT EXISTS channels (
     voice_max_video  INTEGER NOT NULL DEFAULT 0,
     nsfw             INTEGER NOT NULL DEFAULT 0,
     is_group         INTEGER NOT NULL DEFAULT 0,
-    dm_owner_id      INTEGER
+    dm_owner_id      INTEGER,
+    dm_icon      TEXT
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -319,7 +320,7 @@ func dmCreateToken(t *testing.T, database *db.DB, username string, roleID int) s
 func buildDMRouter(database *db.DB, broadcaster api.DMBroadcaster) http.Handler {
 	r := chi.NewRouter()
 	svc := service.New(database, auth.NewRateLimiter())
-	api.MountDMRoutes(r, database, svc, broadcaster, nil)
+	api.MountDMRoutes(r, database, svc, broadcaster, nil, nil)
 	return r
 }
 

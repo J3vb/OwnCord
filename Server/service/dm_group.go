@@ -24,6 +24,7 @@ type GroupDMStore interface {
 	RemoveGroupDMMember(ctx context.Context, channelID, ownerID, targetID int64, content string) (*db.GroupChange, error)
 	TransferGroupDMOwner(ctx context.Context, channelID, ownerID, targetID int64) ([]int64, error)
 	SetGroupDMName(ctx context.Context, channelID, actorID int64, name, content string) (*db.GroupChange, error)
+	SetGroupDMIcon(ctx context.Context, channelID, actorID int64, iconID *string, content string) (*db.GroupChange, error)
 }
 
 // MaxGroupDMAddPerCall is how many users one add may name (the cap of 10
@@ -57,6 +58,8 @@ type GroupEventRow struct {
 	TargetUserID int64
 	// Name is the new group name of a rename row ("" = removed), else nil.
 	Name *string
+	// IconRemoved is true for an icon row that cleared the icon.
+	IconRemoved bool
 }
 
 // GroupChangeResult is what a membership or rename mutation tells its caller:
@@ -159,6 +162,13 @@ func groupRenameContent(actor *db.User, name string) string {
 	return fmt.Sprintf("%s changed the group name to %s.", groupActorName(actor), name)
 }
 
+func groupIconContent(actor *db.User, removed bool) string {
+	if removed {
+		return fmt.Sprintf("%s removed the group icon.", groupActorName(actor))
+	}
+	return fmt.Sprintf("%s changed the group icon.", groupActorName(actor))
+}
+
 // groupRows resolves the author of each written row (and their role) for the
 // hub. A failed lookup keeps the row with the id alone, so the frame still goes
 // out and the client falls back to its member store.
@@ -188,7 +198,7 @@ func (s *DMService) groupRows(ctx context.Context, rows []db.GroupEventRow) []Gr
 			MessageID: r.MessageID, Kind: db.MessageKindName(r.Kind),
 			Author: a.user, AuthorRole: a.role,
 			Content: r.Content, Timestamp: r.Timestamp,
-			TargetUserID: r.TargetUserID, Name: r.Name,
+			TargetUserID: r.TargetUserID, Name: r.Name, IconRemoved: r.IconRemoved,
 		})
 	}
 	return out

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"regexp"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -124,6 +125,13 @@ var bodyCapExemptPrefixes = []string{
 	// plus the handler's re-wrap enforce it.
 	"/api/v1/users/me/avatar",
 }
+
+// bodyCapExemptPattern names the upload route that carries an id in the middle
+// of its path, so a prefix cannot: POST /api/v1/dms/{id}/icon. The exemption
+// covers only that route (POST, the escaped path), which enforces the avatar
+// envelope itself (route-scoped MaxBodySize(avatarMaxBodySize) plus the
+// handler's re-wrap). The WAF rules 1004 and 900006 in waf.go mirror it.
+var bodyCapExemptPattern = regexp.MustCompile(`^/api/v1/dms/[0-9]+/icon$`)
 
 // ─── Size limits ────────────────────────────────────────────────────────────
 

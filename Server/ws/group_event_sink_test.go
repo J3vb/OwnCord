@@ -19,6 +19,12 @@ func groupRow(f *callSinkFixture, id int64, kind string, target int64, name *str
 	}
 }
 
+func iconRemovedRow(f *callSinkFixture, id int64) service.GroupEventRow {
+	r := groupRow(f, id, "group_icon", 0, nil)
+	r.IconRemoved = true
+	return r
+}
+
 func TestGroupEventSink_SequencedAndReplayedToAudience(t *testing.T) {
 	f := newCallSinkFixture(t)
 	name := "Raid night"
@@ -27,6 +33,8 @@ func TestGroupEventSink_SequencedAndReplayedToAudience(t *testing.T) {
 		groupRow(f, 82, "group_remove", f.bob.ID, nil),
 		groupRow(f, 83, "group_leave", 0, nil),
 		groupRow(f, 84, "group_rename", 0, &name),
+		groupRow(f, 85, "group_icon", 0, nil),
+		iconRemovedRow(f, 86),
 	}
 	f.hub.GroupEventRows(context.Background(), f.dm, []int64{f.alice.ID, f.bob.ID}, rows)
 
@@ -35,6 +43,8 @@ func TestGroupEventSink_SequencedAndReplayedToAudience(t *testing.T) {
 		82: `{"target_user_id":%d}`,
 		83: `{}`,
 		84: `{"name":"Raid night"}`,
+		85: `{"icon_removed":false}`,
+		86: `{"icon_removed":true}`,
 	}
 	for who, ch := range map[string]chan []byte{"alice": f.aliceSend, "bob": f.bobSend} {
 		frames := callFrames(ch, 300*time.Millisecond)

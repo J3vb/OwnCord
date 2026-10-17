@@ -231,7 +231,8 @@ func (s *UploadService) checkNSFWConsent(ctx context.Context, aa *db.AttachmentA
 }
 
 // authorizeUnlinked is Authorize's branch for an attachment no message claims:
-// the uploader may read it, and so may everyone while it is somebody's avatar.
+// the uploader may read it, everyone may while it is somebody's avatar, and the
+// members of a group DM may while it is that group's live icon.
 func (s *UploadService) authorizeUnlinked(ctx context.Context, aa *db.AttachmentAccess, actor *db.User) error {
 	// A failed lookup is not a grant and not a refusal: it falls through to
 	// the ownership check below, which is the answer this file would have had
@@ -240,9 +241,13 @@ func (s *UploadService) authorizeUnlinked(ctx context.Context, aa *db.Attachment
 	if avatarErr != nil {
 		slog.Error("failed to check avatar file", "id", aa.ID, "error", avatarErr)
 	}
-	switch {
-	case isAvatar:
+	if isAvatar {
 		return nil
+	}
+	if s.isGroupIconFor(ctx, aa.ID, actor) {
+		return nil
+	}
+	switch {
 	case aa.UploaderID == nil:
 		slog.Warn("legacy attachment access denied (NULL uploader_id)", "id", aa.ID)
 		return errFileForbidden()
@@ -250,6 +255,21 @@ func (s *UploadService) authorizeUnlinked(ctx context.Context, aa *db.Attachment
 		return errFileForbidden()
 	}
 	return nil
+}
+
+// isGroupIconFor reports whether the attachment is the live icon of a group the
+// actor is a member of. A failed lookup is not a grant: it falls through to the
+// uploader check.
+func (s *UploadService) isGroupIconFor(ctx context.Context, fileID string, actor *db.User) bool {
+	if actor == nil {
+		return false
+	}
+	ok, err := s.st.IsGroupDMIconForUser(ctx, fileID, actor.ID)
+	if err != nil {
+		slog.Error("failed to check group icon file", "id", fileID, "error", err)
+		return false
+	}
+	return ok
 }
 
 // errFileForbidden is the single refusal every access check answers with, so

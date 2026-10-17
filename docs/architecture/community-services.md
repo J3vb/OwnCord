@@ -49,7 +49,11 @@ in `data-lifecycle.md`. **Amended 2026-10-17 (group DM owner):**
 the group DM owner and the server-written rows for membership changes (WP 3B-10).
 They are no community service and nothing a user can write (group rows are
 read-only), so they add nothing here; their lifecycle rows are classes 11c and
-14e in `data-lifecycle.md`. Other
+14e in `data-lifecycle.md`. **Amended 2026-10-17 (group DM icon):**
+`066_group_dm_icon.sql` adds `channels.dm_icon`, the attachment id of a group DM's
+icon (WP 3B-10c). It is an uploaded image like an avatar, kept alive and served to
+the group's members only while the column names it, so it adds no data class here;
+its file follows the attachment rows of class 12. Other
 historical
 status statements retain their `cbebd37c` baseline.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each

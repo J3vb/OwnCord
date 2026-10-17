@@ -51,13 +51,17 @@ WHERE uploaded_at < ?
   AND NOT EXISTS (
     SELECT 1 FROM users u WHERE u.avatar = '/api/v1/files/' || attachments.id
   )
+  AND NOT EXISTS (
+    SELECT 1 FROM channels c WHERE c.dm_icon = attachments.id
+  )
 RETURNING stored_as
 `
 
 // Avatars are attachments that are never linked to a message on purpose: the
 // users.avatar URL is what keeps them alive and authorizes serving them
 // (migration 027). Excluding them here is what stops the sweep from destroying
-// every avatar in the instance. idx_users_avatar makes the lookup cheap.
+// every avatar in the instance. idx_users_avatar makes the lookup cheap. A
+// group DM icon (channels.dm_icon, migration 066) is kept the same way.
 //
 // OC-0279: a message delete is a soft delete (messages.deleted=1, the row
 // survives), so an attachment linked to a deleted message keeps a non-NULL
@@ -115,6 +119,9 @@ WHERE id = ? AND uploader_id = ? AND message_id IS NULL
   AND NOT EXISTS (
     SELECT 1 FROM users u WHERE u.avatar = '/api/v1/files/' || attachments.id
   )
+  AND NOT EXISTS (
+    SELECT 1 FROM channels c WHERE c.dm_icon = attachments.id
+  )
 RETURNING stored_as
 `
 
@@ -124,7 +131,8 @@ type DiscardUnlinkedAttachmentParams struct {
 }
 
 // The uploader withdraws a file it staged and never sent. A live avatar is an
-// unlinked row too, so it is kept, as in the orphan sweep.
+// unlinked row too, so it is kept, as in the orphan sweep. So is a live group
+// DM icon.
 func (q *Queries) DiscardUnlinkedAttachment(ctx context.Context, arg DiscardUnlinkedAttachmentParams) (string, error) {
 	row := q.db.QueryRowContext(ctx, discardUnlinkedAttachment, arg.ID, arg.UploaderID)
 	var stored_as string
@@ -207,4 +215,27 @@ func (q *Queries) GetAttachmentWithChannel(ctx context.Context, id string) (GetA
 		&i.Nsfw,
 	)
 	return i, err
+}
+
+const isGroupDMIconForUser = `-- name: IsGroupDMIconForUser :one
+SELECT EXISTS (
+  SELECT 1 FROM channels c
+  JOIN dm_participants dp ON dp.channel_id = c.id
+  WHERE c.dm_icon = ?1 AND c.is_group = 1 AND dp.user_id = ?2
+) AS is_icon
+`
+
+type IsGroupDMIconForUserParams struct {
+	DmIcon *string `json:"dmIcon"`
+	UserID int64   `json:"userId"`
+}
+
+// Whether the attachment is the live icon of a group DM the user is a member
+// of. Members only: a non-member, a former member and a replaced icon all
+// answer false.
+func (q *Queries) IsGroupDMIconForUser(ctx context.Context, arg IsGroupDMIconForUserParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, isGroupDMIconForUser, arg.DmIcon, arg.UserID)
+	var is_icon int64
+	err := row.Scan(&is_icon)
+	return is_icon, err
 }

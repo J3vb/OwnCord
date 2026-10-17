@@ -218,7 +218,7 @@ func TestNewDMChannelInfo_ExcludesViewerAndPicksRecipient(t *testing.T) {
 		{ID: 2, Username: "b"},
 		{ID: 3, Username: "c"},
 	}
-	info := db.NewDMChannelInfo(7, "Trio", true, 1, participants, 2)
+	info := db.NewDMChannelInfo(7, "Trio", true, 1, "", participants, 2)
 
 	if info.ChannelID != 7 || info.Name != "Trio" || !info.IsGroup {
 		t.Errorf("unexpected header fields: %+v", info)
@@ -240,7 +240,7 @@ func TestNewDMChannelInfo_ExcludesViewerAndPicksRecipient(t *testing.T) {
 // A DM with no other participants (the moment before the row is cleaned up)
 // must produce an empty list, not a nil one — clients iterate it directly.
 func TestNewDMChannelInfo_EmptyRecipientsIsNotNil(t *testing.T) {
-	info := db.NewDMChannelInfo(9, "", false, 0, []db.DMUser{{ID: 5}}, 5)
+	info := db.NewDMChannelInfo(9, "", false, 0, "", []db.DMUser{{ID: 5}}, 5)
 	if info.Recipients == nil {
 		t.Fatal("recipients must be an empty slice, not nil")
 	}
@@ -253,7 +253,7 @@ func TestNewDMChannelInfo_EmptyRecipientsIsNotNil(t *testing.T) {
 // field is omitted from the JSON rather than reported as 0. The
 // dm_channel_open frame is built the same way.
 func TestNewDMChannelInfo_OmitsLastRead(t *testing.T) {
-	info := db.NewDMChannelInfo(7, "", false, 0, []db.DMUser{{ID: 1}, {ID: 2}}, 1)
+	info := db.NewDMChannelInfo(7, "", false, 0, "", []db.DMUser{{ID: 1}, {ID: 2}}, 1)
 	if info.LastReadMessageID != nil {
 		t.Fatalf("LastReadMessageID = %v, want nil", *info.LastReadMessageID)
 	}

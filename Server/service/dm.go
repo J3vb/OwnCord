@@ -455,8 +455,9 @@ func (s *DMService) DMSummaryFor(ctx context.Context, viewerID, channelID int64)
 		return db.DMChannelInfo{}, fmt.Errorf("%w: failed to read DM kind: %w", ErrInternal, err)
 	}
 	var ownerID int64
+	var iconID string
 	if isGroup {
-		if ownerID, err = s.st.GetGroupDMOwner(ctx, channelID); err != nil {
+		if ownerID, iconID, err = s.st.GetGroupDMMeta(ctx, channelID); err != nil {
 			return db.DMChannelInfo{}, fmt.Errorf("%w: failed to read group owner: %w", ErrInternal, err)
 		}
 	}
@@ -464,7 +465,7 @@ func (s *DMService) DMSummaryFor(ctx context.Context, viewerID, channelID int64)
 	// (group create/rename/leave refresh) and PATCH /dms/{id}'s response
 	// build their payload from, so applying the "no live connection" rule
 	// here covers every push of a DM's membership.
-	return s.presentableDMChannelInfo(db.NewDMChannelInfo(channelID, ch.Name, isGroup, ownerID, participants, viewerID), viewerID), nil
+	return s.presentableDMChannelInfo(db.NewDMChannelInfo(channelID, ch.Name, isGroup, ownerID, iconID, participants, viewerID), viewerID), nil
 }
 
 // SharedOneToOneDM returns the id of the 1:1 DM channel the two users share,
