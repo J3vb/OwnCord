@@ -573,7 +573,7 @@ function buildItems(members: ReadonlyMap<number, Member>, query: string): ListIt
   const known = new Map<string, RoleGroup>();
   for (const group of groups) if (!known.has(group.role)) known.set(group.role, group);
 
-  const needle = fold(query.trim().replace(/^@/, ""));
+  const needle = fold(query.trim().replace(/^@\s*/, ""));
   const buckets = new Map<string, Entry[]>();
   const offline: Entry[] = [];
   for (const member of members.values()) {
@@ -736,7 +736,7 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
     search.addEventListener(
       "keydown",
       (e) => {
-        if (e.key !== "Escape" || search.value === "") return;
+        if (e.isComposing || e.key !== "Escape" || search.value === "") return;
         e.preventDefault();
         e.stopPropagation();
         search.value = "";

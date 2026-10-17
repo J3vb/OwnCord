@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMemberList } from "@components/MemberList";
 import type { MemberListOptions } from "@components/MemberList";
-import { membersStore, updatePresence, updateMemberRole } from "@stores/members.store";
+import {
+  membersStore,
+  updatePresence,
+  updateMemberRole,
+  updateMemberProfile,
+} from "@stores/members.store";
 import type { Member } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { setConnectionStatus } from "@stores/ui.store";
@@ -1777,6 +1782,19 @@ describe("MemberList search (3C-4b)", () => {
     mountWith(roster());
     type("  @bob ");
     expect(texts().filter((t) => t.startsWith("member-"))).toEqual(["member-2"]);
+    type("@ bob");
+    expect(texts().filter((t) => t.startsWith("member-"))).toEqual(["member-2"]);
+  });
+
+  it("search re-folds a member renamed while filtered", () => {
+    mountWith(roster());
+    type("quinn");
+    expect(texts().filter((t) => t.startsWith("member-"))).toEqual(["member-1"]);
+    updateMemberProfile(1, { username: "zoe_x", avatar: null, displayName: "Zed" });
+    membersStore.flush();
+    expect(texts().filter((t) => t.startsWith("member-"))).toEqual([]);
+    type("zed");
+    expect(texts().filter((t) => t.startsWith("member-"))).toEqual(["member-1"]);
   });
 
   it("counts reflect matches and empty groups hide", () => {
