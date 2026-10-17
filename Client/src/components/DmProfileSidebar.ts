@@ -468,9 +468,11 @@ export function createDmProfileSidebar(
     // join date, this person's note, Block -- but keep the panel element, so
     // it does not slide in again and an outside focus is left alone.
     if (identityChanged && contentNode !== null) {
+      const hadFocus = contentNode.contains(document.activeElement);
       const next = buildContent();
       contentNode.replaceWith(next);
       contentNode = next;
+      if (hadFocus) panel.focus();
       return;
     }
 

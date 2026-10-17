@@ -566,6 +566,19 @@ describe("DmProfileSidebar", () => {
       localStorage.removeItem("owncord:dm-note:2");
     });
 
+    it("update() for a different person moves focus from a swapped control to the panel", () => {
+      const sidebar = createDmProfileSidebar(makeOptions({ onToggleBlock: vi.fn() }));
+      sidebar.mount(container);
+      container.querySelector<HTMLElement>('[data-testid="dps-block-btn"]')?.focus();
+
+      sidebar.update(makeUser({ id: 2, username: "Bob" }));
+
+      expect(document.activeElement).toBe(
+        container.querySelector('[data-testid="dm-profile-sidebar"]'),
+      );
+      sidebar.destroy?.();
+    });
+
     it("does not take focus when mounted with focus: false", () => {
       const other = document.createElement("textarea");
       document.body.appendChild(other);
