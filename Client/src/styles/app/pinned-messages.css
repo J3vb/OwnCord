@@ -13,7 +13,9 @@
 
 .pinned-panel {
   position: absolute;
-  top: 0;
+  /* Drops down below the chat header, so the header's pin button stays
+     clickable to close it (the member column puts that button under it). */
+  top: var(--header-height, 48px);
   right: 0;
   z-index: 200;
   width: 420px;

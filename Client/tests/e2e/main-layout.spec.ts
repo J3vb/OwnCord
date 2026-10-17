@@ -106,6 +106,10 @@ const LONG_CHANNEL_LIST = Array.from({ length: 40 }, (_, i) => ({
   category: "Text Channels",
 }));
 
+/** The member list defaults to the right column (3C-6c); the P1-01 tests below
+ *  exercise the sidebar's left section, so they store the left layout. */
+const LEFT_LAYOUT = { "owncord:settings:memberListLayout": JSON.stringify("left") };
+
 async function signInFreshProfile(
   page: import("@playwright/test").Page,
   stored?: Record<string, string>,
@@ -163,7 +167,7 @@ test.describe("P1-01 channel list priority over a long member list", () => {
       page,
     }) => {
       await page.setViewportSize({ width, height });
-      await signInFreshProfile(page);
+      await signInFreshProfile(page, LEFT_LAYOUT);
 
       const inside = await channelRowsOutsideSlot(page);
       expect(inside.total).toBeGreaterThanOrEqual(4);
@@ -179,7 +183,7 @@ test.describe("P1-01 channel list priority over a long member list", () => {
 
   test("the member list scrolls inside its section on a fresh profile", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
-    await signInFreshProfile(page);
+    await signInFreshProfile(page, LEFT_LAYOUT);
 
     const content = page.locator(".sidebar-members-content");
     const scrolls = await content.evaluate((el) => el.scrollHeight > el.clientHeight + 1);
@@ -190,7 +194,7 @@ test.describe("P1-01 channel list priority over a long member list", () => {
     page,
   }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
-    await signInFreshProfile(page, undefined, LONG_CHANNEL_LIST);
+    await signInFreshProfile(page, LEFT_LAYOUT, LONG_CHANNEL_LIST);
 
     // The members show at least three whole rows, and the channel list
     // scrolls inside its slot instead of pushing them out.
@@ -210,7 +214,11 @@ test.describe("P1-01 channel list priority over a long member list", () => {
 
   test("a saved height holds when the channel list overflows (P1-01)", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
-    await signInFreshProfile(page, { "owncord:member-list-height": "200" }, LONG_CHANNEL_LIST);
+    await signInFreshProfile(
+      page,
+      { ...LEFT_LAYOUT, "owncord:member-list-height": "200" },
+      LONG_CHANNEL_LIST,
+    );
 
     const memberBox = (await page.locator("[data-testid='sidebar-members']").boundingBox())!;
     expect(Math.abs(memberBox.height - 200)).toBeLessThanOrEqual(1);
@@ -221,7 +229,7 @@ test.describe("P1-01 channel list priority over a long member list", () => {
 
     // A saved height restores as a definite (`.sized`) height, not a flex
     // share, so the channel list above keeps its rows.
-    await signInFreshProfile(page, { "owncord:member-list-height": "200" });
+    await signInFreshProfile(page, { ...LEFT_LAYOUT, "owncord:member-list-height": "200" });
     const restored = await page.locator("[data-testid='sidebar-members']").evaluate((el) => ({
       inlineHeight: el.style.height,
       sized: el.classList.contains("sized"),
@@ -244,7 +252,7 @@ test.describe("P1-01 channel list priority over a long member list", () => {
 
   test("a dragged height saves and sizes the section (P1-01)", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
-    await signInFreshProfile(page);
+    await signInFreshProfile(page, LEFT_LAYOUT);
 
     await page.locator(".sidebar-resize-handle").evaluate((el) => {
       el.dispatchEvent(new MouseEvent("mousedown", { clientY: 400, bubbles: true }));
@@ -264,7 +272,7 @@ test.describe("P1-01 channel list priority over a long member list", () => {
 
   test("the first drag follows the cursor on a tall window (P1-01)", async ({ page }) => {
     await page.setViewportSize({ width: 2560, height: 1440 });
-    await signInFreshProfile(page);
+    await signInFreshProfile(page, LEFT_LAYOUT);
 
     const members = page.locator("[data-testid='sidebar-members']");
     const before = await members.evaluate((el) => (el as HTMLElement).offsetHeight);
@@ -283,7 +291,7 @@ test.describe("P1-01 channel list priority over a long member list", () => {
     page,
   }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
-    await signInFreshProfile(page, { "owncord:member-list-height": "1040" });
+    await signInFreshProfile(page, { ...LEFT_LAYOUT, "owncord:member-list-height": "1040" });
 
     const members = page.locator("[data-testid='sidebar-members']");
     const before = await members.evaluate((el) => el.getBoundingClientRect().height);
@@ -307,7 +315,7 @@ test.describe("P1-01 channel list priority over a long member list", () => {
       localStorage.setItem("owncord:settings:largeFont", "true");
     });
     await page.setViewportSize({ width: 940, height: 500 });
-    await signInFreshProfile(page);
+    await signInFreshProfile(page, LEFT_LAYOUT);
 
     // The first channel row — the way into the list — is inside the slot's own
     // box and inside the viewport, however tall the members section is.

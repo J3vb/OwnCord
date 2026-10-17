@@ -19,17 +19,17 @@ describe("memberLayout", () => {
     expect(MEMBER_WIDTH_PREF).toBe("memberListWidth");
   });
 
-  it("missing layout reads as left", () => {
-    expect(loadMemberLayout()).toBe("left");
+  it("missing layout reads as right", () => {
+    expect(loadMemberLayout()).toBe("right");
   });
 
-  it("unknown layout reads as left", () => {
+  it("unknown layout reads as right", () => {
     savePref(MEMBER_LAYOUT_PREF, "top");
-    expect(loadMemberLayout()).toBe("left");
+    expect(loadMemberLayout()).toBe("right");
     savePref(MEMBER_LAYOUT_PREF, 7);
-    expect(loadMemberLayout()).toBe("left");
+    expect(loadMemberLayout()).toBe("right");
     localStorage.setItem(STORAGE_PREFIX + MEMBER_LAYOUT_PREF, "{not json");
-    expect(loadMemberLayout()).toBe("left");
+    expect(loadMemberLayout()).toBe("right");
   });
 
   it("stored right reads as right and stored left reads as left", () => {

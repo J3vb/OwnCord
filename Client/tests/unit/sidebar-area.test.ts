@@ -254,7 +254,8 @@ function resetStores(): void {
   }));
   localStorage.removeItem("owncord:member-list-height");
   localStorage.removeItem("owncord:member-list-collapsed");
-  localStorage.removeItem("owncord:settings:memberListLayout");
+  // The default layout is "right" (3C-6c); these tests exercise the left section.
+  localStorage.setItem("owncord:settings:memberListLayout", '"left"');
 }
 
 function resetMocks(): void {

@@ -3,6 +3,7 @@
 // column's panel. jsdom never applies app.css, so these assert the parsed
 // stylesheet (tests/helpers/app-css.ts, plus a walk of the @media rules the
 // helper leaves out).
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { bundle } from "lightningcss";
 import type { Rule } from "lightningcss";
@@ -77,6 +78,20 @@ describe("member column CSS (3C-6b)", () => {
       JSON.stringify(cascadedDeclaration(".member-column .member-search-wrap", "height")?.value),
     ).toContain("48");
     expect(JSON.stringify(cascadedDeclaration(".chat-header", "height")?.value)).toContain("48");
+  });
+
+  it("the narrow overlay starts below the chat header, leaving its toggle clickable", () => {
+    const css = readFileSync(join(process.cwd(), "src/styles/app/member-list.css"), "utf8");
+    const block =
+      /@media \(max-width: 899px\)\s*\{\s*\.member-column\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(block).toMatch(/position:\s*fixed/);
+    expect(block).toMatch(/top:\s*var\(--header-height, 48px\)/);
+  });
+
+  it("the pinned panel drops below the chat header, so the pin button can close it", () => {
+    expect(JSON.stringify(cascadedDeclaration(".pinned-panel", "top")?.value)).toContain(
+      "header-height",
+    );
   });
 
   it("the sidebar copy keeps filling its section", () => {
