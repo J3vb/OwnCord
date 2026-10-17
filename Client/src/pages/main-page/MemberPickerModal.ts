@@ -17,6 +17,9 @@ import { Disposable } from "@lib/disposable";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import type { MountableComponent } from "@lib/safe-render";
 import { membersStore } from "@stores/members.store";
+import type { Member } from "@stores/members.store";
+import { createAvatarElement, pickAvatarColor } from "../../components/message-list/avatar";
+import { statusLabel } from "../../i18n/shell";
 import { authStore } from "@stores/auth.store";
 import { MAX_GROUP_DM_PARTICIPANTS } from "@lib/constants";
 import { requestsText } from "../../i18n/requests";
@@ -40,6 +43,11 @@ export interface MemberPickerOptions {
 // ---------------------------------------------------------------------------
 // createMemberPickerModal
 // ---------------------------------------------------------------------------
+
+const memberLabel = (m: Member): string => (m.displayName ?? "") || m.username;
+// Reachable people first (online, idle, dnd), then by the name the reader sees.
+const reachable = (m: Member): number =>
+  m.status === "online" || m.status === "idle" || m.status === "dnd" ? 0 : 1;
 
 /**
  * Create and mount a member picker modal. Returns a MountableComponent for
@@ -105,6 +113,7 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
       // there would be offering something that cannot take effect.
       nameInput.style.display = isGroup ? "" : "none";
       confirmBtn.style.display = selected.size >= 1 ? "" : "none";
+      renderChips();
       setText(
         confirmBtn,
         isGroup
@@ -113,8 +122,103 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
       );
     };
 
-    for (const member of members.values()) {
-      if (member.id === currentUserId) continue;
+    // Search, chips and the empty notice sit around the list. Rows are built
+    // once and only re-ordered/filtered, so typing never refetches an avatar
+    // and the selection (a Set of ids) survives every filter.
+    const searchInput = createElement("input", {
+      class: "dm-member-picker-search",
+      type: "text",
+      autofocus: "",
+      autocomplete: "off",
+      placeholder: requestsText("picker.searchPlaceholder"),
+      "aria-label": requestsText("picker.searchLabel"),
+      "data-testid": "dm-picker-search",
+    });
+    const chips = createElement("div", {
+      class: "dm-member-picker-chips",
+      "data-testid": "dm-picker-chips",
+    });
+    chips.hidden = true;
+    const emptyNotice = createElement(
+      "p",
+      { class: "dm-member-picker-empty", role: "status", "data-testid": "dm-picker-empty" },
+      requestsText("picker.noMatches"),
+    );
+    emptyNotice.hidden = true;
+
+    interface PickerRow {
+      readonly member: Member;
+      readonly label: string;
+      readonly item: HTMLElement;
+    }
+    const rows: PickerRow[] = [];
+    const rowById = new Map<number, PickerRow>();
+
+    const candidates = [...members.values()]
+      .filter((m) => m.id !== currentUserId)
+      .toSorted(
+        (a, b) =>
+          reachable(a) - reachable(b) ||
+          memberLabel(a).localeCompare(memberLabel(b), undefined, { sensitivity: "base" }) ||
+          a.id - b.id,
+      );
+
+    const toggle = (row: PickerRow): void => {
+      const { member, item } = row;
+      if (selected.has(member.id)) {
+        selected.delete(member.id);
+        item.classList.remove("selected");
+        refreshControls();
+        return;
+      }
+      // The cap counts the creator too, so the picker allows one fewer.
+      if (selected.size >= MAX_GROUP_DM_PARTICIPANTS - 1) return;
+      selected.add(member.id);
+      item.classList.add("selected");
+      refreshControls();
+    };
+
+    function renderChips(): void {
+      const nodes: HTMLElement[] = [];
+      for (const id of selected) {
+        const row = rowById.get(id);
+        if (row === undefined) continue;
+        const chip = createElement(
+          "button",
+          {
+            type: "button",
+            class: "dm-member-picker-chip",
+            "data-testid": `dm-picker-chip-${id}`,
+            "aria-label": requestsText("picker.removeChip", { name: row.label }),
+          },
+          row.label,
+        );
+        chip.appendChild(createElement("span", { "aria-hidden": "true" }, " \u00d7"));
+        chip.addEventListener("click", () => {
+          toggle(row);
+          searchInput.focus();
+        });
+        nodes.push(chip);
+      }
+      chips.replaceChildren(...nodes);
+      chips.hidden = nodes.length === 0;
+    }
+
+    function applyFilter(): void {
+      const q = searchInput.value.trim().toLowerCase();
+      const shown = rows.filter(
+        (r) =>
+          q === "" ||
+          r.label.toLowerCase().includes(q) ||
+          r.member.username.toLowerCase().includes(q),
+      );
+      listContainer.replaceChildren(...shown.map((r) => r.item));
+      emptyNotice.hidden = shown.length > 0;
+      setRovingTabindex(listContainer, ".dm-member-picker-item");
+    }
+
+    for (const member of candidates) {
+      const label = memberLabel(member);
       const item = createElement("div", {
         class: "dm-member-picker-item channel-item",
         "data-testid": `dm-picker-member-${member.id}`,
@@ -125,22 +229,23 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
         tabindex: "-1",
         style: "cursor:pointer;padding:6px 8px;display:flex;align-items:center;gap:8px;",
       });
-      const avatar = createElement("div", {
-        class: "dm-avatar",
-        style:
-          "width:28px;height:28px;border-radius:50%;background:#5865F2;display:flex;align-items:center;justify-content:center;font-size:0.75rem;color:white;flex-shrink:0;",
+      const avatar = createAvatarElement(member, {
+        className: "dm-avatar dm-member-picker-avatar",
+        background: pickAvatarColor(member.username),
       });
-      const label = (member.displayName ?? "") || member.username;
-      setText(avatar, label.charAt(0).toUpperCase());
       const nameEl = createElement("span", {}, label);
       const statusEl = createElement(
         "span",
         {
           style: `font-size:0.75rem;margin-left:auto;color:${member.status === "online" ? "var(--green)" : "var(--text-micro)"};`,
         },
-        member.status,
+        statusLabel(member.status),
       );
       appendChildren(item, avatar, nameEl, statusEl);
+
+      const row: PickerRow = { member, label, item };
+      rows.push(row);
+      rowById.set(member.id, row);
 
       item.addEventListener("click", () => {
         // Single-select mode keeps the pre-group behaviour: one click, one DM.
@@ -149,25 +254,22 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
           opts.onSelect(member.id);
           return;
         }
-        if (selected.has(member.id)) {
-          selected.delete(member.id);
-          item.classList.remove("selected");
-          refreshControls();
-          return;
-        }
-        // The cap counts the creator too, so the picker allows one fewer.
-        if (selected.size >= MAX_GROUP_DM_PARTICIPANTS - 1) return;
-        selected.add(member.id);
-        item.classList.add("selected");
-        refreshControls();
+        toggle(row);
       });
-
-      listContainer.appendChild(item);
     }
+
+    searchInput.addEventListener("input", applyFilter);
+    searchInput.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (e.key !== "ArrowDown") return;
+      const first = listContainer.querySelector<HTMLElement>(".dm-member-picker-item");
+      if (first === null) return;
+      e.preventDefault();
+      first.focus();
+    });
 
     // One Tab stop enters the list; ArrowUp/Down step rows and Enter/Space
     // activate the focused one (a roving list, as the DM sidebar rows do).
-    setRovingTabindex(listContainer, ".dm-member-picker-item");
+    applyFilter();
     enableRovingNavigation(listContainer, ".dm-member-picker-item", pickerOwner.signal, "vertical");
 
     // One button for both outcomes, relabelled by the selection size. A
@@ -196,7 +298,18 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
     );
     cancelBtn.addEventListener("click", () => close());
 
-    appendChildren(content, title, subtitle, listContainer, nameInput, confirmBtn, cancelBtn);
+    appendChildren(
+      content,
+      title,
+      subtitle,
+      searchInput,
+      chips,
+      listContainer,
+      emptyNotice,
+      nameInput,
+      confirmBtn,
+      cancelBtn,
+    );
 
     modalInstance = createModal(
       {
@@ -206,6 +319,7 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
       },
       container,
     );
+    searchInput.focus();
   }
 
   function destroy(): void {
