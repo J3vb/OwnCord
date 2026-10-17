@@ -6,6 +6,7 @@ import type { Member } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, setRoles } from "@stores/channels.store";
 import { Permission, type UserStatus } from "../../src/lib/types";
+import { pickAvatarColor } from "@components/message-list/avatar";
 import { applyThemeByName } from "@lib/themes";
 import { openUserProfilePopup } from "../../src/features/profiles/openUserProfilePopup";
 
@@ -135,12 +136,11 @@ describe("MemberList", () => {
     expect(headerTexts[3]).toContain("MEMBER");
   });
 
-  it("sorts by status within groups (online first)", () => {
+  it("sorts online-ish members together, A-Z, within a group", () => {
     // Two admins: Frank (online) and Bob (idle)
     setTestMembers(testMembers);
     memberList.mount(container);
 
-    const memberItems = container.querySelectorAll(".member-item");
     const adminItems: HTMLDivElement[] = [];
     let inAdminGroup = false;
 
@@ -155,9 +155,10 @@ describe("MemberList", () => {
     }
 
     expect(adminItems.length).toBe(2);
-    // Frank (online, priority 0) should come before Bob (idle, priority 1)
-    expect(adminItems[0]!.getAttribute("data-testid")).toBe("member-6"); // Frank
-    expect(adminItems[1]!.getAttribute("data-testid")).toBe("member-2"); // Bob
+    // Online and idle share a bucket, so the group reads A-Z: Bob (idle)
+    // before Frank (online).
+    expect(adminItems[0]!.getAttribute("data-testid")).toBe("member-2"); // Bob
+    expect(adminItems[1]!.getAttribute("data-testid")).toBe("member-6"); // Frank
   });
 
   it("shows role group headers with count", () => {
@@ -294,7 +295,7 @@ describe("MemberList", () => {
       (i) => i.textContent,
     );
     // "owner" is not a context-menu action.
-    expect(roleLabels).toEqual(["staff", "vip"]);
+    expect(roleLabels).toEqual(["Staff", "VIP"]);
 
     document.body.querySelector(".context-menu")?.remove();
   });
@@ -581,7 +582,7 @@ describe("MemberList", () => {
       const roleLabels = Array.from(
         menu!.querySelectorAll(".context-menu__submenu .context-menu__item"),
       ).map((i) => i.textContent);
-      expect(roleLabels).toEqual(["moderator", "member"]);
+      expect(roleLabels).toEqual(["Moderator", "Member"]);
     });
 
     it("withholds Change Role, Force Logout and Ban for a member the actor does not outrank", () => {
@@ -695,7 +696,49 @@ describe("MemberList", () => {
     expect(avatar?.textContent).toContain("?");
   });
 
-  it("sorts dnd between idle and offline within a group", () => {
+  it("titles the status dot with the catalog label", () => {
+    setTestMembers([
+      makeMember({ id: 1, username: "Dee", role: "member", status: "dnd" as UserStatus }),
+    ]);
+    memberList.mount(container);
+    const dot = container.querySelector(".mi-status") as HTMLDivElement;
+    expect(dot.title).toBe("Do Not Disturb");
+    expect(dot.getAttribute("aria-label")).toBe("Do Not Disturb");
+  });
+
+  it("paints the letter avatar from the username palette, not the role colour", () => {
+    const member = makeMember({ id: 1, username: "Pal", role: "admin" });
+    setTestMembers([member]);
+    memberList.mount(container);
+    const bg = (): string =>
+      (container.querySelector(".mi-avatar") as HTMLElement).style.background;
+    const probe = document.createElement("div");
+    probe.style.background = pickAvatarColor("Pal");
+    expect(bg()).toBe(probe.style.background);
+
+    updateMemberRole(1, "moderator");
+    membersStore.flush();
+    expect(bg()).toBe(probe.style.background);
+  });
+
+  it("sorts A-Z with idle and dnd interleaved among online, offline last", () => {
+    setTestMembers([
+      makeMember({ id: 1, username: "zed", role: "member", status: "online" as UserStatus }),
+      makeMember({ id: 2, username: "Bea", role: "member", status: "offline" as UserStatus }),
+      makeMember({ id: 3, username: "carl", role: "member", status: "dnd" as UserStatus }),
+      makeMember({ id: 4, username: "Amy", role: "member", status: "idle" as UserStatus }),
+      makeMember({ id: 5, username: "dora", role: "member", status: "online" as UserStatus }),
+      makeMember({ id: 6, username: "Abe", role: "member", status: "invisible" as UserStatus }),
+    ]);
+    memberList.mount(container);
+
+    const names = Array.from(container.querySelectorAll(".member-item")).map(
+      (el) => el.querySelector(".mi-name")?.textContent,
+    );
+    expect(names).toEqual(["Amy", "carl", "dora", "zed", "Abe", "Bea"]);
+  });
+
+  it("keeps offline members last within a group", () => {
     setTestMembers([
       makeMember({ id: 1, username: "Offline", role: "member", status: "offline" as UserStatus }),
       makeMember({ id: 2, username: "Dnd", role: "member", status: "dnd" as UserStatus }),
@@ -707,8 +750,8 @@ describe("MemberList", () => {
     const items = container.querySelectorAll(".member-item");
     const names = Array.from(items).map((el) => el.querySelector(".mi-name")?.textContent);
 
-    // Expected order: Online (0), Idle (1), Dnd (2), Offline (3)
-    expect(names).toEqual(["Online", "Idle", "Dnd", "Offline"]);
+    // One online bucket (A-Z), then offline.
+    expect(names).toEqual(["Dnd", "Idle", "Online", "Offline"]);
   });
 
   it("patches a presence-only change in place, keeping row identity", () => {
@@ -728,8 +771,8 @@ describe("MemberList", () => {
     expect(eveRowAfter).toBe(eveRowBefore);
     const dot = eveRowAfter!.querySelector(".mi-status") as HTMLDivElement;
     expect(dot.style.background).toBe("var(--red)");
-    expect(dot.getAttribute("aria-label")).toBe("dnd");
-    expect(dot.title).toBe("dnd");
+    expect(dot.getAttribute("aria-label")).toBe("Do Not Disturb");
+    expect(dot.title).toBe("Do Not Disturb");
 
     // Every other row also kept its identity.
     const allRowsAfter = Array.from(container.querySelectorAll(".member-item"));
@@ -1093,12 +1136,12 @@ describe("MemberList profile fields", () => {
           return el.getAttribute("aria-label") ?? el.textContent;
         })
         .join(" ");
-    expect(description("member-1")).toBe("shipping online");
-    expect(description("member-2")).toBe("idle");
+    expect(description("member-1")).toBe("shipping Online");
+    expect(description("member-2")).toBe("Idle");
 
     updatePresence(1, "dnd");
     membersStore.flush();
-    expect(description("member-1")).toBe("shipping dnd");
+    expect(description("member-1")).toBe("shipping Do Not Disturb");
   });
 
   it("renders an invisible member the way it renders an offline one", () => {

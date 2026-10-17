@@ -1,3 +1,4 @@
+import type { UserStatus } from "@lib/types";
 import { defineCatalog } from "./format";
 
 /**
@@ -254,3 +255,22 @@ export const shellText = defineCatalog("shell", {
   "messages.loadNewerFailed": "Failed to load newer messages",
   "messages.reactionSlowDown": "Slow down! Please wait before reacting again.",
 });
+
+/** The catalog label for a presence status ("dnd" reads "Do Not Disturb"). */
+export function statusLabel(status: UserStatus | (string & {})): string {
+  switch (status) {
+    case "online":
+      return shellText("status.online");
+    case "idle":
+      return shellText("status.idle");
+    case "dnd":
+      return shellText("status.dnd");
+    case "invisible":
+      return shellText("status.invisible");
+    case "offline":
+      return shellText("status.offline");
+    default:
+      // A status this client predates: show it capitalised rather than blank.
+      return status.charAt(0).toUpperCase() + status.slice(1);
+  }
+}
