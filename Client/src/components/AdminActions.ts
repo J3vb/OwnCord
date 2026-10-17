@@ -56,6 +56,8 @@ export interface MemberContextMenuOptions {
   onRemoveTimeout?(): Promise<void>;
   /** Runs once when the menu goes away, by any path. */
   onClosed?(): void;
+  /** Where focus goes on close when the opener row is gone. */
+  restoreFocusTo?(): HTMLElement | null;
   /** Whether the local user currently blocks this member (labels the toggle). */
   isBlocked: boolean;
   onToggleBlock(): Promise<void>;
@@ -188,6 +190,7 @@ function finishMenu(
   menu: HTMLDivElement,
   disposable: Disposable,
   onClosed: () => void = noop,
+  restoreFocusTo?: () => HTMLElement | null,
 ): ContextMenuResult {
   let restoreFocus: () => void = noop;
   let closed = false;
@@ -199,7 +202,11 @@ function finishMenu(
     closed = true;
     onClosed();
   }
-  restoreFocus = enableMenuKeyboard(menu, { signal: disposable.signal, onClose: destroy });
+  restoreFocus = enableMenuKeyboard(menu, {
+    signal: disposable.signal,
+    onClose: destroy,
+    ...(restoreFocusTo === undefined ? {} : { restoreFocusTo }),
+  });
   return { element: menu, destroy };
 }
 
@@ -521,7 +528,7 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
     menu.appendChild(group);
   }
 
-  result = finishMenu(menu, disposable, options.onClosed);
+  result = finishMenu(menu, disposable, options.onClosed, options.restoreFocusTo);
   return result;
 }
 

@@ -174,6 +174,26 @@ function handleOutsideClick(e: MouseEvent): void {
  */
 const ownPopupClosers = new Set<() => void>();
 
+/** What a row needs from the list that owns it: arrow-key moves and its own element. */
+interface RowHooks {
+  /** Move focus for an arrow/Home/End/Page key pressed on member `id`'s row. */
+  readonly navigate: (key: string, id: number, from: HTMLElement) => void;
+  /** Focus member `id`'s row (or the first row when it is gone) and return it. */
+  readonly focusMember: (id: number) => HTMLElement | null;
+}
+
+/** Keys that move between member rows. */
+const NAV_KEYS: ReadonlySet<string> = new Set([
+  "ArrowDown",
+  "ArrowUp",
+  // i18n-exempt: KeyboardEvent.key value, not rendered
+  "Home",
+  // i18n-exempt: KeyboardEvent.key value, not rendered
+  "End",
+  "PageUp",
+  "PageDown",
+]);
+
 /** What a row reads at event time: the live member, and the status its dot shows. */
 interface MemberRowRef {
   member: Member;
@@ -184,6 +204,7 @@ function createMemberItem(
   ref: MemberRowRef,
   colorVar: string,
   opts: MemberListOptions,
+  hooks: RowHooks,
   signal: AbortSignal,
 ): HTMLDivElement {
   const shown = ref.member;
@@ -247,7 +268,6 @@ function createMemberItem(
   // the profile, and its Report action, is reachable from the keyboard.
   const openProfile = (anchorX: number, anchorY: number): void => {
     closeActiveMenu();
-    const list = item.parentElement;
     // The row is reused across store updates, so the member is read from the
     // ref at event time, never from the render-time snapshot.
     const member = ref.member;
@@ -264,10 +284,7 @@ function createMemberItem(
         ...(opts.onBlockFromPopup === undefined ? {} : { onToggleBlock: opts.onBlockFromPopup }),
         onChangeRole: opts.onChangeRole,
       },
-      fallbackFocus: () =>
-        list?.querySelector<HTMLElement>(`[data-testid="member-${member.id}"]`) ??
-        list?.querySelector<HTMLElement>(".member-item") ??
-        null,
+      fallbackFocus: () => hooks.focusMember(member.id),
     });
     ownPopupClosers.add(close);
   };
@@ -279,6 +296,19 @@ function createMemberItem(
       e.preventDefault();
       const rect = item.getBoundingClientRect();
       openProfile(rect.right, rect.top);
+    },
+    { signal },
+  );
+
+  // Arrow keys move between member rows. Only keys pressed on the row itself
+  // count (a menu or popup lives outside it), and a modified key is left alone.
+  item.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.target !== item || !NAV_KEYS.has(e.key)) return;
+      if (e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
+      e.preventDefault();
+      hooks.navigate(e.key, ref.member.id, item);
     },
     { signal },
   );
@@ -365,6 +395,7 @@ function createMemberItem(
         onKick: () => opts.onKick(member.id, member.username),
         onBan: () => opts.onBan(member.id, member.username, memberDisplayName(member)),
         onChangeRole: (newRole: string) => opts.onChangeRole(member.id, member.username, newRole),
+        restoreFocusTo: () => hooks.focusMember(member.id),
         onClosed: () => {
           if (activeMenu !== created) return;
           activeMenu = null;
@@ -433,7 +464,24 @@ function placeMenu(menuEl: HTMLDivElement, clientX: number, clientY: number): vo
   );
 }
 
-export function createMemberList(opts: MemberListOptions): MountableComponent {
+/** Rows that fit in the scroller, at least one: the PageUp/PageDown stride. */
+function pageSize(from: HTMLElement): number {
+  let scroller = from.parentElement;
+  while (scroller !== null && scroller.scrollHeight <= scroller.clientHeight) {
+    scroller = scroller.parentElement;
+  }
+  const rowHeight = from.offsetHeight;
+  if (scroller === null || rowHeight <= 0) return 10;
+  return Math.max(1, Math.floor(scroller.clientHeight / rowHeight));
+}
+
+/** The member list, plus a way for its owner to return focus to a member's row. */
+export interface MemberListComponent extends MountableComponent {
+  /** Focus member `id`'s row, or the first row when that member is gone. Returns the row. */
+  focusMember(id: number): HTMLElement | null;
+}
+
+export function createMemberList(opts: MemberListOptions): MemberListComponent {
   const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
   let searchWrap: HTMLDivElement | null = null;
@@ -443,6 +491,8 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
   // Sorted and grouped members, updated in place of a rebuild on each store
   // change. Model only: it holds no DOM and is dropped with the component.
   let model: MemberModel | null = null;
+  // What the list shows now, in order: navigation walks this, not DOM siblings.
+  let items: readonly ListItem[] = [];
   // Rows are reused across renders, so each owns its listeners: a row's owner
   // is destroyed when reconcile removes or rebuilds it (OC-0295 - listeners on
   // the component-lifetime signal would retain every discarded row), and
@@ -464,12 +514,65 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
     }
   }
 
+  function rowEl(id: number): HTMLElement | null {
+    return root?.querySelector<HTMLElement>(`[data-testid="member-${id}"]`) ?? null;
+  }
+
+  function focusMember(id: number): HTMLElement | null {
+    const el = rowEl(id) ?? root?.querySelector<HTMLElement>(".member-item") ?? null;
+    if (el === null) return null;
+    if (typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "nearest" });
+    el.focus({ preventScroll: true });
+    return el;
+  }
+
+  function navigate(key: string, id: number, from: HTMLElement): void {
+    const rows = items.filter((item) => item.kind === "row");
+    if (rows.length === 0) return;
+    // Looked up by id at key time, so a member that moved group continues from
+    // where it is now.
+    const at = rows.findIndex((item) => item.member.id === id);
+    const last = rows.length - 1;
+    let next: number;
+    switch (key) {
+      case "ArrowDown":
+        next = Math.min(last, at + 1);
+        break;
+      case "ArrowUp":
+        next = Math.max(0, at - 1);
+        break;
+      case "PageDown":
+        next = Math.min(last, at + pageSize(from));
+        break;
+      case "PageUp":
+        next = Math.max(0, at - pageSize(from));
+        break;
+      case "Home":
+        next = 0;
+        break;
+      default:
+        next = last;
+    }
+    const target = rows[next];
+    if (target !== undefined && target.member.id !== id) focusMember(target.member.id);
+  }
+
+  const hooks: RowHooks = { navigate, focusMember };
+
   function render(): void {
     if (root === null) return;
     const members = membersStore.getState().members;
     const roles = channelsStore.getState().roles;
     model = model === null ? buildModel(members, roles) : updateModel(model, members, roles);
-    reconcileChildren<ListItem>(root, flattenModel(model, query), {
+    items = flattenModel(model, query);
+    // A row that holds focus and is filtered away or removed drops focus to
+    // the page; it goes to the same member if still shown, else the first row.
+    const focused = document.activeElement;
+    const focusedId =
+      focused instanceof HTMLElement && focused.parentElement === root
+        ? refByEl.get(focused)?.member.id
+        : undefined;
+    reconcileChildren<ListItem>(root, items, {
       key: (item) => item.key,
       // A header's text is patched in `update`, not part of its signature.
       // Status is not here: it patches the dot in place without a rebuild.
@@ -508,7 +611,7 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
         }
         const owner = new Disposable();
         const ref: MemberRowRef = { member: item.member, shownStatus: item.member.status };
-        const row = createMemberItem(ref, item.colorVar, opts, owner.signal);
+        const row = createMemberItem(ref, item.colorVar, opts, hooks, owner.signal);
         ownerByEl.set(row, owner);
         refByEl.set(row, ref);
         return row;
@@ -531,6 +634,15 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
         refByEl.delete(el);
       },
     });
+    if (
+      focusedId !== undefined &&
+      !(
+        document.activeElement instanceof HTMLElement &&
+        document.activeElement.parentElement === root
+      )
+    ) {
+      focusMember(focusedId);
+    }
   }
 
   function mount(container: Element): void {
@@ -607,5 +719,5 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
     searchWrap = null;
   }
 
-  return { mount, destroy };
+  return { mount, destroy, focusMember };
 }

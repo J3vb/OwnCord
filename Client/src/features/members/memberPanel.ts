@@ -250,7 +250,7 @@ export function createMemberPanel(opts: MemberPanelOptions): MemberPanel {
             onBanned: () => void refreshBanned(),
             notify: (msg, type) => getToast()?.show(msg, type),
             signal: owner.signal,
-            fallbackFocus: () => element.querySelector<HTMLElement>(".member-item"),
+            fallbackFocus: () => memberList.focusMember(userId),
           });
         },
         () => getToast()?.show(shellText("members.banFailed"), "error"),
