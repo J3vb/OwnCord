@@ -3,7 +3,8 @@
 //! and again when the window is shown or focused (Windows drops the overlay
 //! when the taskbar button is recreated); this draws it:
 //!
-//! - Windows: a taskbar overlay icon, the count up to 9 and "9+" above;
+//! - Windows: a taskbar overlay icon, the count up to 9 and "9+" above, and
+//!   the tray icon swapped for a red-dot variant while the count is above 0;
 //! - Linux: two paths at once. The launcher count, as a Unity `LauncherEntry`
 //!   D-Bus signal sent straight to the session bus, which KDE Plasma and
 //!   Ubuntu's dock read; and the tray icon swapped for a red-dot variant with
@@ -88,13 +89,13 @@ fn escape_uri_path(path: &str) -> String {
 }
 
 /// Tray dot radius as a share of the icon's shorter edge.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
 const DOT_RADIUS: f32 = 0.24;
 
 /// `rgba` (`width` x `height`) with a red dot in the top-right corner, edges
 /// blended over what was there. Drawn here for the same reason as the
 /// overlay: no second image to ship or decode.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
 fn with_red_dot(rgba: &[u8], width: u32, height: u32) -> Vec<u8> {
     let mut px = rgba.to_vec();
     if px.len() != (width * height * 4) as usize {
@@ -274,37 +275,74 @@ pub fn set_unread_badge<R: Runtime>(app: tauri::AppHandle<R>, count: u32) {
     );
     if let Some(tray) = app.tray_by_id(tray::TRAY_ID) {
         #[cfg(target_os = "linux")]
-        set_linux_tray(&app, &tray, &plan);
+        {
+            set_tray_dot(&app, &tray, plan.tray_dot);
+            set_linux_tray_title(&tray, &plan);
+        }
+        #[cfg(windows)]
+        set_tray_dot(&app, &tray, count > 0);
         if let Err(e) = tray.set_tooltip(Some(text::tray_tooltip(count))) {
             log::warn!("[badge] cannot set the tray tooltip: {e}");
         }
     }
 }
 
-/// Swap the tray icon for the red-dot variant (or back) and set its title.
-#[cfg(target_os = "linux")]
-fn set_linux_tray<R: Runtime>(
-    app: &tauri::AppHandle<R>,
-    tray: &tauri::tray::TrayIcon<R>,
-    plan: &LinuxBadgePlan,
-) {
-    static DOT_SHOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    let changed =
-        DOT_SHOWN.swap(plan.tray_dot, std::sync::atomic::Ordering::Relaxed) != plan.tray_dot;
-    if let Some(base) = app.default_window_icon().filter(|_| changed) {
-        let icon = if plan.tray_dot {
-            tauri::image::Image::new_owned(
-                with_red_dot(base.rgba(), base.width(), base.height()),
-                base.width(),
-                base.height(),
-            )
-        } else {
-            base.clone()
-        };
-        if let Err(e) = tray.set_icon(Some(icon)) {
-            log::warn!("[badge] cannot set the tray icon: {e}");
-        }
+/// Whether the tray icon needs swapping: only when the dot `shown` differs
+/// from the dot `wanted`.
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
+fn dot_needs_swap(shown: bool, wanted: bool) -> bool {
+    shown != wanted
+}
+
+/// The dot state to record after trying a swap from `shown` to `wanted`.
+/// `swapped` is whether `set_icon` succeeded. A failure keeps `shown`, so
+/// the next call sees a difference and tries again.
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
+fn dot_recorded(shown: bool, wanted: bool, swapped: bool) -> bool {
+    if swapped {
+        wanted
+    } else {
+        shown
     }
+}
+
+/// Swap the tray icon for the red-dot variant (or back). The dot is recorded
+/// as shown only once `set_icon` succeeds, so a failed swap is retried by the
+/// next call rather than waiting for the count to cross zero.
+#[cfg(any(windows, target_os = "linux"))]
+fn set_tray_dot<R: Runtime>(app: &tauri::AppHandle<R>, tray: &tauri::tray::TrayIcon<R>, dot: bool) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static DOT_SHOWN: AtomicBool = AtomicBool::new(false);
+    let shown = DOT_SHOWN.load(Ordering::Relaxed);
+    if !dot_needs_swap(shown, dot) {
+        return;
+    }
+    let Some(base) = app.default_window_icon() else {
+        return;
+    };
+    let icon = if dot {
+        tauri::image::Image::new_owned(
+            with_red_dot(base.rgba(), base.width(), base.height()),
+            base.width(),
+            base.height(),
+        )
+    } else {
+        base.clone()
+    };
+    let swapped = match tray.set_icon(Some(icon)) {
+        Ok(()) => true,
+        Err(e) => {
+            log::warn!("[badge] cannot set the tray icon: {e}");
+            false
+        }
+    };
+    DOT_SHOWN.store(dot_recorded(shown, dot, swapped), Ordering::Relaxed);
+}
+
+/// Set the Linux tray title (the count); the dot is `set_tray_dot`'s.
+#[cfg(target_os = "linux")]
+fn set_linux_tray_title<R: Runtime>(tray: &tauri::tray::TrayIcon<R>, plan: &LinuxBadgePlan) {
     if let Err(e) = tray.set_title(plan.tray_title.as_deref()) {
         log::warn!("[badge] cannot set the tray title: {e}");
     }
@@ -353,6 +391,30 @@ mod tests {
         assert_eq!(at(16, 2), [0xd0, 0x30, 0x2f, 255], "the disc is badge red");
         // "9+" at scale 3 starts at x=5, y=8: the 9's top-left pixel is set.
         assert_eq!(at(5, 8), [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn dot_swaps_only_when_the_wanted_state_differs() {
+        assert!(!dot_needs_swap(false, false));
+        assert!(!dot_needs_swap(true, true));
+        assert!(dot_needs_swap(false, true));
+        assert!(dot_needs_swap(true, false));
+    }
+
+    #[test]
+    fn dot_is_recorded_when_the_swap_succeeds() {
+        assert!(dot_recorded(false, true, true));
+        assert!(!dot_recorded(true, false, true));
+    }
+
+    #[test]
+    fn dot_keeps_the_old_state_when_the_swap_fails_so_the_next_call_retries() {
+        let shown = dot_recorded(false, true, false);
+        assert!(!shown);
+        assert!(dot_needs_swap(shown, true), "the retry happens");
+        let shown = dot_recorded(true, false, false);
+        assert!(shown);
+        assert!(dot_needs_swap(shown, false), "the retry happens");
     }
 
     #[test]
