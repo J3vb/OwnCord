@@ -282,6 +282,16 @@
 .self-profile-card .spc-custom-line {
   margin-top: 4px;
   overflow-wrap: anywhere;
+  /* Same two-line clip as the profile popup's status (WP 3C-9). */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.self-profile-card .spc-custom-line[hidden] {
+  display: none;
 }
 .self-profile-card .spc-custom {
   display: flex;

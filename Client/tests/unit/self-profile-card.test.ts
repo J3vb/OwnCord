@@ -129,7 +129,7 @@ describe("SelfProfileCard from the user bar", () => {
   it("the custom status can be set (trimmed, capped at 128) and cleared", () => {
     trigger().click();
     const input = q<HTMLInputElement>("[data-testid='spc-custom-input']")!;
-    expect(input.maxLength).toBe(128);
+    expect(input.maxLength).toBe(256); // 2 units per character; the 128-character cap is by count
     input.value = "  heads down  ";
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     const sent = (ws.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
@@ -144,6 +144,21 @@ describe("SelfProfileCard from the user bar", () => {
     expect(clear.hidden).toBe(false);
     clear.click();
     expect(loadCustomStatus()).toBe("");
+  });
+
+  it("shows a hint and does not send an over-limit custom status (WP 3C-9)", () => {
+    trigger().click();
+    const input = q<HTMLInputElement>("[data-testid='spc-custom-input']")!;
+    const hint = q<HTMLElement>("[data-testid='spc-custom-hint']")!;
+    expect(hint.textContent).toBe("Up to 128 characters, on one line.");
+    const over = "x".repeat(200); // a value maxlength did not truncate
+    input.value = over;
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(ws.send).not.toHaveBeenCalled();
+    expect(hint.textContent).toBe("Custom status must be at most 128 characters.");
+    // The card stays open with the typed text so it can be shortened.
+    expect(card()).not.toBeNull();
+    expect(input.value).toBe(over);
   });
 
   it("clearing after typing sends a single save, not a blur commit first", () => {
@@ -924,16 +939,23 @@ describe("SelfProfileCard: timers, Clear after, emoji", () => {
       firstCell(openPicker()).click();
       expect(input.value).toBe(full);
 
-      // With room for the emoji but not for more: 127 + one 1-unit emoji is
-      // fine, and an emoji that would overshoot is refused whole.
+      // The limit counts characters like the server: with room for one, an
+      // emoji of several characters is refused whole and a one-character
+      // emoji fits, even when it takes two UTF-16 units.
+      const chars = (s: string): number => [...s].length;
       input.value = "x".repeat(127);
       input.setSelectionRange(127, 127);
-      const picker = openPicker();
-      const cells = [...picker.querySelectorAll<HTMLElement>(".ep-emoji")];
-      const wide = cells.find((c) => c.dataset.emoji!.length > 1)!;
-      wide.click();
+      const cells = [...openPicker().querySelectorAll<HTMLElement>(".ep-emoji")];
+      const multi = cells.find((c) => chars(c.dataset.emoji!) > 1)!;
+      multi.click();
       expect(input.value).toBe("x".repeat(127));
-      expect(input.value.length).toBeLessThanOrEqual(128);
+
+      const single = [...openPicker().querySelectorAll<HTMLElement>(".ep-emoji")].find(
+        (c) => chars(c.dataset.emoji!) === 1 && c.dataset.emoji!.length === 2,
+      )!;
+      single.click();
+      expect(input.value).toBe("x".repeat(127) + single.dataset.emoji!);
+      expect(chars(input.value)).toBe(128);
     });
 
     it("picking does not send half-typed text; Enter then commits it with the emoji", () => {

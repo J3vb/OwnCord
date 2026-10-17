@@ -116,6 +116,22 @@ export const connectText = defineCatalog("connect", {
 
   "validation.hostRequired": "Server address is required.",
   "validation.usernameRequired": "Username is required.",
+  "limits.usernameHint":
+    "{min}–{max} characters: letters, digits, _ . and -. Start with a letter or digit.",
+  "limits.lineHint": "Up to {max} characters, on one line.",
+  "limits.checkField": "Check the highlighted field.",
+  "limits.reached": "Limit of {max} characters reached.",
+  "limits.usernameTooShort": "Username must be {min}–{max} characters.",
+  "limits.usernameTooLong": "Username must be {min}–{max} characters.",
+  "limits.usernameReserved": "Username is reserved.",
+  "limits.usernameInvisible": "Username must not contain invisible characters.",
+  "limits.usernameStart": "Username must start with a letter or digit.",
+  "limits.usernameChars": "Username may only contain letters, digits, '_', '.' and '-'.",
+  "limits.usernameMarkPlacement": "Username has a combining mark that does not follow a letter.",
+  "limits.usernameMarkStack": "Username must not stack more than {max} combining marks.",
+  "limits.displayNameTooLong": "Display name must be at most {max} characters.",
+  "limits.statusTooLong": "Custom status must be at most {max} characters.",
+  "limits.groupNameTooLong": "Group name must be at most {max} characters.",
   "validation.passwordRequired": "Password is required.",
   "validation.passwordTooShort": "Password must be at least {min} characters.",
   "validation.placeholderPassword":

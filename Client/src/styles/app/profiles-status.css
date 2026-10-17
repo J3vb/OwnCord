@@ -46,6 +46,14 @@
   color: var(--text-muted);
   margin: 4px 0;
   overflow-wrap: anywhere;
+  /* A valid status can be 128 very wide characters (WP 3C-9): clip it to two
+     lines with an ellipsis rather than let it grow the popup. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Status picker: the custom-status input sits below the four options. */

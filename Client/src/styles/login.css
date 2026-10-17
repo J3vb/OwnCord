@@ -1552,6 +1552,14 @@
   line-height: 1.45;
   color: var(--text-faint);
 }
+/* Limit hint (WP 3C-9): the rule under a name or status input; the limit and
+   refusal states change the words as well as the colour. */
+.limit-hint--limit {
+  color: var(--text-normal);
+}
+.limit-hint--error {
+  color: var(--text-danger);
+}
 .form-check {
   display: flex;
   align-items: center;

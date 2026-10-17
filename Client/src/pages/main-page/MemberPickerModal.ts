@@ -24,6 +24,14 @@ import { statusLabel } from "../../i18n/shell";
 import { authStore } from "@stores/auth.store";
 import { MAX_GROUP_DM_PARTICIPANTS } from "@lib/constants";
 import { requestsText } from "../../i18n/requests";
+import { connectText } from "../../i18n/connect";
+import {
+  attachLimitHint,
+  collapseSpaces,
+  lineHintText,
+  runeCount,
+  MAX_GROUP_DM_NAME_LEN,
+} from "@lib/nameLimits";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -113,12 +121,19 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
     const nameInput = createElement("input", {
       class: "dm-group-name-input",
       type: "text",
-      maxlength: "100",
       placeholder: requestsText("picker.groupNamePlaceholder"),
       "data-testid": "dm-group-name",
       style: "width:100%;margin-top:10px;",
     });
     nameInput.style.display = "none";
+    const nameHint = attachLimitHint(nameInput, {
+      max: MAX_GROUP_DM_NAME_LEN,
+      hint: lineHintText(MAX_GROUP_DM_NAME_LEN),
+      countCharacters: true,
+      id: "dm-group-name-hint",
+      signal: pickerOwner.signal,
+    });
+    nameHint.el.style.display = "none";
 
     const confirmBtn = createElement(
       "button",
@@ -148,6 +163,7 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
       // the server refuses to name a two-person DM, so offering the field
       // there would be offering something that cannot take effect.
       nameInput.style.display = isGroup ? "" : "none";
+      nameHint.el.style.display = isGroup ? "" : "none";
       confirmBtn.style.display = selected.size >= 1 ? "" : "none";
       renderChips();
       if (adding) return;
@@ -367,7 +383,14 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
         opts.onSelect(ids[0]!);
         return;
       }
-      const name = nameInput.value.trim();
+      // Collapsed like the server stores it: what is checked is what is sent.
+      const name = collapseSpaces(nameInput.value);
+      // A pasted or scripted name past the limit would be refused by the
+      // server: keep the picker open with the hint and the typed name.
+      if (runeCount(name) > MAX_GROUP_DM_NAME_LEN) {
+        nameHint.showError(connectText("limits.groupNameTooLong", { max: MAX_GROUP_DM_NAME_LEN }));
+        return;
+      }
       close();
       opts.onSelectGroup?.(ids, name);
     });
@@ -390,7 +413,7 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
       chips,
       listContainer,
       emptyNotice,
-      ...(adding ? [] : [nameInput]),
+      ...(adding ? [] : [nameInput, nameHint.el]),
       errorEl,
       confirmBtn,
       cancelBtn,

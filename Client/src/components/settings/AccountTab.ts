@@ -34,12 +34,23 @@ import {
   type StatusKind,
 } from "../../features/settings/status";
 import { accountText as t } from "../../i18n/account";
+import { connectText } from "../../i18n/connect";
+import {
+  attachLimitHint,
+  checkNewUsername,
+  collapseSpaces,
+  lineHintText,
+  runeCount,
+  usernameHintText,
+  usernameProblemText,
+  MAX_DISPLAY_NAME_LEN,
+  MAX_USERNAME_LEN,
+} from "@lib/nameLimits";
 
 const log = createLogger("AccountTab");
 
-/** Mirrors the server's caps so the form can bound itself instead of learning
- *  about the limits from a rejected request. */
-const MAX_DISPLAY_NAME_LEN = 32;
+/** Mirrors the server's cap so the form can bound itself instead of learning
+ *  about the limit from a rejected request (the name limits are in nameLimits). */
 const MAX_ABOUT_LEN = 300;
 /** Mirrors maxAvatarFileBytes / maxAvatarDimension on the server. */
 const MAX_AVATAR_BYTES = 1024 * 1024;
@@ -354,11 +365,17 @@ function buildProfileFields(
     class: "form-input",
     type: "text",
     placeholder: t("profile.displayNamePlaceholder"),
-    maxlength: String(MAX_DISPLAY_NAME_LEN),
-    style: "margin-bottom:12px",
     "data-testid": "display-name-input",
   });
   nameInput.value = user?.display_name ?? "";
+  const nameHint = attachLimitHint(nameInput, {
+    max: MAX_DISPLAY_NAME_LEN,
+    hint: lineHintText(MAX_DISPLAY_NAME_LEN),
+    countCharacters: true,
+    id: "display-name-hint",
+    signal,
+  });
+  nameHint.el.style.marginBottom = "12px";
 
   const aboutLabel = createElement("div", { class: "account-field-label" }, t("profile.about"));
   const aboutInput = createElement("textarea", {
@@ -382,8 +399,17 @@ function buildProfileFields(
   saveBtn.addEventListener(
     "click",
     () => {
-      const displayName = nameInput.value.trim();
+      // Collapsed like the server stores it: what is checked is what is sent.
+      const displayName = collapseSpaces(nameInput.value);
       const about = aboutInput.value.trim();
+      // A pasted or scripted value can exceed maxlength; never send one the
+      // server would refuse. The typed text stays in the field.
+      if (runeCount(displayName) > MAX_DISPLAY_NAME_LEN) {
+        const message = connectText("limits.displayNameTooLong", { max: MAX_DISPLAY_NAME_LEN });
+        nameHint.showError(message);
+        showOutcome(statusEl, "error", connectText("limits.checkField"));
+        return;
+      }
       // Both are sent unconditionally, empty string included: "" is how the
       // API says "clear it", and omitting a field means "leave it alone".
       showOutcome(statusEl, "error", "");
@@ -398,7 +424,15 @@ function buildProfileFields(
           );
         })
         .catch((err: unknown) => {
-          showOutcome(statusEl, "error", errorText(err, t("profile.saveFailed")));
+          const message = errorText(err, t("profile.saveFailed"));
+          // The server's refusal (a character it does not allow) goes under
+          // the field too, and what was typed stays put.
+          if (err instanceof ApiClientError && /^display_name\b/i.test(err.message)) {
+            nameHint.showError(message);
+            showOutcome(statusEl, "error", connectText("limits.checkField"));
+            return;
+          }
+          showOutcome(statusEl, "error", message);
         })
         .finally(() => {
           saveBtn.disabled = false;
@@ -415,6 +449,7 @@ function buildProfileFields(
     header,
     nameLabel,
     nameInput,
+    nameHint.el,
     aboutLabel,
     aboutInput,
     statusEl,
@@ -1360,8 +1395,6 @@ function buildSecurityCard(options: SettingsOverlayOptions, signal: AbortSignal)
 // Main tab builder
 // ---------------------------------------------------------------------------
 
-const MAX_USERNAME_LEN = 32;
-
 export function buildAccountTab(
   options: SettingsOverlayOptions,
   signal: AbortSignal,
@@ -1413,6 +1446,12 @@ export function buildAccountTab(
     "aria-label": t("profile.newUsername"),
     "aria-describedby": "username-edit-error",
   });
+  const usernameHint = attachLimitHint(editInput, {
+    max: MAX_USERNAME_LEN,
+    hint: usernameHintText(),
+    id: "username-edit-hint",
+    signal,
+  });
   const saveBtn = createElement("button", { class: "ac-btn secondary" }, t("common.save"));
   const cancelBtn = createElement("button", { class: "ac-btn secondary" }, t("recovery.cancel"));
   appendChildren(editForm, editInput, saveBtn, cancelBtn);
@@ -1420,11 +1459,15 @@ export function buildAccountTab(
   const usernameError = outcomeEl("error");
   usernameError.id = "username-edit-error";
   usernameError.style.marginTop = "4px";
-  editForm.appendChild(usernameError);
+  editForm.style.flexWrap = "wrap";
+  usernameError.style.width = "100%";
+  usernameHint.el.style.width = "100%";
+  editForm.append(usernameError, usernameHint.el);
 
   const openEditForm = () => {
     editForm.style.display = "flex";
     editInput.value = authStore.getState().user?.username ?? "";
+    usernameHint.reset();
     editInput.focus();
   };
   const closeEditForm = () => {
@@ -1441,10 +1484,17 @@ export function buildAccountTab(
     "click",
     () => {
       const newName = editInput.value.trim();
-      if (newName.length < 2 || newName.length > MAX_USERNAME_LEN) {
-        setText(usernameError, t("profile.usernameInvalid", { max: MAX_USERNAME_LEN }));
+      // Resending the name the account already has is checked by the server's
+      // loose rule (an older account may not meet the new one); a different
+      // name is a rename and must pass the new-name rules.
+      const problem =
+        newName === authStore.getState().user?.username ? null : checkNewUsername(newName);
+      if (problem !== null) {
+        editInput.setAttribute("aria-invalid", "true");
+        setText(usernameError, usernameProblemText(problem));
         return;
       }
+      editInput.removeAttribute("aria-invalid");
       setText(usernameError, "");
       void options
         .onUpdateProfile({ username: newName })
@@ -1466,6 +1516,8 @@ export function buildAccountTab(
           closeEditForm();
         })
         .catch((err: unknown) => {
+          // The server's own refusal text, under the field; the typed name stays.
+          editInput.setAttribute("aria-invalid", "true");
           setText(usernameError, errorText(err, t("profile.usernameSaveFailed")));
         });
     },

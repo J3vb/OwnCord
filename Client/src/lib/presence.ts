@@ -44,14 +44,14 @@ export interface PresenceSender {
    */
   send(status: UserStatus, customStatus?: string, expiresInSeconds?: number): void;
   /**
-   * A TIMED_OUT refusal of the frame with this envelope id: put the status
+   * A TIMED_OUT or BAD_REQUEST refusal of the frame with this envelope id: put the status
    * that was in effect before that frame's optimistic apply back, in the
    * members store and in the saved prefs. Called by the dispatcher's error
    * chain (the one writer for server events), never by this module's own
    * `ws.on` — a presence sender may read store state there, not write it.
    * A no-op when the id is not the frame this sender last put on the wire.
    */
-  rollbackTimedOut(id: string | undefined): void;
+  rollbackRefused(id: string | undefined): void;
   /** Cancel any pending retry. Call on teardown of the owning session. */
   destroy(): void;
 }
@@ -251,7 +251,7 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
    * else has. A no-op unless the id is the frame this sender last put on the
    * wire.
    */
-  function rollbackTimedOut(id: string | undefined): void {
+  function rollbackRefused(id: string | undefined): void {
     if (id === undefined || id !== lastSentId) return;
     lastSentId = null;
     const baseline = sentBaseline;
@@ -281,7 +281,7 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
     unsubError();
   }
 
-  return { send, rollbackTimedOut, destroy };
+  return { send, rollbackRefused, destroy };
 }
 
 // ---------------------------------------------------------------------------

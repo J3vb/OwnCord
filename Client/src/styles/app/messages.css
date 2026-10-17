@@ -237,6 +237,11 @@
 .message .msg-author {
   font-weight: 600;
   font-size: var(--font-size-lg);
+  /* Clip a very wide display name to the header line (WP 3C-9). */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   cursor: pointer;
   text-decoration-color: currentColor;
 }
@@ -506,6 +511,11 @@
 .msg-reply-ref .rr-author {
   color: var(--text-normal);
   font-weight: 600;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .msg-reply-ref .rr-text {
   overflow: hidden;

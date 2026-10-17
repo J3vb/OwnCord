@@ -369,7 +369,12 @@ export function wireDispatcher(
       // user seeing and saving a status nobody else has. This is the one
       // writer for server events, so the rollback (a store write) lives here;
       // a no-op for any frame the sender did not put on the wire.
-      if (payload.code === "TIMED_OUT") getActivePresenceSender()?.rollbackTimedOut(id);
+      // A BAD_REQUEST (a custom status the server's character or length rules
+      // refuse, WP 3C-9) leaves the same unaccepted optimistic value behind, so
+      // it takes the same rollback; the toast below carries the server's text.
+      if (payload.code === "TIMED_OUT" || payload.code === "BAD_REQUEST") {
+        getActivePresenceSender()?.rollbackRefused(id);
+      }
       // Never consumes the frame: the refused send/reaction/join still rolls back below.
       handleTimedOutRefusal(api, payload);
       // A refused Mark Unread restores the pointer and says so.

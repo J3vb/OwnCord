@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
+import { ApiClientError } from "../../src/lib/api";
 // The modules in SettingsOverlay's graph that install an app-lifetime window
 // listener at load. The re-import below reuses these instances, so the
 // vi.resetModules() does not install a second copy of each listener.
@@ -808,6 +809,130 @@ describe("SettingsOverlay", () => {
       expect(nameError?.getAttribute("role")).toBe("alert");
     });
 
+    overlay.destroy?.();
+  });
+
+  // WP 3C-9: the rename and display-name inputs carry the new limits.
+  function openUsernameEditor(onUpdateProfile = defaultOptions.onUpdateProfile) {
+    const overlay = createSettingsOverlay({ ...defaultOptions, onUpdateProfile });
+    overlay.mount(container);
+    overlay.open();
+    (container.querySelector(".account-field-edit") as HTMLElement).click();
+    const editInput = container.querySelector<HTMLInputElement>(
+      '[data-testid="username-edit-input"]',
+    )!;
+    const saveBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+      (b) => b.textContent === "Save",
+    ) as HTMLElement;
+    const error = container.querySelector<HTMLElement>("#username-edit-error")!;
+    return { overlay, editInput, saveBtn, error };
+  }
+
+  it("bounds the rename input and shows the rule", () => {
+    const { overlay, editInput } = openUsernameEditor();
+    expect(editInput.maxLength).toBe(32);
+    const hintId = editInput.getAttribute("aria-describedby")!.split(" ").at(-1)!;
+    const hint = container.querySelector<HTMLElement>(`#${hintId}`)!;
+    expect(hint.textContent).toContain("2–32 characters");
+    overlay.destroy?.();
+  });
+
+  it("does not send a rename the server's rules refuse (over the limit, reserved, bad character)", () => {
+    const onUpdateProfile = vi.fn().mockResolvedValue(undefined);
+    const { overlay, editInput, saveBtn, error } = openUsernameEditor(onUpdateProfile);
+    for (const [typed, message] of [
+      ["x".repeat(40), "Username must be 2–32 characters."],
+      ["Here", "Username is reserved."],
+      ["has space", "Username may only contain letters, digits, '_', '.' and '-'."],
+    ] as const) {
+      editInput.value = typed;
+      saveBtn.click();
+      expect(error.textContent).toBe(message);
+      expect(editInput.value).toBe(typed);
+    }
+    expect(onUpdateProfile).not.toHaveBeenCalled();
+    overlay.destroy?.();
+  });
+
+  it("shows the server's refusal of a rename inline and keeps the typed name", async () => {
+    const onUpdateProfile = vi
+      .fn()
+      .mockRejectedValue(new ApiClientError(400, "INVALID_INPUT", "username is reserved"));
+    const { overlay, editInput, saveBtn, error } = openUsernameEditor(onUpdateProfile);
+    editInput.value = "passes-client";
+    saveBtn.click();
+    await vi.waitFor(() => expect(error.textContent).toBe("Username is reserved"));
+    expect(editInput.value).toBe("passes-client");
+    expect(editInput.getAttribute("aria-invalid")).toBe("true");
+    overlay.destroy?.();
+  });
+
+  it("bounds the display name and does not send one over the limit", async () => {
+    const onUpdateProfile = vi.fn().mockResolvedValue(undefined);
+    const overlay = createSettingsOverlay({ ...defaultOptions, onUpdateProfile });
+    overlay.mount(container);
+    overlay.open();
+    const nameInput = container.querySelector<HTMLInputElement>(
+      '[data-testid="display-name-input"]',
+    )!;
+    expect(nameInput.maxLength).toBe(64); // 2 units per character; the 32-character cap is by count
+    const hint = nameInput.nextElementSibling as HTMLElement;
+    expect(hint.textContent).toBe("Up to 32 characters, on one line.");
+
+    const over = "n".repeat(50);
+    nameInput.value = over;
+    container.querySelector<HTMLElement>('[data-testid="profile-save-btn"]')!.click();
+    expect(onUpdateProfile).not.toHaveBeenCalled();
+    expect(hint.textContent).toBe("Display name must be at most 32 characters.");
+    expect(container.querySelector('[data-testid="profile-error"]')?.textContent).toBe(
+      "Check the highlighted field.",
+    );
+    expect(nameInput.value).toBe(over);
+    overlay.destroy?.();
+  });
+
+  it("sends the display name with runs of spaces collapsed, as the server stores it", async () => {
+    const onUpdateProfile = vi.fn().mockResolvedValue(undefined);
+    const overlay = createSettingsOverlay({ ...defaultOptions, onUpdateProfile });
+    overlay.mount(container);
+    overlay.open();
+    container.querySelector<HTMLInputElement>('[data-testid="display-name-input"]')!.value =
+      "  Ada    Lovelace ";
+    container.querySelector<HTMLElement>('[data-testid="profile-save-btn"]')!.click();
+    await vi.waitFor(() => expect(onUpdateProfile).toHaveBeenCalled());
+    expect(onUpdateProfile.mock.calls[0]![0].display_name).toBe("Ada Lovelace");
+    overlay.destroy?.();
+  });
+
+  it("shows the server's display-name refusal under the field and keeps the typed name", async () => {
+    const onUpdateProfile = vi
+      .fn()
+      .mockRejectedValue(
+        new ApiClientError(
+          400,
+          "INVALID_INPUT",
+          "display_name must not contain control characters or line breaks",
+        ),
+      );
+    const overlay = createSettingsOverlay({ ...defaultOptions, onUpdateProfile });
+    overlay.mount(container);
+    overlay.open();
+    const nameInput = container.querySelector<HTMLInputElement>(
+      '[data-testid="display-name-input"]',
+    )!;
+    const hint = nameInput.nextElementSibling as HTMLElement;
+    nameInput.value = "Ada";
+    container.querySelector<HTMLElement>('[data-testid="profile-save-btn"]')!.click();
+    await vi.waitFor(() =>
+      expect(hint.textContent).toBe(
+        "Display_name must not contain control characters or line breaks",
+      ),
+    );
+    // Said once, under the field; the status line points at it.
+    expect(container.querySelector('[data-testid="profile-error"]')?.textContent).toBe(
+      "Check the highlighted field.",
+    );
+    expect(nameInput.value).toBe("Ada");
     overlay.destroy?.();
   });
 

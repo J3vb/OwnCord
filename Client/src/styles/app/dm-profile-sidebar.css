@@ -61,6 +61,7 @@
   padding: 0 16px 16px;
 }
 .dps-username {
+  overflow-wrap: anywhere;
   text-align: center;
   font-size: var(--font-size-xl);
   font-weight: 600;

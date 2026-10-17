@@ -363,6 +363,12 @@
 .channel-item .ch-name {
   font-size: var(--font-size-md);
   flex: 1;
+  /* A DM row's name is a person's or a group's name: clip very wide valid
+     characters to the row (WP 3C-9). */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* Embedded DM rows reuse .channel-item but stack name + preview like the full
    DM sidebar. The body owns the flexible middle column; the time and badges

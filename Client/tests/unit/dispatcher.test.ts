@@ -4473,6 +4473,58 @@ describe("WS Dispatcher", () => {
     }
   });
 
+  // WP 3C-9: a custom status the server's character or length rules refuse
+  // comes back BAD_REQUEST; the optimistic value must not stay on screen, and
+  // the toast carries the server's own text.
+  it("rolls back the optimistic custom status on a BAD_REQUEST refusal and toasts the server's text", () => {
+    const presenceSender = createPresenceSender(mock.ws, createPresenceLimiter());
+    setActivePresenceSender(presenceSender);
+    try {
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: 1, username: "alice", avatar: null, role: "member" },
+      }));
+      membersStore.setState((prev) => ({
+        ...prev,
+        members: new Map([
+          [
+            1,
+            {
+              id: 1,
+              username: "alice",
+              avatar: null,
+              role: "member",
+              status: "online",
+              customStatus: "old text",
+            } as never,
+          ],
+        ]),
+      }));
+      saveCustomStatus("old text");
+      saveCustomStatus("bad\u202etext");
+      presenceSender.send("online", "bad\u202etext");
+      const id = (mock.ws.send as ReturnType<typeof vi.fn>).mock.results.at(-1)!.value as string;
+
+      mockShowToast.mockClear();
+      mock.dispatch(
+        "error",
+        { code: "BAD_REQUEST", message: "custom_status must not contain invisible characters" },
+        id,
+      );
+      expectConsole("error", /\[dispatcher\] Server error/);
+
+      expect(membersStore.getState().members.get(1)?.customStatus).toBe("old text");
+      expect(loadCustomStatus()).toBe("old text");
+      expect(mockShowToast).toHaveBeenCalledWith(
+        "Custom_status must not contain invisible characters",
+        "error",
+      );
+    } finally {
+      setActivePresenceSender(null);
+      presenceSender.destroy();
+    }
+  });
+
   it("wires error with an unrecognized code to the generic fallback toast (OC-0064)", () => {
     // The final fallthrough is the one place every unmatched error code
     // lands (e.g. a rejected fire-and-forget chat_edit) — it must not be

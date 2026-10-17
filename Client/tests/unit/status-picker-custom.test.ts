@@ -81,7 +81,8 @@ describe("StatusPicker", () => {
 
     const input = container.querySelector<HTMLInputElement>('[data-testid="custom-status-input"]')!;
     expect(input.value).toBe("shipping");
-    expect(input.getAttribute("maxlength")).toBe(String(MAX_CUSTOM_STATUS_LEN));
+    // Twice the limit in UTF-16 units, so astral text fits; the limit itself is by character count.
+    expect(input.getAttribute("maxlength")).toBe(String(MAX_CUSTOM_STATUS_LEN * 2));
 
     input.value = "  in a meeting  ";
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));

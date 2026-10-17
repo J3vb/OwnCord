@@ -69,6 +69,13 @@ import type { ContentViewId, NavigationDestinations } from "../../features/navig
 import { trackCurrentView } from "../../features/navigation/contentView";
 import { navigationText } from "../../i18n/navigation";
 import { shellText } from "../../i18n/shell";
+import { connectText } from "../../i18n/connect";
+import {
+  collapseSpaces,
+  lineHintText,
+  visibleLength,
+  MAX_GROUP_DM_NAME_LEN,
+} from "@lib/nameLimits";
 
 const log = createLogger("SidebarArea");
 
@@ -708,16 +715,21 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       label: shellText("dm.renameGroupHint"),
       initialValue: dm.name,
       placeholder: shellText("dm.groupNamePlaceholder"),
-      maxLength: 100,
+      maxLength: MAX_GROUP_DM_NAME_LEN,
+      hint: lineHintText(MAX_GROUP_DM_NAME_LEN),
       testId: "dm-rename-input",
-      onSubmit: (name) => {
-        // The store is updated by the dm_channel_open the server fans out to
-        // every participant, so the response is only used for the error path.
-        void api.renameGroupDm(channelId, name).catch((err: unknown) => {
-          const msg = errorText(err, shellText("dm.renameFailed"));
-          getToast()?.show(msg, "error");
-        });
-      },
+      validate: (name) =>
+        visibleLength(name) > MAX_GROUP_DM_NAME_LEN
+          ? connectText("limits.groupNameTooLong", { max: MAX_GROUP_DM_NAME_LEN })
+          : null,
+      // The store is updated by the dm_channel_open the server fans out to
+      // every participant, so the response is only used for the error path:
+      // the server's refusal shows under the field and the typed name stays.
+      onSubmit: (name) =>
+        api
+          .renameGroupDm(channelId, collapseSpaces(name))
+          .then(() => null)
+          .catch((err: unknown) => errorText(err, shellText("dm.renameFailed"))),
       onClose: () => {
         activePrompt = null;
       },

@@ -214,7 +214,7 @@ describe("createPresenceSender — a TIMED_OUT refusal rolls back the optimistic
   // The server broadcasts nothing when it refuses a timed-out custom status
   // (service/channel.go's requireNotTimedOut), so the optimistic apply in
   // send() and UserBar's saveCustomStatus would leave the user seeing a status
-  // nobody else has. The dispatcher's error chain calls rollbackTimedOut for a
+  // nobody else has. The dispatcher's error chain calls rollbackRefused for a
   // TIMED_OUT frame; this pins the sender half.
   it("restores the previous member status/text and the saved prefs for our own frame", () => {
     const { ws, sent } = createErrorableWs();
@@ -236,7 +236,7 @@ describe("createPresenceSender — a TIMED_OUT refusal rolls back the optimistic
       expect(membersStore.getState().members.get(1)?.customStatus).toBe("new text");
       expect(loadCustomStatus()).toBe("new text");
 
-      sender.rollbackTimedOut("id-1");
+      sender.rollbackRefused("id-1");
 
       // In memory (membersStore) and in what was saved (the prefs).
       expect(membersStore.getState().members.get(1)?.status).toBe("online");
@@ -258,8 +258,8 @@ describe("createPresenceSender — a TIMED_OUT refusal rolls back the optimistic
       sender.send("dnd", "new text");
       expect(sent).toHaveLength(1);
 
-      sender.rollbackTimedOut("some-other-id");
-      sender.rollbackTimedOut(undefined);
+      sender.rollbackRefused("some-other-id");
+      sender.rollbackRefused(undefined);
 
       expect(membersStore.getState().members.get(1)?.customStatus).toBe("new text");
       expect(loadCustomStatus()).toBe("new text");
@@ -277,7 +277,7 @@ describe("createPresenceSender — a TIMED_OUT refusal rolls back the optimistic
       saveCustomStatus("old text");
       saveCustomStatus("new text");
       sender.send("dnd", "new text");
-      sender.rollbackTimedOut("id-1");
+      sender.rollbackRefused("id-1");
       vi.advanceTimersByTime(60_000);
       expect(sent).toHaveLength(1);
     } finally {
@@ -300,7 +300,7 @@ describe("createPresenceSender — a TIMED_OUT refusal rolls back the optimistic
       expect(sent).toHaveLength(1);
 
       // The first frame's refusal must not roll back over the queued edit.
-      sender.rollbackTimedOut("id-1");
+      sender.rollbackRefused("id-1");
       expect(membersStore.getState().members.get(1)?.customStatus).toBe("yo");
       expect(loadCustomStatus()).toBe("yo");
 
@@ -310,7 +310,7 @@ describe("createPresenceSender — a TIMED_OUT refusal rolls back the optimistic
 
       // The queued frame is refused too: back to what the server really has,
       // not the first, also refused, text.
-      sender.rollbackTimedOut("id-2");
+      sender.rollbackRefused("id-2");
       expect(membersStore.getState().members.get(1)?.customStatus).toBe("old text");
       expect(loadCustomStatus()).toBe("old text");
     } finally {
@@ -331,7 +331,7 @@ describe("createPresenceSender — a TIMED_OUT refusal rolls back the optimistic
       sender.send("dnd");
       expect(sent).toHaveLength(1);
 
-      sender.rollbackTimedOut("id-1");
+      sender.rollbackRefused("id-1");
       expect(membersStore.getState().members.get(1)?.customStatus).toBe("old text");
       expect(membersStore.getState().members.get(1)?.status).toBe("dnd");
       expect(authStore.getState().user?.custom_status).toBe("old text");
