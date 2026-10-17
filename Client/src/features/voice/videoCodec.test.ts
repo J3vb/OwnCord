@@ -460,10 +460,43 @@ describe("resolveVideoCodec", () => {
     expect(encodingInfo).not.toHaveBeenCalled();
   });
 
-  it("publishes H.264 when the user picked it, without probing", async () => {
-    savePref("h264");
-    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("h264");
-    expect(encodingInfo).not.toHaveBeenCalled();
+  describe("a saved H.264 off Linux", () => {
+    beforeEach(() => savePref("h264"));
+
+    it("publishes H.264 when the probe reports a hardware encoder", async () => {
+      encodingInfo.mockResolvedValue(HARDWARE);
+      await expect(resolveVideoCodec(track(3440, 1440), 30, 8_000_000)).resolves.toBe("h264");
+      expect(encodingInfo).toHaveBeenCalledWith({
+        type: "webrtc",
+        video: {
+          contentType: "video/H264",
+          width: 3440,
+          height: 1440,
+          bitrate: 8_000_000,
+          framerate: 30,
+        },
+      });
+    });
+
+    it("publishes VP8 when the probe reports a software encoder", async () => {
+      encodingInfo.mockResolvedValue({ supported: true, smooth: false, powerEfficient: false });
+      await expect(resolveVideoCodec(track(3440, 1440), 30, 8_000_000)).resolves.toBe("vp8");
+    });
+
+    it("publishes VP8 when the probe reports H.264 unsupported", async () => {
+      encodingInfo.mockResolvedValue({ supported: false, smooth: false, powerEfficient: true });
+      await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+    });
+
+    it("keeps H.264 when the probe rejects", async () => {
+      encodingInfo.mockRejectedValue(new TypeError("unsupported config"));
+      await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("h264");
+    });
+
+    it("keeps H.264 where MediaCapabilities is missing", async () => {
+      vi.stubGlobal("navigator", {});
+      await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("h264");
+    });
   });
 
   it("probes H.264 for WebRTC at the captured size, frame rate and bitrate on Auto", async () => {
@@ -503,6 +536,7 @@ describe("resolveVideoCodec", () => {
   it("still publishes H.264 on Intel graphics when the user picked it", async () => {
     savePref("h264");
     stubGpu(INTEL);
+    encodingInfo.mockResolvedValue(HARDWARE);
 
     await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("h264");
   });
@@ -561,10 +595,11 @@ describe("resolveVideoCodec", () => {
       await expect(resolveVideoCodec(track(1920, 1080), 120, 12_000_000)).resolves.toBe("vp8");
     });
 
-    it("keeps a saved H.264 without probing", async () => {
+    it("keeps a saved H.264 the hardware probe accepts", async () => {
       savePref("h264");
+      encodingInfo.mockResolvedValue(HARDWARE);
       await expect(resolveVideoCodec(track(1920, 1080), 120, 12_000_000)).resolves.toBe("h264");
-      expect(encodingInfo).not.toHaveBeenCalled();
+      expect(encodingInfo).toHaveBeenCalledTimes(1);
     });
 
     it("does not probe a saved VP8 at 60 fps", async () => {
@@ -605,7 +640,10 @@ function inChannel(peers: Record<number, readonly string[] | undefined>): void {
 }
 
 describe("resolveVideoCodec with channel peers", () => {
-  beforeEach(() => resetVoiceStore());
+  beforeEach(() => {
+    resetVoiceStore();
+    encodingInfo.mockResolvedValue(HARDWARE);
+  });
 
   it("downgrades a saved H.264 to VP8 for a VP8-only peer", async () => {
     savePref("h264");

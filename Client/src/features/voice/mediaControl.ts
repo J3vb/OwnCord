@@ -32,6 +32,7 @@ import {
   disableScreenshare as doDisableScreenshare,
   reconcileVideoFlags as doReconcileVideoFlags,
   inPlaceSourceChange,
+  getLocalScreenshareStats,
 } from "../../lib/screenShare";
 
 // Same logger tag as before the extraction, so the media log lines are unchanged.
@@ -68,6 +69,7 @@ export class MediaControl {
     getCameraState: () => this._cameraState,
     getScreenState: () => this._screenState,
     getDeps: () => this._videoTrackDeps,
+    readScreenSenderSample: () => getLocalScreenshareStats(this._room),
     onSwitchError: (err) => log.warn("Codec switch failed", err),
   });
   private latestVideoDevice: string | null = null;
