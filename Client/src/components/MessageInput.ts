@@ -25,6 +25,7 @@ import {
   createChannelAutocomplete,
   type ChannelAutocompleteComponent,
 } from "@components/ChannelAutocomplete";
+import { claimComposer } from "../features/messaging/activeComposer";
 import { emojiCatalog, loadEmojiCatalog } from "../features/messaging/emojiCatalog";
 import {
   createSlashAutocomplete,
@@ -152,6 +153,12 @@ export type MessageInputComponent = MountableComponent & {
   clearReply(): void;
   /** Put the caret back in the composer (the inline editor closed). */
   focus(): void;
+  /**
+   * Insert `@username ` at the caret (member menu's Mention). Returns false,
+   * and leaves the draft alone, when the composer is not mounted, disabled or
+   * read-only.
+   */
+  insertMention(username: string): boolean;
   /** Capture the current unsent state so a channel switch can carry it. */
   getDraft(): ComposerDraft;
   /** Restore a previously captured draft into this (fresh) composer. */
@@ -283,6 +290,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   let lastSendTime = 0;
 
   let textarea: HTMLTextAreaElement | null = null;
+  /** Releases this composer's claim on the member menu's Mention target. */
+  let releaseComposer: (() => void) | null = null;
   let replyBar: HTMLDivElement | null = null;
   let replyText: HTMLSpanElement | null = null;
   let replyPingBtn: HTMLButtonElement | null = null;
@@ -1763,6 +1772,11 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     appendChildren(root, replyBar, attachmentPreviewBar, inputBox, slowModeNoteEl);
     applySlowModeNote();
     container.appendChild(root);
+    releaseComposer?.();
+    releaseComposer = claimComposer({
+      insertMention: insertMentionAtCaret,
+      canMention: canTakeText,
+    });
     // Apply any initial disabled reason before focusing.
     applyDisabledState();
     if (disabledReason === null) {
@@ -1771,6 +1785,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   }
 
   function destroy(): void {
+    releaseComposer?.();
+    releaseComposer = null;
     // Close any open pickers and their document listeners before aborting
     cleanupPickers?.();
     cleanupPickers = null;
@@ -1805,6 +1821,29 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
 
   function openFilePicker(): void {
     openPicker?.();
+  }
+
+  /** Whether the composer would take text right now. */
+  function canTakeText(): boolean {
+    return textarea !== null && disabledReason === null && !textarea.readOnly && !textarea.disabled;
+  }
+
+  /** Insert `@username ` at the caret, spaced from a preceding word. */
+  function insertMentionAtCaret(username: string): boolean {
+    if (textarea === null || !canTakeText()) return false;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const before = textarea.value.slice(0, start);
+    const after = textarea.value.slice(end);
+    const lead = before.length > 0 && !/\s$/.test(before) ? " " : "";
+    const inserted = `${lead}@${username} `;
+    textarea.value = before + inserted + after;
+    const pos = before.length + inserted.length;
+    textarea.selectionStart = pos;
+    textarea.selectionEnd = pos;
+    autoResize();
+    textarea.focus();
+    return true;
   }
 
   function togglePicker(kind: "emoji" | "gif"): void {
@@ -1955,6 +1994,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     setReplyTo,
     clearReply,
     focus,
+    insertMention: insertMentionAtCaret,
     isIdle,
     setDisabled,
     setSendGate,

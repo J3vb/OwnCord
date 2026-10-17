@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMemberContextMenu, createChannelContextMenu } from "@components/AdminActions";
 import { setDeveloperMode } from "../helpers/message-actions-fixtures";
 import type { MemberContextMenuOptions, ChannelContextMenuOptions } from "@components/AdminActions";
+import type { VoiceModMenuOptions } from "@components/channel-sidebar/volume-menu";
 
 describe("AdminActions", () => {
   let container: HTMLDivElement;
@@ -586,5 +587,341 @@ describe("AdminActions", () => {
       });
       result.destroy();
     });
+  });
+});
+
+describe("MemberContextMenu - full menu (3C-3)", () => {
+  let container: HTMLDivElement;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    setDeveloperMode(false);
+    container.remove();
+  });
+
+  function open(overrides: Partial<MemberContextMenuOptions> = {}) {
+    const options: MemberContextMenuOptions = {
+      userId: 5,
+      username: "Dave",
+      currentRole: "member",
+      availableRoles: ["admin", "member"],
+      showAdminActions: false,
+      isBlocked: false,
+      onToggleBlock: vi.fn(async () => {}),
+      onKick: vi.fn(async () => {}),
+      onBan: vi.fn(async () => {}),
+      onChangeRole: vi.fn(async () => {}),
+      ...overrides,
+    };
+    const result = createMemberContextMenu(options);
+    container.appendChild(result.element);
+    return result;
+  }
+
+  /** Top-level rows in order; a submenu trigger reports its own label only. */
+  function labels(el: HTMLElement): string[] {
+    return Array.from(el.children)
+      .filter((c) => c.classList.contains("context-menu__item"))
+      .map((c) => c.firstChild?.textContent ?? "");
+  }
+
+  function row(el: HTMLElement, label: string): HTMLElement {
+    const found = Array.from(el.querySelectorAll<HTMLElement>(".context-menu__item")).find(
+      (i) => i.firstChild?.textContent === label,
+    );
+    if (found === undefined) throw new Error(`no menu row "${label}"`);
+    return found;
+  }
+
+  function voiceMod(over: Partial<VoiceModMenuOptions> = {}): VoiceModMenuOptions {
+    return {
+      serverMuted: false,
+      serverDeafened: false,
+      moveTargets: [],
+      onServerMute: vi.fn(),
+      onServerDeafen: vi.fn(),
+      onMove: vi.fn(),
+      onDisconnect: vi.fn(),
+      ...over,
+    };
+  }
+
+  // (1)
+  it("puts Profile first and calls onProfile", () => {
+    const onProfile = vi.fn();
+    const { element, destroy } = open({ onProfile, onMention: vi.fn() });
+    expect(labels(element)[0]).toBe("Profile");
+    row(element, "Profile").click();
+    expect(onProfile).toHaveBeenCalledTimes(1);
+    destroy();
+  });
+
+  // (2)
+  it("Mention calls onMention and closes the menu", () => {
+    const onMention = vi.fn();
+    const { element } = open({ onMention });
+    row(element, "Mention").click();
+    expect(onMention).toHaveBeenCalledTimes(1);
+    expect(container.querySelector(".context-menu")).toBeNull();
+  });
+
+  it("greys Mention with its reason as the title when it is unavailable", () => {
+    const onMention = vi.fn();
+    const { element, destroy } = open({ onMention, mentionDisabledReason: "No composer" });
+    const mention = row(element, "Mention");
+    expect(mention.getAttribute("aria-disabled")).toBe("true");
+    expect(mention.title).toBe("No composer");
+    mention.click();
+    expect(onMention).not.toHaveBeenCalled();
+    expect(container.querySelector(".context-menu")).not.toBeNull();
+    destroy();
+  });
+
+  // (3)
+  it("shows Message and Call only when their callbacks are given", () => {
+    const none = open({ onProfile: vi.fn() });
+    expect(labels(none.element)).toEqual(["Profile", "Block"]);
+    none.destroy();
+
+    const onMessage = vi.fn();
+    const onCall = vi.fn();
+    const both = open({ onProfile: vi.fn(), onMessage, onCall });
+    expect(labels(both.element)).toEqual(["Profile", "Message", "Call", "Block"]);
+    row(both.element, "Message").click();
+    expect(onMessage).toHaveBeenCalledWith();
+    expect(container.querySelector(".context-menu")).toBeNull();
+  });
+
+  // (4)
+  it("renders the voice trio from the options, flips the labels and fires Disconnect", () => {
+    const mod = voiceMod({ serverMuted: true, serverDeafened: false });
+    const { element } = open({ voiceMod: mod });
+    expect(labels(element)).toEqual(["Server Unmute", "Server Deafen", "Disconnect", "Block"]);
+    row(element, "Server Deafen").click();
+    expect(mod.onServerDeafen).toHaveBeenCalledWith(true);
+
+    const again = open({ voiceMod: mod });
+    row(again.element, "Server Unmute").click();
+    expect(mod.onServerMute).toHaveBeenCalledWith(false);
+
+    const third = open({ voiceMod: mod });
+    row(third.element, "Disconnect").click();
+    expect(mod.onDisconnect).toHaveBeenCalledTimes(1);
+    expect(container.querySelector(".context-menu")).toBeNull();
+  });
+
+  // (5)
+  it.each([
+    ["a string verdict", "Voice moderation is unavailable", "Voice moderation is unavailable"],
+    [
+      "a disabledReason while offline",
+      voiceMod({ disabledReason: "Not connected" }),
+      "Not connected",
+    ],
+  ] as const)("greys all three voice rows for %s", (_name, mod, reason) => {
+    const { element, destroy } = open({ voiceMod: mod });
+    const rows = ["Server Mute", "Server Deafen", "Disconnect"].map((l) => row(element, l));
+    for (const r of rows) {
+      expect(r.getAttribute("aria-disabled")).toBe("true");
+      expect(r.title).toBe(reason);
+      r.click();
+    }
+    if (typeof mod !== "string") {
+      expect(mod.onServerMute).not.toHaveBeenCalled();
+      expect(mod.onServerDeafen).not.toHaveBeenCalled();
+      expect(mod.onDisconnect).not.toHaveBeenCalled();
+    }
+    expect(container.querySelector(".context-menu")).not.toBeNull();
+    destroy();
+  });
+
+  describe("Timeout", () => {
+    const moderating = (over: Partial<MemberContextMenuOptions> = {}) => ({
+      showAdminActions: true,
+      canKick: false,
+      canBan: false,
+      canManageRoles: false,
+      canTimeout: true,
+      ...over,
+    });
+
+    // (6)
+    it("lists the six presets in order and sends their seconds", async () => {
+      const onTimeout = vi.fn(async (_seconds: number) => {});
+      const { element, destroy } = open(
+        moderating({ onTimeout, onRemoveTimeout: vi.fn(async () => {}), timeoutState: "none" }),
+      );
+      const sub = row(element, "Timeout").querySelector<HTMLElement>(".context-menu__submenu")!;
+      const presets = Array.from(sub.querySelectorAll<HTMLElement>(".context-menu__item"));
+      expect(presets.map((p) => p.textContent)).toEqual([
+        "60 Seconds",
+        "5 Minutes",
+        "10 Minutes",
+        "1 Hour",
+        "1 Day",
+        "1 Week",
+      ]);
+      for (const preset of presets) {
+        preset.click();
+        // oxlint-disable-next-line no-await-in-loop -- each click must settle before the next
+        await Promise.resolve();
+        // oxlint-disable-next-line no-await-in-loop
+        await Promise.resolve();
+      }
+      expect(onTimeout.mock.calls.map((c) => c[0])).toEqual([60, 300, 600, 3600, 86400, 604800]);
+      destroy();
+    });
+
+    // (7)
+    it("keeps one in-flight guard across all presets", async () => {
+      let finish: () => void = () => {};
+      const onTimeout = vi.fn(
+        () =>
+          new Promise<void>((res) => {
+            finish = res;
+          }),
+      );
+      const { element, destroy } = open(moderating({ onTimeout, timeoutState: "none" }));
+      const presets = Array.from(
+        row(element, "Timeout").querySelectorAll<HTMLElement>(
+          ".context-menu__submenu .context-menu__item",
+        ),
+      );
+      presets[0]!.click();
+      presets[3]!.click();
+      presets[0]!.click();
+      expect(onTimeout).toHaveBeenCalledTimes(1);
+      expect(onTimeout).toHaveBeenCalledWith(60);
+
+      finish();
+      await Promise.resolve();
+      await Promise.resolve();
+      presets[3]!.click();
+      expect(onTimeout).toHaveBeenCalledTimes(2);
+      expect(onTimeout).toHaveBeenLastCalledWith(3600);
+      destroy();
+    });
+
+    // (8)
+    it("offers only Remove Timeout when a timeout is active, and one click lifts it", () => {
+      const onRemoveTimeout = vi.fn(async () => {});
+      const { element, destroy } = open(
+        moderating({ onTimeout: vi.fn(async () => {}), onRemoveTimeout, timeoutState: "active" }),
+      );
+      expect(labels(element)).toEqual(["Remove Timeout", "Block"]);
+      const remove = row(element, "Remove Timeout");
+      remove.click();
+      remove.click();
+      expect(onRemoveTimeout).toHaveBeenCalledTimes(1);
+      destroy();
+    });
+
+    // (9)
+    it("offers both when the state is unknown (an older server)", () => {
+      const { element, destroy } = open(
+        moderating({
+          onTimeout: vi.fn(async () => {}),
+          onRemoveTimeout: vi.fn(async () => {}),
+          timeoutState: "unknown",
+        }),
+      );
+      expect(labels(element)).toEqual(["Timeout", "Remove Timeout", "Block"]);
+      destroy();
+    });
+
+    // (10)
+    it("offers neither without the timeout callbacks", () => {
+      const { element, destroy } = open(moderating());
+      expect(labels(element)).toEqual(["Block"]);
+      destroy();
+    });
+
+    it("offers neither when canTimeout is false", () => {
+      const { element, destroy } = open(
+        moderating({
+          canTimeout: false,
+          onTimeout: vi.fn(async () => {}),
+          onRemoveTimeout: vi.fn(async () => {}),
+        }),
+      );
+      expect(labels(element)).toEqual(["Block"]);
+      destroy();
+    });
+  });
+
+  // (11)
+  it("on yourself shows Profile and Mention only, never Message, Call, moderation or Block", () => {
+    const { element, destroy } = open({
+      isSelf: true,
+      showAdminActions: true,
+      onProfile: vi.fn(),
+      onMention: vi.fn(),
+      onMessage: vi.fn(),
+      onCall: vi.fn(),
+      voiceMod: voiceMod(),
+      onTimeout: vi.fn(async () => {}),
+      onRemoveTimeout: vi.fn(async () => {}),
+    });
+    expect(labels(element)).toEqual(["Profile", "Mention"]);
+    destroy();
+  });
+
+  it("on yourself adds Copy User ID in Developer Mode", () => {
+    setDeveloperMode(true);
+    const { element, destroy } = open({
+      isSelf: true,
+      onProfile: vi.fn(),
+      onMention: vi.fn(),
+    });
+    expect(labels(element)).toEqual(["Profile", "Mention", "Copy User ID"]);
+    destroy();
+  });
+
+  // (12)
+  it("orders a full admin menu for a member in voice, Copy User ID directly above Block", () => {
+    setDeveloperMode(true);
+    const { element, destroy } = open({
+      showAdminActions: true,
+      canKick: true,
+      canBan: true,
+      canManageRoles: true,
+      canTimeout: true,
+      timeoutState: "none",
+      onProfile: vi.fn(),
+      onMention: vi.fn(),
+      onMessage: vi.fn(),
+      onCall: vi.fn(),
+      voiceMod: voiceMod(),
+      onTimeout: vi.fn(async () => {}),
+      onRemoveTimeout: vi.fn(async () => {}),
+    });
+    expect(labels(element)).toEqual([
+      "Profile",
+      "Mention",
+      "Message",
+      "Call",
+      "Server Mute",
+      "Server Deafen",
+      "Disconnect",
+      "Change Role",
+      "Timeout",
+      "Force Logout",
+      "Ban",
+      "Copy User ID",
+      "Block",
+    ]);
+    destroy();
+  });
+
+  it("tells its owner once when the menu closes, by any path", () => {
+    const onClosed = vi.fn();
+    const { destroy } = open({ onClosed });
+    destroy();
+    destroy();
+    expect(onClosed).toHaveBeenCalledTimes(1);
   });
 });

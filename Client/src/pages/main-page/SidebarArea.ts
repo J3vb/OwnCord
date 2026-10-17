@@ -848,6 +848,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
           }
           void handleCreateDm(userId, dmDeps, () => opts.onStartCall?.());
         },
+        onVoiceModerate: createVoiceModerationCallbacks(ws),
       });
       contentSlot.appendChild(memberSection.element);
       channelModeExtras.push(memberSection.memberListComponent);

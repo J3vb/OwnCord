@@ -826,6 +826,88 @@
   color: var(--text-link);
 }
 
+.msg-codeblock .tok-inserted {
+  color: var(--green);
+}
+
+.msg-codeblock .tok-deleted {
+  color: var(--red);
+}
+
+/* ansi blocks: Discord's fixed palette (not theme tokens — the author picked
+   these colours). Light theme darkens the two that vanish on a pale block. */
+.msg-codeblock .ansi-30 {
+  color: #4f545c;
+}
+.msg-codeblock .ansi-31 {
+  color: #dc322f;
+}
+.msg-codeblock .ansi-32 {
+  color: #859900;
+}
+.msg-codeblock .ansi-33 {
+  color: #b58900;
+}
+.msg-codeblock .ansi-34 {
+  color: #268bd2;
+}
+.msg-codeblock .ansi-35 {
+  color: #d33682;
+}
+.msg-codeblock .ansi-36 {
+  color: #2aa198;
+}
+.msg-codeblock .ansi-37 {
+  color: #fff;
+}
+.msg-codeblock .ansi-40 {
+  background: #002b36;
+}
+.msg-codeblock .ansi-41 {
+  background: #cb4b16;
+}
+.msg-codeblock .ansi-42 {
+  background: #586e75;
+}
+.msg-codeblock .ansi-43 {
+  background: #657b83;
+}
+.msg-codeblock .ansi-44 {
+  background: #839496;
+}
+.msg-codeblock .ansi-45 {
+  background: #6c71c4;
+}
+.msg-codeblock .ansi-46 {
+  background: #93a1a1;
+}
+.msg-codeblock .ansi-47 {
+  background: #fdf6e3;
+}
+/* A background with no foreground set gets text that reads on it. */
+.msg-codeblock [class*="ansi-4"]:not([class*="ansi-3"]) {
+  color: #fdf6e3;
+}
+.msg-codeblock .ansi-47:not([class*="ansi-3"]),
+.msg-codeblock .ansi-46:not([class*="ansi-3"]) {
+  color: #002b36;
+}
+.msg-codeblock .ansi-b {
+  font-weight: 700;
+}
+
+.msg-codeblock .ansi-u {
+  text-decoration: underline;
+}
+
+body.theme-light .msg-codeblock .ansi-33 {
+  color: #8a6a00;
+}
+
+body.theme-light .msg-codeblock .ansi-37 {
+  color: #586e75;
+}
+
 /* Markdown blocks */
 /* Paragraph runs keep their newlines; block children handle their own layout. */
 .message .msg-text .md-p {
