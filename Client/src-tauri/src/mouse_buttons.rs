@@ -8,7 +8,7 @@
 //! the tree under tao), so a system without libXi, or a session with no X
 //! display, simply reports no side buttons.
 
-use std::os::raw::{c_double, c_int, c_uint, c_ulong};
+use std::os::raw::{c_char, c_double, c_int, c_uint, c_ulong};
 use std::ptr;
 
 use x11_dl::xinput2::{XIButtonState, XIModifierState, XInput2};
@@ -17,6 +17,17 @@ use x11_dl::xlib::{Display, Xlib};
 /// X button numbers of the back and forward side buttons.
 const X_BUTTON_BACK: usize = 8;
 const X_BUTTON_FORWARD: usize = 9;
+
+/// X keycodes of F21-F24, which `device_query` has no Keycode for. Read by
+/// physical key, like `device_query` reads F1-F20: evdev KEY_F21..KEY_F24
+/// (191..194) plus 8. The default keymap gives these keys touchpad keysyms,
+/// so a keysym lookup would find nothing.
+const KEYCODES_F21_F24: [u8; 4] = [199, 200, 201, 202];
+
+/// Whether `keycode` is set in an `XQueryKeymap` bit vector.
+fn keymap_has(keymap: &[u8; 32], keycode: u8) -> bool {
+    keycode != 0 && keymap[usize::from(keycode / 8)] & (1 << (keycode % 8)) != 0
+}
 
 /// Whether X button `button` is set in an XInput2 button mask.
 fn mask_has(mask: &[u8], button: usize) -> bool {
@@ -90,6 +101,15 @@ impl SideButtons {
         })
     }
 
+    /// (F21, F22, F23, F24) held right now, from the core keymap.
+    pub fn held_f21_f24(&self) -> [bool; 4] {
+        let mut raw: [c_char; 32] = [0; 32];
+        // SAFETY: display is live; XQueryKeymap writes exactly 32 bytes.
+        unsafe { (self.xlib.XQueryKeymap)(self.display, raw.as_mut_ptr()) };
+        let keymap = raw.map(|b| u8::from_ne_bytes(b.to_ne_bytes()));
+        KEYCODES_F21_F24.map(|code| keymap_has(&keymap, code))
+    }
+
     /// (Mouse 4, Mouse 5) held right now on the client pointer.
     pub fn held(&self) -> (bool, bool) {
         let mut device: c_int = 0;
@@ -159,13 +179,34 @@ impl Drop for SideButtons {
 
 #[cfg(test)]
 mod tests {
-    use super::{side_buttons_from_mask, SideButtons};
+    use super::{keymap_has, side_buttons_from_mask, SideButtons};
 
     #[test]
     fn reads_buttons_8_and_9_from_the_second_mask_byte() {
         assert_eq!(side_buttons_from_mask(&[0, 0b0000_0001]), (true, false));
         assert_eq!(side_buttons_from_mask(&[0, 0b0000_0010]), (false, true));
         assert_eq!(side_buttons_from_mask(&[0, 0b0000_0011]), (true, true));
+    }
+
+    #[test]
+    fn keymap_bits_are_read_per_keycode() {
+        let mut keymap = [0u8; 32];
+        // KEY_F21 is evdev 191, X keycode 199 = byte 24, bit 7.
+        keymap[24] = 0b1000_0000;
+        assert!(keymap_has(&keymap, 199));
+        assert!(!keymap_has(&keymap, 200));
+        // Keycode 0 means unmapped and never reads as held.
+        keymap[0] = 1;
+        assert!(!keymap_has(&keymap, 0));
+    }
+
+    #[test]
+    fn f21_to_f24_are_the_evdev_keycodes() {
+        // KEY_F21..KEY_F24 are evdev 191..194; X adds 8.
+        assert_eq!(
+            super::KEYCODES_F21_F24,
+            [191 + 8, 192 + 8, 193 + 8, 194 + 8]
+        );
     }
 
     #[test]

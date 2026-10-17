@@ -123,6 +123,10 @@ fn layout_vk(vk: i32) -> i32 {
     }
 }
 
+/// F21 (the first of F21-F24, VK 0x84..=0x87), which `device_query` cannot read.
+#[cfg(any(target_os = "linux", test))]
+const VK_F21: i32 = 0x84;
+
 /// Mouse 4 and Mouse 5 (XBUTTON1/XBUTTON2).
 const VK_XBUTTON1: i32 = 0x05;
 const VK_XBUTTON2: i32 = 0x06;
@@ -131,8 +135,25 @@ const VK_XBUTTON2: i32 = 0x06;
 fn is_key_down(vk: i32) -> bool {
     match vk {
         VK_XBUTTON1 | VK_XBUTTON2 => side_button_vks(held_side_buttons()).contains(&vk),
+        VK_F21..=0x87 => f21_f24_vks(held_f21_f24()).contains(&vk),
         _ => linux::vk_held(vk, &held_keys()),
     }
+}
+
+/// The F21-F24 VKs held in an (F21, F22, F23, F24) reading.
+#[cfg(any(target_os = "linux", test))]
+fn f21_f24_vks(held: [bool; 4]) -> Vec<i32> {
+    (VK_F21..)
+        .zip(held)
+        .filter_map(|(vk, down)| down.then_some(vk))
+        .collect()
+}
+
+/// (F21, F22, F23, F24) held now; all false with no X display (or no XInput2,
+/// since the reading shares the side-button connection).
+#[cfg(target_os = "linux")]
+fn held_f21_f24() -> [bool; 4] {
+    SIDE_BUTTONS.with(|b| b.as_ref().map_or([false; 4], |b| b.held_f21_f24()))
 }
 
 /// The side-button VKs held in a (Mouse 4, Mouse 5) reading.
@@ -344,6 +365,14 @@ mod linux {
         (0x79, Keycode::F10),
         (0x7A, Keycode::F11),
         (0x7B, Keycode::F12),
+        (0x7C, Keycode::F13),
+        (0x7D, Keycode::F14),
+        (0x7E, Keycode::F15),
+        (0x7F, Keycode::F16),
+        (0x80, Keycode::F17),
+        (0x81, Keycode::F18),
+        (0x82, Keycode::F19),
+        (0x83, Keycode::F20),
         // Lock keys
         (0x14, Keycode::CapsLock),
         // Punctuation
@@ -629,6 +658,7 @@ fn bindable_keys_down() -> Vec<i32> {
         .collect();
     down.dedup();
     down.extend(side_button_vks(held_side_buttons()));
+    down.extend(f21_f24_vks(held_f21_f24()));
     down
 }
 
@@ -778,6 +808,10 @@ mod tests {
     fn allowed_vk_accepts_non_text_keys() {
         assert!(is_allowed_ptt_vk(0x70)); // F1
         assert!(is_allowed_ptt_vk(0x7B)); // F12
+        assert!(is_allowed_ptt_vk(0x7C)); // F13
+        assert!(is_allowed_ptt_vk(0x83)); // F20
+        assert!(is_allowed_ptt_vk(0x87)); // F24
+        assert!(!is_allowed_ptt_vk(0x88));
         assert!(is_allowed_ptt_vk(0x25)); // Left arrow
         assert!(is_allowed_ptt_vk(0x2E)); // Delete
         assert!(is_allowed_ptt_vk(0x05)); // Mouse X1
@@ -861,6 +895,8 @@ mod tests {
             (Keycode::Enter, 0x0D),
             (Keycode::F1, 0x70),
             (Keycode::F12, 0x7B),
+            (Keycode::F13, 0x7C),
+            (Keycode::F20, 0x83),
             (Keycode::CapsLock, 0x14),
             (Keycode::Grave, 0xC0),
         ];
@@ -877,6 +913,13 @@ mod tests {
                 "vk_to_keycode failed for vk={vk:#04x}"
             );
         }
+    }
+
+    #[test]
+    fn f21_to_f24_map_to_their_vks() {
+        assert_eq!(f21_f24_vks([false; 4]), Vec::<i32>::new());
+        assert_eq!(f21_f24_vks([true, false, false, true]), vec![0x84, 0x87]);
+        assert_eq!(f21_f24_vks([false, true, true, false]), vec![0x85, 0x86]);
     }
 
     #[cfg(target_os = "linux")]
