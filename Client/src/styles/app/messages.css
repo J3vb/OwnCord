@@ -870,6 +870,14 @@
 .msg-codeblock .ansi-47 {
   background: #fdf6e3;
 }
+/* A background with no foreground set gets text that reads on it. */
+.msg-codeblock [class*="ansi-4"]:not([class*="ansi-3"]) {
+  color: #fdf6e3;
+}
+.msg-codeblock .ansi-47:not([class*="ansi-3"]),
+.msg-codeblock .ansi-46:not([class*="ansi-3"]) {
+  color: #002b36;
+}
 .msg-codeblock .ansi-b {
   font-weight: 700;
 }
