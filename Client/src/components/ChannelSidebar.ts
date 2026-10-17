@@ -5,7 +5,6 @@
  */
 
 import { Disposable } from "@lib/disposable";
-import { formatBadgeCount } from "@lib/formatting";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { reconcileChildren } from "@lib/reconcile";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
@@ -82,6 +81,8 @@ export interface ChannelSidebarOptions {
   readonly onReorderChannel?: (reorders: readonly ChannelReorderData[]) => void;
   /** Bulk-delete the newest `count` messages; gated on MANAGE_MESSAGES. */
   readonly onPurgeChannel?: (channel: Channel, count: number) => Promise<void>;
+  /** Called when the user picks Invite People from a channel's menu. */
+  readonly onInviteFromChannel?: (channel: Channel) => void;
   /** Called when the user clicks a voice user row to watch their stream. */
   readonly onWatchStream?: (userId: number) => void;
 }
@@ -146,7 +147,9 @@ function renderTextChannelItem(
   const classes = [
     "channel-item",
     isActive ? "active" : "",
-    channel.unreadCount > 0 ? "unread" : "",
+    // A muted channel is quiet: no bold name and no pill for plain unread.
+    // A mention is addressed to the reader, so it still lights the row.
+    rowLooksUnread(channel) ? "unread" : "",
     channel.mentionCount > 0 ? "mentioned" : "",
   ]
     .filter(Boolean)
@@ -161,6 +164,11 @@ function renderTextChannelItem(
   });
   item.dataset.channelId = String(channel.id);
   item.setAttribute("aria-current", isActive ? "page" : "false");
+  // The pill is drawn in CSS only, so name the unread state for screen
+  // readers; a mention announces itself through its badge.
+  if (rowLooksUnread(channel) && channel.mentionCount === 0) {
+    item.setAttribute("aria-description", shellText("channel.unread"));
+  }
 
   const prefix = createElement("span", { class: "ch-icon", "aria-hidden": "true" });
   if (channel.type === "announcement") {
@@ -182,17 +190,16 @@ function renderTextChannelItem(
     item.appendChild(privateIndicator(channel.id));
   }
 
-  // A muted channel still counts its unreads — it has not stopped existing,
-  // it has stopped shouting — so the badge dims rather than disappearing. The
-  // mention badge is deliberately left alone: a mute silences chatter, never
-  // something addressed to the reader.
+  // A server channel shows plain unread as a bold name and a white pill only
+  // (Discord parity): the count is for mentions and for DMs. A mute silences
+  // chatter, never something addressed to the reader, so the mention badge is
+  // left alone.
   const muted = isChannelMuted(channel.id);
   if (muted) {
     item.classList.add("muted");
   }
 
-  // A mention badge outranks the plain unread badge: only one is shown, and
-  // it counts the mentions, not the messages.
+  // The mention badge counts the mentions, not the messages.
   if (channel.mentionCount > 0) {
     const badge = createElement(
       "span",
@@ -200,13 +207,6 @@ function renderTextChannelItem(
       String(channel.mentionCount),
     );
     badge.title = shellText("channel.mentions", { count: channel.mentionCount });
-    item.appendChild(badge);
-  } else if (channel.unreadCount > 0) {
-    const badge = createElement(
-      "span",
-      { class: muted ? "unread-badge muted" : "unread-badge" },
-      formatBadgeCount(channel.unreadCount),
-    );
     item.appendChild(badge);
   }
 
@@ -258,11 +258,19 @@ export function buildVoiceModOptions(
 }
 
 /**
- * Whether a text-style row draws its unread state. The same condition
- * `renderTextChannelItem` uses for the "unread" class; voice rows never do.
+ * Whether a text-style row has unread messages; voice rows never do. Muted
+ * rows count, so a collapsed category still flags a hidden muted channel.
  */
 function rowIsUnread(channel: Channel): boolean {
   return channel.type !== "voice" && channel.unreadCount > 0;
+}
+
+/**
+ * Whether a row draws the "unread" class: a muted channel is quiet (no bold,
+ * no pill) unless it has a mention.
+ */
+function rowLooksUnread(channel: Channel): boolean {
+  return rowIsUnread(channel) && (!isChannelMuted(channel.id) || channel.mentionCount > 0);
 }
 
 /**
@@ -662,6 +670,7 @@ function renderChannelItem(
   onVoiceModerate?: VoiceModerationCallbacks,
   onPurgeChannel?: (channel: Channel, count: number) => Promise<void>,
   menuChannels: readonly Channel[] | undefined = channels,
+  onInviteFromChannel?: (channel: Channel) => void,
 ): HTMLDivElement {
   let el: HTMLDivElement;
   if (channel.type === "voice") {
@@ -688,6 +697,7 @@ function renderChannelItem(
     onPurgeChannel,
     menuChannels,
     onReorderChannel,
+    onInviteFromChannel,
   );
   if (containerEl !== undefined && channels !== undefined) {
     attachDragHandlers(
@@ -759,6 +769,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     onWatchStream,
     onVoiceModerate,
     onPurgeChannel,
+    onInviteFromChannel,
   } = options;
   const disposable = new Disposable();
   // renderChannels() keys every row (B9-21): an unchanged row is reused and its
@@ -952,6 +963,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
             onVoiceModerate,
             onPurgeChannel,
             shown,
+            onInviteFromChannel,
           );
           ownerByEl.set(el, owner);
           return el;

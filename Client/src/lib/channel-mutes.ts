@@ -5,7 +5,7 @@
  * semantics, which this follows exactly:
  *
  *   - no desktop notification, no chime, no taskbar flash;
- *   - the unread badge still counts, but renders dimmed — the channel has not
+ *   - plain unread shows no bold name and no pill — the channel has not
  *     stopped existing, it has stopped shouting;
  *   - a message that mentions you STILL notifies and still shows the red
  *     mention badge. A mute is "stop telling me about the chatter", not "hide

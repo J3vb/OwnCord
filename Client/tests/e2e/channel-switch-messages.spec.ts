@@ -69,7 +69,7 @@ test.describe("Channel Switch — Messages", () => {
 
     // Wait for the unread badge to confirm the event was processed
     const secondChannel = page.locator(".channel-item").nth(1);
-    await expect(secondChannel.locator(".unread-badge")).toBeVisible({ timeout: 5_000 });
+    await expect(secondChannel).toHaveClass(/\bunread\b/, { timeout: 5_000 });
 
     // Message count on current channel should not change
     const countAfter = await page.locator(".message").count();
@@ -117,7 +117,6 @@ test.describe("Channel Switch — Messages", () => {
 
     // The non-active channel should show an unread badge
     const secondChannel = page.locator(".channel-item").nth(1);
-    const badge = secondChannel.locator(".unread-badge");
-    await expect(badge).toBeVisible({ timeout: 5_000 });
+    await expect(secondChannel).toHaveClass(/\bunread\b/, { timeout: 5_000 });
   });
 });
