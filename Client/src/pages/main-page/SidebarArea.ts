@@ -730,16 +730,34 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     if (error !== null) getToast()?.show(error, "error");
   }
 
-  /** Pick, crop and upload a group's icon. The store updates from the dm_channel_open that follows. */
+  /**
+   * Pick, crop and upload a group's icon. The picker opens synchronously from
+   * the menu click (WebKit refuses one opened after an await), on an input
+   * that is attached to the page and removed on change or cancel; the crop and
+   * upload code is imported only once a file is chosen. The store updates from
+   * the dm_channel_open that follows.
+   */
   function changeGroupIcon(channelId: number): void {
-    void import("../../features/direct-messages/groupIcon").then(
-      async (icon) => {
-        const file = await icon.pickGroupIconFile();
-        if (file === null) return;
-        showGroupIconResult(await icon.uploadGroupIcon(api, channelId, file));
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/png,image/jpeg,image/webp";
+    input.style.display = "none";
+    document.body.appendChild(input);
+    input.addEventListener(
+      "change",
+      () => {
+        const file = input.files?.[0];
+        input.remove();
+        if (file === undefined) return;
+        void import("../../features/direct-messages/groupIcon").then(
+          async (icon) => showGroupIconResult(await icon.uploadGroupIcon(api, channelId, file)),
+          () => showGroupIconResult(shellText("dm.iconFailed")),
+        );
       },
-      () => showGroupIconResult(shellText("dm.iconFailed")),
+      { once: true },
     );
+    input.addEventListener("cancel", () => input.remove(), { once: true });
+    input.click();
   }
 
   function removeGroupIconFor(channelId: number): void {

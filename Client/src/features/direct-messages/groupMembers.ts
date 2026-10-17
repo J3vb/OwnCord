@@ -119,7 +119,7 @@ export function buildGroupPanelView(channelId: number): GroupPanelView | null {
 
 export type GroupAction = "add" | "remove" | "owner" | "icon";
 
-/** The text for a failed Add / Remove / Make Owner call. */
+/** The text for a failed Add / Remove / Make Owner call, or a group icon change (`icon`, open to every member, so a 403 is not "owner only"). */
 export function groupActionErrorText(err: unknown, action: GroupAction): string {
   if (!(err instanceof ApiClientError)) return groupDmText("error.generic");
   if (err.status === 429 || err.code === "RATE_LIMITED") return connectText("error.rateLimited");

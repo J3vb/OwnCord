@@ -144,9 +144,11 @@ function paintAvatar(el: HTMLElement, avatar: string | null, label: string): voi
  * header so a group looks the same in both.
  *
  * A group with an uploaded icon (WP 3B-11b) shows that picture instead of the
- * faces. The icon is fetched like any avatar; when it cannot be loaded (or the
- * picture fails to decode) the faces are drawn, so a group never shows an
- * empty circle.
+ * faces. The faces are drawn first, so a group is never an empty circle; the
+ * icon is fetched like any avatar and replaces them when it arrives, even if
+ * the stack has been detached meanwhile (the image cache owns the object URL,
+ * so it is not revoked here). If the picture then fails to decode the faces
+ * are drawn again.
  */
 export function buildGroupAvatarStack(
   channelId: number,
@@ -172,17 +174,11 @@ export function buildGroupAvatarStack(
       stack.appendChild(face);
     });
   };
-  if (!isRenderableAvatar(icon)) {
-    drawFaces();
-    return stack;
-  }
+  drawFaces();
+  if (!isRenderableAvatar(icon)) return stack;
   const resolved = resolveServerUrl(icon);
   void fetchImageAsObjectUrl(resolved).then((objectUrl) => {
-    if (!stack.isConnected && objectUrl !== null) return;
-    if (objectUrl === null) {
-      drawFaces();
-      return;
-    }
+    if (objectUrl === null) return;
     const img = createElement("img", {
       src: objectUrl,
       alt: "",
@@ -193,12 +189,12 @@ export function buildGroupAvatarStack(
     img.addEventListener(
       "error",
       () => {
-        img.remove();
+        stack.replaceChildren();
         drawFaces();
       },
       { once: true },
     );
-    stack.appendChild(img);
+    stack.replaceChildren(img);
   });
   return stack;
 }

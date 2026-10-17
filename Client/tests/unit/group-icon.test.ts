@@ -16,7 +16,6 @@ import {
   removeGroupIcon,
   uploadGroupIcon,
 } from "../../src/features/direct-messages/groupIcon";
-import { groupActionErrorText } from "../../src/features/direct-messages/groupMembers";
 import { ApiClientError, type ApiClient } from "../../src/lib/api";
 import { buildDmConversations } from "../../src/pages/main-page/SidebarDmHelpers";
 import { dmStore, type DmChannel } from "../../src/stores/dm.store";
@@ -251,10 +250,25 @@ describe("group icon — crop", () => {
     const ok = await cropGroupIcon(png());
     expect(ok.ok && ok.file.type).toBe("image/webp");
 
-    stubCanvas([big, new Blob([new Uint8Array(1024 * 1024 + 1)], { type: "image/webp" })]);
+    const bigWebp = new Blob([new Uint8Array(1024 * 1024 + 1)], { type: "image/webp" });
+    const bigJpeg = new Blob([new Uint8Array(1024 * 1024 + 1)], { type: "image/jpeg" });
+    stubCanvas([big, bigWebp, bigJpeg]);
     const bad = await cropGroupIcon(png());
     expect(bad).toEqual({ ok: false, error: "Avatar must be at most 1024 KB." });
     expect(toBlob).toHaveBeenCalled();
+  });
+
+  it("tries JPEG after WebP, and types the file from what the browser returned", async () => {
+    bitmap(800, 800);
+    const big = new Blob([new Uint8Array(1024 * 1024 + 1)], { type: "image/png" });
+    // WebKit cannot encode WebP and hands back a PNG again.
+    stubCanvas([big, big, new Blob(["j"], { type: "image/jpeg" })]);
+    const jpeg = await cropGroupIcon(png());
+    expect(jpeg.ok && [jpeg.file.type, jpeg.file.name]).toEqual(["image/jpeg", "group-icon.jpg"]);
+
+    stubCanvas([big, new Blob(["w"], { type: "image/png" })]);
+    const png2 = await cropGroupIcon(png());
+    expect(png2.ok && [png2.file.type, png2.file.name]).toEqual(["image/png", "group-icon.png"]);
   });
 
   it("rejects a wrong type, an undecodable image and a failed encode with the avatar texts", async () => {
@@ -340,9 +354,7 @@ describe("group icon — upload and remove", () => {
         7,
         new File(["x"], "pic.png", { type: "image/png" }),
       );
-    expect(await fail(429, "RATE_LIMITED")).toBe(
-      groupActionErrorText(new ApiClientError(429, "RATE_LIMITED", ""), "icon"),
-    );
+    expect(await fail(429, "RATE_LIMITED")).toBe("Too many requests. Try again later.");
     expect(await fail(400, "INVALID_INPUT")).toBe("That file could not be read as an image.");
     expect(await fail(403, "TIMED_OUT")).toBe(
       "You're timed out and can't change this group right now",
