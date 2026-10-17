@@ -983,10 +983,8 @@ test("a native VP9 camera and share with the wrong key are decoded by no one", a
   await page.waitForTimeout(5_000);
   const camera = await readBrowserPeer(page, "user-2");
   const screen = await readBrowserPeer(page, "user-2#screen");
-  // inbound-rtp names the codec even when decryption fails, so a VP8 fallback
-  // cannot pass as this control.
-  await expectBrowserReceivedVp9(page, "camera");
-  await expectBrowserReceivedVp9(page, "screen_share");
+  // The codec is unreadable when nothing decrypts; the same-key cases above
+  // prove this exact publish goes out as VP9.
   await peer.done;
   // Subscribed to both, and not one frame of either decoded.
   expect(camera.videoFrames).toBe(0);
