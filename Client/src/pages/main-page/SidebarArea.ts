@@ -746,13 +746,19 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         if (selectDm(channelId)) opts.onStartCall?.();
       },
       onToggleBlock: (userId, username, block) => {
-        void import("../../features/blocks/blockActions").then(({ confirmAndToggleBlock }) =>
-          confirmAndToggleBlock(
-            { api, notify: (msg, type) => getToast()?.show(msg, type) },
-            userId,
-            username,
-            block,
-          ),
+        void import("../../features/blocks/blockActions").then(
+          ({ confirmAndToggleBlock }) =>
+            confirmAndToggleBlock(
+              { api, notify: (msg, type) => getToast()?.show(msg, type) },
+              userId,
+              username,
+              block,
+            ),
+          () =>
+            getToast()?.show(
+              shellText(block ? "members.blockFailed" : "members.unblockFailed"),
+              "error",
+            ),
         );
       },
       onRenameGroup: (channelId) => renameGroup(channelId),

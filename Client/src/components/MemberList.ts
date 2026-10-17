@@ -373,7 +373,7 @@ function createMemberItem(
       canBan: gates.canBan,
       canManageRoles: gates.canManageRoles,
       isBlocked,
-      onToggleBlock: () => opts.onToggleBlock(member.id, member.username, !isBlocked),
+      onToggleBlock: () => opts.onToggleBlock(member.id, memberDisplayName(member), !isBlocked),
       onKick: () => opts.onKick(member.id, member.username),
       onBan: (reason: string, durationHours: number) =>
         opts.onBan(member.id, member.username, reason, durationHours),

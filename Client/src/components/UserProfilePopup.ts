@@ -94,6 +94,15 @@ const STATUS_COLORS: Record<UserStatus, string> = {
   offline: "var(--text-micro)",
 };
 
+/** aria-disabled, not `disabled`, so the button stays focusable and its
+ *  reason is reachable by keyboard and read by a screen reader. */
+const markUnavailable = (btn: HTMLElement, reason: string, id: string): void => {
+  btn.setAttribute("aria-disabled", "true");
+  btn.setAttribute("aria-describedby", id);
+  btn.title = reason;
+  btn.appendChild(createElement("span", { id, class: "sr-only" }, reason));
+};
+
 /**
  * Place the card beside the anchor, flipping and clamping so it always lands
  * fully on screen — Discord opens its popout away from whichever edge the
@@ -295,8 +304,7 @@ export function createUserProfilePopup(
       messageBtn.appendChild(createIcon("send", 16));
       messageBtn.appendChild(document.createTextNode(requestsText("profile.message")));
       if (unavailable !== undefined) {
-        messageBtn.disabled = true;
-        messageBtn.title = unavailable;
+        markUnavailable(messageBtn, unavailable, "upp-message-reason");
       }
       messageBtn.addEventListener(
         "click",
@@ -319,8 +327,7 @@ export function createUserProfilePopup(
       callBtn.appendChild(createIcon("phone", 16));
       callBtn.appendChild(document.createTextNode(requestsText("profile.call")));
       if (unavailable !== undefined) {
-        callBtn.disabled = true;
-        callBtn.title = unavailable;
+        markUnavailable(callBtn, unavailable, "upp-call-reason");
       }
       callBtn.addEventListener(
         "click",

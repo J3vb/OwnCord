@@ -344,12 +344,24 @@ export function createSidebarMemberSection(
     },
     // Loaded on first use: the dialog and request code stay out of MainPage.
     onToggleBlock: async (userId, username, block) => {
-      const { toggleBlock } = await import("../../features/blocks/blockActions");
-      await toggleBlock(blockDeps, userId, username, block);
+      try {
+        const { toggleBlock } = await import("../../features/blocks/blockActions");
+        await toggleBlock(blockDeps, userId, username, block);
+      } catch {
+        getToast()?.show(
+          shellText(block ? "members.blockFailed" : "members.unblockFailed"),
+          "error",
+        );
+      }
     },
     onBlockFromPopup: (userId, username, block) => {
-      void import("../../features/blocks/blockActions").then(({ confirmAndToggleBlock }) =>
-        confirmAndToggleBlock(blockDeps, userId, username, block),
+      void import("../../features/blocks/blockActions").then(
+        ({ confirmAndToggleBlock }) => confirmAndToggleBlock(blockDeps, userId, username, block),
+        () =>
+          getToast()?.show(
+            shellText(block ? "members.blockFailed" : "members.unblockFailed"),
+            "error",
+          ),
       );
     },
     onChangeRole: async (userId, username, newRole) => {

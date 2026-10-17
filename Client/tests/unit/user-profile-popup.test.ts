@@ -522,7 +522,8 @@ describe("UserProfilePopup profile fields", () => {
       const onCall = vi.fn();
       const popup = mountPopup({ onMessage, onCall, unavailableReason: "Offline right now" });
       for (const id of ["upp-message-btn", "upp-call-btn"]) {
-        expect(btn(id)?.disabled).toBe(true);
+        expect(btn(id)?.getAttribute("aria-disabled")).toBe("true");
+        expect(btn(id)?.getAttribute("aria-describedby")).toBeTruthy();
         expect(btn(id)?.title).toBe("Offline right now");
         btn(id)?.click();
       }
@@ -533,7 +534,7 @@ describe("UserProfilePopup profile fields", () => {
 
     it("leaves Message and Call enabled with no reason", () => {
       const popup = mountPopup();
-      expect(btn("upp-message-btn")?.disabled).toBe(false);
+      expect(btn("upp-message-btn")?.hasAttribute("aria-disabled")).toBe(false);
       expect(btn("upp-call-btn")?.title).toBe("");
       popup.destroy?.();
     });
