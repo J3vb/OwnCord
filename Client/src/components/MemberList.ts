@@ -4,7 +4,8 @@
  * Right-click context menu for admin actions (force logout, ban, role change).
  */
 
-import { createElement, appendChildren, clearChildren, setText, setOwnedTimeout } from "@lib/dom";
+import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/dom";
+import { reconcileChildren } from "@lib/reconcile";
 import type { MountableComponent } from "@lib/safe-render";
 import { Disposable } from "@lib/disposable";
 import {
@@ -191,26 +192,6 @@ function roleGroups(): readonly RoleGroup[] {
   });
 }
 
-/** Status priority for sorting: lower = higher priority (shown first). */
-function statusPriority(status: UserStatus): number {
-  switch (status) {
-    // Online, idle and dnd share one bucket: a member stepping away must not
-    // jump rows, so the order inside a role group is stable A–Z.
-    case "online":
-    case "idle":
-    case "dnd":
-      return 0;
-    // "invisible" only ever describes the signed-in user (the server shows
-    // everyone else offline), and it sorts with offline because that is where
-    // they appear to everybody — including, in this list, to themselves.
-    case "invisible":
-    case "offline":
-      return 1;
-    default:
-      return 99;
-  }
-}
-
 function statusColor(status: UserStatus): string {
   switch (status) {
     case "online":
@@ -270,34 +251,41 @@ function handleOutsideClick(e: MouseEvent): void {
  */
 const ownPopupClosers = new Set<() => void>();
 
+/** What a row reads at event time: the live member, and the status its dot shows. */
+interface MemberRowRef {
+  member: Member;
+  shownStatus: UserStatus;
+}
+
 function createMemberItem(
-  member: Member,
+  ref: MemberRowRef,
   colorVar: string,
   opts: MemberListOptions,
   signal: AbortSignal,
 ): HTMLDivElement {
+  const shown = ref.member;
   const item = createElement("div", {
-    class: isAwayStatus(member.status) ? "member-item offline" : "member-item",
-    "data-testid": `member-${member.id}`,
+    class: isAwayStatus(shown.status) ? "member-item offline" : "member-item",
+    "data-testid": `member-${shown.id}`,
     role: "button",
     tabindex: "0",
     "aria-haspopup": "dialog",
-    "aria-label": memberDisplayName(member),
+    "aria-label": memberDisplayName(shown),
   });
-  const statusId = `mi-status-${member.id}`;
-  const customId = `mi-custom-status-${member.id}`;
+  const statusId = `mi-status-${shown.id}`;
+  const customId = `mi-custom-status-${shown.id}`;
 
   const avatar = createAvatarElement(
-    { username: member.username, displayName: member.displayName, avatar: member.avatar },
-    { className: "mi-avatar", background: pickAvatarColor(member.username) },
+    { username: shown.username, displayName: shown.displayName, avatar: shown.avatar },
+    { className: "mi-avatar", background: pickAvatarColor(shown.username) },
   );
 
   const statusDot = createElement("div", {
     class: "mi-status",
     id: statusId,
-    style: `background: ${statusColor(member.status)}`,
-    "aria-label": statusLabel(member.status),
-    title: statusLabel(member.status),
+    style: `background: ${statusColor(shown.status)}`,
+    "aria-label": statusLabel(shown.status),
+    title: statusLabel(shown.status),
   });
   avatar.appendChild(statusDot);
 
@@ -309,13 +297,13 @@ function createMemberItem(
     style: `color: ${readableRoleColor(colorVar)}`,
     "data-role-color": colorVar,
   });
-  setText(name, memberDisplayName(member));
+  setText(name, memberDisplayName(shown));
   nameWrap.appendChild(name);
-  const custom = member.customStatus;
+  const custom = shown.customStatus;
   if (typeof custom === "string" && custom.length > 0) {
     const customEl = createElement("span", {
       class: "mi-custom-status",
-      "data-testid": `member-custom-status-${member.id}`,
+      "data-testid": `member-custom-status-${shown.id}`,
       id: customId,
     });
     setText(customEl, custom);
@@ -333,11 +321,9 @@ function createMemberItem(
   const openProfile = (anchorX: number, anchorY: number): void => {
     closeActiveMenu();
     const list = item.parentElement;
-    // `member` is the row's render-time snapshot; a presence-only update
-    // (see patchPresence) recolors the dot in place without rebuilding the
-    // row, so that snapshot's `status` can be stale. The opener re-resolves
-    // against the live store so the popup always agrees with the dot it was
-    // opened from; the snapshot is only the fallback.
+    // The row is reused across store updates, so the member is read from the
+    // ref at event time, never from the render-time snapshot.
+    const member = ref.member;
     const close = openUserProfilePopup({
       userId: member.id,
       anchorX,
@@ -373,6 +359,7 @@ function createMemberItem(
   // coordinates; the keyboard path (Shift+F10 / the Menu key) anchors to the
   // row's own edge instead of a pointer position.
   const openContextMenu = (clientX: number, clientY: number): void => {
+    const member = ref.member;
     const isSelf = member.id === (authStore.getState().user?.id ?? 0);
 
     // Moderation actions are permission-gated per item (a role name told us
@@ -520,188 +507,196 @@ function placeMenu(menuEl: HTMLDivElement, clientX: number, clientY: number): vo
   );
 }
 
-function renderList(
-  root: HTMLDivElement,
-  opts: MemberListOptions,
-  signal: AbortSignal,
-  rowsByUserId: Map<number, HTMLDivElement>,
-): void {
-  clearChildren(root);
-  rowsByUserId.clear();
-
-  const state = membersStore.getState();
-
-  if (state.members.size === 0) {
-    const emptyState = createElement("div", { class: "member-list-empty" });
-    const msg = createElement("p", { class: "member-list-empty-text" }, shellText("members.empty"));
-    emptyState.appendChild(msg);
-    root.appendChild(emptyState);
-    return;
-  }
-
-  // Single pass: bucket members by (lowercased) role, then sort each bucket
-  // by status \u2014 instead of one filter + toSorted sweep per role group.
-  const buckets = new Map<string, Member[]>();
-  for (const member of state.members.values()) {
-    const role = member.role.toLowerCase();
-    const bucket = buckets.get(role);
-    if (bucket === undefined) {
-      buckets.set(role, [member]);
-    } else {
-      bucket.push(member);
+/** One child of `.member-list`, in display order. */
+type ListItem =
+  | {
+      readonly kind: "header";
+      readonly key: string;
+      readonly text: string;
+      readonly offline: boolean;
     }
-  }
+  | {
+      readonly kind: "row";
+      readonly key: string;
+      readonly member: Member;
+      readonly colorVar: string;
+    }
+  | { readonly kind: "empty"; readonly key: string; readonly text: string };
 
+const nameCollator = new Intl.Collator(undefined, { sensitivity: "base" });
+
+interface Entry {
+  readonly member: Member;
+  readonly colorVar: string;
+}
+
+function compareEntries(a: Entry, b: Entry): number {
+  return (
+    nameCollator.compare(memberDisplayName(a.member), memberDisplayName(b.member)) ||
+    a.member.id - b.member.id
+  );
+}
+
+/**
+ * The wanted children, in order: one group per role holding its online
+ * members, then one OFFLINE group (offline and invisible members, A-Z across
+ * roles) that keeps each member's role colour. The OFFLINE header's key is
+ * "offline" and role keys carry a "g:" prefix, so a role named "Offline"
+ * cannot collide with it.
+ */
+function buildItems(members: ReadonlyMap<number, Member>): ListItem[] {
+  if (members.size === 0) {
+    return [{ kind: "empty", key: "empty", text: shellText("members.empty") }];
+  }
   const groups = roleGroups();
-  const rendered = new Set<string>();
-  for (const group of groups) {
-    rendered.add(group.role);
-    appendGroup(root, group, buckets.get(group.role) ?? [], opts, signal, rowsByUserId);
-  }
+  const known = new Map<string, RoleGroup>();
+  for (const group of groups) if (!known.has(group.role)) known.set(group.role, group);
 
-  // Members whose role isn't in the server's role list (e.g. a role deleted
-  // mid-session) still render, in a gray group, instead of vanishing.
-  const leftovers = [...buckets.keys()].filter((role) => !rendered.has(role)).toSorted();
-  for (const role of leftovers) {
-    const group: RoleGroup = { role, label: role.toUpperCase(), colorVar: MEMBER_COLOR };
-    appendGroup(root, group, buckets.get(role) ?? [], opts, signal, rowsByUserId);
-  }
-}
-
-function appendGroup(
-  root: HTMLDivElement,
-  group: RoleGroup,
-  members: readonly Member[],
-  opts: MemberListOptions,
-  signal: AbortSignal,
-  rowsByUserId: Map<number, HTMLDivElement>,
-): void {
-  const groupMembers = members.toSorted(
-    (a, b) =>
-      statusPriority(a.status) - statusPriority(b.status) ||
-      memberDisplayName(a).localeCompare(memberDisplayName(b), undefined, {
-        sensitivity: "base",
-      }),
-  );
-
-  if (groupMembers.length === 0) return;
-
-  const header = createElement(
-    "div",
-    { class: "member-role-group" },
-    shellText("members.groupHeader", { role: group.label, count: groupMembers.length }),
-  );
-  root.appendChild(header);
-
-  for (const member of groupMembers) {
-    const item = createMemberItem(member, group.colorVar, opts, signal);
-    rowsByUserId.set(member.id, item);
-    root.appendChild(item);
-  }
-}
-
-/** True when the only difference between two member maps is presence status \u2014
- *  same ids with identical username/role/avatar/identity key. Such updates can
- *  be patched into the existing rows instead of rebuilding the list. */
-function isPresenceOnlyChange(
-  prev: ReadonlyMap<number, Member>,
-  next: ReadonlyMap<number, Member>,
-): boolean {
-  if (prev.size === 0 || prev.size !== next.size) return false;
-  for (const [id, member] of next) {
-    const before = prev.get(id);
-    if (before === undefined) return false;
-    if (before === member) continue;
-    if (
-      before.username !== member.username ||
-      before.role !== member.role ||
-      before.avatar !== member.avatar ||
-      before.displayName !== member.displayName ||
-      // A custom status is rendered as its own line, so a change to it is a
-      // structural change, not a dot recolor.
-      before.customStatus !== member.customStatus ||
-      before.identityPublicKey !== member.identityPublicKey
-    ) {
-      return false;
+  const buckets = new Map<string, Entry[]>();
+  const offline: Entry[] = [];
+  for (const member of members.values()) {
+    const role = member.role.toLowerCase();
+    const entry: Entry = { member, colorVar: known.get(role)?.colorVar ?? MEMBER_COLOR };
+    if (isAwayStatus(member.status)) {
+      offline.push(entry);
+      continue;
     }
+    const bucket = buckets.get(role);
+    if (bucket === undefined) buckets.set(role, [entry]);
+    else bucket.push(entry);
   }
-  return true;
-}
 
-/** Patch status dots/classes in place for members whose presence changed.
- *  Row identity (and therefore hover/context-menu state) is preserved; the
- *  status-priority sort order is deliberately not reshuffled until the next
- *  structural render. */
-function patchPresence(
-  prev: ReadonlyMap<number, Member>,
-  next: ReadonlyMap<number, Member>,
-  rowsByUserId: ReadonlyMap<number, HTMLDivElement>,
-): void {
-  for (const [id, member] of next) {
-    const before = prev.get(id);
-    if (before === undefined || before.status === member.status) continue;
-    const row = rowsByUserId.get(id);
-    if (row === undefined) continue;
-    row.classList.toggle("offline", isAwayStatus(member.status));
-    const dot = row.querySelector<HTMLDivElement>(".mi-status");
-    if (dot !== null) {
-      dot.style.background = statusColor(member.status);
-      dot.setAttribute("aria-label", statusLabel(member.status));
-      dot.title = statusLabel(member.status);
-    }
+  // A role missing from the server's list (deleted mid-session) still renders,
+  // in a gray group, after the listed ones.
+  const order: RoleGroup[] = [...known.values()];
+  for (const role of [...buckets.keys()].filter((r) => !known.has(r)).toSorted()) {
+    order.push({ role, label: role.toUpperCase(), colorVar: MEMBER_COLOR });
   }
+
+  const items: ListItem[] = [];
+  const push = (key: string, label: string, offlineGroup: boolean, entries: Entry[]): void => {
+    if (entries.length === 0) return;
+    items.push({
+      kind: "header",
+      key,
+      text: shellText("members.groupHeader", { role: label, count: entries.length }),
+      offline: offlineGroup,
+    });
+    for (const { member, colorVar } of entries.toSorted(compareEntries)) {
+      items.push({ kind: "row", key: `u:${member.id}`, member, colorVar });
+    }
+  };
+  for (const group of order)
+    push(`g:${group.role}`, group.label, false, buckets.get(group.role) ?? []);
+  push("offline", shellText("members.offlineGroup"), true, offline);
+  return items;
 }
 
 export function createMemberList(opts: MemberListOptions): MountableComponent {
   const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
-  /** Rendered rows by user id \u2014 lets presence-only updates patch in place. */
-  const rowsByUserId = new Map<number, HTMLDivElement>();
-  let prevMembers: ReadonlyMap<number, Member> = new Map();
-  // renderList() rebuilds every row from scratch on every non-presence-only
-  // membersStore change and on every roles_update. Per-row listeners (click,
-  // contextmenu) must NOT be registered on the component-lifetime
-  // `disposable.signal`, which only aborts once, at destroy() --
-  // addEventListener({ signal }) keeps a detached row alive via that signal's
-  // own retained "abort" listener list until it fires, so every rebuild would
-  // otherwise leak one full set of detached rows (OC-0295), exactly the
-  // defect already fixed in ChannelSidebar (renderOwner, OC-0229) and
-  // MessageList (OC-0286). renderOwner is aborted and replaced at the top of
-  // every render, so only the CURRENT render's rows stay reachable.
-  let renderOwner: Disposable | null = null;
+  // Rows are reused across renders, so each owns its listeners: a row's owner
+  // is destroyed when reconcile removes or rebuilds it (OC-0295 - listeners on
+  // the component-lifetime signal would retain every discarded row), and
+  // destroy() disposes the rest. Per-row state lives in WeakMaps keyed by the
+  // row element.
+  const ownerByEl = new WeakMap<Element, Disposable>();
+  const refByEl = new WeakMap<Element, MemberRowRef>();
+
+  function patchStatus(el: Element, ref: MemberRowRef): void {
+    const { status } = ref.member;
+    if (status === ref.shownStatus) return;
+    ref.shownStatus = status;
+    el.classList.toggle("offline", isAwayStatus(status));
+    const dot = el.querySelector<HTMLDivElement>(".mi-status");
+    if (dot !== null) {
+      dot.style.background = statusColor(status);
+      dot.setAttribute("aria-label", statusLabel(status));
+      dot.title = statusLabel(status);
+    }
+  }
 
   function render(): void {
     if (root === null) return;
-    renderOwner?.destroy();
-    const currentRender = new Disposable();
-    renderOwner = currentRender;
-    renderList(root, opts, currentRender.signal, rowsByUserId);
+    reconcileChildren<ListItem>(root, buildItems(membersStore.getState().members), {
+      key: (item) => item.key,
+      // A header's text is patched in `update`, not part of its signature.
+      // Status is not here: it patches the dot in place without a rebuild.
+      // A row rebuilt while its context menu is open drops focus to the page
+      // when the menu closes (accepted; only its own name, avatar, custom
+      // status or role colour changing does this).
+      signature: (item) =>
+        item.kind === "row"
+          ? [
+              item.member.username,
+              item.member.displayName ?? "",
+              item.member.avatar ?? "",
+              item.member.customStatus ?? "",
+              item.colorVar,
+            ].join("\u0001")
+          : item.kind === "empty"
+            ? item.text
+            : "",
+      create: (item) => {
+        if (item.kind === "header") {
+          return createElement(
+            "div",
+            {
+              class: "member-role-group",
+              ...(item.offline ? { "data-testid": "member-group-offline" } : {}),
+            },
+            item.text,
+          );
+        }
+        if (item.kind === "empty") {
+          const emptyState = createElement("div", { class: "member-list-empty" });
+          emptyState.appendChild(
+            createElement("p", { class: "member-list-empty-text" }, item.text),
+          );
+          return emptyState;
+        }
+        const owner = new Disposable();
+        const ref: MemberRowRef = { member: item.member, shownStatus: item.member.status };
+        const row = createMemberItem(ref, item.colorVar, opts, owner.signal);
+        ownerByEl.set(row, owner);
+        refByEl.set(row, ref);
+        return row;
+      },
+      update: (el, item) => {
+        // A header keeps its node when only its count changes.
+        if (item.kind === "header") {
+          if (el.textContent !== item.text) setText(el, item.text);
+          return;
+        }
+        if (item.kind !== "row") return;
+        const ref = refByEl.get(el);
+        if (ref === undefined) return;
+        ref.member = item.member;
+        patchStatus(el, ref);
+      },
+      dispose: (el) => {
+        ownerByEl.get(el)?.destroy();
+        ownerByEl.delete(el);
+        refByEl.delete(el);
+      },
+    });
   }
 
   function mount(container: Element): void {
     root = createElement("div", { class: "member-list", "data-testid": "member-list" });
-    prevMembers = membersStore.getState().members;
     render();
 
     disposable.onStoreChange<MembersState, ReadonlyMap<number, Member>>(
       membersStore,
       (s) => s.members,
-      (members) => {
-        if (root !== null) {
-          if (isPresenceOnlyChange(prevMembers, members)) {
-            patchPresence(prevMembers, members, rowsByUserId);
-          } else {
-            render();
-          }
-        }
-        prevMembers = members;
+      () => {
+        render();
       },
     );
 
     // Role groups, their labels and their colors all come from the server's
     // role list, which role management makes mutable at runtime (a roles_update
-    // broadcast replaces it). Without this the list kept the old grouping until
-    // some unrelated member change happened to force a re-render.
+    // broadcast replaces it).
     disposable.onStoreChange<ChannelsState, readonly ReadyRole[]>(
       channelsStore,
       (s) => s.roles,
@@ -719,10 +714,8 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
     ownPopupClosers.clear();
     releaseMenuDismiss();
     disposable.destroy();
-    renderOwner?.destroy();
-    renderOwner = null;
-    rowsByUserId.clear();
     if (root !== null) {
+      for (const child of Array.from(root.children)) ownerByEl.get(child)?.destroy();
       root.remove();
       root = null;
     }
