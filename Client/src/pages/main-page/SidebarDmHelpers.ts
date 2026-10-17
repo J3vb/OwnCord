@@ -19,7 +19,7 @@ import {
 import type { DmChannel, DmUser } from "@stores/dm.store";
 import { membersStore } from "@stores/members.store";
 import { voiceStore } from "@stores/voice.store";
-import { isChannelMuted } from "@lib/channel-mutes";
+import { getChannelMute, isChannelMuted } from "@lib/channel-mutes";
 import { markdownToPlainText } from "@lib/markdown";
 import { connectText } from "../../i18n/connect";
 
@@ -174,6 +174,12 @@ export function isDmInCall(channelId: number): boolean {
  * recipient, and a user can be in both a 1:1 and a group with the same person,
  * so a user id no longer identifies a row.
  */
+/** `mutedUntil` for a timed mute only, so an untimed row's shape is unchanged. */
+function timedMute(channelId: number): { mutedUntil?: number } {
+  const until = getChannelMute(channelId)?.until ?? null;
+  return until === null ? {} : { mutedUntil: until };
+}
+
 export function buildDmConversations(activeChannelId: number | null): readonly DmConversation[] {
   const dmChannels = dmStore.getState().channels;
   return dmChannels.map((dm) => ({
@@ -194,6 +200,7 @@ export function buildDmConversations(activeChannelId: number | null): readonly D
     unreadCount: dm.unreadCount,
     mentionCount: dm.mentionCount,
     muted: isChannelMuted(dm.channelId),
+    ...timedMute(dm.channelId),
     active: dm.channelId === activeChannelId,
   }));
 }

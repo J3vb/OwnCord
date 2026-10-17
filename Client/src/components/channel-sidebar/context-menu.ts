@@ -22,9 +22,15 @@ import {
 import { Permission } from "@lib/types";
 import { formatChannelLink } from "@lib/deep-link";
 import { markChannelRead, hasUnread } from "@lib/read-state";
-import { isChannelMuted, toggleChannelMute, getChannelMutesHost } from "@lib/channel-mutes";
+import {
+  getChannelMute,
+  muteChannel,
+  unmuteChannel,
+  getChannelMutesHost,
+} from "@lib/channel-mutes";
 import {
   createMenuItem,
+  createSubmenuTrigger,
   enableMenuKeyboard,
   openMenuOnKeyboard,
   clampMenuToViewport,
@@ -34,6 +40,7 @@ import { appendPurgeSection } from "@components/purge-prompt";
 import { copyWithToast, isDeveloperMode } from "../../features/developer-mode/developerTools";
 import type { ChannelReorderData } from "../ChannelSidebar";
 import { shellText } from "../../i18n/shell";
+import { muteChoices, mutedUntilLabel } from "../muteMenu";
 
 /** Bubbles from a channel row when its mute is toggled. Re-exported from the
  *  mute store, which dispatches it on every write (F16). */
@@ -122,7 +129,7 @@ export function attachChannelContextMenu(
       className: string,
       testId: string,
       onClick: (() => void) | null,
-    ): void => {
+    ): HTMLElement => {
       const item = createMenuItem(label, className, { testId });
       if (onClick === null) {
         item.setAttribute("aria-disabled", "true");
@@ -138,6 +145,7 @@ export function attachChannelContextMenu(
         );
       }
       menu.appendChild(item);
+      return item;
     };
 
     if (showMarkRead) {
@@ -153,18 +161,52 @@ export function attachChannelContextMenu(
     }
 
     if (showMute) {
-      // "Until turned off": there is no timed mute, because a timed one needs
-      // a stored expiry the client would have to sweep, and the affordance it
-      // buys ("quiet for 8 hours") is one the user can reproduce by unmuting.
-      const muted = isChannelMuted(channel.id);
-      addItem(
-        shellText(muted ? "channel.unmute" : "channel.mute"),
-        "context-menu-item",
-        "ctx-mute-channel",
-        () => {
-          toggleChannelMute(channel.id);
-        },
-      );
+      // A mute is a read-time check on a stored expiry (`channel-mutes`), so a
+      // timed one needs no sweep for the gates to be right.
+      const mute = getChannelMute(channel.id);
+      if (mute !== null) {
+        const row = addItem(
+          shellText("channel.unmute"),
+          "context-menu-item",
+          "ctx-mute-channel",
+          () => unmuteChannel(channel.id),
+        );
+        const until = mutedUntilLabel(mute.until);
+        if (until !== null) {
+          row.appendChild(createElement("span", { class: "context-menu-item__detail" }, until));
+        }
+      } else {
+        // Clicking the row (or Enter) mutes until turned off, as Discord does;
+        // hovering or ArrowRight offers the timed choices.
+        const { trigger, flyout } = createSubmenuTrigger(
+          shellText("channel.mute"),
+          "context-menu-item",
+          {
+            testId: "ctx-mute-channel",
+            activates: true,
+            onActivate: () => {
+              closeMenu();
+              muteChannel(channel.id);
+            },
+          },
+          lifetimeSignal,
+        );
+        for (const choice of muteChoices()) {
+          const row = createMenuItem(choice.label, "context-menu-item", {
+            testId: choice.testId,
+          });
+          row.addEventListener(
+            "click",
+            () => {
+              closeMenu();
+              muteChannel(channel.id, choice.durationMs);
+            },
+            { signal: lifetimeSignal },
+          );
+          flyout.appendChild(row);
+        }
+        menu.append(trigger, flyout);
+      }
     }
 
     if (showCopyLink) {

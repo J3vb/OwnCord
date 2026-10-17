@@ -143,6 +143,8 @@ export const settingsText = defineCatalog("settings", {
     "Muted channels never notify you, but messages that mention you still do.",
   "notifications.muted.empty": "Nothing is muted.",
   "notifications.muted.unmute": "Unmute",
+  "notifications.muted.until": "Until {time}",
+  "notifications.muted.untilDate": "Until {date}, {time}",
   "notifications.channelFallback": "Channel {id}",
 
   "images.linkPreview.label": "Link Preview",

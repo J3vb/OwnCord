@@ -4,7 +4,14 @@ import {
   CHANNEL_MUTE_CHANGED,
 } from "@components/channel-sidebar/context-menu";
 import { buildNotificationsTab } from "@components/settings/NotificationsTab";
-import { isChannelMuted, muteChannel, invalidateMuteCache } from "@lib/channel-mutes";
+import {
+  isChannelMuted,
+  muteChannel,
+  invalidateMuteCache,
+  getChannelMute,
+  pruneExpiredMutes,
+} from "@lib/channel-mutes";
+import { saveTimeFormat } from "@lib/timeFormat";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
 import type { Channel } from "@stores/channels.store";
@@ -258,5 +265,156 @@ describe("NotificationsTab — muted channel list", () => {
     expect(rows).toHaveLength(2);
     expect(rows[0]!.textContent).toContain("Channel 2");
     expect(rows[1]!.textContent).toContain("Channel 9");
+  });
+});
+
+describe("channel context menu — timed mutes (3D-3a)", () => {
+  const T0 = new Date(2026, 9, 17, 12, 0, 0).getTime();
+  const HOUR = 3_600_000;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(T0);
+    saveTimeFormat("12h");
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    saveTimeFormat("12h");
+  });
+
+  const trigger = (): HTMLElement =>
+    document.querySelector('[data-testid="ctx-mute-channel"]') as HTMLElement;
+
+  it("hover shows six duration rows", () => {
+    openMenu(channel());
+    const flyout = trigger().nextElementSibling as HTMLElement;
+    expect(flyout.classList.contains("context-menu__submenu")).toBe(true);
+    expect(flyout.style.display).toBe("none");
+
+    trigger().dispatchEvent(new MouseEvent("mouseenter"));
+    expect(flyout.style.display).toBe("");
+    const rows = [...flyout.querySelectorAll('[role="menuitem"]')];
+    expect(rows.map((r) => r.textContent)).toEqual([
+      "For 15 Minutes",
+      "For 1 Hour",
+      "For 3 Hours",
+      "For 8 Hours",
+      "For 24 Hours",
+      "Until I turn it back on",
+    ]);
+
+    trigger().dispatchEvent(new MouseEvent("mouseleave"));
+    expect(flyout.style.display).toBe("none");
+  });
+
+  it("For 1 Hour mutes until now + 1 h and closes the menu", () => {
+    openMenu(channel());
+    trigger().dispatchEvent(new MouseEvent("mouseenter"));
+    (document.querySelector('[data-testid="ctx-mute-for-3600000"]') as HTMLElement).click();
+    expect(getChannelMute(5)).toEqual({ until: T0 + HOUR });
+    expect(document.querySelector(".channel-ctx-menu")).toBeNull();
+  });
+
+  it("Until I turn it back on mutes with no end", () => {
+    openMenu(channel());
+    (document.querySelector('[data-testid="ctx-mute-for-forever"]') as HTMLElement).click();
+    expect(getChannelMute(5)).toEqual({ until: null });
+  });
+
+  it("a click on the flyout does not also fire the trigger's mute-forever", () => {
+    openMenu(channel());
+    (document.querySelector('[data-testid="ctx-mute-for-900000"]') as HTMLElement).click();
+    expect(getChannelMute(5)).toEqual({ until: T0 + 900_000 });
+  });
+
+  it("Enter on Mute Channel mutes until turned off", async () => {
+    openMenu(channel());
+    trigger().focus();
+    trigger().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(getChannelMute(5)).toEqual({ until: null });
+  });
+
+  it('muted row shows "Muted until" with the 12h format', () => {
+    muteChannel(5, 900_000);
+    openMenu(channel());
+    expect(trigger().textContent).toBe("Unmute Channel" + "Muted until 12:15 PM");
+    expect(trigger().querySelector(".context-menu-item__detail")!.textContent).toBe(
+      "Muted until 12:15 PM",
+    );
+  });
+
+  it('muted row shows "Muted until" with the 24h format', () => {
+    saveTimeFormat("24h");
+    muteChannel(5, 900_000);
+    openMenu(channel());
+    expect(trigger().querySelector(".context-menu-item__detail")!.textContent).toBe(
+      "Muted until 12:15",
+    );
+  });
+
+  it("adds the date when the mute ends on another day", () => {
+    muteChannel(5, 86_400_000);
+    openMenu(channel());
+    expect(trigger().querySelector(".context-menu-item__detail")!.textContent).toBe(
+      "Muted until October 18, 2026, 12:00 PM",
+    );
+  });
+
+  it("a forever mute has no second line, and Unmute clears a timed mute", () => {
+    muteChannel(5);
+    openMenu(channel());
+    expect(trigger().querySelector(".context-menu-item__detail")).toBeNull();
+    document.querySelectorAll(".channel-ctx-menu").forEach((el) => el.remove());
+
+    muteChannel(5, HOUR);
+    openMenu(channel());
+    trigger().click();
+    expect(isChannelMuted(5)).toBe(false);
+  });
+
+  it("Unmute on a mute that has just expired is harmless", () => {
+    muteChannel(5, 900_000);
+    openMenu(channel());
+    vi.setSystemTime(T0 + HOUR);
+    expect(() => trigger().click()).not.toThrow();
+    expect(isChannelMuted(5)).toBe(false);
+  });
+});
+
+describe("NotificationsTab — timed mutes (3D-3a)", () => {
+  const T0 = new Date(2026, 9, 17, 12, 0, 0).getTime();
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(T0);
+    saveTimeFormat("12h");
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("Settings list shows until and drops the row on expiry", () => {
+    muteChannel(5, 900_000);
+    muteChannel(6);
+    const tab = buildNotificationsTab(ac.signal);
+    container.appendChild(tab);
+    expect(tab.querySelector('[data-testid="muted-until-5"]')!.textContent).toBe("Until 12:15 PM");
+    expect(tab.querySelector('[data-testid="muted-until-6"]')).toBeNull();
+
+    vi.setSystemTime(T0 + 900_000);
+    pruneExpiredMutes(Date.now());
+    expect(tab.querySelector('[data-testid="unmute-5"]')).toBeNull();
+    expect(tab.querySelector('[data-testid="unmute-6"]')).not.toBeNull();
+  });
+
+  it("stops listening once the tab's signal aborts", () => {
+    muteChannel(5, 900_000);
+    const own = new AbortController();
+    const tab = buildNotificationsTab(own.signal);
+    container.appendChild(tab);
+    own.abort();
+    vi.setSystemTime(T0 + 900_000);
+    pruneExpiredMutes(Date.now());
+    expect(tab.querySelector('[data-testid="unmute-5"]')).not.toBeNull();
   });
 });

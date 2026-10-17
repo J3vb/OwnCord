@@ -12,7 +12,14 @@ import {
   type SoundSwitch,
 } from "@lib/soundPrefs";
 import { setStatusIcon, statusIcon, type StatusKind } from "../../features/settings/status";
-import { getChannelMutesHost, listMutedChannels, unmuteChannel } from "@lib/channel-mutes";
+import {
+  CHANNEL_MUTE_CHANGED,
+  getChannelMute,
+  getChannelMutesHost,
+  listMutedChannels,
+  unmuteChannel,
+} from "@lib/channel-mutes";
+import { clockAndDate } from "../muteMenu";
 import {
   NOTIFICATION_LEVELS,
   getGlobalNotificationLevel,
@@ -509,6 +516,18 @@ function buildMutedChannelsSection(signal: AbortSignal): HTMLDivElement {
       const row = createElement("div", { class: "settings-muted-row" });
       const name = createElement("span", { class: "settings-muted-name" });
       setText(name, mutedChannelName(channelId));
+      const until = getChannelMute(channelId)?.until ?? null;
+      let untilEl: HTMLElement | null = null;
+      if (until !== null) {
+        const { time, date } = clockAndDate(until);
+        untilEl = createElement(
+          "span",
+          { class: "settings-muted-until", "data-testid": `muted-until-${channelId}` },
+          date === null
+            ? t("notifications.muted.until", { time })
+            : t("notifications.muted.untilDate", { date, time }),
+        );
+      }
       const btn = createElement(
         "button",
         {
@@ -526,11 +545,15 @@ function buildMutedChannelsSection(signal: AbortSignal): HTMLDivElement {
         },
         { signal },
       );
-      appendChildren(row, name, btn);
+      appendChildren(row, name);
+      if (untilEl !== null) row.appendChild(untilEl);
+      row.appendChild(btn);
       list.appendChild(row);
     }
   }
 
   render();
+  // A timed mute ends (or is changed from a menu) while this tab is open.
+  window.addEventListener(CHANNEL_MUTE_CHANGED, render, { signal });
   return wrapper;
 }

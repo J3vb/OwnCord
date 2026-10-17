@@ -79,7 +79,7 @@ import {
 import { markAllRead, setMarkReadSender } from "@lib/read-state";
 import { setMarkUnreadSender } from "@components/message-list/mark-unread";
 import { onChannelReselect, stepChannel } from "@lib/channel-navigation";
-import { setChannelMutesHost } from "@lib/channel-mutes";
+import { setChannelMutesHost, startMuteExpiryWatch } from "@lib/channel-mutes";
 import { setAudioVolumeHost } from "@lib/audioElements";
 import { setScreenSourcePicker } from "../features/voice/native/screenPickerSlot";
 import { createQuickSwitcherManager } from "./main-page/OverlayManagers";
@@ -1323,6 +1323,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // logout or server switch does not leave this session's count behind.
     // destroy() sets tornDown before it runs unsubscribers, so a stopper
     // pushed while !tornDown always runs.
+    // Timed mutes: redraws the sidebars when one ends. Page-owned, so a socket
+    // reconnect leaves it alone and a server switch remounts a fresh one.
+    unsubscribers.push(startMuteExpiryWatch());
     void import("../features/unread-badge/unreadBadge").then((badge) => {
       if (!tornDown) unsubscribers.push(badge.startUnreadBadge(desktop.notifier));
     });

@@ -12,7 +12,7 @@ import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
 import { setSidebarMode } from "@stores/ui.store";
-import { CHANNEL_MUTE_CHANGED, isChannelMuted } from "@lib/channel-mutes";
+import { CHANNEL_MUTE_CHANGED, getChannelMute, isChannelMuted } from "@lib/channel-mutes";
 import { trackCurrentView } from "../../features/navigation/contentView";
 import type { CountSource } from "../../features/navigation/destinations";
 import { navigationText } from "../../i18n/navigation";
@@ -87,6 +87,7 @@ function menuConvo(dm: DmChannel): DmMenuConvo {
     isGroup: dm.isGroup,
     unread: dm.unreadCount > 0 || dm.mentionCount > 0,
     muted: isChannelMuted(dm.channelId),
+    mutedUntil: getChannelMute(dm.channelId)?.until ?? null,
   };
 }
 

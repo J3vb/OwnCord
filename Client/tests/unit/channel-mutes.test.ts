@@ -8,6 +8,10 @@ import {
   notificationAllowed,
   invalidateMuteCache,
   setChannelMutesHost,
+  getChannelMute,
+  pruneExpiredMutes,
+  CHANNEL_MUTE_CHANGED,
+  MUTE_DURATIONS_MS,
 } from "@lib/channel-mutes";
 import { STORAGE_PREFIX } from "@lib/preferences";
 // The modules in the notifications graph that install an app-lifetime window
@@ -261,5 +265,160 @@ describe("notifyIncomingMessage respects mutes", () => {
     // pins is that the mute gate did not return early — which it would have,
     // silently, for a non-mention.
     expect(notificationAllowed(50, true)).toBe(true);
+  });
+});
+
+describe("channel mutes — timed mutes (3D-3a)", () => {
+  const T0 = new Date(2026, 9, 17, 12, 0, 0).getTime();
+  const HOUR = 3_600_000;
+
+  beforeEach(() => {
+    setChannelMutesHost(null);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(T0);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function stored(): unknown {
+    return JSON.parse(localStorage.getItem(KEY)!);
+  }
+
+  it("reads a mixed list of bare ids and timed entries", () => {
+    localStorage.setItem(KEY, JSON.stringify([3, { id: 4, until: T0 + HOUR }]));
+    invalidateMuteCache();
+    expect(listMutedChannels()).toEqual([3, 4]);
+    expect(getChannelMute(3)).toEqual({ until: null });
+    expect(getChannelMute(4)).toEqual({ until: T0 + HOUR });
+    expect(getChannelMute(5)).toBeNull();
+  });
+
+  it("a timed mute is muted before until and not muted after (Date mocked, no timer run)", () => {
+    muteChannel(7, HOUR);
+    expect(isChannelMuted(7)).toBe(true);
+    vi.setSystemTime(T0 + HOUR - 1);
+    expect(isChannelMuted(7)).toBe(true);
+    vi.setSystemTime(T0 + HOUR);
+    expect(isChannelMuted(7)).toBe(false);
+    expect(listMutedChannels()).toEqual([]);
+    expect(getChannelMute(7)).toBeNull();
+  });
+
+  it("a mention still notifies through a timed mute, chatter does not, until it ends", () => {
+    muteChannel(7, HOUR);
+    expect(notificationAllowed(7, false)).toBe(false);
+    expect(notificationAllowed(7, true)).toBe(true);
+    vi.setSystemTime(T0 + HOUR);
+    expect(notificationAllowed(7, false)).toBe(true);
+  });
+
+  it("muteChannel replaces timed with forever and forever with timed", () => {
+    muteChannel(7, HOUR);
+    muteChannel(7);
+    expect(getChannelMute(7)).toEqual({ until: null });
+    muteChannel(7, 900_000);
+    expect(getChannelMute(7)).toEqual({ until: T0 + 900_000 });
+    expect(listMutedChannels()).toEqual([7]);
+  });
+
+  it("rejects a duration not in the list", () => {
+    expect(muteChannel(7, 12345)).toBe(false);
+    expect(muteChannel(7, 0)).toBe(false);
+    expect(isChannelMuted(7)).toBe(false);
+    expect(localStorage.getItem(KEY)).toBeNull();
+    expect(MUTE_DURATIONS_MS).toEqual([900_000, 3_600_000, 10_800_000, 28_800_000, 86_400_000]);
+  });
+
+  it("a list with only forever mutes is written byte-identical to today", () => {
+    muteChannel(7);
+    muteChannel(2);
+    expect(localStorage.getItem(KEY)).toBe("[7,2]");
+  });
+
+  it("writes a timed mute as an {id, until} object", () => {
+    muteChannel(7, HOUR);
+    muteChannel(2);
+    expect(stored()).toEqual([{ id: 7, until: T0 + HOUR }, 2]);
+  });
+
+  it("write drops expired entries", () => {
+    muteChannel(7, 900_000);
+    vi.setSystemTime(T0 + HOUR);
+    muteChannel(8);
+    expect(stored()).toEqual([8]);
+  });
+
+  it("pruneExpiredMutes announces each expired id once and returns them", () => {
+    muteChannel(7, 900_000);
+    muteChannel(8, 900_000);
+    muteChannel(9, HOUR);
+    muteChannel(10);
+    const seen: number[] = [];
+    const ac = new AbortController();
+    window.addEventListener(
+      CHANNEL_MUTE_CHANGED,
+      (e) => seen.push((e as CustomEvent<{ channelId: number }>).detail.channelId),
+      { signal: ac.signal },
+    );
+    vi.setSystemTime(T0 + 900_000);
+    expect(pruneExpiredMutes(Date.now())).toEqual([7, 8]);
+    expect(seen).toEqual([7, 8]);
+    expect(stored()).toEqual([{ id: 9, until: T0 + HOUR }, 10]);
+    // Nothing more has ended: no write, no event.
+    expect(pruneExpiredMutes(Date.now())).toEqual([]);
+    expect(seen).toEqual([7, 8]);
+    ac.abort();
+  });
+
+  it("prune clamps an entry more than 24 h out", () => {
+    muteChannel(7, 86_400_000);
+    // The clock goes back 10 h: the mute now has 34 h left.
+    vi.setSystemTime(T0 - 10 * HOUR);
+    expect(getChannelMute(7)!.until).toBe(T0 + 24 * HOUR);
+    expect(pruneExpiredMutes(Date.now())).toEqual([]);
+    expect(getChannelMute(7)).toEqual({ until: T0 - 10 * HOUR + 24 * HOUR });
+    expect(stored()).toEqual([{ id: 7, until: T0 + 14 * HOUR }]);
+  });
+
+  it("skips a malformed timed entry and keeps the rest", () => {
+    localStorage.setItem(
+      KEY,
+      JSON.stringify([
+        { id: 1, until: T0 + HOUR },
+        { id: 2 },
+        { id: "3", until: T0 + HOUR },
+        { id: 4, until: -5 },
+        { id: 5, until: "soon" },
+        { id: 0, until: T0 + HOUR },
+        { until: T0 + HOUR },
+        { id: 6, until: null },
+        6.5,
+        8,
+      ]),
+    );
+    invalidateMuteCache();
+    expect(listMutedChannels()).toEqual([1, 8]);
+  });
+
+  it("a later duplicate wins", () => {
+    localStorage.setItem(KEY, JSON.stringify([5, { id: 5, until: T0 + HOUR }]));
+    invalidateMuteCache();
+    expect(getChannelMute(5)).toEqual({ until: T0 + HOUR });
+  });
+
+  it("toggleChannelMute unmutes a timed mute", () => {
+    muteChannel(7, HOUR);
+    expect(toggleChannelMute(7)).toBe(false);
+    expect(isChannelMuted(7)).toBe(false);
+  });
+
+  it("migrates a legacy unscoped list into a Map the timed API can replace", () => {
+    localStorage.setItem(KEY, JSON.stringify([3]));
+    setChannelMutesHost("legacy.example.com");
+    expect(isChannelMuted(3)).toBe(true);
+    muteChannel(3, HOUR);
+    expect(getChannelMute(3)).toEqual({ until: T0 + HOUR });
+    setChannelMutesHost(null);
   });
 });

@@ -46,7 +46,7 @@ import {
 import { createMemberPickerModal } from "./MemberPickerModal";
 import { createPromptModal } from "@lib/modalFactory";
 import type { ModalInstance } from "@lib/modalFactory";
-import { CHANNEL_MUTE_CHANGED, toggleChannelMute } from "@lib/channel-mutes";
+import { CHANNEL_MUTE_CHANGED, muteChannel, toggleChannelMute } from "@lib/channel-mutes";
 import { markAllRead, markChannelRead, unreadChannelIds } from "@lib/read-state";
 import { createSidebarDmSection } from "./SidebarDmSection";
 import { uiStore, setSidebarMode, loadCollapsedCategories, openSettings } from "@stores/ui.store";
@@ -771,6 +771,10 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       onToggleMute: (channelId) => {
         toggleChannelMute(channelId);
         // Mute state is not in a store, so nothing re-renders on its own.
+        refreshDmSidebarRef?.();
+      },
+      onMuteFor: (channelId, durationMs) => {
+        muteChannel(channelId, durationMs);
         refreshDmSidebarRef?.();
       },
       onMarkRead: markChannelRead,

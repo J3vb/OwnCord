@@ -64,6 +64,8 @@ export interface DmConversation {
   /** Muted: the unread badge renders dimmed. The mention badge does not —
    *  a mute silences chatter, never something addressed to you. */
   readonly muted?: boolean;
+  /** When a timed mute ends (epoch ms); absent or null for an untimed mute. */
+  readonly mutedUntil?: number | null;
   readonly active?: boolean;
   /** Someone is in this DM's call: the row shows a phone glyph. */
   readonly inCall?: boolean;
@@ -77,6 +79,8 @@ export interface DmSidebarOptions {
    *  which one it is is the server's call, and the label says so. */
   readonly onCloseDm?: (channelId: number) => void;
   readonly onToggleMute?: (channelId: number) => void;
+  /** Row menu: mute for a fixed time. */
+  readonly onMuteFor?: (channelId: number, durationMs: number) => void;
   /** Row menu: mark the conversation read. Offered only while it is unread. */
   readonly onMarkRead?: (channelId: number) => void;
   /** Row menu, 1:1 only: open this person's profile panel. */
@@ -191,6 +195,7 @@ function menuConvo(convo: DmConversation): DmMenuConvo {
     isGroup: convo.isGroup === true,
     unread: convo.unread,
     muted: convo.muted === true,
+    mutedUntil: convo.mutedUntil ?? null,
   };
 }
 

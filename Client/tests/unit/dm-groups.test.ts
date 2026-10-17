@@ -282,6 +282,71 @@ describe("DmSidebar — muted rows", () => {
     sidebar.destroy?.();
   });
 
+  it("DM menu offers durations", () => {
+    const onToggleMute = vi.fn();
+    const onMuteFor = vi.fn();
+    const sidebar = mount([convo({ channelId: 7 })], { onToggleMute, onMuteFor });
+
+    const item = container.querySelector(".dm-item") as HTMLElement;
+    item.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }));
+
+    const entry = document.querySelector('[data-testid="dm-mute-7"]') as HTMLElement;
+    const flyout = entry.nextElementSibling as HTMLElement;
+    expect([...flyout.querySelectorAll('[role="menuitem"]')].map((r) => r.textContent)).toEqual([
+      "For 15 Minutes",
+      "For 1 Hour",
+      "For 3 Hours",
+      "For 8 Hours",
+      "For 24 Hours",
+      "Until I turn it back on",
+    ]);
+    (flyout.querySelector('[data-testid="dm-mute-for-3600000-7"]') as HTMLElement).click();
+    expect(onMuteFor).toHaveBeenCalledWith(7, 3_600_000);
+    expect(onToggleMute).not.toHaveBeenCalled();
+
+    sidebar.destroy?.();
+  });
+
+  it("DM menu: Until I turn it back on and the row itself both mute until turned off", () => {
+    const onToggleMute = vi.fn();
+    const sidebar = mount([convo({ channelId: 7 })], { onToggleMute, onMuteFor: vi.fn() });
+    const open = (): HTMLElement => {
+      container
+        .querySelector(".dm-item")!
+        .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }));
+      return document.querySelector('[data-testid="dm-mute-7"]') as HTMLElement;
+    };
+    open();
+    (document.querySelector('[data-testid="dm-mute-for-forever-7"]') as HTMLElement).click();
+    expect(onToggleMute).toHaveBeenCalledTimes(1);
+    open().click();
+    expect(onToggleMute).toHaveBeenCalledTimes(2);
+    sidebar.destroy?.();
+  });
+
+  it("DM menu: a timed mute shows its end under Unmute Conversation", () => {
+    const until = new Date(2026, 9, 17, 15, 30, 0).getTime();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 9, 17, 12, 0, 0));
+    try {
+      const sidebar = mount([convo({ channelId: 7, muted: true, mutedUntil: until })], {
+        onToggleMute: vi.fn(),
+        onMuteFor: vi.fn(),
+      });
+      container
+        .querySelector(".dm-item")!
+        .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }));
+      const entry = document.querySelector('[data-testid="dm-mute-7"]') as HTMLElement;
+      expect(entry.querySelector(".context-menu-item__detail")!.textContent).toBe(
+        "Muted until 3:30 PM",
+      );
+      expect(entry.nextElementSibling?.classList.contains("context-menu__submenu")).toBeFalsy();
+      sidebar.destroy?.();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("says Unmute when the conversation is already muted", () => {
     const sidebar = mount([convo({ channelId: 7, muted: true })], { onToggleMute: vi.fn() });
     (container.querySelector(".dm-item") as HTMLElement).dispatchEvent(

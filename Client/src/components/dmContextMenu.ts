@@ -10,6 +10,7 @@ import { createModal, type ModalInstance } from "@lib/modalFactory";
 import { showContextMenu, type ContextMenuItem } from "@lib/context-menu";
 import { requestsText } from "../i18n/requests";
 import { shellText } from "../i18n/shell";
+import { muteChoices, mutedUntilLabel } from "./muteMenu";
 import { blocksStore } from "@stores/blocks.store";
 import { callUnavailableReason } from "../features/profiles/openUserProfilePopup";
 import { copyWithToast, isDeveloperMode } from "../features/developer-mode/developerTools";
@@ -23,6 +24,8 @@ export interface DmMenuConvo {
   readonly isGroup: boolean;
   readonly unread: boolean;
   readonly muted: boolean;
+  /** When a timed mute ends (epoch ms); null for none or "until turned off". */
+  readonly mutedUntil: number | null;
 }
 
 /** The actions a menu can offer. An item whose callback is absent is omitted. */
@@ -30,6 +33,8 @@ export interface DmMenuActions {
   /** Close a 1:1 DM / leave a group. */
   readonly onCloseDm?: (channelId: number) => void;
   readonly onToggleMute?: (channelId: number) => void;
+  /** Mute for a fixed time. Absent: the menu offers only the plain toggle. */
+  readonly onMuteFor?: (channelId: number, durationMs: number) => void;
   /** Offered only while the conversation is unread. */
   readonly onMarkRead?: (channelId: number) => void;
   /** 1:1 only: open this person's profile panel. */
@@ -148,9 +153,26 @@ export function openDmContextMenu(req: DmContextMenuRequest): void {
   }
   if (actions.onToggleMute !== undefined) {
     const toggle = actions.onToggleMute;
+    const muteFor = actions.onMuteFor;
+    const until = convo.muted ? mutedUntilLabel(convo.mutedUntil) : null;
     items.push({
       label: convo.muted ? requestsText("dm.unmute") : requestsText("dm.mute"),
       testId: `dm-mute-${id}`,
+      ...(until === null ? {} : { detail: until }),
+      // The row itself is the default action (mute until turned off); the
+      // flyout offers the timed choices.
+      ...(convo.muted || muteFor === undefined
+        ? {}
+        : {
+            submenu: muteChoices().map(
+              (choice): ContextMenuItem => ({
+                label: choice.label,
+                testId: `dm-mute-for-${choice.durationMs ?? "forever"}-${id}`,
+                onClick: () =>
+                  choice.durationMs === undefined ? toggle(id) : muteFor(id, choice.durationMs),
+              }),
+            ),
+          }),
       onClick: () => toggle(id),
     });
   }

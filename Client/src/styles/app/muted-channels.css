@@ -31,3 +31,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.settings-muted-row .settings-muted-until {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs, 11px);
+  white-space: nowrap;
+}
