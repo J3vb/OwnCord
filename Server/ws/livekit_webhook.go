@@ -283,26 +283,18 @@ func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.W
 // fields for this exact join instance, then either finishes the leave or, when
 // the client has already moved on, clears the stale DB row.
 func (h *Hub) webhookLeftCleanupClient(ctx context.Context, c *Client, userID, channelID int64, joinToken string) {
-	// Atomic compare-and-clear under c.voiceMu, replacing the previous
-	// read-then-read-then-clear: two independent unlocked getVoiceState
-	// snapshots followed by an unconditional clearVoiceState is not a
-	// guard at all — no lock spans the second read and the clear, so a
-	// voice_join committed on the readPump goroutine in between (a
+	// Atomic compare-and-clear under the slot's voiceMu, replacing the
+	// previous read-then-read-then-clear: two independent unlocked
+	// getVoiceState snapshots followed by an unconditional clearVoiceState
+	// is not a guard at all — no lock spans the second read and the clear,
+	// so a voice_join committed on the readPump goroutine in between (a
 	// channel switch, or a same-channel rejoin with a fresh token) is
 	// wiped out from under the new session, dropping its VoiceTopic
-	// subscription along with it. client.go's clearVoiceStateIfMatch
-	// only compares the channel, not the token, so it would still be
-	// fooled by a same-channel rejoin — this compares both, inlined here
-	// via direct field access (same package as client.go) under the
-	// client's own voiceMu.
-	c.voiceMu.Lock()
-	matched := c.voiceChID == channelID && c.voiceJoinToken != "" && c.voiceJoinToken == joinToken
-	if matched {
-		c.voiceChID = 0
-		c.voiceJoinToken = ""
-		c.e2ee = e2eeAnnounce{}
-	}
-	c.voiceMu.Unlock()
+	// subscription along with it. clearVoiceStateIfMatch only compares the
+	// channel, not the token, so it would still be fooled by a same-channel
+	// rejoin — this compares both, in one voiceMu critical section
+	// (voice_registry.go).
+	matched := c.clearExactKeepCompleted(channelID, joinToken)
 
 	if matched {
 		h.webhookLeftFinishLeave(ctx, c, userID, channelID, joinToken)
