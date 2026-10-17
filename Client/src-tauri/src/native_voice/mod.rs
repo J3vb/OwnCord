@@ -329,8 +329,10 @@ async fn end_mic_test<R: Runtime>(app: &AppHandle<R>, t: Option<(u64, MicTest)>)
 }
 
 /// Start the settings tab's mic test: the chosen microphone, with the call's
-/// processing, gain and gate, played on the chosen output. Replaces a running
-/// test and is refused during a call; a call that joins meanwhile ends it.
+/// processing, gain and gate, played on the chosen output (`monitor`: levels
+/// only, no output; the meter and the diagnostics check use it). Replaces a
+/// running test or monitor and is refused during a call; a call that joins
+/// meanwhile ends it.
 /// Resolves with the test's id once the streams are open.
 #[tauri::command]
 pub async fn native_voice_start_mic_test<R: Runtime>(
@@ -1355,5 +1357,46 @@ mod tests {
         let mut inner = Inner::default();
         assert!(!inner.mic_test_blocked());
         assert!(inner.begin_mic_test().is_ok());
+    }
+
+    fn idle_test(monitor: bool) -> MicTest {
+        let audio = session::AudioOptions {
+            echo_cancellation: false,
+            noise_suppression: false,
+            auto_gain_control: false,
+            enhanced_noise_suppression: false,
+        };
+        MicTest::idle_for_test(audio, monitor, tokio::spawn(async {}))
+    }
+
+    /// The meter's monitor holds the test slot: a test start takes it over, a
+    /// stop of the old id is stale, and a connect takes it out.
+    #[tokio::test]
+    async fn a_mic_test_start_replaces_a_running_monitor_and_a_connect_ends_it() {
+        let mut inner = Inner::default();
+        let (_, monitor_id, seen) = inner.begin_mic_test().unwrap();
+        inner.admit_mic_test(monitor_id, seen).unwrap();
+        inner.mic_test = Some((monitor_id, idle_test(true)));
+        let (replaced, test_id, seen) = inner.begin_mic_test().unwrap();
+        assert_eq!(replaced.map(|(id, _)| id), Some(monitor_id));
+        assert!(inner.stop_mic_test(monitor_id).is_none(), "stale id");
+        inner.admit_mic_test(test_id, seen).unwrap();
+        inner.mic_test = Some((test_id, idle_test(false)));
+        let ended = inner.take_mic_test();
+        assert_eq!(ended.map(|(id, _)| id), Some(test_id));
+        assert!(inner.mic_test.is_none());
+    }
+
+    /// A monitor that finishes opening after a call joined must not claim
+    /// the slot: the call's capture owns the device.
+    #[test]
+    fn a_monitor_that_finishes_after_a_connect_is_refused() {
+        let mut inner = Inner::default();
+        let (_, id, seen) = inner.begin_mic_test().unwrap();
+        inner.next_id += 1;
+        assert_eq!(
+            inner.admit_mic_test(id, seen),
+            Err(MIC_TEST_IN_CALL.to_string())
+        );
     }
 }

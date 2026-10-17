@@ -51,6 +51,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Desktop UI**
 
+- The DM header now has a **Video Call** button next to Voice Call, shows the person's avatar (or a group's faces) instead of "@", reads "Do Not Disturb" instead of "Dnd", and you can click a group's name to rename it.
 - Private channels now show a small lock over their icon in the channel list, so you can tell at a glance which channels only some members can see. It updates straight away when a channel's permissions change.
 - In a DM call, drag the bottom edge of the call area to make it taller or shorter, as in Discord; the height is remembered, and double-click puts it back.
 - Settings → Notifications has an **App sounds volume** slider for every OwnCord sound, and a switch for each one (message, mention, incoming call, outgoing call, join/leave, mute/deafen, stream). Everything starts at today's volume with every sound on.
@@ -71,6 +72,8 @@ and only when it changes something a contributor or fork holder must do
 - On Linux, Settings → Voice & Video now has **Input Volume** (0–200 %) and **Automatically determine input sensitivity**, as on Windows, and the sensitivity bar moves with your voice during a call. A Linux profile still at the default sensitivity switches to automatic, as Windows did in beta 4.
 - On Linux, Echo Cancellation, Noise Suppression, Automatic Gain Control and Enhanced Noise Suppression now apply straight away during a call instead of at the next join.
 - On Linux, Settings → Voice & Video now has a working **Mic Test**: it plays your microphone back on your chosen speakers with your input volume, sensitivity and noise settings, and the level bar moves while it runs. Use headphones, as on Windows. Joining a voice channel stops the test, and it cannot start during a call.
+- On Linux, the level bar in Settings → Voice & Video now moves whenever the tab is open, as on Windows, instead of only in a call or during the Mic Test. The Mic Test still does not run during a call; the bar then follows your call's microphone.
+- On Linux, Settings → Diagnostics now really opens your microphone for a second and passes only when audio arrives, instead of only checking that it is listed. Incoming media still cannot be checked on Linux, and the result now says why.
 - On Linux, app sounds (join, mute, message chime, ringing) now play on the output device chosen in Settings → Voice & Video, in a call and outside one. If that device cannot be opened they play on the default output.
 - On Linux, plugging in or removing an audio device now updates the device lists in Settings → Voice & Video and switches over, in a call and outside one. A saved device that comes back is picked again.
 - Linux: switching camera in a call keeps your video tile instead of restarting it.

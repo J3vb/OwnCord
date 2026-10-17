@@ -34,6 +34,10 @@ export interface ChatAreaOptions {
   readonly onToggleDmProfile?: () => void;
   /** Start a call in the current DM (join its voice channel + ring). */
   readonly onStartCall?: () => void;
+  /** Start a call in the current DM with the camera on. */
+  readonly onStartVideoCall?: () => void;
+  /** Rename the open group DM (the header's group name click). */
+  readonly onRenameGroup?: () => void;
 }
 
 export interface ChatAreaResult {
@@ -158,6 +162,8 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     },
     onToggleDmProfile: opts.onToggleDmProfile,
     onStartCall: opts.onStartCall,
+    onStartVideoCall: opts.onStartVideoCall,
+    onRenameGroup: opts.onRenameGroup,
   });
   const chatHeaderName = chatHeader.refs.nameEl;
 

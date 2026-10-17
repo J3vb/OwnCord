@@ -18,6 +18,24 @@ vi.mock("../../src/features/voice/native/devices", () => ({
   nativeCameraSupport: async () => null,
   onNativeDevicesChanged: () => null,
 }));
+// The Linux tab starts the meter's capture-only monitor on the host; a call
+// holding the capture stands in for it here.
+vi.mock("../../src/platform/desktop", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../src/platform/desktop")>();
+  return {
+    ...original,
+    desktop: {
+      ...original.desktop,
+      nativeVoice: {
+        ...original.desktop.nativeVoice,
+        onMicTestEvent: () => () => {},
+        startMicTest: async () => {
+          throw new Error("mic test unavailable during a call");
+        },
+      },
+    },
+  };
+});
 vi.mock("livekit-client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("livekit-client")>()),
   supportsVP9: () => supportsVP9(),

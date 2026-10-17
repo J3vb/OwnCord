@@ -18,6 +18,10 @@ export interface ChatHeaderRefs {
   /** The DM call button. Hidden outside DMs — a guild voice channel is joined
    *  from the sidebar, and a text channel has nobody in particular to call. */
   readonly callBtn: HTMLButtonElement;
+  /** The DM video call button: the same call, with the camera on once joined. */
+  readonly videoCallBtn: HTMLButtonElement;
+  /** Holds the DM partner's avatar (or a group's stack) in place of the "@". */
+  readonly avatarEl: HTMLSpanElement;
   /**
    * The narrow-width sidebar toggle. Hidden above 800px; visible below it,
    * where the sidebar collapses. The drawer owns its `aria-expanded`.
@@ -34,6 +38,19 @@ export interface ChatHeaderOptions {
   readonly onToggleDmProfile?: () => void;
   /** Start a call in the current DM: join its voice channel and ring. */
   readonly onStartCall?: () => void;
+  /** Start a call in the current DM with the camera on. */
+  readonly onStartVideoCall?: () => void;
+  /** Rename the open group DM. Reached by clicking the group's name. */
+  readonly onRenameGroup?: () => void;
+}
+
+/** What the header shows for a DM. `avatar` is built by the caller (it owns the
+ *  data); `isGroup` makes a click on the name rename instead of open a profile. */
+export interface ChatHeaderDm {
+  readonly username: string;
+  readonly status: string;
+  readonly avatar?: HTMLElement | null;
+  readonly isGroup?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -79,12 +96,17 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
     const toggle = opts.onToggleDmProfile;
     nameGroup.style.cursor = "pointer";
     nameGroup.addEventListener("click", () => {
-      // Only acts where the profile panel can open; MainPage's handler already
-      // no-ops for a group, but the cursor is toggled to match (F24).
+      // A group has no profile panel; its name is the rename affordance.
+      if (nameGroup.dataset["dmGroup"] === "true") {
+        opts.onRenameGroup?.();
+        return;
+      }
       toggle();
     });
   }
-  appendChildren(nameGroup, hash, nameEl);
+  const avatarEl = createElement("span", { class: "ch-avatar", "data-testid": "ch-avatar" });
+  avatarEl.style.display = "none";
+  appendChildren(nameGroup, hash, avatarEl, nameEl);
 
   const divider = createElement("div", { class: "ch-divider" });
   const topicEl = createElement("span", { class: "ch-topic" }, "");
@@ -102,6 +124,19 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
   if (opts.onStartCall !== undefined) {
     const start = opts.onStartCall;
     callBtn.addEventListener("click", () => start());
+  }
+  const videoCallBtn = createElement("button", {
+    type: "button",
+    class: "call-btn",
+    title: messagingText("header.startVideoCall"),
+    "aria-label": messagingText("header.startVideoCall"),
+    "data-testid": "video-call-btn",
+  });
+  videoCallBtn.appendChild(createIcon("camera", 18));
+  videoCallBtn.style.display = "none";
+  if (opts.onStartVideoCall !== undefined) {
+    const start = opts.onStartVideoCall;
+    videoCallBtn.addEventListener("click", () => start());
   }
   const pinBtn = createElement("button", {
     type: "button",
@@ -127,12 +162,21 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
       searchInput.blur();
     });
   }
-  appendChildren(tools, searchInput, callBtn, pinBtn);
+  appendChildren(tools, searchInput, callBtn, videoCallBtn, pinBtn);
 
   appendChildren(header, sidebarToggle, nameGroup, divider, topicEl, tools);
   return {
     element: header,
-    refs: { hashEl: hash, nameEl, topicEl, callBtn, sidebarToggle, nameGroupEl: nameGroup },
+    refs: {
+      hashEl: hash,
+      nameEl,
+      topicEl,
+      callBtn,
+      videoCallBtn,
+      avatarEl,
+      sidebarToggle,
+      nameGroupEl: nameGroup,
+    },
   };
 }
 
@@ -147,17 +191,26 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
  * presence for a 1:1 DM, and the member list for a group — a group has no
  * single status to show, and "who is in here" is the fact that matters.
  */
-export function updateChatHeaderForDm(
-  refs: ChatHeaderRefs,
-  recipient: { username: string; status: string } | null,
-): void {
+export function updateChatHeaderForDm(refs: ChatHeaderRefs, recipient: ChatHeaderDm | null): void {
   if (recipient !== null) {
+    const avatar = recipient.avatar ?? null;
     setText(refs.hashEl, "@");
+    // With an avatar the "@" would only repeat what the picture says.
+    refs.hashEl.style.display = avatar !== null ? "none" : "";
+    refs.avatarEl.replaceChildren(...(avatar !== null ? [avatar] : []));
+    refs.avatarEl.style.display = avatar !== null ? "" : "none";
+    refs.nameGroupEl.dataset["dmGroup"] = recipient.isGroup === true ? "true" : "false";
     setText(refs.nameEl, recipient.username);
     setText(refs.topicEl, recipient.status);
     refs.callBtn.style.display = "";
+    refs.videoCallBtn.style.display = "";
   } else {
     setText(refs.hashEl, "#");
+    refs.hashEl.style.display = "";
+    refs.avatarEl.replaceChildren();
+    refs.avatarEl.style.display = "none";
+    delete refs.nameGroupEl.dataset["dmGroup"];
     refs.callBtn.style.display = "none";
+    refs.videoCallBtn.style.display = "none";
   }
 }
