@@ -280,6 +280,12 @@ test.describe("Admin moderation — member context menu", () => {
     await expect(menu.locator(".context-menu__item", { hasText: /^Ban$/ })).toHaveCount(0);
     await expect(menu.locator("[data-testid='force-logout']")).toHaveCount(0);
     await expect(menu.locator(".context-menu__item", { hasText: "Change Role" })).toHaveCount(0);
-    expect(await menu.locator(".context-menu__item").allTextContents()).toEqual(["Block"]);
+    expect(await menu.locator(".context-menu__item").allTextContents()).toEqual([
+      "Profile",
+      "Mention",
+      "Message",
+      "Call",
+      "Block",
+    ]);
   });
 });

@@ -24,6 +24,7 @@ import {
 } from "../../src/stores/messages.store";
 import { registerReadingAnchor } from "../../src/features/messaging/readingAnchor";
 import { membersStore } from "../../src/stores/members.store";
+import { memberTimeoutsStore, setMemberTimeouts } from "../../src/features/moderation/store";
 import { voiceStore } from "../../src/stores/voice.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { blocksStore, setUserBlockedByMe } from "../../src/stores/blocks.store";
@@ -3252,6 +3253,50 @@ describe("WS Dispatcher", () => {
     expect(roles.map((r) => r.id)).toEqual([1, 4]);
     expect(roles[0]?.color).toBe("#FF0000");
     expect(roles.some((r) => r.name === "Contractor")).toBe(false);
+  });
+
+  // (21) the member menu's timeout view (WP 3C-3, data half of 3C-7c)
+  describe("member timeouts", () => {
+    const emptyReady = { channels: [], members: [], voice_states: [], roles: [], dm_channels: [] };
+
+    afterEach(() => setMemberTimeouts(undefined));
+
+    it("fills the store from ready.member_timeouts, replacing the previous map", () => {
+      mock.dispatch("ready", {
+        ...emptyReady,
+        member_timeouts: [{ user_id: 4, expires_at: "2099-01-01T00:00:00Z" }],
+      });
+      expect(memberTimeoutsStore.getState()).toEqual(new Map([[4, "2099-01-01T00:00:00Z"]]));
+
+      mock.dispatch("ready", {
+        ...emptyReady,
+        member_timeouts: [{ user_id: 9, expires_at: "2099-02-02T00:00:00Z" }],
+      });
+      expect(memberTimeoutsStore.getState()).toEqual(new Map([[9, "2099-02-02T00:00:00Z"]]));
+    });
+
+    it("sets the store to null when ready carries no member_timeouts (an older server)", () => {
+      mock.dispatch("ready", {
+        ...emptyReady,
+        member_timeouts: [{ user_id: 4, expires_at: "2099-01-01T00:00:00Z" }],
+      });
+      mock.dispatch("ready", emptyReady);
+      expect(memberTimeoutsStore.getState()).toBeNull();
+    });
+
+    it("replaces the whole map on a member_timeouts frame", () => {
+      mock.dispatch("ready", {
+        ...emptyReady,
+        member_timeouts: [{ user_id: 4, expires_at: "2099-01-01T00:00:00Z" }],
+      });
+      mock.dispatch("member_timeouts", {
+        timeouts: [{ user_id: 5, expires_at: "2099-03-03T00:00:00Z" }],
+      });
+      expect(memberTimeoutsStore.getState()).toEqual(new Map([[5, "2099-03-03T00:00:00Z"]]));
+
+      mock.dispatch("member_timeouts", { timeouts: [] });
+      expect(memberTimeoutsStore.getState()).toEqual(new Map());
+    });
   });
 
   it("makes a role created by roles_update immediately assignable", () => {
