@@ -401,56 +401,100 @@ describe("ChannelSidebar", () => {
     expect(serverName?.textContent).toBe("Test Server");
   });
 
-  it("shows unread badge for channels with unread messages", () => {
+  it("shows plain unread as bold name and pill only, with no number badge", () => {
     setChannels(testChannels);
     sidebar.mount(container);
 
-    const badges = container.querySelectorAll(".unread-badge");
-    expect(badges.length).toBe(2); // general (2) and announcements (5)
-
-    const badgeTexts = Array.from(badges).map((b) => b.textContent);
-    expect(badgeTexts).toContain("2");
-    expect(badgeTexts).toContain("5");
+    // general (2) and announcements (5) are unread: the `.unread` class carries
+    // the bold name and the white pill; the count is not drawn.
+    const unreadRows = container.querySelectorAll(".channel-item.unread");
+    expect(unreadRows.length).toBe(2);
+    expect(container.querySelectorAll(".unread-badge").length).toBe(0);
+    expect(container.querySelector('[data-channel-id="1"]')?.textContent).not.toContain("2");
+    // The pill and the bold name are CSS on `.unread`; pin both.
+    expect(cascadedDeclaration(".channel-item.unread .ch-name", "font-weight")).toBeDefined();
+    expect(cascadedDeclaration(".channel-item.unread::before", "background")).toBeDefined();
+    // No stylesheet rule styles a server-channel count any more.
+    expect(cascadedDeclaration(".channel-item .unread-badge", "background")).toBeUndefined();
   });
 
-  it("shows the red mention badge instead of the unread badge", () => {
+  it("keeps the red mention badge, with the count, on a mentioned row", () => {
     setChannels([{ ...testChannels[0]!, unread_count: 7, mention_count: 2 }, testChannels[1]!]);
     sidebar.mount(container);
 
     const item = container.querySelector('[data-channel-id="1"]')!;
     expect(item.classList.contains("mentioned")).toBe(true);
-    const mentionBadge = item.querySelector(".mention-badge");
-    expect(mentionBadge?.textContent).toBe("2");
-    // The mention badge wins outright — no double badge on one row.
+    expect(item.querySelector(".mention-badge")?.textContent).toBe("2");
     expect(item.querySelector(".unread-badge")).toBeNull();
   });
 
-  it("falls back to the unread badge when there are no mentions", () => {
+  it("an unread row with no mentions has no mention badge and no count", () => {
     setChannels([{ ...testChannels[0]!, unread_count: 7, mention_count: 0 }]);
     sidebar.mount(container);
 
     const item = container.querySelector('[data-channel-id="1"]')!;
+    expect(item.classList.contains("unread")).toBe(true);
     expect(item.classList.contains("mentioned")).toBe(false);
     expect(item.querySelector(".mention-badge")).toBeNull();
-    expect(item.querySelector(".unread-badge")?.textContent).toBe("7");
+    expect(item.querySelector(".unread-badge")).toBeNull();
   });
 
-  it("caps the unread badge at 99+", () => {
-    setChannels([{ ...testChannels[0]!, unread_count: 137, mention_count: 0 }]);
-    sidebar.mount(container);
+  describe("muted channels (N7)", () => {
+    beforeEach(() => {
+      localStorage.clear();
+      invalidateMuteCache();
+    });
+    afterEach(() => {
+      localStorage.clear();
+      invalidateMuteCache();
+    });
 
-    const badge = container.querySelector('[data-channel-id="1"] .unread-badge');
-    expect(badge?.textContent).toBe("99+");
-  });
+    it("a muted unread row has no .unread class and no badge", () => {
+      setChannels([{ ...testChannels[0]!, unread_count: 5, mention_count: 0 }]);
+      muteChannel(1);
+      sidebar.mount(container);
 
-  it("shows 99 without the plus at the cap, and 100 as 99+", () => {
-    setChannels([{ ...testChannels[0]!, unread_count: 99, mention_count: 0 }]);
-    sidebar.mount(container);
-    expect(container.querySelector('[data-channel-id="1"] .unread-badge')?.textContent).toBe("99");
+      const item = container.querySelector('[data-channel-id="1"]')!;
+      expect(item.classList.contains("muted")).toBe(true);
+      expect(item.classList.contains("unread")).toBe(false);
+      expect(item.querySelector(".unread-badge")).toBeNull();
+      expect(item.querySelector(".mention-badge")).toBeNull();
+      expect(item.hasAttribute("aria-description")).toBe(false);
+    });
 
-    setChannels([{ ...testChannels[0]!, unread_count: 100, mention_count: 0 }]);
-    channelsStore.flush();
-    expect(container.querySelector('[data-channel-id="1"] .unread-badge')?.textContent).toBe("99+");
+    it("names plain unread for screen readers, but not a mention", () => {
+      setChannels([
+        { ...testChannels[0]!, unread_count: 5, mention_count: 0 },
+        { ...testChannels[1]!, unread_count: 5, mention_count: 1 },
+      ]);
+      sidebar.mount(container);
+
+      const plain = container.querySelector(`[data-channel-id="${testChannels[0]!.id}"]`)!;
+      const mentioned = container.querySelector(`[data-channel-id="${testChannels[1]!.id}"]`)!;
+      expect(plain.getAttribute("aria-description")).toBe("Unread");
+      expect(mentioned.hasAttribute("aria-description")).toBe(false);
+    });
+
+    it("a muted row with mentions still shows the mention", () => {
+      setChannels([{ ...testChannels[0]!, unread_count: 5, mention_count: 2 }]);
+      muteChannel(1);
+      sidebar.mount(container);
+
+      const item = container.querySelector('[data-channel-id="1"]')!;
+      expect(item.classList.contains("unread")).toBe(true);
+      expect(item.classList.contains("mentioned")).toBe(true);
+      expect(item.querySelector(".mention-badge")?.textContent).toBe("2");
+    });
+
+    it("unmuting restores the unread look", () => {
+      setChannels([{ ...testChannels[0]!, unread_count: 5, mention_count: 0 }]);
+      muteChannel(1);
+      sidebar.mount(container);
+      unmuteChannel(1);
+      channelsStore.flush();
+      const item = container.querySelector('[data-channel-id="1"]')!;
+      expect(item.classList.contains("unread")).toBe(true);
+    });
   });
 
   it("leaves the mention badge uncapped", () => {

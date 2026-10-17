@@ -393,6 +393,9 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       onOpenCall: () => opts.onOpenCall?.(),
       onVoiceModerate: createVoiceModerationCallbacks(ws),
       onWatchStream: opts.onWatchStream,
+      onInviteFromChannel: () => {
+        void headerInviteCtrl.open();
+      },
       onCreateChannel: (category) => {
         if (activeModal !== null) return;
         const modal = createCreateChannelModal({

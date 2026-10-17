@@ -4,6 +4,8 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { createModal } from "@lib/modalFactory";
+import type { ChannelType } from "@lib/types";
 import { messagingText } from "../../i18n/messaging";
 import { shellText } from "../../i18n/shell";
 
@@ -109,7 +111,26 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
   appendChildren(nameGroup, hash, avatarEl, nameEl);
 
   const divider = createElement("div", { class: "ch-divider" });
-  const topicEl = createElement("span", { class: "ch-topic" }, "");
+  const topicEl = createElement(
+    "span",
+    { class: "ch-topic", "data-testid": "chat-header-topic" },
+    "",
+  );
+  // A long topic is ellipsised in one line; clicking it (or Enter/Space on the
+  // focused topic) opens the full text. Only armed while a channel topic is
+  // shown: a DM's status line carries no `data-topic`.
+  const openTopic = (): void => {
+    const topic = topicEl.dataset["topic"];
+    if (topic === undefined || topic === "") return;
+    openTopicModal(nameEl.textContent ?? "", topic);
+  };
+  topicEl.addEventListener("click", openTopic);
+  topicEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      openTopic();
+    }
+  });
 
   const tools = createElement("div", { class: "ch-tools" });
   const callBtn = createElement("button", {
@@ -181,6 +202,79 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
 }
 
 // ---------------------------------------------------------------------------
+// Channel-mode helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * The header glyph for a channel type: the sidebar's megaphone for an
+ * announcement channel, "#" for every other text-style channel. Mirrors
+ * `renderTextChannelItem` so the two cannot disagree.
+ */
+export function setChatHeaderChannelType(
+  refs: ChatHeaderRefs,
+  type: ChannelType | undefined,
+): void {
+  if (type === "announcement") {
+    refs.hashEl.dataset["channelType"] = "announcement";
+    refs.hashEl.replaceChildren(createIcon("megaphone", 18));
+  } else {
+    delete refs.hashEl.dataset["channelType"];
+    setText(refs.hashEl, "#");
+  }
+}
+
+/** Show a channel topic in the header and arm the click-to-read-in-full. */
+export function setChatHeaderTopic(refs: ChatHeaderRefs, topic: string): void {
+  setText(refs.topicEl, topic);
+  if (topic === "") {
+    delete refs.topicEl.dataset["topic"];
+    refs.topicEl.removeAttribute("role");
+    refs.topicEl.removeAttribute("tabindex");
+    refs.topicEl.removeAttribute("title");
+    return;
+  }
+  refs.topicEl.dataset["topic"] = topic;
+  refs.topicEl.setAttribute("role", "button");
+  refs.topicEl.setAttribute("tabindex", "0");
+  refs.topicEl.title = messagingText("header.topicOpen");
+}
+
+/**
+ * A small modal with the whole topic. The topic is user text, so it goes in
+ * through `textContent` only, never as markup; Escape, the backdrop and the
+ * close button all dismiss it.
+ */
+export function openTopicModal(channelName: string, topic: string): void {
+  const title = createElement("h3", { id: "channel-topic-title" });
+  title.textContent = messagingText("header.topicTitle", { channel: channelName });
+  const closeBtn = createElement("button", {
+    class: "modal-close",
+    type: "button",
+    "aria-label": shellText("common.close"),
+    "data-testid": "channel-topic-close",
+  });
+  closeBtn.appendChild(createIcon("x", 14));
+  const header = createElement("div", { class: "modal-header" });
+  appendChildren(header, title, closeBtn);
+
+  const body = createElement("div", { class: "modal-body" });
+  const text = createElement("p", {
+    class: "channel-topic-full",
+    "data-testid": "channel-topic-text",
+  });
+  text.textContent = topic;
+  body.appendChild(text);
+
+  const instance = createModal({
+    content: header,
+    overlayAttrs: { "data-testid": "channel-topic-modal" },
+    ariaLabelledBy: "channel-topic-title",
+  });
+  instance.modal.appendChild(body);
+  closeBtn.addEventListener("click", () => instance.close());
+}
+
+// ---------------------------------------------------------------------------
 // DM mode helper
 // ---------------------------------------------------------------------------
 
@@ -194,6 +288,7 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
 export function updateChatHeaderForDm(refs: ChatHeaderRefs, recipient: ChatHeaderDm | null): void {
   if (recipient !== null) {
     const avatar = recipient.avatar ?? null;
+    delete refs.hashEl.dataset["channelType"];
     setText(refs.hashEl, "@");
     // With an avatar the "@" would only repeat what the picture says.
     refs.hashEl.style.display = avatar !== null ? "none" : "";
@@ -201,11 +296,12 @@ export function updateChatHeaderForDm(refs: ChatHeaderRefs, recipient: ChatHeade
     refs.avatarEl.style.display = avatar !== null ? "" : "none";
     refs.nameGroupEl.dataset["dmGroup"] = recipient.isGroup === true ? "true" : "false";
     setText(refs.nameEl, recipient.username);
+    setChatHeaderTopic(refs, "");
     setText(refs.topicEl, recipient.status);
     refs.callBtn.style.display = "";
     refs.videoCallBtn.style.display = "";
   } else {
-    setText(refs.hashEl, "#");
+    setChatHeaderChannelType(refs, undefined);
     refs.hashEl.style.display = "";
     refs.avatarEl.replaceChildren();
     refs.avatarEl.style.display = "none";

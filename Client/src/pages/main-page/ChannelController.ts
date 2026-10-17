@@ -51,7 +51,7 @@ import { authStore } from "@stores/auth.store";
 import type { MessageUser } from "@lib/types";
 import type { MessageController } from "./MessageController";
 import type { ReactionController } from "./ReactionController";
-import { updateChatHeaderForDm } from "./ChatHeader";
+import { updateChatHeaderForDm, setChatHeaderChannelType, setChatHeaderTopic } from "./ChatHeader";
 import type { ChatHeaderRefs } from "./ChatHeader";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
@@ -1152,6 +1152,16 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       );
     } else if (chatHeaderRefs !== null) {
       updateChatHeaderForDm(chatHeaderRefs, null);
+      const typeRefs = chatHeaderRefs;
+      const typeOf = (): ChannelType | undefined =>
+        channelsStore.getState().channels.get(channelId)?.type ?? channelType;
+      setChatHeaderChannelType(typeRefs, typeOf());
+      composerGatingUnsubs.push(
+        channelsStore.subscribeSelector(
+          (s) => s.channels.get(channelId)?.type,
+          () => setChatHeaderChannelType(typeRefs, typeOf()),
+        ),
+      );
       if (chatHeaderName !== null) {
         setText(chatHeaderName, channelName);
         // Keep the header name live across channel_update events (a rename),
@@ -1168,12 +1178,15 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         );
       }
       // Show the channel topic and keep it live across channel_update events.
-      const topicEl = chatHeaderRefs.topicEl;
-      setText(topicEl, channelsStore.getState().channels.get(channelId)?.topic ?? "");
+      const topicRefs = chatHeaderRefs;
+      setChatHeaderTopic(
+        chatHeaderRefs,
+        channelsStore.getState().channels.get(channelId)?.topic ?? "",
+      );
       composerGatingUnsubs.push(
         channelsStore.subscribeSelector(
           (s) => s.channels.get(channelId)?.topic ?? "",
-          (topic) => setText(topicEl, topic),
+          (topic) => setChatHeaderTopic(topicRefs, topic),
         ),
       );
     } else if (chatHeaderName !== null) {

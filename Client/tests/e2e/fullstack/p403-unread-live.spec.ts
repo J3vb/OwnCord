@@ -73,8 +73,10 @@ async function channelIdByName(server: TestServer, name: string): Promise<number
 const channelItem = (page: Page, name: string) =>
   page.locator(".channel-item:not(.voice)").filter({ hasText: name });
 
+// A server channel shows plain unread as the `.unread` row (bold name + pill),
+// with no count; the fullstack assertions below therefore check presence only.
 const unreadBadge = (page: Page, channelId: number) =>
-  page.locator(`.channel-item[data-channel-id="${channelId}"] .unread-badge`);
+  page.locator(`.channel-item.unread[data-channel-id="${channelId}"]`);
 
 const evidence = (name: string) => `${process.env.OWNCORD_EVIDENCE_DIR}/${name}`;
 
@@ -93,7 +95,6 @@ test("unfocused message in the active channel counts unread, then refocus at the
   const aliceSocket = await rawSocket(server, "alice");
   await aliceSocket.post(general, "counted while unfocused");
   await expect(unreadBadge(bob, general)).toBeVisible({ timeout: 10_000 });
-  await expect(unreadBadge(bob, general)).toHaveText("1");
   await bob.screenshot({ path: evidence("p403-A-unfocused-counted.png") });
 
   // Refocus with the bottom in view: the channel is read and a mark_read goes out.
@@ -146,7 +147,6 @@ test("an unfocused full-ready resync keeps the restated unread and sends no mark
     timeout: 30_000,
   });
   await expect(unreadBadge(bob, general)).toBeVisible({ timeout: 15_000 });
-  await expect(unreadBadge(bob, general)).toHaveText("3");
 
   // The fix: an unfocused ready must not silently mark the unseen messages read.
   expect(sent).not.toContain("mark_read");
@@ -177,7 +177,7 @@ test("an unfocused mention in the active channel paints the mention badge; focus
   aliceSocket.close();
 });
 
-test("a never-opened channel with 100+ unread shows the 99+ badge", async ({
+test("a never-opened channel with 100+ unread shows as unread", async ({
   bob,
   bobTransport,
   server,
@@ -197,8 +197,7 @@ test("a never-opened channel with 100+ unread shows the 99+ badge", async ({
 
   const badge = unreadBadge(bob, flood);
   await expect(badge).toBeVisible({ timeout: 15_000 });
-  await expect(badge).toHaveText("99+");
-  await bob.screenshot({ path: evidence("p403-D-99plus-badge.png") });
+  await bob.screenshot({ path: evidence("p403-D-100plus-unread.png") });
 
   aliceSocket.close();
 });

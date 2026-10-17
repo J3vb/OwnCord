@@ -372,23 +372,8 @@
   font-size: var(--font-size-xxs);
   color: var(--text-micro);
 }
-.channel-item .unread-badge {
-  background: var(--accent);
-  color: var(--on-accent);
-  font-size: var(--font-size-xxs);
-  font-weight: 700;
-  min-width: 18px;
-  height: 18px;
-  border-radius: var(--radius-pill);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 4px;
-}
-.channel-item .unread-badge:empty {
-  display: none;
-}
-/* Mention badge — red, and rendered instead of (never beside) the unread badge. */
+/* Mention badge — red. A server channel has no plain-unread count: unread is the
+   bold name and the pill (`.unread`), and numbers are for mentions and DMs. */
 .channel-item .mention-badge {
   background: var(--danger-fill);
   color: var(--on-fill);

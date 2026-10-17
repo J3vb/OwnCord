@@ -1,7 +1,7 @@
 /**
- * Channel context menu — right-click on a channel for Mark as Read/Move/Edit/
- * Delete/Purge. Mark as Read is offered to everyone (it only touches the
- * caller's own read state); Move, Edit and Delete follow the server's
+ * Channel context menu — right-click on a channel for Mark as Read/Copy Link/
+ * Invite People/Move/Edit/Delete/Purge. Mark as Read is offered to everyone (it
+ * only touches the caller's own read state); Move, Edit and Delete follow the server's
  * MANAGE_CHANNELS gate; Purge follows its MANAGE_MESSAGES gate.
  *
  * Both gates are permission bits, not role names: a custom role granted
@@ -13,10 +13,16 @@
 import { Disposable } from "@lib/disposable";
 import { createElement, setOwnedTimeout } from "@lib/dom";
 import { channelsStore, updateChannelPosition, type Channel } from "@stores/channels.store";
-import { hasPermission, currentUserPermissions, canManageChannels } from "@lib/permissions";
+import {
+  hasPermission,
+  currentUserPermissions,
+  canManageChannels,
+  canManageInvites,
+} from "@lib/permissions";
 import { Permission } from "@lib/types";
+import { formatChannelLink } from "@lib/deep-link";
 import { markChannelRead, hasUnread } from "@lib/read-state";
-import { isChannelMuted, toggleChannelMute } from "@lib/channel-mutes";
+import { isChannelMuted, toggleChannelMute, getChannelMutesHost } from "@lib/channel-mutes";
 import {
   createMenuItem,
   enableMenuKeyboard,
@@ -59,6 +65,7 @@ export function attachChannelContextMenu(
   onPurge?: (channel: Channel, count: number) => Promise<void>,
   channels?: readonly Channel[],
   onReorder?: (reorders: readonly ChannelReorderData[]) => void,
+  onInvite?: (channel: Channel) => void,
 ): void {
   const canManage = canManageChannels();
 
@@ -78,7 +85,21 @@ export function attachChannelContextMenu(
   const showMute = channel.type !== "voice";
   // Keyboard reordering only makes sense with the row's own group at hand.
   const showMove = canManage && channels !== undefined && onReorder !== undefined;
-  const hasEntries = showMarkRead || showMute || showEdit || showDelete || canPurge || showMove;
+  // Invite People opens the invite manager, which only MANAGE_INVITES holders
+  // can list or create from; the server enforces the same bit.
+  const showInvite = onInvite !== undefined && canManageInvites();
+  // The link opens the channel's message view, so a voice channel has none to
+  // offer (joining one is a click on its row, not a link).
+  const showCopyLink = channel.type !== "voice";
+  const hasEntries =
+    showMarkRead ||
+    showMute ||
+    showEdit ||
+    showDelete ||
+    canPurge ||
+    showMove ||
+    showCopyLink ||
+    showInvite;
 
   /** Build, mount and wire the menu at a viewport anchor. */
   function openMenu(anchorX: number, anchorY: number): void {
@@ -152,6 +173,22 @@ export function attachChannelContextMenu(
       );
     }
 
+    if (showCopyLink) {
+      addItem(shellText("channel.copyLink"), "context-menu-item", "ctx-copy-channel-link", () =>
+        copyWithToast(
+          formatChannelLink(channel.id, getChannelMutesHost() ?? ""),
+          "toast.channelLinkCopied",
+          "toast.channelLinkCopyFailed",
+        ),
+      );
+    }
+
+    if (showInvite && onInvite !== undefined) {
+      addItem(shellText("channel.invite"), "context-menu-item", "ctx-invite-people", () =>
+        onInvite(channel),
+      );
+    }
+
     if (showMove && channels !== undefined && onReorder !== undefined) {
       const live = channelsStore.getState().channels;
       const group = channels
@@ -195,7 +232,10 @@ export function attachChannelContextMenu(
       );
     }
 
-    if ((showMarkRead || showMute || showMove) && (showEdit || showDelete || canPurge)) {
+    if (
+      (showMarkRead || showMute || showMove || showCopyLink || showInvite) &&
+      (showEdit || showDelete || canPurge)
+    ) {
       menu.appendChild(createElement("div", { class: "context-menu-sep" }));
     }
 
