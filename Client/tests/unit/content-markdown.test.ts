@@ -846,6 +846,21 @@ describe("syntax highlighting", () => {
     ]);
   });
 
+  it("skips extended colour arguments and honours the per-attribute resets", () => {
+    expect(highlightCode("\u001b[38;5;32my\u001b[48;2;1;31;4mz", "ansi")).toEqual([
+      { text: "yz", cls: null },
+    ]);
+    expect(highlightCode("\u001b[1;4;31;42ma\u001b[39;49;22;24mb", "ansi")).toEqual([
+      { text: "a", cls: null, ansi: "ansi-31 ansi-42 ansi-b ansi-u" },
+      { text: "b", cls: null },
+    ]);
+  });
+
+  it("treats a ---/+++ line after a hunk as a header, like highlight.js", () => {
+    const tokens = highlightCode("@@ -1 +1 @@\n--- removed sql comment", "diff");
+    expect(tokens).toContainEqual({ text: "--- removed sql comment", cls: "keyword" });
+  });
+
   it("ignores unknown ansi codes and drops every escape from the text", () => {
     const input = "\u001b[99mA\u001b[2JB\u001b[34;99mC\u001b[0m";
     const tokens = highlightCode(input, "ansi");

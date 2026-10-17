@@ -336,9 +336,14 @@ function ansiClasses(st: AnsiState): string | null {
 
 /** Apply one SGR parameter list. Codes outside the supported set are ignored. */
 function applySgr(st: AnsiState, body: string): void {
-  for (const part of body.split(";")) {
+  const parts = body.split(";");
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i]!;
     const n = part === "" ? 0 : Number(part);
-    if (n === 0) {
+    if (n === 38 || n === 48) {
+      // Extended colour: skip its arguments (5;n or 2;r;g;b), no colour set.
+      i += parts[i + 1] === "5" ? 2 : parts[i + 1] === "2" ? 4 : 0;
+    } else if (n === 0) {
       st.fg = 0;
       st.bg = 0;
       st.bold = false;
@@ -347,6 +352,10 @@ function applySgr(st: AnsiState, body: string): void {
     else if (n === 4) st.underline = true;
     else if (n >= 30 && n <= 37) st.fg = n;
     else if (n >= 40 && n <= 47) st.bg = n;
+    else if (n === 39) st.fg = 0;
+    else if (n === 49) st.bg = 0;
+    else if (n === 22) st.bold = false;
+    else if (n === 24) st.underline = false;
   }
 }
 
