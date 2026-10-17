@@ -62,6 +62,7 @@ function makeOptions(overrides: Partial<SettingsOverlayOptions> = {}): SettingsO
     onChangePassword: vi.fn().mockResolvedValue(undefined),
     onUpdateProfile: vi.fn().mockResolvedValue(undefined),
     onUploadAvatar: vi.fn().mockResolvedValue("/api/v1/files/test"),
+    onRemoveAvatar: vi.fn().mockResolvedValue(undefined),
     onLogout: vi.fn(),
     onDeleteAccount: vi.fn().mockResolvedValue(undefined),
     onStatusChange: vi.fn(),

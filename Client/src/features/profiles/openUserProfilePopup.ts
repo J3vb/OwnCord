@@ -15,6 +15,7 @@ import type { UserProfilePopupComponent } from "../../components/UserProfilePopu
 import { showToast } from "../../lib/toast";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { requestsText } from "../../i18n/requests";
+import { formatDate } from "../../i18n/format";
 import { blocksStore } from "../../stores/blocks.store";
 import { uiStore } from "../../stores/ui.store";
 
@@ -64,6 +65,15 @@ let activePopup: UserProfilePopupComponent | null = null;
  *  moves on is dropped instead of mounted. */
 let popupSeq = 0;
 
+/** "Member since" text for an RFC3339 account-creation time; null when absent
+ *  or unparseable (older server), which hides the section. */
+function formatJoinDate(createdAt: string | undefined): string | null {
+  if (createdAt === undefined) return null;
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return null;
+  return formatDate(date, { year: "numeric", month: "long", day: "numeric" });
+}
+
 /** Close the open popup, if any, and cancel one that is still loading. */
 export function closeUserProfilePopup(): void {
   popupSeq++;
@@ -83,6 +93,7 @@ export function openUserProfilePopup(options: OpenUserProfilePopupOptions): () =
   closeUserProfilePopup();
   if (live === undefined) return () => undefined;
 
+  const joinDate = formatJoinDate(live.createdAt);
   const isSelf = userId === (authStore.getState().user?.id ?? 0);
   const onMessage = isSelf ? undefined : callbacks?.onMessage;
   const onCall = isSelf ? undefined : callbacks?.onCall;
@@ -105,6 +116,9 @@ export function openUserProfilePopup(options: OpenUserProfilePopupOptions): () =
           status: live.status,
           displayName: live.displayName,
           customStatus: live.customStatus,
+          // Absent (older server) hides the sections, as before.
+          ...(live.about === undefined ? {} : { about: live.about }),
+          ...(joinDate === null ? {} : { joinDate }),
         },
         anchorX,
         anchorY,

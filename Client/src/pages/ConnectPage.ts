@@ -342,6 +342,7 @@ export function createConnectPage(
         onChangePassword: () => Promise.resolve(undefined),
         onUpdateProfile: () => Promise.resolve(),
         onUploadAvatar: notAuthenticated,
+        onRemoveAvatar: notAuthenticated,
         onLogout: () => {},
         onDeleteAccount: () => Promise.resolve(),
         onStatusChange: () => {},

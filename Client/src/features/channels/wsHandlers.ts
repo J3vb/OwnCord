@@ -502,6 +502,7 @@ export function handleUserUpdate(payload: Payload<"user_update">): void {
     avatar: payload.avatar,
     displayName: payload.display_name,
     identityPublicKey: payload.identity_public_key,
+    about: payload.about,
   });
   // Same reasoning as PRESENCE above: dmStore's copy of a DM partner's
   // username/avatar/displayName is otherwise never refreshed. DmUser's
