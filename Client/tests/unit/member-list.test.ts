@@ -1891,3 +1891,183 @@ describe("MemberList search (3C-4b)", () => {
     expect(texts().filter((t) => t.includes(" — "))).toEqual(["ADMIN — 1", "OFFLINE — 1"]);
   });
 });
+
+describe("MemberList arrow navigation (4.14b)", () => {
+  let container: HTMLDivElement;
+  let list: ReturnType<typeof createMemberList> | null;
+
+  const row = (id: number): HTMLElement =>
+    container.querySelector<HTMLElement>(`[data-testid="member-${id}"]`)!;
+  const focusedId = (): string | null | undefined =>
+    document.activeElement?.getAttribute("data-testid");
+  const press = (el: Element, key: string): boolean =>
+    el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+  const box = (): HTMLInputElement =>
+    container.querySelector<HTMLInputElement>('[data-testid="member-search"]')!;
+
+  // ADMIN: ann(1); MEMBER: bob(2), cy(3); OFFLINE: dee(4), eli(5).
+  const roster = (): Member[] => [
+    makeMember({ id: 1, username: "ann", role: "admin" }),
+    makeMember({ id: 2, username: "bob", role: "member" }),
+    makeMember({ id: 3, username: "cy", role: "member" }),
+    makeMember({ id: 4, username: "dee", role: "member", status: "offline" }),
+    makeMember({ id: 5, username: "eli", role: "member", status: "offline" }),
+  ];
+
+  function mountWith(members: Member[]): void {
+    setTestMembers(members);
+    list = createMemberList(defaultOpts());
+    list.mount(container);
+  }
+
+  beforeEach(() => {
+    resetStore();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    list = null;
+  });
+
+  afterEach(() => {
+    list?.destroy?.();
+    container.remove();
+  });
+
+  it("ArrowDown and ArrowUp move between member rows, skipping headers", () => {
+    mountWith(roster());
+    row(1).focus();
+    const seen: (string | null | undefined)[] = [];
+    for (let i = 0; i < 4; i++) {
+      expect(press(document.activeElement!, "ArrowDown")).toBe(false);
+      seen.push(focusedId());
+    }
+    expect(seen).toEqual(["member-2", "member-3", "member-4", "member-5"]);
+    // The last row stays put.
+    press(row(5), "ArrowDown");
+    expect(focusedId()).toBe("member-5");
+    press(row(5), "ArrowUp");
+    press(row(4), "ArrowUp");
+    expect(focusedId()).toBe("member-3");
+    press(row(3), "ArrowUp");
+    press(row(2), "ArrowUp");
+    expect(focusedId()).toBe("member-1");
+    press(row(1), "ArrowUp");
+    expect(focusedId()).toBe("member-1");
+  });
+
+  it("Home and End reach the first and last member", () => {
+    mountWith(roster());
+    row(3).focus();
+    press(row(3), "End");
+    expect(focusedId()).toBe("member-5");
+    press(row(5), "Home");
+    expect(focusedId()).toBe("member-1");
+    press(row(1), "PageDown");
+    expect(focusedId()).toBe("member-5");
+    press(row(5), "PageUp");
+    expect(focusedId()).toBe("member-1");
+    // Every rendered row keeps its tab stop.
+    for (const id of [1, 2, 3, 4, 5]) expect(row(id).getAttribute("tabindex")).toBe("0");
+  });
+
+  it("arrows during search move only between matches", () => {
+    mountWith(roster());
+    box().value = "e";
+    box().dispatchEvent(new Event("input", { bubbles: true }));
+    // dee and eli match; the rest do not.
+    expect(container.querySelectorAll(".member-item")).toHaveLength(2);
+    row(4).focus();
+    press(row(4), "ArrowDown");
+    expect(focusedId()).toBe("member-5");
+    press(row(5), "ArrowDown");
+    expect(focusedId()).toBe("member-5");
+    press(row(5), "Home");
+    expect(focusedId()).toBe("member-4");
+  });
+
+  it("profile popup fallback focuses that member's row", async () => {
+    mountWith(roster());
+    const before = row(3);
+    before.focus();
+    press(before, "Enter");
+    await vi.waitFor(() =>
+      expect(document.activeElement?.getAttribute("data-testid")).toBe("user-profile-popup"),
+    );
+    // A rename rebuilds the row, so the popup's own opener is gone.
+    setTestMembers(roster().map((m) => (m.id === 3 ? { ...m, displayName: "Cyrus" } : m)));
+    membersStore.flush();
+    expect(row(3)).not.toBe(before);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(document.activeElement).toBe(row(3));
+  });
+
+  it("does not move focus for modified keys or for a key pressed off the row", () => {
+    mountWith(roster());
+    row(2).focus();
+    row(2).dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowDown", shiftKey: true, bubbles: true }),
+    );
+    expect(focusedId()).toBe("member-2");
+    const inner = row(2).querySelector(".mi-name")!;
+    press(inner, "ArrowDown");
+    expect(focusedId()).toBe("member-2");
+  });
+
+  it("focusMember focuses a row, or the first row when the member is gone", () => {
+    mountWith(roster());
+    expect(list!.focusMember(4)).toBe(row(4));
+    expect(document.activeElement).toBe(row(4));
+    expect(list!.focusMember(99)).toBe(row(1));
+    expect(document.activeElement).toBe(row(1));
+  });
+
+  it("the focused member going offline continues from its new position", () => {
+    mountWith(roster());
+    row(1).focus();
+    press(row(1), "ArrowDown");
+    expect(focusedId()).toBe("member-2");
+    // bob moves from MEMBER into OFFLINE (A-Z): order is ann, cy, bob, dee, eli.
+    updatePresence(2, "offline");
+    membersStore.flush();
+    expect(focusedId()).toBe("member-2");
+    press(row(2), "ArrowDown");
+    expect(focusedId()).toBe("member-4");
+    press(row(4), "ArrowUp");
+    press(row(2), "ArrowUp");
+    expect(focusedId()).toBe("member-3");
+  });
+
+  it("focus follows the focused member when its row is rebuilt", () => {
+    const members = roster();
+    mountWith(members);
+    const old = row(2);
+    old.focus();
+    // A display name change alters the row signature, so reconcile builds a new
+    // row and hands focus to it by key.
+    setTestMembers(members.map((m) => (m.id === 2 ? { ...m, displayName: "Bobby" } : m)));
+    membersStore.flush();
+    expect(row(2)).not.toBe(old);
+    expect(document.activeElement).toBe(row(2));
+  });
+
+  it("a search that removes the focused member focuses the first match, not the body", () => {
+    mountWith(roster());
+    row(1).focus();
+    box().value = "eli";
+    box().dispatchEvent(new Event("input", { bubbles: true }));
+    expect(container.querySelector('[data-testid="member-1"]')).toBeNull();
+    expect(document.activeElement).not.toBe(document.body);
+    expect(focusedId()).toBe("member-5");
+  });
+
+  it("the only match renamed out of the search moves focus to the search box", () => {
+    const members = roster();
+    mountWith(members);
+    box().value = "eli";
+    box().dispatchEvent(new Event("input", { bubbles: true }));
+    row(5).focus();
+    setTestMembers(members.map((m) => (m.id === 5 ? { ...m, username: "zed" } : m)));
+    membersStore.flush();
+    expect(container.querySelector(".member-item")).toBeNull();
+    expect(document.activeElement).toBe(box());
+  });
+});
