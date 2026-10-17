@@ -148,7 +148,7 @@ _classes_ converts them into permanent detectors.
 
 **Sources to mine:** bughunt commit history on `fix/bughunt-*` and
 `fix/bughunt-harvest-*` branches, `.superpowers/harvest-med-low-checklist.md`,
-and `docs/audit-*.md`.
+and `docs/audits/*.md`.
 
 **Method:** cluster findings by class, not by symptom. Use the installed
 `semgrep-rule-creator` skill, which is test-first — each rule ships with a

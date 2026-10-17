@@ -19,7 +19,7 @@ This page is condensed from the sources listed at the end. It was first written 
 `.prettierignore` excludes:
 
 - generated files that CI checks with `git diff --exit-code` instead of reformatting (`Server/db/dbgen/`, `Client/src/lib/protocolTypes.ts`);
-- frozen wire fixtures (`protocol/fixtures/`) and dated audit snapshots (`docs/audit-*.md`);
+- frozen wire fixtures (`protocol/fixtures/`) and dated audit snapshots (`docs/audits/*.md`);
 - the Server-owned admin panel (`Server/admin/static/`) and every `*.html` file;
 - build and scratch output under a nested `.gitignore` that Prettier does not read (`Client/dist/`, `Client/src-tauri/target/`, `.serena/`, and others);
 - per-machine agent state (`.remember/`, `.claude/homunculus/`).
