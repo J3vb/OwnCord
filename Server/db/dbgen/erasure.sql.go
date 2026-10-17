@@ -9,6 +9,26 @@ import (
 	"context"
 )
 
+const appendErasureJobFiles = `-- name: AppendErasureJobFiles :execrows
+UPDATE erasure_jobs
+SET files = ?,
+    updated_at = datetime('now')
+WHERE id = ? AND state = 'queued'
+`
+
+type AppendErasureJobFilesParams struct {
+	Files string `json:"files"`
+	ID    int64  `json:"id"`
+}
+
+func (q *Queries) AppendErasureJobFiles(ctx context.Context, arg AppendErasureJobFilesParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, appendErasureJobFiles, arg.Files, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const completeErasureJob = `-- name: CompleteErasureJob :exec
 UPDATE erasure_jobs
 SET state = 'done',
@@ -65,6 +85,30 @@ func (q *Queries) GetErasureJob(ctx context.Context, id int64) (GetErasureJobRow
 	return i, err
 }
 
+const getQueuedErasureJobForUser = `-- name: GetQueuedErasureJobForUser :one
+
+SELECT id, files
+FROM erasure_jobs
+WHERE user_id = ? AND state = 'queued'
+ORDER BY id ASC
+`
+
+type GetQueuedErasureJobForUserRow struct {
+	ID    int64  `json:"id"`
+	Files string `json:"files"`
+}
+
+// Chunked erasure (WP 4.1a). The lock stage writes a 'queued' row, each drain
+// chunk appends the stored_as names it unlinked in the same transaction, and
+// the finish stage turns the row into the db_done job above. At most one
+// queued row exists per user while an erasure is under way.
+func (q *Queries) GetQueuedErasureJobForUser(ctx context.Context, userID int64) (GetQueuedErasureJobForUserRow, error) {
+	row := q.db.QueryRowContext(ctx, getQueuedErasureJobForUser, userID)
+	var i GetQueuedErasureJobForUserRow
+	err := row.Scan(&i.ID, &i.Files)
+	return i, err
+}
+
 const insertErasureJob = `-- name: InsertErasureJob :one
 
 INSERT INTO erasure_jobs (user_id, state, files, replay_purged)
@@ -84,6 +128,19 @@ type InsertErasureJobParams struct {
 // maintenance tick until it is.
 func (q *Queries) InsertErasureJob(ctx context.Context, arg InsertErasureJobParams) (int64, error) {
 	row := q.db.QueryRowContext(ctx, insertErasureJob, arg.UserID, arg.Files)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const insertQueuedErasureJob = `-- name: InsertQueuedErasureJob :one
+INSERT INTO erasure_jobs (user_id, state, files, replay_purged)
+VALUES (?, 'queued', '[]', 0)
+RETURNING id
+`
+
+func (q *Queries) InsertQueuedErasureJob(ctx context.Context, userID int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, insertQueuedErasureJob, userID)
 	var id int64
 	err := row.Scan(&id)
 	return id, err
@@ -137,6 +194,27 @@ func (q *Queries) ListUnfinishedErasureJobs(ctx context.Context) ([]ListUnfinish
 		return nil, err
 	}
 	return items, nil
+}
+
+const markErasureJobDBDone = `-- name: MarkErasureJobDBDone :execrows
+UPDATE erasure_jobs
+SET state = 'db_done',
+    files = ?,
+    updated_at = datetime('now')
+WHERE id = ? AND state = 'queued'
+`
+
+type MarkErasureJobDBDoneParams struct {
+	Files string `json:"files"`
+	ID    int64  `json:"id"`
+}
+
+func (q *Queries) MarkErasureJobDBDone(ctx context.Context, arg MarkErasureJobDBDoneParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markErasureJobDBDone, arg.Files, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const markErasureJobReplayPurged = `-- name: MarkErasureJobReplayPurged :exec

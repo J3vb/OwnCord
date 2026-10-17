@@ -1021,6 +1021,10 @@ func (s *AuthService) DeleteAccount(ctx context.Context, p Principal, password, 
 		case errors.Is(err, ErrErasureFilesPending):
 			// The account is gone; the journal finishes the files.
 			slog.Warn("DeleteAccount: files pending", "user_id", user.ID, "err", err)
+		case errors.Is(err, ErrErasureInProgress):
+			// The account is locked and the erasure is committed to; the
+			// maintenance loop finishes it.
+			slog.Info("DeleteAccount: erasure in progress", "user_id", user.ID)
 		default:
 			slog.Error("DeleteAccount failed", "err", err, "user_id", user.ID)
 			return ErrDeleteAccountFailed

@@ -152,6 +152,13 @@ func (m *maintenance) loop(bgCtx context.Context, stopMaintenance, maintenanceDo
 	_ = m.runJob(bgCtx, "Push subscriptions")
 	ticker := time.NewTicker(15 * time.Minute)
 	defer ticker.Stop()
+	// An erasure that outran its inline budget, or failed after its lock,
+	// asks for a resume now instead of at the next tick (WP 4.1a). A nil
+	// channel (no erasure runner) never fires.
+	var erasureWake <-chan struct{}
+	if m.erasure != nil {
+		erasureWake = m.erasure.WakeCh()
+	}
 	consecutiveFailures := 0
 	const maxConsecutiveFailures = 5
 	for {
@@ -170,6 +177,8 @@ func (m *maintenance) loop(bgCtx context.Context, stopMaintenance, maintenanceDo
 			} else {
 				consecutiveFailures = 0
 			}
+		case <-erasureWake:
+			_ = m.runJob(bgCtx, "Account erasure")
 		case <-stopMaintenance:
 			return
 		}

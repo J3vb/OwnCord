@@ -115,6 +115,15 @@ type DB struct {
 	// so the hook must not touch this DB's pools. Nil in production, no
 	// exported setter.
 	testEraseCommitHook func()
+
+	// testErasureChunkHook is a test seam (WP 4.1a): called after each
+	// chunked-erasure transaction commits, with the stage ("lock", "chunk",
+	// "finish", "checkpoint") and, for "chunk", the 1-based count of drain
+	// chunks committed in this call. A non-nil error aborts the erasure at
+	// that point, which is how a test stands in for a crash mid-drain; the
+	// hook may also block to hold the erasure between two stages. Nil in
+	// production, no exported setter.
+	testErasureChunkHook func(stage string, n int) error
 }
 
 // filePragmas are the per-connection PRAGMAs applied to every file-backed

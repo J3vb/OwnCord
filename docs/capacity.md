@@ -360,6 +360,45 @@ writer's `Stats()`. OwnCord runs one writer and a separate reader pool, so both
 are reported side by side — "the reader never waited" is a claim a document can
 only make after looking.
 
+**Account erasure holds the writer for one chunk at a time (WP 4.1a).** The
+database half of an account erasure used to be one transaction, so every other
+write queued behind it for as long as the account's history took to delete.
+It is now a lock, a drain of short transactions and a finish
+(`docs/architecture/data-lifecycle.md`, O1), and the writer is handed back
+after every one. `BenchmarkEraseAccount` (`Server/db/erasure_bench_test.go`)
+erases a member with 10,000 and 100,000 messages from a file-backed WAL
+database — with a mention on every seventh, an attachment on every tenth,
+reactions on a third as many of another member's messages, and replay events
+naming the member — and reports how the work was cut up:
+
+```
+cd Server && go test -run '^$' -bench 'BenchmarkEraseAccount' -benchtime 1x ./db/
+```
+
+| Messages | Wall time (`ns/op`) | `chunks` | `max_chunk_ms` | Before: one transaction |
+| -------- | ------------------- | -------- | -------------- | ----------------------- |
+| 10,000   | 0.34-0.41 s         | 30       | 27-35 ms       | 0.31 s                  |
+| 100,000  | 4.16-4.22 s         | 228      | 61-97 ms       | 2.89 s                  |
+
+Machine: 4 vCPU Intel Xeon @ 2.1 GHz, 15 GB, ext4 on a virtual disk, Linux
+6.18, Go 1.27; five runs each, quiet host, the same seed in every run.
+`chunks` counts drain transactions; `max_chunk_ms` is the longest any one
+stage (lock, a drain chunk, finish, checkpoint) held the writer, measured
+between consecutive commits. **The gate is `max_chunk_ms` <= 250 at 100,000
+messages: met, with a factor of 2.5 to 4 to spare.** Wall time is recorded, not
+gated: chunking trades a longer erasure (about 1.4x here) for a writer that is
+never held longer than the slowest chunk, which is about 3% of what the single
+transaction held it. The slowest stage is the finish transaction, and a busy
+host or a slow disk moves every figure: an earlier run on the same box, with
+other test binaries running beside it, measured up to 184 ms. Nothing here has
+been measured on an SD card.
+
+Not yet measured: erasure under the `capacity` profile's load (a user seeded
+with 100,000-500,000 messages and erased mid-run, recording pong-timeout
+disconnects and `db_writer_wait_seconds`). `load-baseline.yml` has no erasure
+step, so that run needs a small harness addition; its result decides whether
+the per-connection command worker (4.1-F2) is needed.
+
 ### Message fan-out, to the ceiling
 
 `ceiling-search` steps connections by `K6_CEILING_STEP` (default 100) up to

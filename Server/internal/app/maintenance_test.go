@@ -508,3 +508,54 @@ func TestMaintenance_StartupRunsRecordJobHealth(t *testing.T) {
 		t.Errorf("tick-only job status = %q before any tick, want unknown or unlisted", got)
 	}
 }
+
+// TestMaintenance_LoopResumesAnErasureOnWake pins WP 4.1a's hand-off: an
+// erasure that outran its inline budget asks the loop to resume it, and the
+// loop does so without waiting for the 15-minute tick. The lock stage is run
+// directly, so the account is exactly as Erase leaves it.
+func TestMaintenance_LoopResumesAnErasureOnWake(t *testing.T) {
+	database := newMaintenanceTestDB(t)
+	ctx := t.Context()
+	if _, err := database.CreateUser(ctx, "wake-owner", "x", 1); err != nil {
+		t.Fatal(err)
+	}
+	member, err := database.CreateUser(ctx, "wake-member", "x", 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{Upload: config.UploadConfig{StorageDir: t.TempDir(), MaxSizeMB: 1}}
+	svc := service.New(database, auth.NewRateLimiter())
+	m := newMaintenance(slog.Default(), cfg, database, svc)
+	stop, done := make(chan struct{}), make(chan struct{})
+	go m.loop(ctx, stop, done)
+	defer func() {
+		close(stop)
+		<-done
+	}()
+	// Let the loop's start-up runs finish and block in the select, so the
+	// resume below can only come from the wake.
+	time.Sleep(300 * time.Millisecond)
+
+	if _, err := database.EraseAccountLock(ctx, member, true); err != nil {
+		t.Fatalf("EraseAccountLock: %v", err)
+	}
+	svc.Erasure.RequestResume()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		jobs, err := database.ListUnfinishedErasureJobs(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(jobs) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the loop did not resume the queued erasure after a wake: %+v", jobs)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if u, err := database.GetUserByID(ctx, member); err != nil || u != nil {
+		t.Errorf("the account after the resume = %v, %v; want erased", u, err)
+	}
+}

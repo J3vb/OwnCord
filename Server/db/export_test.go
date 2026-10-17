@@ -83,3 +83,20 @@ func SetModerationActionPreRankCheckHookForTest(fn func()) {
 func SetModerationActionPreBeginTxHookForTest(fn func()) {
 	moderationActionPreBeginTxHook = fn
 }
+
+// SetErasureChunkHookForTest installs (or, with nil, clears) the seam
+// EraseAccountLock, Drain and Finish call after each committed transaction
+// (stage "lock", "chunk" with a 1-based count, "finish", "checkpoint"); a
+// non-nil error aborts the erasure there, and the hook may block to hold it
+// between two stages. Exported for db_test; production code never calls this.
+func SetErasureChunkHookForTest(d *DB, fn func(stage string, n int) error) {
+	d.testErasureChunkHook = fn
+}
+
+// SetErasureChunkSizesForTest overrides the drain's row chunk and key-window
+// sizes and returns a function that restores them. Exported for db_test.
+func SetErasureChunkSizesForTest(chunk, window int) (restore func()) {
+	prevChunk, prevWindow := erasureChunk, erasureScanWindow
+	erasureChunk, erasureScanWindow = chunk, window
+	return func() { erasureChunk, erasureScanWindow = prevChunk, prevWindow }
+}
