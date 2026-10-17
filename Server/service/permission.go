@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -12,18 +13,27 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 	"github.com/J3vb/OwnCord/Server/telemetry"
+	"golang.org/x/sync/singleflight"
 )
 
-// cachedPerms holds a snapshot of a user's role and channel overrides.
+// cachedPerms holds a snapshot of a user's role and channel overrides. It is
+// immutable once built: singleflight hands the same pointer to every waiter
+// of a load, so nothing may write to it (or its overrides map) afterwards.
 type cachedPerms struct {
 	roleID      int64
 	rolePerms   int64
+	role        db.Role // copy of the role row, so GetRoleForUser needs no store read
 	overrides   map[int64]permissions.ChannelOverride
 	populatedAt time.Time
 }
 
 // permCacheTTL is how long cached permissions remain valid before refresh.
 const permCacheTTL = 30 * time.Second
+
+// permLoadTimeout bounds a shared cache-miss load. The load runs detached
+// from any single caller's cancellation (so one cancelled request cannot fail
+// the other waiters), which makes it need its own deadline.
+const permLoadTimeout = 10 * time.Second
 
 // PermissionService wraps the stateless permissions.Checker with per-user
 // caching. It eliminates per-message DB round-trips for permission checks
@@ -39,6 +49,9 @@ type PermissionService struct {
 	// its DB read and refuses to cache if it changed, so an invalidation that
 	// races a populate can't be lost (F6).
 	gen uint64
+	// loads coalesces concurrent cache-miss loads per (user, generation), so a
+	// burst of requests after an invalidation costs one pair of store reads.
+	loads singleflight.Group
 
 	// hits/misses are atomics, not mu-guarded ints: the hit path holds mu only
 	// as an RLock, so a plain increment there would race.
@@ -240,7 +253,19 @@ func (s *PermissionService) GetRoleForUser(ctx context.Context, userID int64) (*
 		// fall back to direct DB query.
 		return s.st.GetRoleForUser(ctx, userID)
 	}
-	return s.st.GetRoleByID(ctx, cp.roleID)
+	// Served from the snapshot: every role edit invalidates the cache. Hand
+	// back a copy so a caller cannot alias (or mutate) the cached row.
+	return cloneRole(&cp.role), nil
+}
+
+// cloneRole deep-copies a role row, including its Color string.
+func cloneRole(r *db.Role) *db.Role {
+	out := *r
+	if r.Color != nil {
+		c := *r.Color
+		out.Color = &c
+	}
+	return &out
 }
 
 // InvalidateUser removes cached permissions for a specific user.
@@ -305,7 +330,29 @@ func (s *PermissionService) getOrPopulate(ctx context.Context, userID int64) (*c
 	s.mu.RUnlock()
 	s.misses.Add(1)
 
-	// Populate.
+	// The key carries the generation snapshot, so a load that began before an
+	// invalidation is never shared with a caller that arrived after it.
+	key := strconv.FormatInt(userID, 10) + ":" + strconv.FormatUint(startGen, 10)
+	ch := s.loads.DoChan(key, func() (any, error) {
+		return s.loadPerms(ctx, userID, startGen)
+	})
+	select {
+	case res := <-ch:
+		cp, _ := res.Val.(*cachedPerms)
+		return cp, res.Err
+	case <-ctx.Done():
+		return nil, fmt.Errorf("permission load: %w", ctx.Err())
+	}
+}
+
+// loadPerms reads the user's role and overrides from the store and caches the
+// snapshot (unless an invalidation raced it). It is shared by every caller
+// waiting on the same key, so it runs on a context detached from the first
+// caller's cancellation and bounded by permLoadTimeout instead.
+func (s *PermissionService) loadPerms(parent context.Context, userID int64, startGen uint64) (*cachedPerms, error) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), permLoadTimeout)
+	defer cancel()
+
 	role, err := s.st.GetRoleForUser(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -332,9 +379,10 @@ func (s *PermissionService) getOrPopulate(ctx context.Context, userID int64) (*c
 		overrides = permOverrides(raw)
 	}
 
-	cp = &cachedPerms{
+	cp := &cachedPerms{
 		roleID:      role.ID,
 		rolePerms:   role.Permissions,
+		role:        *cloneRole(role),
 		overrides:   overrides,
 		populatedAt: time.Now(),
 	}

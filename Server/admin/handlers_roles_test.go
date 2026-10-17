@@ -243,6 +243,7 @@ func TestAdminAPI_PatchRole_PermissionChangeInvalidatesAndResyncs(t *testing.T) 
 func TestAdminAPI_PatchRole_RenameOnlySkipsResync(t *testing.T) {
 	database := openAdminTestDB(t)
 	handler, hub, inv, token := newRolesHandler(t, database)
+	createUserWithRole(t, database, "member1", 3)
 
 	w := doRequest(t, handler, http.MethodPatch, "/roles/3", token, map[string]any{"name": "Regulars"})
 	if w.Code != http.StatusOK {
@@ -254,8 +255,10 @@ func TestAdminAPI_PatchRole_RenameOnlySkipsResync(t *testing.T) {
 	if hub.allVisibilityRefreshes != 0 {
 		t.Errorf("RefreshAllChannelVisibility called %d times for a rename, want 0", hub.allVisibilityRefreshes)
 	}
-	if len(inv.invalidateUserIDs) != 0 {
-		t.Errorf("InvalidateUser called %v for a rename, want none", inv.invalidateUserIDs)
+	// The cached snapshot holds the role row (name, colour, position), so even a
+	// rename drops the members' entries or GetRoleForUser would serve the old one.
+	if len(inv.invalidateUserIDs) != 1 {
+		t.Errorf("InvalidateUser calls = %v for a rename, want the single role member", inv.invalidateUserIDs)
 	}
 	if len(hub.rolesUpdates) != 1 {
 		t.Errorf("roles_update broadcasts = %d, want 1 — the name is in the client's role list", len(hub.rolesUpdates))
