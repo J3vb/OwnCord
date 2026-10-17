@@ -160,6 +160,18 @@ func (a *App) startDatabase() error {
 	}
 	a.database = database
 	a.onClose("database", func(context.Context) error { return database.Close() })
+	// Periodic PRAGMA optimize (SV-06). Registered after the database close, so
+	// the reverse walk stops and joins it first.
+	optCtx, optCancel := context.WithCancel(a.bgCtx)
+	optDone := database.StartOptimizer(optCtx, 0)
+	a.onClose("db-optimize", func(ctx context.Context) error {
+		optCancel()
+		select {
+		case <-optDone:
+		case <-ctx.Done():
+		}
+		return nil
+	})
 	return nil
 }
 

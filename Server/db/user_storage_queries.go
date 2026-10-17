@@ -86,10 +86,16 @@ func (d *DB) RecountUserStorage(ctx context.Context, userID int64) error {
 // surface: every attachments row, legacy rows with a NULL uploader_id
 // included, so it is a total rather than a sum of the per-user counters.
 // Emoji (bounded, uncounted — see migration 044) are not in it.
+//
+// The sum is cached for statsCacheTTL: a scraper polling every few seconds
+// would otherwise re-aggregate the whole table each time (SV-07). A failed
+// query is not cached.
 func (d *DB) TotalAttachmentBytes(ctx context.Context) (int64, error) {
-	n, err := d.q.TotalAttachmentBytes(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("TotalAttachmentBytes: %w", err)
-	}
-	return n, nil
+	return d.attachmentBytesCache.Get(statsCacheTTL, func() (int64, error) {
+		n, err := d.q.TotalAttachmentBytes(ctx)
+		if err != nil {
+			return 0, fmt.Errorf("TotalAttachmentBytes: %w", err)
+		}
+		return n, nil
+	})
 }

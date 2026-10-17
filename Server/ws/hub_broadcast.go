@@ -334,6 +334,8 @@ func (h *Hub) SendToUserLow(userID int64, msg []byte) bool {
 // window would silently lose the overtaken events. The high queue remains for
 // unsequenced targeted messages only.
 func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte) {
+	// The replay copy's JSON work happens before the lock (SV-04).
+	rs := newReplaySplice(msg)
 	h.seqMu.Lock()
 	start := time.Now()
 	defer h.seqMu.Unlock()
@@ -344,7 +346,7 @@ func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte)
 	}
 	seq := h.nextSeq()
 	wrapped := wrapWithSeq(msg, seq)
-	stored := replayCopy(wrapped)
+	stored := storedCopy(rs, msg, wrapped, seq)
 	h.replayBuf.Push(seq, channelID, stored)
 	h.persistEvent(seq, channelID, stored)
 
@@ -360,6 +362,14 @@ func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte)
 // is what every non-content frame carries.
 func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 	contentFilter, labelled, gateUnconfirmed := g.allow, g.labelled, g.unconfirmed
+
+	// The replay copy's JSON work happens before seqMu (SV-04). A presence
+	// window builds its frame under the lock and never carries a reply
+	// snippet, so it has nothing to precompute.
+	var rs *replaySplice
+	if bm.presence == nil {
+		rs = newReplaySplice(bm.msg)
+	}
 
 	// The channel-broadcast debug log is emitted after seqMu is released
 	// (below) so a slow logging sink never extends the critical section that
@@ -408,7 +418,7 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 		}
 
 		// Store in replay buffer for reconnection recovery.
-		stored := replayCopy(msg)
+		stored := storedCopy(rs, bm.msg, msg, seq)
 		h.replayBuf.Push(seq, bm.channelID, stored)
 		h.persistEvent(seq, bm.channelID, stored)
 
