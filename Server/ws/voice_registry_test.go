@@ -24,7 +24,7 @@ func TestVoiceSlot_ZeroValueIsNotInVoice(t *testing.T) {
 	if c.markVoiceJoinCompleteIfMatch(1, "tok") {
 		t.Fatal("zero client marked a join complete it never started")
 	}
-	if _, ok := c.clearExact(1, "tok"); ok {
+	if c.clearExact(1, "tok") {
 		t.Fatal("zero client matched an exact-join clear")
 	}
 	if ch, tok, completed := c.clearVoiceState(); ch != 0 || tok != "" || completed {

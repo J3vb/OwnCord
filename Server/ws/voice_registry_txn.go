@@ -154,7 +154,7 @@ func (t *voiceTxn) clearExact(c *Client, chID int64, token string) bool {
 	if token == "" {
 		return false
 	}
-	if _, ok := c.clearExact(chID, token); !ok {
+	if !c.clearExact(chID, token) {
 		return false
 	}
 	t.h.pubsub.Unsubscribe(c, VoiceTopic(chID))

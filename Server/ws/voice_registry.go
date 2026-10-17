@@ -172,21 +172,20 @@ func (s *voiceSlot) clearIfChannel(chID int64) (string, bool) {
 }
 
 // clearExact clears the membership only while it still names this exact join
-// instance (channel AND token), reporting whether that join had completed and
-// whether it cleared. Token-scoped unlike clearIfChannel: a same-channel
-// rejoin has a new token, and its membership must survive.
-func (s *voiceSlot) clearExact(chID int64, joinToken string) (completed, ok bool) {
+// instance (channel AND token), reporting whether it cleared. Token-scoped
+// unlike clearIfChannel: a same-channel rejoin has a new token, and its
+// membership must survive.
+func (s *voiceSlot) clearExact(chID int64, joinToken string) bool {
 	s.voiceMu.Lock()
 	defer s.voiceMu.Unlock()
 	if s.voiceChID != chID || s.voiceJoinToken != joinToken {
-		return false, false
+		return false
 	}
-	completed = s.voiceJoinCompleted
 	s.voiceChID = 0
 	s.voiceJoinToken = ""
 	s.voiceJoinCompleted = false
 	s.e2ee = e2eeAnnounce{}
-	return completed, true
+	return true
 }
 
 // stashModFlags stashes a moderator-imposed mute/deafen before a server-driven
