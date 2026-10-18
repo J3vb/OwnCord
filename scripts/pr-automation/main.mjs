@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { GitHub, receipt } from "./github.mjs";
+import { GitHub, receipt, installationCredentials } from "./github.mjs";
 import { reviewWithClaude } from "./claude.mjs";
 import { reductions } from "./integrity.mjs";
 import { proposeRepair, publishRepair } from "./repair.mjs";
+import { sealEvidence, openEvidence, carriedFindings } from "./evidence.mjs";
 import {
   CHECKS,
   POLICY_VERSION,
@@ -50,7 +51,16 @@ export async function reviewPR(api, pr, options, reviewer = reviewWithClaude) {
   const { appID, policyRevision, now = Date.now() } = options;
   const base = pr.base.sha;
   const head = pr.head.sha;
-  const comments = await api.list(`issues/${pr.number}/comments`);
+  const comments = await api.comments(pr.number);
+  if (
+    comments.some(
+      (c) =>
+        c.performed_via_github_app?.id === appID &&
+        c.body?.startsWith("<!-- owncord-controller-ledger:v1 -->") &&
+        c.editor_verified !== true,
+    )
+  )
+    throw new Error("Controller ledger requires authenticated edit provenance");
   const ledgerComment = comments
     .filter(
       (c) =>
@@ -75,7 +85,9 @@ export async function reviewPR(api, pr, options, reviewer = reviewWithClaude) {
       throw new Error("Unreadable controller ledger");
     }
   }
-  const previous = receipt(await api.checks(head), CHECKS[0], appID);
+  const existingChecks = await api.checks(head);
+  const previous = receipt(existingChecks, CHECKS[0], appID);
+  const previousIntegrity = receipt(existingChecks, CHECKS[1], appID);
   const sameScope =
     previous?.head === head &&
     previous?.base === base &&
@@ -95,7 +107,16 @@ export async function reviewPR(api, pr, options, reviewer = reviewWithClaude) {
     policyRevision,
   });
   // A late finding invalidates an otherwise reusable pass.
-  if (route === "reuse" && previous.codexFingerprint === codex.fingerprint) return previous;
+  if (
+    route === "reuse" &&
+    previous.codexFingerprint === codex.fingerprint &&
+    previousIntegrity?.head === head &&
+    previousIntegrity.base === base &&
+    previousIntegrity.policyRevision === policyRevision &&
+    previousIntegrity.verdict === "pass" &&
+    previousIntegrity.diffDigest === previous.diffDigest
+  )
+    return previous;
   const rounds = ledger.rounds ?? 0;
   const binding = {
     head,
@@ -109,8 +130,10 @@ export async function reviewPR(api, pr, options, reviewer = reviewWithClaude) {
   };
   let reservedRounds = rounds;
   let ledgerID = ledgerComment?.id;
+  let currentEvidence = ledger.privateEvidence;
   const save = async (state) => {
-    const body = `<!-- owncord-controller-ledger:v1 -->\n${JSON.stringify({ head, base, rounds: state.rounds, verdict: state.verdict })}\n\nAutomated review: ${state.verdict}. See the required checks for the current commit. No author reply is treated as approval.`;
+    currentEvidence = state.privateEvidence ?? currentEvidence;
+    const body = `<!-- owncord-controller-ledger:v1 -->\n${JSON.stringify({ head, base, rounds: state.rounds, verdict: state.verdict, privateEvidence: currentEvidence })}\n\nAutomated review: ${state.verdict}. See the required checks for the current commit. No author reply is treated as approval.`;
     const saved = await api.request(
       ledgerID ? `issues/comments/${ledgerID}` : `issues/${pr.number}/comments`,
       ledgerID ? "PATCH" : "POST",
@@ -126,23 +149,68 @@ export async function reviewPR(api, pr, options, reviewer = reviewWithClaude) {
     return state;
   }
   if (route === "held" || route === "wait") {
+    const state = {
+      ...binding,
+      verdict: route === "held" ? "held" : "pending",
+      ...(sameScope ? { attemptedAt: previous.attemptedAt } : {}),
+    };
     await api.check(
       CHECKS[0],
       head,
       appID,
       route === "held" ? "failure" : "pending",
       route === "held" ? "Review attempts exhausted; follow-up required" : "Waiting for review",
-      { ...binding, ...(sameScope ? { attemptedAt: previous.attemptedAt } : {}) },
+      state,
     );
     await api.check(CHECKS[1], head, appID, "pending", "Waiting for integrity evidence", binding);
+    // A held PR must not consume another PR's metered slot every tick.
     return binding;
   }
   await api.check(CHECKS[0], head, appID, "pending", "Independent review in progress", binding);
   await api.check(CHECKS[1], head, appID, "pending", "Integrity assessment in progress", binding);
   try {
+    if (options.enforce && !options.privateKey)
+      throw new Error("Private review evidence key is required");
     const { context, diffDigest } = await snapshot(api, pr, base);
+    const priorEvidence = openEvidence(ledger.privateEvidence, options.privateKey);
+    context.findings = carriedFindings(priorEvidence);
+    if (codex.findings) {
+      const inline = await api.comments(pr.number, true);
+      const findings = inline.filter(
+        (c) =>
+          c.user?.login === "chatgpt-codex-connector[bot]" &&
+          c.editor_verified === true &&
+          !c.in_reply_to_id &&
+          (c.commit_id === head || c.original_commit_id === head),
+      );
+      if (!findings.length) throw new Error("No complete authenticated provider findings");
+      context.findings.push(
+        ...findings.map((c) => ({
+          id: `codex:${c.id}`,
+          path: c.path,
+          severity: "blocking",
+          description: c.body,
+        })),
+      );
+    }
+    context.findings = [...new Map(context.findings.map((f) => [f.id, f])).values()];
     const risk = classify(context.files);
     const results = [];
+    const running = {
+      ...binding,
+      attempts: binding.attempts + 1,
+      attemptedAt: new Date(now).toISOString(),
+    };
+    await api.check(CHECKS[0], head, appID, "pending", "Independent review in progress", running);
+    const checkpoint = async () =>
+      save({
+        ...running,
+        privateEvidence: sealEvidence(
+          { head, base, findings: context.findings, reviews: results },
+          options.privateKey,
+        ),
+      });
+    await checkpoint();
     // Codex supplies the ordinary correctness pass. Test/policy edits still
     // need an independent integrity pass; sensitive work always gets one.
     if (
@@ -150,7 +218,8 @@ export async function reviewPR(api, pr, options, reviewer = reviewWithClaude) {
       codex.findings ||
       risk.sensitive ||
       risk.policy ||
-      risk.testsChanged
+      risk.testsChanged ||
+      context.findings.length > 0
     ) {
       results.push(
         await reviewer(
@@ -160,11 +229,13 @@ export async function reviewPR(api, pr, options, reviewer = reviewWithClaude) {
             : "correctness and behavioral regressions",
         ),
       );
+      await checkpoint();
     }
     if ((route === "claude" || codex.findings) && (risk.sensitive || risk.policy)) {
       results.push(
         await reviewer(context, "independent security, concurrency and test-integrity assessment"),
       );
+      await checkpoint();
     }
     const current = await api.request(`pulls/${pr.number}`);
     if (current.head.sha !== head || current.base.sha !== base || current.state !== "open")
@@ -194,6 +265,10 @@ export async function reviewPR(api, pr, options, reviewer = reviewWithClaude) {
       attemptedAt: new Date(now).toISOString(),
       integrityReductions,
       reviews: publicReviews,
+      privateEvidence: sealEvidence(
+        { head, base, findings: context.findings, reviews: results },
+        options.privateKey,
+      ),
     };
     await api.check(
       CHECKS[0],
@@ -290,11 +365,10 @@ export async function integrate(api, prs, options) {
     `actions/workflows/ci.yml/runs?event=push&head_sha=${dev}`,
     "workflow_runs",
   );
-  if (
-    !devRuns.some(
-      (r) => r.head_sha === dev && r.status === "completed" && r.conclusion === "success",
-    )
-  )
+  const latestDevRun = devRuns
+    .filter((r) => r.head_sha === dev)
+    .sort((a, b) => b.id - a.id || (b.run_attempt ?? 1) - (a.run_attempt ?? 1))[0];
+  if (latestDevRun?.status !== "completed" || latestDevRun.conclusion !== "success")
     return { action: "dev_not_green" };
   for (const pr of prs) {
     const checks = await annotatedChecks(api, pr.head.sha);
@@ -305,7 +379,11 @@ export async function integrate(api, prs, options) {
       approval.head !== pr.head.sha ||
       approval.base !== pr.base.sha ||
       approval.policyRevision !== policyRevision ||
-      integrity?.verdict !== "pass"
+      integrity?.verdict !== "pass" ||
+      integrity.head !== pr.head.sha ||
+      integrity.base !== pr.base.sha ||
+      integrity.policyRevision !== policyRevision ||
+      integrity.diffDigest !== approval.diffDigest
     )
       continue;
     const live = await api.request(`pulls/${pr.number}`);
@@ -390,16 +468,23 @@ export async function reconcile(api, options, reviewer = reviewWithClaude) {
     );
   // One metered PR per tick. Others can still be considered for integration.
   for (const pr of prs) {
-    const prior = receipt(await api.checks(pr.head.sha), CHECKS[0], options.appID);
+    const currentChecks = await api.checks(pr.head.sha);
+    const prior = receipt(currentChecks, CHECKS[0], options.appID);
+    const integrity = receipt(currentChecks, CHECKS[1], options.appID);
     if (
       prior?.verdict === "pass" &&
       prior.head === pr.head.sha &&
       prior.base === pr.base.sha &&
-      prior.policyRevision === options.policyRevision
+      prior.policyRevision === options.policyRevision &&
+      integrity?.verdict === "pass" &&
+      integrity.head === pr.head.sha &&
+      integrity.base === pr.base.sha &&
+      integrity.policyRevision === options.policyRevision &&
+      integrity.diffDigest === prior.diffDigest
     ) {
       // Read current provider findings, including late results, on every tick.
       const codex = codexObservation(
-        await api.list(`issues/${pr.number}/comments`),
+        await api.comments(pr.number),
         await api.list(`pulls/${pr.number}/reviews`),
         pr.head.sha,
       );
@@ -416,11 +501,23 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const policyRevision = process.env.REVIEW_POLICY_REVISION;
   if (!Number.isSafeInteger(appID) || appID <= 0 || !/^[a-f0-9]{40}$/.test(policyRevision ?? ""))
     throw new Error("Invalid trusted deployment identity");
-  const api = new GitHub(process.env.REVIEW_GITHUB_TOKEN, process.env.GITHUB_REPOSITORY);
+  const credentials = installationCredentials({
+    token: process.env.REVIEW_GITHUB_TOKEN,
+    appID,
+    installationID: Number(process.env.REVIEW_INSTALLATION_ID),
+    privateKey: process.env.REVIEW_EVIDENCE_KEY,
+  });
+  const api = new GitHub(
+    process.env.REVIEW_GITHUB_TOKEN,
+    process.env.GITHUB_REPOSITORY,
+    fetch,
+    credentials,
+  );
   const result = await reconcile(api, {
     appID,
     policyRevision,
     enforce: process.env.REVIEW_MODE === "enforce",
+    privateKey: process.env.REVIEW_EVIDENCE_KEY,
   });
   console.log(JSON.stringify(result));
 }

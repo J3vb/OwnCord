@@ -14,9 +14,128 @@ import {
   trustedEnvironment,
 } from "./policy.mjs";
 import { reductions } from "./integrity.mjs";
-import { receipt, GitHub } from "./github.mjs";
+import { receipt, GitHub, installationCredentials } from "./github.mjs";
 import { reviewWithClaude } from "./claude.mjs";
 import { validateRepair, publishRepair } from "./repair.mjs";
+import { sealEvidence, openEvidence, carriedFindings } from "./evidence.mjs";
+import { generateKeyPairSync } from "node:crypto";
+
+test("long-running review renews only the installation token and fails closed on renewal error", async () => {
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  let now = Date.parse("2026-10-18T10:00:00Z"),
+    calls = 0;
+  const credentials = installationCredentials(
+    { token: "initial", appID: 42, installationID: 7, privateKey },
+    async (url, init) => {
+      calls++;
+      assert.equal(url, "https://api.github.com/app/installations/7/access_tokens");
+      const jwt = init.headers.Authorization.split(" ")[1];
+      const claims = JSON.parse(Buffer.from(jwt.split(".")[1], "base64url"));
+      assert.equal(claims.iss, 42);
+      assert.ok(claims.exp * 1000 > now);
+      assert.equal(JSON.parse(init.body).permissions.administration, "read");
+      return {
+        ok: true,
+        json: async () => ({
+          token: "renewed",
+          expires_at: new Date(now + 3600_000).toISOString(),
+        }),
+      };
+    },
+    () => now,
+  );
+  assert.equal(await credentials(), "initial");
+  assert.equal(calls, 0);
+  now += 46 * 60_000;
+  assert.equal(await credentials(), "renewed");
+  assert.equal(calls, 1);
+  assert.equal(await credentials(), "renewed");
+  const unavailable = installationCredentials(
+    { appID: 42, installationID: 7, privateKey },
+    async () => ({ ok: false }),
+    () => now,
+  );
+  await assert.rejects(unavailable(), /Cannot renew/);
+});
+
+test("a late clean provider result cannot erase a bound fallback finding", () => {
+  const h = "a".repeat(40),
+    b = "b".repeat(40),
+    p = "c".repeat(40);
+  const previous = {
+    head: h,
+    base: b,
+    policyRevision: p,
+    verdict: "changes_required",
+    attempts: 1,
+    attemptedAt: new Date(0).toISOString(),
+  };
+  assert.equal(
+    routeReview({
+      head: h,
+      base: b,
+      policyRevision: p,
+      now: 1_800_000,
+      createdAt: new Date(0).toISOString(),
+      previous,
+      codex: { completed: true, findings: false },
+    }),
+    "held",
+  );
+});
+test("encrypted findings survive recovery without exposing their descriptions", () => {
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const finding = { path: "a", severity: "blocking", description: "private finding" };
+  const evidence = { reviews: [{ findings: [finding] }] };
+  const sealed = sealEvidence(evidence, privateKey);
+  assert.equal(JSON.stringify(sealed).includes(finding.description), false);
+  assert.deepEqual(openEvidence(sealed, privateKey), evidence);
+  assert.equal(
+    carriedFindings(openEvidence(sealed, privateKey))[0].description,
+    finding.description,
+  );
+  assert.throws(() =>
+    openEvidence({ ...sealed, tag: Buffer.alloc(16).toString("base64") }, privateKey),
+  );
+  const prior = { ...finding, id: "codex:1" };
+  assert.equal(carriedFindings({ findings: [prior], reviews: [] }).length, 1);
+  assert.equal(
+    carriedFindings({
+      findings: [prior],
+      reviews: [
+        {
+          findings: [],
+          finding_dispositions: [
+            { id: prior.id, status: "resolved", evidence: "verified correction" },
+          ],
+        },
+      ],
+    }).length,
+    0,
+  );
+});
+test("a carried finding requires an explicit evidence-bearing disposition", () => {
+  const finding = { id: "prior-1", path: "a", description: "old failure" };
+  const value = {
+    verdict: "pass",
+    integrity: "preserved",
+    reviewed_paths: ["a"],
+    findings: [],
+    rationale: "reviewed",
+  };
+  assert.throws(() => validateReview(value, [{ filename: "a" }], [finding]), /disposition/);
+  const complete = {
+    ...value,
+    finding_dispositions: [
+      {
+        id: finding.id,
+        status: "resolved",
+        evidence: "negative control now covers the repaired path",
+      },
+    ],
+  };
+  assert.ok(acceptable(validateReview(complete, [{ filename: "a" }], [finding])));
+});
 
 const head = "a".repeat(40),
   base = "b".repeat(40),
@@ -32,6 +151,7 @@ const options = {
 const bot = { login: CODEX_LOGIN, type: "Bot" };
 const summary = (sha, state = {}) => ({
   user: bot,
+  editor_verified: true,
   body: `<!-- codex-review-state:v1 ${JSON.stringify({ code_review: { commit_sha: sha, status: "completed", has_any_findings: false, has_unresolved_findings: false, ...state } })} -->`,
 });
 
@@ -41,6 +161,10 @@ test("quota failure selects Claude immediately; an ordinary pending review waits
   assert.equal(routeReview(options), "claude");
 });
 test("only authenticated, current connector completion certifies review", () => {
+  assert.equal(
+    codexObservation([{ ...summary(head), editor_verified: false }], [], head).completed,
+    false,
+  );
   assert.equal(codexObservation([summary(head)], [], head).completed, true);
   assert.equal(codexObservation([summary(base)], [], head).completed, false);
   assert.equal(
@@ -229,6 +353,50 @@ test("receipt cannot be minted by an author-controlled Actions check", () => {
 test("GitHub pagination and unavailable API fail closed", async () => {
   const api = new GitHub("test", "owner/repo", async () => ({ ok: false, status: 403 }));
   await assert.rejects(api.list("pulls"), /403/);
+});
+test("provider comment edits are verified independently of the original author", async () => {
+  for (const editor of [
+    { __typename: "Bot", login: "chatgpt-codex-connector" },
+    { __typename: "User", login: "J3vb" },
+  ]) {
+    const c = { id: 1, user: { login: CODEX_LOGIN, type: "Bot" }, body: "receipt" };
+    const api = new GitHub("test", "owner/repo", async (url) => ({
+      ok: true,
+      status: 200,
+      json: async () =>
+        url.endsWith("/graphql")
+          ? {
+              data: {
+                repository: {
+                  pullRequest: {
+                    comments: {
+                      nodes: [
+                        {
+                          databaseId: 1,
+                          body: "receipt",
+                          author: { __typename: "Bot", login: "chatgpt-codex-connector" },
+                          editor,
+                          lastEditedAt: "2026-10-18T00:00:00Z",
+                        },
+                      ],
+                      pageInfo: { hasNextPage: false },
+                    },
+                  },
+                },
+              },
+            }
+          : [c],
+    }));
+    assert.equal((await api.comments(1))[0].editor_verified, editor.__typename === "Bot");
+  }
+});
+test("missing provider edit provenance cannot certify a receipt", async () => {
+  const api = new GitHub("test", "owner/repo", async (url) => ({
+    ok: true,
+    status: 200,
+    json: async () => (url.endsWith("/graphql") ? { errors: [{ message: "unavailable" }] } : []),
+  }));
+  await assert.rejects(api.comments(1), /provenance/);
 });
 test("Claude receives data without tools, project discovery or GitHub credentials", async () => {
   const context = { files: [{ filename: "a" }], intent: "untrusted" };

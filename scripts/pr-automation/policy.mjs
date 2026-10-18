@@ -45,7 +45,8 @@ export function codexObservation(comments, reviews, head) {
   let completed = false;
   let findings = false;
   for (const c of comments) {
-    if (c.user?.login !== CODEX_LOGIN || c.user?.type !== "Bot") continue;
+    if (c.user?.login !== CODEX_LOGIN || c.user?.type !== "Bot" || c.editor_verified !== true)
+      continue;
     if (/reached your Codex usage limits for code reviews/i.test(c.body ?? "")) quota = true;
     const match = (c.body ?? "").match(/<!-- codex-review-state:v1 (.+?) -->/);
     if (!match) continue;
@@ -85,6 +86,7 @@ export function routeReview({ codex, previous, now, createdAt, head, base, polic
     previous?.base === base &&
     previous?.policyRevision === policyRevision;
   if (bound && previous.verdict === "pass") return "reuse";
+  if (bound && ["changes_required", "held"].includes(previous.verdict)) return "held";
   if (bound && previous.attempts >= MAX_ATTEMPTS) return "held";
   if (bound && previous.attemptedAt && now - Date.parse(previous.attemptedAt) < RETRY_MS)
     return "wait";
@@ -97,7 +99,14 @@ export function routeReview({ codex, previous, now, createdAt, head, base, polic
 export const REVIEW_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["verdict", "integrity", "reviewed_paths", "findings", "rationale"],
+  required: [
+    "verdict",
+    "integrity",
+    "reviewed_paths",
+    "findings",
+    "finding_dispositions",
+    "rationale",
+  ],
   properties: {
     verdict: { type: "string", enum: ["pass", "changes_required"] },
     integrity: {
@@ -119,10 +128,23 @@ export const REVIEW_SCHEMA = {
       },
     },
     rationale: { type: "string" },
+    finding_dispositions: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "status", "evidence"],
+        properties: {
+          id: { type: "string" },
+          status: { type: "string", enum: ["resolved", "rejected", "unresolved", "uncertain"] },
+          evidence: { type: "string" },
+        },
+      },
+    },
   },
 };
 
-export function validateReview(value, files) {
+export function validateReview(value, files, findings = []) {
   if (
     !value ||
     !["pass", "changes_required"].includes(value.verdict) ||
@@ -151,6 +173,20 @@ export function validateReview(value, files) {
       throw new Error("Invalid finding");
   if (value.verdict === "pass" && value.findings.some((f) => f.severity === "blocking"))
     throw new Error("Contradictory review verdict");
+  const dispositions = value.finding_dispositions ?? [];
+  if (
+    !Array.isArray(dispositions) ||
+    !findings.every((f) => dispositions.some((d) => d.id === f.id))
+  )
+    throw new Error("Missing finding disposition");
+  for (const d of dispositions)
+    if (
+      typeof d.id !== "string" ||
+      !["resolved", "rejected", "unresolved", "uncertain"].includes(d.status) ||
+      typeof d.evidence !== "string" ||
+      !d.evidence.trim()
+    )
+      throw new Error("Invalid finding disposition");
   return value;
 }
 
@@ -158,7 +194,8 @@ export function acceptable(value) {
   return (
     value.verdict === "pass" &&
     ["preserved", "equivalent_replacement"].includes(value.integrity) &&
-    !value.findings.some((f) => f.severity === "blocking")
+    !value.findings.some((f) => f.severity === "blocking") &&
+    !(value.finding_dispositions ?? []).some((d) => ["unresolved", "uncertain"].includes(d.status))
   );
 }
 

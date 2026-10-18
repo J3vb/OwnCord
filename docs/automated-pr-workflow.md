@@ -33,7 +33,10 @@ the App-owned checks.
   minutes. After three automatic repair attempts, unresolved findings hold the PR;
   an App-owned ledger keeps that budget across commits.
 - Public receipts contain verdicts, paths, counts and evidence digests. Detailed
-  model findings are deliberately not posted publicly. A separate tool-free
+  findings are encrypted with the controller App key and retained across fixes
+  and interrupted jobs. Reviewers must explicitly reconcile each carried
+  finding with code evidence; a late clean provider result cannot erase it.
+  Model findings are deliberately not posted publicly. A separate tool-free
   Claude fixer proposes file replacements in memory; the controller publishes
   the bounded correction as a descendant commit and requires fresh review/CI.
   It cannot edit gate policy, generated files or unrelated production files.
@@ -99,6 +102,14 @@ emit similarly named checks. Do not grant that App's private key to PR workflows
 or authoring/fix agents. The metered worker receives only the Claude credential;
 its child environment excludes the controller token. PR code is never checked
 out or executed in this credential-bearing controller job.
+
+The App key also protects private review evidence in the App-owned ledger. Keep
+the key available while those PRs are active; rotation that loses decryption
+access holds affected work rather than silently dropping findings. The model
+worker never receives the key. Provider attempts are reserved before model
+execution so an interrupted job cannot reset its metered retry budget.
+Installation tokens are renewed in the trusted controller during long reviews;
+the renewal key is never passed to review or repair subprocesses.
 
 ## Verification and recovery
 

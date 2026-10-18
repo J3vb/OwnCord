@@ -74,12 +74,16 @@ export async function reviewWithClaude(context, focus, runner = runClaude) {
         "--max-turns",
         "2",
       ],
-      { cwd, env, input: prompt },
+      {
+        cwd,
+        env,
+        input: `${prompt}\nReconcile every supplied finding by its ID in finding_dispositions, with concrete code evidence. An unresolved or uncertain prior finding requires changes_required; another provider's clean result alone never resolves it.`,
+      },
     );
     const result = JSON.parse(stdout);
     if (result.is_error || result.type !== "result" || result.subtype !== "success")
       throw new Error("Claude did not complete review");
-    const review = validateReview(result.structured_output, context.files);
+    const review = validateReview(result.structured_output, context.files, context.findings ?? []);
     return {
       ...review,
       provider: "claude",

@@ -2,6 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { reviewPR, integrate } from "./main.mjs";
 import { CHECKS, CI_CHECKS } from "./policy.mjs";
+import { generateKeyPairSync } from "node:crypto";
+import { openEvidence, carriedFindings } from "./evidence.mjs";
+const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 
 const head = "a".repeat(40),
   base = "b".repeat(40),
@@ -12,6 +15,7 @@ const options = {
   now: Date.parse("2026-10-18T10:00:00Z"),
   enforce: true,
   repair: false,
+  privateKey,
 };
 const pr = {
   number: 1,
@@ -48,6 +52,14 @@ function reviewAPI({
   return {
     written,
     checks: async () => [],
+    comments: async () => [
+      ...comments.map((c) => ({ ...c, editor_verified: true })),
+      {
+        user: { login: "chatgpt-codex-connector[bot]", type: "Bot" },
+        editor_verified: true,
+        body: "You have reached your Codex usage limits for code reviews.",
+      },
+    ],
     list: async (path) =>
       path.endsWith("/files")
         ? files
@@ -86,6 +98,50 @@ test("a head moving during review cannot acquire success", async () => {
     api.written.some((c) => c.status === "success"),
     false,
   );
+});
+test("a held fallback verdict remains held on subsequent ticks with a clean Codex receipt", async () => {
+  const api = reviewAPI();
+  let prior = { head, base, policyRevision, verdict: "changes_required", attempts: 1 };
+  api.checks = async () => [checkReceipt(CHECKS[0], prior)];
+  api.comments = async () => [
+    {
+      user: { login: "chatgpt-codex-connector[bot]", type: "Bot" },
+      editor_verified: true,
+      body: `<!-- codex-review-state:v1 ${JSON.stringify({ code_review: { commit_sha: head, status: "completed", has_any_findings: false, has_unresolved_findings: false } })} -->`,
+    },
+  ];
+  let calls = 0;
+  for (let i = 0; i < 3; i++) {
+    await reviewPR(api, pr, options, async () => {
+      calls++;
+      return clean;
+    });
+    prior = api.written.filter((c) => c.name === CHECKS[0]).at(-1).state;
+    assert.equal(prior.verdict, "held");
+  }
+  assert.equal(calls, 0);
+  assert.ok(api.written.every((c) => c.status !== "success"));
+});
+test("interrupted review preserves the first pass and reserves the provider attempt", async () => {
+  const api = reviewAPI();
+  const saved = [];
+  const request = api.request;
+  api.request = async (path, method, body) => {
+    if (body?.body) saved.push(JSON.parse(body.body.split("\n")[1]));
+    return request(path, method, body);
+  };
+  let calls = 0;
+  const state = await reviewPR(api, pr, options, async () => {
+    if (++calls === 2) throw new Error("interrupted");
+    return {
+      ...clean,
+      verdict: "changes_required",
+      findings: [{ path: "a", severity: "blocking", description: "retain this private finding" }],
+    };
+  });
+  assert.equal(state.attempts, 1);
+  assert.equal(carriedFindings(openEvidence(saved.at(-1).privateEvidence, privateKey)).length, 1);
+  assert.ok(api.written.some((c) => c.status === "pending" && c.state.attempts === 1));
 });
 test("unreadable or truncated scope and crashed reviewer fail closed", async () => {
   for (const api of [
@@ -264,6 +320,21 @@ test("integration dispatches full CI before permitting merge", async () => {
   );
   assert.equal(api.writes.find((w) => w.method)?.body.ref, "feature/a");
 });
+test("an older green dev run cannot hide a newer failing or pending run", async () => {
+  for (const status of ["completed", "in_progress"]) {
+    const api = integrationAPI();
+    const list = api.list;
+    api.list = async (path, ...args) =>
+      path.includes("event=push")
+        ? [
+            { id: 1, head_sha: base, status: "completed", conclusion: "success" },
+            { id: 2, head_sha: base, status, conclusion: "failure" },
+          ]
+        : list(path, ...args);
+    assert.equal((await integrate(api, [pr], options)).action, "dev_not_green");
+    assert.ok(api.writes.every((w) => !w.method));
+  }
+});
 test("only selected final head is merged with expected-head protection", async () => {
   const api = integrationAPI();
   assert.equal((await integrate(api, [pr], options)).action, "merge_attempted");
@@ -271,6 +342,30 @@ test("only selected final head is merged with expected-head protection", async (
     sha: head,
     merge_method: "squash",
   });
+});
+test("integrity from another scope cannot authorize integration", async () => {
+  for (const mismatch of [
+    { base: head },
+    { head: base },
+    { policyRevision: head },
+    { diffDigest: "other" },
+  ]) {
+    const api = integrationAPI();
+    const read = api.checks;
+    api.checks = async () => {
+      const checks = await read();
+      return checks.map((c) =>
+        c.name === CHECKS[1]
+          ? checkReceipt(CHECKS[1], { head, base, policyRevision, verdict: "pass", ...mismatch })
+          : c,
+      );
+    };
+    assert.equal((await integrate(api, [pr], options)).action, "waiting");
+    assert.equal(
+      api.writes.some((w) => w.path?.endsWith("/merge")),
+      false,
+    );
+  }
 });
 test("base moving during final recheck never unlocks a candidate", async () => {
   const api = integrationAPI();

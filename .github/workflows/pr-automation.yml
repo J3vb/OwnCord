@@ -15,7 +15,7 @@ jobs:
     if: contains(fromJSON('["J3vb"]'), github.actor) && vars.REVIEW_CONTROLLER_REF != '' && vars.REVIEW_APP_ID != ''
     runs-on: ubuntu-latest
     environment: pr-automation
-    timeout-minutes: 50
+    timeout-minutes: 75
     concurrency:
       group: owncord-pr-automation
       cancel-in-progress: false
@@ -51,6 +51,8 @@ jobs:
       - name: Reconcile reviews and integration
         env:
           REVIEW_GITHUB_TOKEN: ${{ steps.app.outputs.token }}
+          REVIEW_INSTALLATION_ID: ${{ steps.app.outputs.installation-id }}
+          REVIEW_EVIDENCE_KEY: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}
           REVIEW_APP_ID: ${{ vars.REVIEW_APP_ID }}
           REVIEW_POLICY_REVISION: ${{ vars.REVIEW_CONTROLLER_REF }}
           REVIEW_MODE: ${{ vars.REVIEW_MODE }}
