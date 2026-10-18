@@ -28,7 +28,8 @@ and at least one authenticated `codex` or `claude` CLI. It does not use Firstmat
    On a bounded wait ending, inspect `--status` and use `--reattach`; do not
    start another run, hand-edit the gate worktree, force-push, or kill the daemon
    to bypass a gate. Follow the installed upstream `/no-mistakes` guidance for
-   gates and coverage-completion decisions. A real `ask-user` policy/product
+   gates. Use the adapter's `--fix-findings <ids>` only for eligible corrections
+   or a fix the user explicitly authorized. A real `ask-user` policy/product
    decision must be escalated; never blanket-approve, skip or decline findings
    just to continue.
 6. At `checks-passed`, report the PR URL and hand integration to the independent

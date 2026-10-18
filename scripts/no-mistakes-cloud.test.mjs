@@ -16,6 +16,7 @@ test("shipping always targets dev and transports intent as a literal file argume
   ]);
   assert.ok(result.args[5].endsWith("intent $(not-a-command).md"));
   assert.equal(result.args.includes("--skip"), false);
+  assert.equal(result.args.includes("--yes"), false);
   assert.equal(result.args.includes("--no-publish-intent"), true);
 });
 test("the cloud profile preserves bounded review/repair and fresh repair validation", () => {
@@ -42,6 +43,21 @@ test("unsupported platforms and bypass flags cause no installation or execution"
   assert.throws(() => invocation(["--skip", "review"]));
   assert.throws(() => invocation(["--intent-file", "x", "--yes"]));
   assert.throws(() => verifyArchive(Buffer.from("unverified archive")), /digest mismatch/);
+});
+test("eligible fixes use the selected finding IDs without an approval override", () => {
+  const command = invocation(["--fix-findings", "f1,f2"]);
+  assert.deepEqual(command.args.slice(0, 6), [
+    "axi",
+    "respond",
+    "--action",
+    "fix",
+    "--findings",
+    "f1,f2",
+  ]);
+  assert.equal(command.args.includes("approve"), false);
+  assert.equal(command.args.includes("--yes"), false);
+  assert.equal(invocation(["--reattach"]).args.includes("--yes"), false);
+  assert.throws(() => invocation(["--fix-findings", "f1; command"]));
 });
 test("setup validates the archive before extracting or initializing the gate", async () => {
   const home = mkdtempSync(join(tmpdir(), "nm-cloud-test-"));
@@ -128,6 +144,37 @@ test("provider failure propagates instead of reporting successful validation", a
       }),
       /provider unavailable/,
     );
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+test("installed but signed-out providers cannot initialize the gate", async () => {
+  const home = mkdtempSync(join(tmpdir(), "nm-cloud-test-"));
+  const calls = [];
+  try {
+    await assert.rejects(
+      run(["--setup"], {
+        platform: "linux",
+        arch: "x64",
+        remote: "true",
+        home,
+        fetcher: async () => ({ ok: true, arrayBuffer: async () => Buffer.from("fixture") }),
+        verify: () => {},
+        extract: () => {},
+        probe: (cmd, args) => {
+          calls.push([cmd, ...args]);
+          return args[0] === "--version";
+        },
+        execute: () => {
+          throw new Error("must not initialize");
+        },
+      }),
+      /No authenticated/,
+    );
+    assert.deepEqual(calls, [
+      ["codex", "login", "status"],
+      ["claude", "auth", "status"],
+    ]);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

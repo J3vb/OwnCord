@@ -32,10 +32,15 @@ normal trusted-default-branch rules; `--base-branch dev` is supplied explicitly.
 Its local CLI fallback is distinct from hosted Codex GitHub review availability.
 
 Each call waits at most sixty seconds. Use `--status` and `--reattach` to drive
-an active run. `--yes` only advances eligible gates; it is not authority to
-override ask-user findings, weakened tests or a policy exception. The adapter
+an active run. The adapter never supplies blanket `--yes` consent: the bounded
+`auto_fix` profile owns eligible corrections, and ask-user findings must be
+escalated. It is not authority to override weakened tests or a policy exception. The adapter
 exposes no skip or blanket approval option. The upstream skill installed by
 `init` owns the detailed gate protocol.
+
+Use `--fix-findings <ids>` for an eligible correction or an explicitly
+authorized fix. The adapter keeps the isolated binary on the daemon/worker
+PATH; gate responses should use this adapter rather than a global installation.
 
 The daemon is session-local. GitHub Actions remains the authoritative durable CI
 service, and the separately deployed App review controller owns automated final

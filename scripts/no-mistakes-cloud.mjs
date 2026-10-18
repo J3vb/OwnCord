@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, lstatSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, delimiter } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const RELEASE = {
@@ -45,16 +45,24 @@ export function invocation(argv) {
         "--intent-file",
         resolve(argv[1]),
         "--no-publish-intent",
-        "--yes",
         "--wait",
         "60s",
       ],
     };
   }
   if (argv.length === 1 && argv[0] === "--reattach")
-    return { mode: "run", args: ["axi", "run", "--yes", "--wait", "60s"] };
+    return { mode: "run", args: ["axi", "run", "--wait", "60s"] };
+  if (
+    argv.length === 2 &&
+    argv[0] === "--fix-findings" &&
+    /^[A-Za-z0-9_.:-]+(?:,[A-Za-z0-9_.:-]+)*$/.test(argv[1])
+  )
+    return {
+      mode: "run",
+      args: ["axi", "respond", "--action", "fix", "--findings", argv[1], "--wait", "60s"],
+    };
   throw new Error(
-    "Use --setup, --status, --intent-file <file>, or --reattach; no skip/approval override is exposed",
+    "Use --setup, --status, --intent-file <file>, --reattach or --fix-findings <ids>; no skip/approval override is exposed",
   );
 }
 
@@ -86,7 +94,12 @@ export async function run(argv, dependencies = {}) {
           `${cmd === binary ? "no-mistakes" : "setup command"} did not complete successfully`,
         );
     });
-  const env = { ...process.env, NM_HOME: home, NO_MISTAKES_TELEMETRY: "off" };
+  const env = {
+    ...process.env,
+    PATH: `${join(home, "bin")}${delimiter}${process.env.PATH ?? ""}`,
+    NM_HOME: home,
+    NO_MISTAKES_TELEMETRY: "off",
+  };
   if (command.mode === "setup") {
     mkdirSync(home, { recursive: true, mode: 0o700 });
     const stat = lstatSync(home);
@@ -116,10 +129,9 @@ export async function run(argv, dependencies = {}) {
     );
     writeFileSync(config, serialized, { mode: 0o600 });
     const probe =
-      dependencies.probe ??
-      ((cmd) => spawnSync(cmd, ["--version"], { stdio: "ignore" }).status === 0);
-    if (!probe("codex") && !probe("claude"))
-      throw new Error("No runnable Codex or Claude CLI in this cloud session");
+      dependencies.probe ?? ((cmd, args) => spawnSync(cmd, args, { stdio: "ignore" }).status === 0);
+    if (!probe("codex", ["login", "status"]) && !probe("claude", ["auth", "status"]))
+      throw new Error("No authenticated Codex or Claude CLI in this cloud session");
     execute("gh", ["auth", "status", "--active", "--hostname", "github.com"], { cwd: root, env });
     // doctor is diagnostic (some releases exit zero with failed checks).
     // Explicit executable/auth checks above own those setup prerequisites.
