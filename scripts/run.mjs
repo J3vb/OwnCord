@@ -255,7 +255,6 @@ const PRETTIER_TRACKED = (() => {
 // Lint check, and by .githooks/pre-commit on staged files.
 const CHECK_HYGIENE = [
   ...PRETTIER_TRACKED,
-  step("node", ["--test", "scripts/no-mistakes-cloud.test.mjs"], "."),
   optional(
     "shellcheck",
     "shellcheck",
@@ -303,6 +302,7 @@ const CHECK_HYGIENE = [
   // on every PR rather than only at release. `ci-select.mjs` cannot check
   // itself: its own path selects every capability, so this step always runs.
   step("node", ["--test", "scripts/ci-select.test.mjs"], "."),
+  step("node", ["--test", "scripts/no-mistakes-cloud.test.mjs"], "."),
   // WP 0-5. weekly-supply-chain.yml repeats ci.yml's supply-chain steps; this
   // fails when their pins or lockfile list drift apart.
   step("node", ["--test", "scripts/check-supply-chain-sync.test.mjs"], "."),
