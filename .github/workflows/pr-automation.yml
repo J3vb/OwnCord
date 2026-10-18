@@ -14,6 +14,7 @@ jobs:
   reconcile:
     if: contains(fromJSON('["J3vb"]'), github.actor) && vars.REVIEW_CONTROLLER_REF != '' && vars.REVIEW_APP_ID != ''
     runs-on: ubuntu-latest
+    environment: pr-automation
     timeout-minutes: 50
     concurrency:
       group: owncord-pr-automation

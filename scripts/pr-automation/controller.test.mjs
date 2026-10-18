@@ -214,6 +214,12 @@ function integrationAPI({ strict = true, tip = base, full = true, devGreen = tru
         writes.push({ path, method, body });
         return {};
       }
+      if (path === "environments/pr-automation")
+        return {
+          deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+        };
+      if (path === "environments/pr-automation/deployment-branch-policies")
+        return { branch_policies: [{ name: "main", type: "branch" }] };
       if (path === "branches/dev/protection")
         return {
           required_status_checks: {

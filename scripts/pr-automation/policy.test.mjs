@@ -11,6 +11,7 @@ import {
   validateReview,
   checksPassed,
   enforcedProtection,
+  trustedEnvironment,
 } from "./policy.mjs";
 import { reductions } from "./integrity.mjs";
 import { receipt, GitHub } from "./github.mjs";
@@ -194,6 +195,24 @@ test("activation requires strict branch protection and dedicated App source", ()
       { ...p, required_status_checks: { ...p.required_status_checks, strict: false } },
       42,
     ),
+    false,
+  );
+});
+test("controller credentials belong to a main-only environment without routine approvals", () => {
+  const env = {
+    deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+  };
+  const policies = { branch_policies: [{ name: "main", type: "branch" }] };
+  assert.ok(trustedEnvironment(env, policies));
+  assert.equal(
+    trustedEnvironment(env, {
+      branch_policies: [...policies.branch_policies, { name: "*", type: "branch" }],
+    }),
+    false,
+  );
+  assert.equal(trustedEnvironment({ deployment_branch_policy: null }, policies), false);
+  assert.equal(
+    trustedEnvironment({ ...env, protection_rules: [{ type: "required_reviewers" }] }, policies),
     false,
   );
 });

@@ -192,3 +192,14 @@ export function enforcedProtection(protection, appID) {
     CHECKS.every((name) => r.checks?.some((c) => c.context === name && c.app_id === appID))
   );
 }
+
+export function trustedEnvironment(environment, policies) {
+  return (
+    environment.deployment_branch_policy?.protected_branches === false &&
+    environment.deployment_branch_policy?.custom_branch_policies === true &&
+    policies.branch_policies?.length === 1 &&
+    policies.branch_policies[0].name === "main" &&
+    policies.branch_policies[0].type === "branch" &&
+    !(environment.protection_rules ?? []).some((r) => r.type === "required_reviewers")
+  );
+}

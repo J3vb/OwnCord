@@ -13,6 +13,7 @@ import {
   acceptable,
   checksPassed,
   enforcedProtection,
+  trustedEnvironment,
 } from "./policy.mjs";
 
 const hash = (text) => createHash("sha256").update(text).digest("hex");
@@ -275,6 +276,12 @@ export async function integrate(api, prs, options) {
       { head: pr.head.sha, base: pr.base.sha, policyRevision },
     );
   if (!enforce) return { action: "shadow" };
+  const environment = await api.request("environments/pr-automation");
+  const environmentPolicies = await api.request(
+    "environments/pr-automation/deployment-branch-policies",
+  );
+  if (!trustedEnvironment(environment, environmentPolicies))
+    throw new Error("Controller environment must be restricted to main without approval gates");
   const protection = await api.request("branches/dev/protection");
   if (!enforcedProtection(protection, appID))
     throw new Error("Required App-bound protection is not active");

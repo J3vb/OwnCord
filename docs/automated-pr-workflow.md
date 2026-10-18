@@ -68,9 +68,12 @@ change the default branch or bypass that process.
 1. Create a private GitHub App installed only on OwnCord. Grant repository
    permissions: Checks write, Contents write, Pull requests write, Actions
    write, and Administration read. Keep Metadata read. No administration write
-   or protection bypass is required. The private key must be a repository
-   Actions secret named `REVIEW_APP_PRIVATE_KEY`. Store the numeric App ID as
-   repository variable `REVIEW_APP_ID`.
+   or protection bypass is required. Create the `pr-automation` environment,
+   restrict its deployment branches to exactly `main` (selected branches, no
+   tags), and require no reviewers. Store `REVIEW_APP_PRIVATE_KEY` as an
+   **environment secret**, never a repository secret. Store the numeric App ID
+   as repository variable `REVIEW_APP_ID`. Branch restrictions permit scheduled
+   default-branch runs without making this credential available to PR jobs.
 2. Set `REVIEW_CONTROLLER_REF` to the **full immutable commit SHA** containing
    the reviewed controller implementation. Checkout always uses this revision;
    a PR cannot deploy its own changes to its judge. Updating this variable is
