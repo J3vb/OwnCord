@@ -18,7 +18,7 @@ export const RELEASE = {
 // All keys are from the pinned release's global configuration interface.
 export function configuration() {
   return {
-    agent: ["codex", "claude"],
+    agent: ["claude"],
     session_reuse: true,
     auto_fix: { rebase: 3, review: 3, test: 3, document: 3, lint: 3, ci: 3 },
     ci: {
@@ -130,8 +130,8 @@ export async function run(argv, dependencies = {}) {
     writeFileSync(config, serialized, { mode: 0o600 });
     const probe =
       dependencies.probe ?? ((cmd, args) => spawnSync(cmd, args, { stdio: "ignore" }).status === 0);
-    if (!probe("codex", ["login", "status"]) && !probe("claude", ["auth", "status"]))
-      throw new Error("No authenticated Codex or Claude CLI in this cloud session");
+    if (!probe("claude", ["auth", "status"]))
+      throw new Error("No authenticated Claude CLI in this cloud session");
     execute("gh", ["auth", "status", "--active", "--hostname", "github.com"], { cwd: root, env });
     // doctor is diagnostic (some releases exit zero with failed checks).
     // Explicit executable/auth checks above own those setup prerequisites.
@@ -141,6 +141,8 @@ export async function run(argv, dependencies = {}) {
   }
   if (!existsSync(config) || !existsSync(binary))
     throw new Error("Run --setup in this cloud session first");
+  if (readFileSync(config, "utf8") !== JSON.stringify(configuration(), null, 2) + "\n")
+    throw new Error("Existing cloud profile differs; start a fresh cloud session and run --setup");
   execute(binary, command.args, { cwd: root, env });
   return { home, mode: "run" };
 }

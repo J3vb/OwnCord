@@ -21,7 +21,7 @@ test("shipping always targets dev and transports intent as a literal file argume
 });
 test("the cloud profile preserves bounded review/repair and fresh repair validation", () => {
   const profile = JSON.parse(JSON.stringify(configuration()));
-  assert.deepEqual(profile.agent, ["codex", "claude"]);
+  assert.deepEqual(profile.agent, ["claude"]);
   assert.equal(profile.auto_fix.review, 3);
   assert.equal(profile.auto_fix.ci, 3);
   assert.equal(profile.ci.revalidate_repairs, true);
@@ -97,7 +97,11 @@ test("setup uses isolated state, checks agent availability, then initializes", a
       },
       verify: () => calls.push("verified"),
       extract: () => calls.push("extracted"),
-      probe: () => true,
+      probe: (cmd, args) => {
+        assert.equal(cmd, "claude");
+        assert.deepEqual(args, ["auth", "status"]);
+        return true;
+      },
       execute: (cmd, args, opts) => {
         calls.push(args[0]);
         assert.equal(opts.env.NM_HOME, home);
@@ -130,7 +134,7 @@ test("provider failure propagates instead of reporting successful validation", a
   try {
     mkdirSync(join(home, "bin"));
     writeFileSync(join(home, "bin", "no-mistakes"), "");
-    writeFileSync(join(home, "config.yaml"), "{}");
+    writeFileSync(join(home, "config.yaml"), JSON.stringify(configuration(), null, 2) + "\n");
     await assert.rejects(
       run(["--intent-file", "intent.md"], {
         platform: "linux",
@@ -148,7 +152,7 @@ test("provider failure propagates instead of reporting successful validation", a
     rmSync(home, { recursive: true, force: true });
   }
 });
-test("installed but signed-out providers cannot initialize the gate", async () => {
+test("Codex availability cannot compensate for signed-out Claude", async () => {
   const home = mkdtempSync(join(tmpdir(), "nm-cloud-test-"));
   const calls = [];
   try {
@@ -163,7 +167,7 @@ test("installed but signed-out providers cannot initialize the gate", async () =
         extract: () => {},
         probe: (cmd, args) => {
           calls.push([cmd, ...args]);
-          return args[0] === "--version";
+          return cmd === "codex";
         },
         execute: () => {
           throw new Error("must not initialize");
@@ -171,10 +175,42 @@ test("installed but signed-out providers cannot initialize the gate", async () =
       }),
       /No authenticated/,
     );
-    assert.deepEqual(calls, [
-      ["codex", "login", "status"],
-      ["claude", "auth", "status"],
-    ]);
+    assert.deepEqual(calls, [["claude", "auth", "status"]]);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("all run commands reject an older Codex-enabled cloud profile before execution", async () => {
+  const home = mkdtempSync(join(tmpdir(), "nm-cloud-test-"));
+  try {
+    mkdirSync(join(home, "bin"));
+    writeFileSync(join(home, "bin", "no-mistakes"), "");
+    writeFileSync(
+      join(home, "config.yaml"),
+      JSON.stringify({ ...configuration(), agent: ["codex", "claude"] }, null, 2) + "\n",
+    );
+    for (const argv of [
+      ["--status"],
+      ["--reattach"],
+      ["--intent-file", "intent.md"],
+      ["--fix-findings", "f1"],
+    ]) {
+      let executed = false;
+      await assert.rejects(
+        run(argv, {
+          platform: "linux",
+          arch: "x64",
+          remote: "true",
+          home,
+          execute: () => {
+            executed = true;
+          },
+        }),
+        /start a fresh cloud session/,
+      );
+      assert.equal(executed, false);
+    }
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

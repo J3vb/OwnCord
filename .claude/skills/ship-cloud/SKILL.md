@@ -1,13 +1,13 @@
 ---
 name: ship-cloud
-description: Validate and publish committed OwnCord changes from a Claude cloud session through the pinned no-mistakes pipeline, with Codex-to-Claude CLI fallback and PRs targeting dev.
+description: Validate and publish committed OwnCord changes from a Claude cloud session through pinned no-mistakes using Claude only, with GitHub PR reviews requested through @codex review and PRs targeting dev.
 ---
 
 # Ship OwnCord from Claude cloud
 
 Use this workflow when shipping committed changes from Claude Projects. It is
 opt-in and requires an x64 Linux cloud session with usable `gh` authentication
-and at least one authenticated `codex` or `claude` CLI. It does not use Firstmate.
+and an authenticated `claude` CLI. Codex CLI is not a cloud prerequisite.
 
 1. Check `git status`. Preserve unrelated work. Finish and commit the requested
    changes on a feature branch based on `dev`; never run the gate from `dev` or
@@ -32,15 +32,22 @@ and at least one authenticated `codex` or `claude` CLI. It does not use Firstmat
    or a fix the user explicitly authorized. A real `ask-user` policy/product
    decision must be escalated; never blanket-approve, skip or decline findings
    just to continue.
-6. At `checks-passed`, report the PR URL and hand integration to the independent
+6. Once the PR exists, request its final-head GitHub review with
+   `gh pr comment <number> --body '@codex review'`. Inspect the existing request
+   comments and provider receipt first: do not repeat a request for the same
+   head or request again when that head already has a running/completed review.
+   After a correction changes the head, request review for the new final head.
+   If Codex reports quota exhaustion, hand off to the deployed Claude fallback
+   instead of posting repeated requests. A request comment is not an approval.
+7. At `checks-passed`, report the PR URL and hand integration to the independent
    GitHub checks/merge policy. Never merge directly from this skill. If the
    cloud session ends, the local daemon does not continue running elsewhere;
    GitHub CI and its deployed controller continue independently.
 
-The profile prefers Codex CLI and falls back to Claude CLI for launch/provider
-errors. Missing/malformed review output still fails. These CLI credentials and
-limits are separate from hosted Codex GitHub review; the GitHub controller is
-responsible for that fallback. no-mistakes reviews start fresh sessions, while
+The cloud profile uses Claude CLI only for reviews and fixes. Missing/malformed
+review output still fails. Codex runs only through GitHub PR review requests;
+the separately deployed GitHub controller uses Claude when that Codex review is
+unavailable or exceeds its wait bound. no-mistakes reviews start fresh sessions, while
 its fixer may reuse its own session. Every CI repair re-enters review before
 publication. Ordinary review, test and CI repairs have a three-attempt budget.
 

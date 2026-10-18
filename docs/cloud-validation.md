@@ -17,7 +17,8 @@ permission to publish the user's full request. Generated public PR summaries
 still need to follow the repository's neutral security-wording policy.
 
 Prerequisites are x64 Linux, `CLAUDE_CODE_REMOTE=true`, GitHub CLI authentication,
-and an authenticated Codex or Claude CLI that the cloud session may launch. A
+and an authenticated Claude CLI that the cloud session may launch. Codex CLI is
+neither invoked nor required by this adapter. A
 Claude Projects subscription/session does not itself prove that a child CLI can
 authenticate. Setup runs the pinned binary's `doctor` before initialization.
 Confirm an actual cloud session completes validation before treating this as a
@@ -26,10 +27,19 @@ an end-to-end test when this adapter was prepared.
 
 The adapter gives no-mistakes its own short temporary `NM_HOME`, avoiding Unix
 socket path-length problems and preserving the user's existing global profile.
-It prefers `agent: [codex, claude]`, allows three eligible repair attempts, and
+It sets `agent: [claude]`, allows three eligible repair attempts, and
 sets `ci.revalidate_repairs: true`. Repo settings are resolved by no-mistakes'
 normal trusted-default-branch rules; `--base-branch dev` is supplied explicitly.
-Its local CLI fallback is distinct from hosted Codex GitHub review availability.
+Codex review happens on the published GitHub PR through `@codex review`, not
+inside the cloud session. The shipping skill requests review once per final
+head, avoiding requests when that head already has a running/completed review.
+The separately deployed GitHub controller handles Codex quota or missing results
+with Claude review; the cloud adapter does not switch to Codex CLI.
+
+An older Codex-enabled temporary profile is rejected for setup and execution.
+Finish or inspect its active pipeline using the matching older adapter first;
+then start a fresh cloud session and set up the Claude-only profile. Existing
+profile contents and active daemon state are never silently overwritten.
 
 Each call waits at most sixty seconds. Use `--status` and `--reattach` to drive
 an active run. The adapter never supplies blanket `--yes` consent: the bounded
