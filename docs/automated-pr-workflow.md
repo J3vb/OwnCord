@@ -4,13 +4,20 @@ Claude Projects authors changes and opens PRs against `dev`. GitHub runs CI.
 The optional controller in `.github/workflows/pr-automation.yml` reconciles PRs
 every five minutes, preferring completed Codex reviews and running a fresh Claude
 review when Codex reports quota exhaustion or no usable result arrives within
-twenty minutes of observing a new head. It does not post repeated Codex requests.
+twenty minutes of observing a new head. Codex runs as the hosted GitHub reviewer,
+requested with `gh pr comment <number> --body '@codex review'` for the final head.
+The cloud shipping skill owns that request and avoids repeating it when the head
+already has a running/completed review or quota exhaustion has been reported.
+This controller observes authenticated GitHub results; it never invokes Codex
+CLI or posts repeated Codex requests.
 
 This controller ships **inactive**. The existing workflow remains unchanged
 until the one-time deployment below. Firstmate and its old no-mistakes daemon
 are not dependencies. A separate optional no-mistakes cloud shipping adapter
 can validate work before publication; its PR-body attestation does not replace
 the App-owned checks.
+The cloud adapter uses Claude only. Its child CLI authentication is separate
+from this controller's Claude credential and the hosted Codex GitHub reviewer.
 
 ## Review policy
 
