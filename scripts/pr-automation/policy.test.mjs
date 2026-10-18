@@ -134,6 +134,17 @@ test("incomplete or contradictory model output never passes", () => {
   assert.equal(acceptable({ ...v, integrity: "reduced" }), false);
 });
 test("sensitive routing follows paths rather than the PR author's labels", () => {
+  for (const filename of [
+    "Server/api/login.go",
+    "Server/admin/handlers.go",
+    "Server/config/config.go",
+    "Server/plugin/http.go",
+    "Server/main.go",
+    "Client/src/lib/ws.ts",
+    "Client/src/stores/auth.store.ts",
+    "protocol/schema.json",
+  ])
+    assert.equal(classify([{ filename }]).sensitive, true, filename);
   assert.equal(classify([{ filename: "Server/auth/session.go" }]).sensitive, true);
   assert.equal(classify([{ filename: ".github/workflows/ci.yml" }]).policy, true);
   assert.equal(classify([{ filename: "Client/tests/unit/a.test.ts" }]).testsChanged, true);

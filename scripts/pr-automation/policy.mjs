@@ -25,7 +25,7 @@ export const REVIEW_TIMEOUT_MS = 20 * 60_000;
 export const RETRY_MS = 5 * 60_000;
 export const MAX_ATTEMPTS = 2;
 export const SENSITIVE =
-  /^(?:Server\/(?:auth|permissions|safefetch|updater|migrations|ws|service)\/|Client\/src\/(?:lib\/(?:identity|livekitE2EE)|features\/voice\/e2ee|platform\/)|Client\/src-tauri\/|\.github\/|scripts\/pr-automation\/)/;
+  /^(?:Server\/(?:api|admin|auth|permissions|safefetch|updater|migrations|ws|service|db|config|plugin)\/|Server\/[^/]+\.go$|protocol\/|Client\/src\/(?:lib\/|stores\/(?:auth|voice)\.|features\/voice\/e2ee|platform\/)|Client\/src-tauri\/|\.github\/|scripts\/pr-automation\/)/;
 export const POLICY_PATH =
   /^(?:\.github\/|\.githooks\/|\.claude\/|\.codex\/|\.agents\/|scripts\/|(?:AGENTS|CLAUDE|SECURITY)\.md|(?:Client|Server)\/(?:coverage-floor\.json|scripts\/coverage-floor\.sh)|Client\/(?:vitest\.config|stryker.*config|tests\/e2e\/quarantine\.json)|osv-scanner\.toml|Client\/src-tauri\/(?:deny\.toml|\.cargo\/audit\.toml))/;
 
