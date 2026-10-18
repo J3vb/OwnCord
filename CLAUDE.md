@@ -37,6 +37,11 @@ scratch and stays local.
 
 ## Tools for agents
 
+Claude cloud sessions can opt into the `ship-cloud` skill to validate and publish
+committed work through pinned no-mistakes, without Firstmate. See
+[docs/cloud-validation.md](docs/cloud-validation.md) for prerequisites and limits.
+It does not replace the independent GitHub review and integration checks.
+
 Optional command-line tools that make a task cheaper. Install the ones you need
 — none is required to build or test OwnCord. The last four are also CI checks
 (`.github/workflows/ci.yml`), and each fails closed on a new finding: actionlint
