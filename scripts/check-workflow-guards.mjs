@@ -33,7 +33,10 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 // Workflows whose runs consume a metered credential, and therefore must carry
 // every guard in CHECKS. An unlisted workflow is not checked.
-const METERED = [".github/workflows/claude.yml"];
+const METERED = [
+  { path: ".github/workflows/claude.yml", serialized: false },
+  { path: ".github/workflows/pr-automation.yml", serialized: true },
+];
 
 // Each check is (name, test, why). `why` is the failure message: it states the
 // invariant a contributor has to restore, not the history behind it.
@@ -79,8 +82,18 @@ export const CHECKS = [
   },
 ];
 
-export function auditWorkflow(src) {
-  return CHECKS.filter((c) => !c.test(src)).map((c) => ({ name: c.name, why: c.why }));
+export function auditWorkflow(src, { serialized = false } = {}) {
+  return CHECKS.filter((c) =>
+    c.name === "cancel-in-progress" && serialized
+      ? !gatedAll(concurrencyBlocks(src), (b) => /^\s*cancel-in-progress:\s*false\s*$/m.test(b))
+      : !c.test(src),
+  ).map((c) => ({
+    name: c.name,
+    why:
+      c.name === "cancel-in-progress" && serialized
+        ? "a merge controller must serialize ticks without cancelling an active integration"
+        : c.why,
+  }));
 }
 
 // The updater signing key (and its password) is handed to release.yml only.
@@ -150,7 +163,7 @@ export function unboundedPlaywrightInstalls(workflows) {
 function main() {
   const failures = [];
 
-  for (const rel of METERED) {
+  for (const { path: rel, serialized } of METERED) {
     const p = join(ROOT, rel);
     if (!existsSync(p)) {
       failures.push(
@@ -159,7 +172,7 @@ function main() {
       continue;
     }
     const src = readFileSync(p, "utf8");
-    for (const { name, why } of auditWorkflow(src)) {
+    for (const { name, why } of auditWorkflow(src, { serialized })) {
       failures.push(`${rel}: missing ${name} — ${why}`);
     }
   }
@@ -205,7 +218,7 @@ function main() {
     process.exit(1);
   }
   console.log(
-    `${CHECKS.length} guard(s) present in ${METERED.length} metered workflow(s): ${METERED.join(", ")}`,
+    `${CHECKS.length} guard(s) present in ${METERED.length} metered workflow(s): ${METERED.map((m) => m.path).join(", ")}`,
   );
 }
 

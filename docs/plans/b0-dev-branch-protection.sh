@@ -68,6 +68,15 @@ set -euo pipefail
 
 REPO="${REPO:-J3vb/OwnCord}"
 
+# Preserve an activated automation deployment. Its App-bound checks must be
+# maintained through the additive configuration tool, not this baseline reset.
+automation_checks=$(gh api "repos/${REPO}/branches/dev/protection" --jq \
+  '[.required_status_checks.contexts[]? | select(. == "AI Review Gate" or . == "Test Integrity Gate" or . == "Merge Readiness Gate")] | length')
+if [ "$automation_checks" != "0" ]; then
+  echo "Controller checks are active; use scripts/pr-automation/configure.mjs instead." >&2
+  exit 1
+fi
+
 gh api -X PUT "repos/${REPO}/branches/dev/protection" --input - <<'JSON'
 {
   "required_status_checks": {

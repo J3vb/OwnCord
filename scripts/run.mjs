@@ -255,6 +255,15 @@ const PRETTIER_TRACKED = (() => {
 // Lint check, and by .githooks/pre-commit on staged files.
 const CHECK_HYGIENE = [
   ...PRETTIER_TRACKED,
+  step(
+    "node",
+    [
+      "--test",
+      "scripts/pr-automation/policy.test.mjs",
+      "scripts/pr-automation/controller.test.mjs",
+    ],
+    ".",
+  ),
   optional(
     "shellcheck",
     "shellcheck",

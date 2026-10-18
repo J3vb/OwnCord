@@ -1,0 +1,57 @@
+name: PR Automation Controller
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+# Durable receipts live in App-owned checks. A queued tick reconciles all PRs,
+# so GitHub replacing an older pending tick does not lose a PR event.
+permissions:
+  contents: read
+
+jobs:
+  reconcile:
+    if: contains(fromJSON('["J3vb"]'), github.actor) && vars.REVIEW_CONTROLLER_REF != '' && vars.REVIEW_APP_ID != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    concurrency:
+      group: owncord-pr-automation
+      cancel-in-progress: false
+    steps:
+      - name: Validate immutable deployment revision
+        env:
+          CONTROLLER_REF: ${{ vars.REVIEW_CONTROLLER_REF }}
+        run: |
+          if [[ ! "$CONTROLLER_REF" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "::error::REVIEW_CONTROLLER_REF must be an immutable reviewed commit"
+            exit 1
+          fi
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ vars.REVIEW_CONTROLLER_REF }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+      - name: Install pinned review worker
+        run: node scripts/pr-automation/install-claude.mjs
+      - name: Issue controller installation token
+        id: app
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.REVIEW_APP_ID }}
+          private-key: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}
+          permission-checks: write
+          permission-contents: write
+          permission-pull-requests: write
+          permission-actions: write
+          permission-administration: read
+      - name: Reconcile reviews and integration
+        env:
+          REVIEW_GITHUB_TOKEN: ${{ steps.app.outputs.token }}
+          REVIEW_APP_ID: ${{ vars.REVIEW_APP_ID }}
+          REVIEW_POLICY_REVISION: ${{ vars.REVIEW_CONTROLLER_REF }}
+          REVIEW_MODE: ${{ vars.REVIEW_MODE }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: node scripts/pr-automation/main.mjs

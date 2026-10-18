@@ -27,6 +27,15 @@ const missing = (src) => auditWorkflow(src).map((f) => f.name);
 test("a fully guarded workflow reports nothing", () => {
   assert.equal(auditWorkflow(good).length, 0);
 });
+test("a serialized controller must retain its active tick", () => {
+  assert.equal(
+    auditWorkflow(good.replace("cancel-in-progress: true", "cancel-in-progress: false"), {
+      serialized: true,
+    }).length,
+    0,
+  );
+  assert.ok(auditWorkflow(good, { serialized: true }).some((f) => f.name === "cancel-in-progress"));
+});
 
 test("a missing timeout-minutes is caught", () => {
   assert.ok(missing(good.replace("    timeout-minutes: 30", "")).includes("timeout-minutes"));
