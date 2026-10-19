@@ -238,7 +238,7 @@ cpal = { version = "0.18", features = ["pulseaudio"] }
 # recognises OwnCord's own playback by the client name cpal gives its
 # connections (`cpal-pulseaudio-<pid>`, cpal src/host/pulseaudio/mod.rs): a
 # cpal bump has to re-check that name.
-pulseaudio = "=0.3.1"
+pulseaudio = "=0.3.2"
 # RNNoise for the Enhanced Noise Suppression setting on the native capture
 # path (native_voice/capture.rs): a pure-Rust port of the RNNoise model the web
 # path runs as WASM. Default features only add its command-line tool.
