@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -40,6 +41,7 @@ func fullMetricsSources() api.MetricsSources {
 		DiskFree:            func() (uint64, error) { return 5 << 30, nil },
 		DiskMinFree:         1 << 30,
 		UploadBytes:         func(context.Context) (int64, error) { return 3 << 20, nil },
+		WALBytes:            func() (int64, error) { return 5 << 20, nil },
 		PushCounters:        func() (uint64, uint64, uint64) { return 1, 2, 3 },
 	}
 }
@@ -183,8 +185,8 @@ func TestHandleMetrics_LegacyKeysUnchanged(t *testing.T) {
 		"backpressure_low_drops": num, "backpressure_presence_drops": num,
 		"delivery_loss_marks": num, "ws_conn_rejects": num,
 		"disk_free_mb": num, "disk_min_free_mb": num, "disk_low": boolean,
-		"upload_storage_used_mb": num,
-		"db_writer_wait_count":   num, "db_writer_wait_seconds": num,
+		"upload_storage_used_mb": num, "db_wal_mb": num,
+		"db_writer_wait_count": num, "db_writer_wait_seconds": num,
 		"db_reader_wait_count": num, "db_reader_wait_seconds": num,
 		"perm_cache_hits": num, "perm_cache_misses": num,
 		"push_dispatched": num, "push_failed": num, "push_pruned": num,
@@ -254,5 +256,44 @@ func TestHandleMetrics_WindowsWithoutAllVoicePhases(t *testing.T) {
 	}
 	if _, ok := w["ws_broadcast_ms"]; !ok {
 		t.Fatal("the rest of the window should still be reported")
+	}
+}
+
+// TestHandleMetrics_WALSize: the WAL size is read per scrape, and the JSON
+// db_wal_mb and the Prometheus owncord_db_wal_bytes report the same figure. A
+// failing stat leaves the field out on both surfaces and never a 500.
+func TestHandleMetrics_WALSize(t *testing.T) {
+	const walBytes = 7<<20 + 512<<10 // 7.5 MiB
+
+	src := api.MetricsSources{WALBytes: func() (int64, error) { return walBytes, nil }}
+	resp := getMetrics(t, src)
+	mb, ok := resp["db_wal_mb"].(float64)
+	if !ok || mb != 7.5 {
+		t.Fatalf("db_wal_mb = %v (present %v), want 7.5", resp["db_wal_mb"], ok)
+	}
+	_, fams := scrapeProm(t, src)
+	if got, ok := promFind(fams, "owncord_db_wal_bytes"); !ok || got != walBytes {
+		t.Fatalf("owncord_db_wal_bytes = %v (present %v), want %d", got, ok, walBytes)
+	}
+
+	// Each scrape re-reads the source: it is not sampled or cached.
+	size := int64(1 << 20)
+	live := api.MetricsSources{WALBytes: func() (int64, error) { return size, nil }}
+	if got := getMetrics(t, live)["db_wal_mb"]; got != 1.0 {
+		t.Fatalf("first scrape db_wal_mb = %v, want 1", got)
+	}
+	size = 3 << 20
+	if got := getMetrics(t, live)["db_wal_mb"]; got != 3.0 {
+		t.Fatalf("second scrape db_wal_mb = %v, want 3", got)
+	}
+
+	// A stat error is absent on both surfaces, not a failure.
+	bad := api.MetricsSources{WALBytes: func() (int64, error) { return 0, errors.New("stat failed") }}
+	if _, present := getMetrics(t, bad)["db_wal_mb"]; present {
+		t.Error("db_wal_mb present after a stat error")
+	}
+	_, fams = scrapeProm(t, bad)
+	if promFamily(fams, "owncord_db_wal_bytes") != nil {
+		t.Error("owncord_db_wal_bytes present after a stat error")
 	}
 }

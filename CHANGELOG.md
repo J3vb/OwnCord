@@ -182,6 +182,7 @@ and only when it changes something a contributor or fork holder must do
 
 - `GET /api/v1/metrics` gains a `windows` key with the latency, worst-hold and counter figures for the last minute and fifteen minutes, so a stall shows up and then clears instead of being buried in totals since boot; every existing key is unchanged.
 - `GET /api/v1/metrics/prometheus` serves the same figures in Prometheus text format in every build, with no setting to turn on; it is limited to the same addresses as `GET /api/v1/metrics` (`server.metrics_allowed_cidrs`).
+- The metrics gain the size of the database's write-ahead log (`db_wal_mb` in `GET /api/v1/metrics`, `owncord_db_wal_bytes` in the Prometheus output), and the server log now shows how long each database migration took when it runs at start-up.
 
 ### Changed
 

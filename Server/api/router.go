@@ -557,8 +557,7 @@ func routerVoiceRoutes(r chi.Router, cfg *config.Config, limiter *auth.RateLimit
 // twin (every build), and, when an OTel Prometheus exporter is wired, that
 // exporter's handler beside them.
 func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc *service.Services, hub *ws.Hub, windows *metrics.Windows) {
-	// A nil *Windows must not become a non-nil method value: the handler reads
-	// a nil func as "no windowed source".
+	// A nil *Windows must not become a non-nil method value (nil = no source).
 	var windowSnapshot func(time.Duration) (metrics.WindowSnapshot, bool)
 	if windows != nil {
 		windowSnapshot = windows.Snapshot
@@ -591,6 +590,7 @@ func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc 
 		DiskFree:            func() (uint64, error) { return diskutil.FreeBytes(cfg.Server.DataDir) },
 		DiskMinFree:         cfg.Server.MinFreeDiskBytes(),
 		UploadBytes:         database.TotalAttachmentBytes,
+		WALBytes:            database.WALBytes,
 		PushCounters:        pushCountersSource(svc),
 		Windows:             windowSnapshot,
 		LatencyCounts:       hub.LatencyCounts,

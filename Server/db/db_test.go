@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -564,5 +566,151 @@ func TestMigrateWALAndFKOnFile(t *testing.T) {
 		"SELECT name FROM sqlite_master WHERE type='table' AND name='users'",
 	).Scan(&name); err != nil {
 		t.Errorf("users table not found after migration on file db: %v", err)
+	}
+}
+
+// captureSlog redirects the default slog logger to a buffer while fn runs.
+func captureSlog(t *testing.T, fn func()) string {
+	t.Helper()
+	var buf strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer slog.SetDefault(prev)
+	fn()
+	return buf.String()
+}
+
+func TestMigrate_LogsAnalyzeThenOptimize(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "boot.db"))
+	if err != nil {
+		t.Fatalf("Open() error: %v", err)
+	}
+	defer database.Close() //nolint:errcheck
+	for i, want := range []string{"db: analyze done", "db: optimize done"} {
+		out := captureSlog(t, func() {
+			if err := db.Migrate(database); err != nil {
+				t.Fatalf("Migrate() #%d error: %v", i+1, err)
+			}
+		})
+		if !regexp.MustCompile(`msg="` + want + `" ms=\d+(\s|$)`).MatchString(out) {
+			t.Errorf("Migrate() #%d: want %q with integer ms:\n%s", i+1, want, out)
+		}
+	}
+}
+
+func TestMigrateFS_LogsEachMigrationWithDuration(t *testing.T) {
+	database := openMemory(t)
+	first := fstest.MapFS{
+		"001_a.sql": &fstest.MapFile{Data: []byte("CREATE TABLE wp43c_a (id INTEGER);")},
+	}
+	if err := db.MigrateFS(database, first); err != nil {
+		t.Fatalf("seed MigrateFS: %v", err)
+	}
+
+	both := fstest.MapFS{
+		"001_a.sql": first["001_a.sql"],
+		"002_b.sql": &fstest.MapFile{Data: []byte("CREATE TABLE wp43c_b (id INTEGER);")},
+		"003_c.sql": &fstest.MapFile{Data: []byte("CREATE TABLE wp43c_c (id INTEGER);")},
+	}
+	out := captureSlog(t, func() {
+		if err := db.MigrateFS(database, both); err != nil {
+			t.Fatalf("MigrateFS: %v", err)
+		}
+	})
+	if strings.Contains(out, "001_a.sql") {
+		t.Errorf("already-applied file logged:\n%s", out)
+	}
+	for _, name := range []string{"002_b.sql", "003_c.sql"} {
+		if got := len(regexp.MustCompile(`msg="db: migration applied" file=`+regexp.QuoteMeta(name)+` ms=\d+(\s|$)`).FindAllString(out, -1)); got != 1 {
+			t.Errorf("%s: %d applied lines, want 1:\n%s", name, got, out)
+		}
+	}
+	if got := len(regexp.MustCompile(`msg="db: migrations applied" count=2 ms=\d+(\s|$)`).FindAllString(out, -1)); got != 1 {
+		t.Errorf("want one summary line with count=2:\n%s", out)
+	}
+
+	// Nothing left to apply: no per-file lines and no summary.
+	out = captureSlog(t, func() {
+		if err := db.MigrateFS(database, both); err != nil {
+			t.Fatalf("idempotent MigrateFS: %v", err)
+		}
+	})
+	if strings.Contains(out, "db: migration") {
+		t.Errorf("no-op boot logged migration lines:\n%s", out)
+	}
+
+	// A migration that fails logs no "applied" line for itself and no summary.
+	failing := fstest.MapFS{
+		"001_a.sql": both["001_a.sql"], "002_b.sql": both["002_b.sql"], "003_c.sql": both["003_c.sql"],
+		"004_ok.sql":  &fstest.MapFile{Data: []byte("CREATE TABLE wp43c_ok (id INTEGER);")},
+		"005_bad.sql": &fstest.MapFile{Data: []byte("NOT VALID SQL !!!")},
+	}
+	out = captureSlog(t, func() {
+		if err := db.MigrateFS(database, failing); err == nil {
+			t.Error("MigrateFS with bad SQL returned nil")
+		}
+	})
+	if strings.Contains(out, "005_bad.sql") || strings.Contains(out, "db: migrations applied") {
+		t.Errorf("failed migration reported as applied:\n%s", out)
+	}
+	if !strings.Contains(out, "file=004_ok.sql") {
+		t.Errorf("successful earlier file not logged:\n%s", out)
+	}
+}
+
+func TestWALBytes_FileBackedGrowsAndInMemoryIsZero(t *testing.T) {
+	mem := openMemory(t)
+	if n, err := mem.WALBytes(); n != 0 || err != nil {
+		t.Errorf("in-memory WALBytes = %d, %v; want 0, nil", n, err)
+	}
+
+	database, err := db.Open(filepath.Join(t.TempDir(), "wal.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	ctx := context.Background()
+	if _, err := database.ExecContext(ctx, "PRAGMA wal_autocheckpoint = 0"); err != nil {
+		t.Fatalf("disable autocheckpoint: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, "CREATE TABLE wal_probe (v BLOB)"); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	before, err := database.WALBytes()
+	if err != nil {
+		t.Fatalf("WALBytes: %v", err)
+	}
+	for range 50 {
+		if _, err := database.ExecContext(ctx, "INSERT INTO wal_probe (v) VALUES (zeroblob(8192))"); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+	}
+	after, err := database.WALBytes()
+	if err != nil {
+		t.Fatalf("WALBytes after writes: %v", err)
+	}
+	if after <= before || after < 50*8192 {
+		t.Errorf("WAL did not grow: before=%d after=%d", before, after)
+	}
+}
+
+func TestWALBytes_MissingFileIsZero(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "gone.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if _, err := database.ExecContext(context.Background(), "PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+		t.Fatalf("checkpoint: %v", err)
+	}
+	if n, err := database.WALBytes(); n != 0 || err != nil {
+		t.Errorf("truncated WAL: WALBytes = %d, %v; want 0, nil", n, err)
+	}
+	// Closing the last connection deletes the WAL file: missing is 0, nil.
+	if err := database.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if n, err := database.WALBytes(); n != 0 || err != nil {
+		t.Errorf("missing WAL: WALBytes = %d, %v; want 0, nil", n, err)
 	}
 }

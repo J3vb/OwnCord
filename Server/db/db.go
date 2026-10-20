@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 	"github.com/J3vb/OwnCord/Server/migrations"
@@ -64,6 +65,10 @@ type DB struct {
 	// plainMemory is true for a private ":memory:" database, the only kind
 	// Migrate may fill from the cached migrated image (migrate_memory.go).
 	plainMemory bool
+
+	// walPath is "<path>-wal" for a file-backed database, empty for an
+	// in-memory one. WALBytes stats it; nothing else reads it.
+	walPath string
 
 	// lockRelease drops the single-process advisory lock taken by openFile.
 	// Nil for in-memory databases and when the lock mechanism is unavailable.
@@ -317,6 +322,7 @@ func openFile(path string, maxReaders int, takeLock bool) (*DB, error) {
 
 	d := newDB(writer, reader)
 	d.messageDeliveryFloor.Store(retryFloor)
+	d.walPath = walFilePath(path)
 	d.lockRelease = release
 	ok = true
 	return d, nil
@@ -442,14 +448,18 @@ func migrateEmbedded(database *DB) error {
 	// never reached Close()'s optimize. Both write sqlite_stat rows, so they
 	// run on the writer.
 	if applied > 0 {
+		started := time.Now()
 		if _, err := database.writer.Exec("ANALYZE;"); err != nil {
 			return fmt.Errorf("running ANALYZE after migrations: %w", err)
 		}
+		slog.Info("db: analyze done", "ms", time.Since(started).Milliseconds())
 		return nil
 	}
+	started := time.Now()
 	if _, err := database.writer.Exec("PRAGMA optimize;"); err != nil {
 		return fmt.Errorf("running PRAGMA optimize at startup: %w", err)
 	}
+	slog.Info("db: optimize done", "ms", time.Since(started).Milliseconds())
 	return nil
 }
 
