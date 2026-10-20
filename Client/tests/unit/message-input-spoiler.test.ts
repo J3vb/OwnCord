@@ -52,6 +52,8 @@ function queueFile(container: HTMLElement, file: File): void {
   fileInput.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
+const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
 const toggle = (c: HTMLElement): HTMLButtonElement =>
   c.querySelector<HTMLButtonElement>('[data-testid="attachment-spoiler"]')!;
 
@@ -75,7 +77,7 @@ describe("MessageInput spoiler toggle", () => {
     expect(uploads[1]!.name).toBe("SPOILER_cat.png");
     expect(uploads[1]!.type).toBe("image/png");
     await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
-    expect(onDiscardUpload).toHaveBeenCalledWith("srv-1");
+    await vi.waitFor(() => expect(onDiscardUpload).toHaveBeenCalledWith("srv-1"));
     expect(toggle(container).getAttribute("aria-pressed")).toBe("true");
     expect(container.querySelector(".attachment-preview-img")?.getAttribute("alt")).toBe(
       "SPOILER_cat.png",
@@ -149,6 +151,89 @@ describe("MessageInput spoiler toggle", () => {
     expect(onDiscardUpload).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
     expect(container.querySelectorAll(".attachment-preview-item")).toHaveLength(1);
+    comp.destroy?.();
+  });
+
+  it("keeps the chip, and the old copy, when the re-upload fails", async () => {
+    let calls = 0;
+    const onUploadFile = vi.fn(async (file: File): Promise<Uploaded> => {
+      calls += 1;
+      if (calls === 2) throw new Error("boom");
+      return { id: `srv-${calls}`, url: `/f/${calls}`, filename: file.name };
+    });
+    const onDiscardUpload = vi.fn(async () => {});
+    const onSend = vi.fn();
+    const comp = createMessageInput({
+      channelId: 1,
+      channelName: "general",
+      gifApi: stubGifApi,
+      onSend,
+      onTyping: vi.fn(),
+      onUploadFile,
+      onDiscardUpload,
+    });
+    comp.mount(container);
+    queueFile(container, new File(["x"], "cat.png", { type: "image/png" }));
+    await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
+
+    toggle(container).click();
+    await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
+    await flush();
+    expect(container.querySelectorAll(".attachment-preview-item")).toHaveLength(1);
+    expect(container.querySelector(".attachment-upload-error-text")?.textContent).toContain("boom");
+    // The old copy is not withdrawn: nothing replaced it.
+    expect(onDiscardUpload).not.toHaveBeenCalled();
+    comp.destroy?.();
+  });
+
+  it("a double toggle does not race: the id sent is the last upload's", async () => {
+    const resolvers: ((r: Uploaded) => void)[] = [];
+    const signals: (AbortSignal | undefined)[] = [];
+    const names: string[] = [];
+    const onUploadFile = vi.fn((file: File, signal?: AbortSignal) => {
+      signals.push(signal);
+      names.push(file.name);
+      return new Promise<Uploaded>((resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(new Error("aborted")));
+        resolvers.push((r) => resolve(r));
+      });
+    });
+    const onDiscardUpload = vi.fn(async () => {});
+    const onSend = vi.fn();
+    const comp = createMessageInput({
+      channelId: 1,
+      channelName: "general",
+      gifApi: stubGifApi,
+      onSend,
+      onTyping: vi.fn(),
+      onUploadFile,
+      onDiscardUpload,
+    });
+    comp.mount(container);
+    queueFile(container, new File(["x"], "a.png", { type: "image/png" }));
+    await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalledTimes(1));
+    resolvers[0]!({ id: "srv-a", url: "/f/a", filename: "a.png" });
+    await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
+
+    toggle(container).click(); // SPOILER_a.png, upload 2 in flight
+    await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalledTimes(2));
+    toggle(container).click(); // back to a.png, upload 2 cancelled
+    await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalledTimes(3));
+    expect(signals[1]!.aborted).toBe(true);
+    expect(names).toEqual(["a.png", "SPOILER_a.png", "a.png"]);
+    // Nothing is withdrawn while a replacement is still on its way.
+    expect(onDiscardUpload).not.toHaveBeenCalled();
+
+    resolvers[2]!({ id: "srv-b", url: "/f/b", filename: "a.png" });
+    await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
+    await vi.waitFor(() => expect(onDiscardUpload).toHaveBeenCalledWith("srv-a"));
+    expect(onDiscardUpload).toHaveBeenCalledTimes(1);
+
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.value = "hi";
+    textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(onSend.mock.calls[0]![2]).toEqual(["srv-b"]);
     comp.destroy?.();
   });
 });

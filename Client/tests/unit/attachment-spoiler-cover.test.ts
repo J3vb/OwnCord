@@ -101,17 +101,24 @@ describe("spoiler attachment cover", () => {
     expect(cover.textContent).toBe("Spoiler");
     expect(img.hasAttribute("inert")).toBe(true);
 
+    // Listeners on the image itself: the guard on the box must stop every
+    // one of these events before it gets here, so none of them may run.
+    const reached = vi.fn();
+    for (const type of ["click", "keydown", "contextmenu"]) img.addEventListener(type, reached);
     img.click();
     img.dispatchEvent(
       new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
     );
     img.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true }));
-    const menu = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
-    img.dispatchEvent(menu);
-    await new Promise((r) => setTimeout(r, 20));
+    img.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    expect(reached).not.toHaveBeenCalled();
     expect(lightbox()).toBeNull();
-    expect(menu.defaultPrevented).toBe(true);
-    expect(document.querySelector(".image-menu, .context-menu")).toBeNull();
+
+    // Once revealed the same click does reach the image and opens the viewer.
+    cover.click();
+    img.click();
+    expect(reached).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(lightbox()).not.toBeNull());
   });
 
   it("covers a spoiler inside the grid; a plain sibling is not covered", async () => {
@@ -179,5 +186,50 @@ describe("spoiler attachment cover", () => {
     ]) {
       expect(renderAttachment(a).querySelector(".msg-spoiler-cover")).toBeNull();
     }
+  });
+
+  it("blocks a covered video's play button and download overlay until revealed", async () => {
+    // jsdom has no media playback.
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const node = renderAttachment(att("v", "SPOILER_clip.mp4", "video/mp4"));
+    document.body.appendChild(node);
+    const play = node.querySelector<HTMLButtonElement>(".msg-media-play")!;
+    const download = node.querySelector<HTMLButtonElement>(
+      ".msg-media-overlay .msg-file-download",
+    )!;
+    const reached = vi.fn();
+    play.addEventListener("click", reached);
+    download.addEventListener("click", reached);
+
+    play.click();
+    download.click();
+    expect(reached).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(play.disabled).toBe(false);
+
+    node.querySelector<HTMLButtonElement>(".msg-spoiler-cover")!.click();
+    play.click();
+    expect(reached).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+  });
+
+  it("hands focus to the play button when a video is revealed", () => {
+    const node = renderAttachment(att("v", "SPOILER_clip.mp4", "video/mp4"));
+    document.body.appendChild(node);
+    const cover = node.querySelector<HTMLButtonElement>(".msg-spoiler-cover")!;
+    cover.focus();
+    cover.click();
+    expect(document.activeElement).toBe(node.querySelector(".msg-media-play"));
+  });
+
+  it("hands focus to the box when a still-loading image is revealed", () => {
+    fetchMock.mockReturnValue(new Promise(() => {}));
+    const node = renderAttachment(att("a", "SPOILER_a.png", "image/png"));
+    document.body.appendChild(node);
+    expect(node.querySelector("img")).toBeNull();
+    const cover = node.querySelector<HTMLButtonElement>(".msg-spoiler-cover")!;
+    cover.focus();
+    cover.click();
+    expect(document.activeElement).toBe(node);
   });
 });

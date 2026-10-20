@@ -295,15 +295,11 @@ function relabelChip(item: HTMLDivElement, filename: string): void {
     ?.setAttribute("aria-label", messagingText("attach.remove", { filename }));
 }
 
-/** The spoiler toggle's pressed state and label for the file's current name. */
+/** The spoiler toggle's pressed state for the file's current name. Its label
+ *  is fixed: the state is carried by aria-pressed alone. */
 function paintSpoilerButton(btn: HTMLButtonElement, filename: string): void {
   const marked = isSpoilerFilename(filename);
   btn.setAttribute("aria-pressed", String(marked));
-  btn.setAttribute(
-    "aria-label",
-    messagingText(marked ? "attach.unmarkSpoiler" : "attach.markSpoiler", { filename }),
-  );
-  btn.title = btn.getAttribute("aria-label") ?? "";
   btn.classList.toggle("active", marked);
 }
 
@@ -1128,6 +1124,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   /** Withdraw a settled upload's server copy. The promise resolves when that
    *  is done or has failed, never rejecting; undefined when nothing withdraws. */
   function discard(id: string): Promise<void> | undefined {
+    // A chip that never landed has no server copy to withdraw.
+    if (id.startsWith("pending-")) return undefined;
     return options.onDiscardUpload?.(id).catch(() => {});
   }
 
@@ -1187,24 +1185,38 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   }
 
   /** Flip the spoiler mark of a chip's file (6.12). The name is part of the
-   *  upload, so the file goes up again under the new name: a running upload is
-   *  cancelled, a settled one is withdrawn, and neither id is ever sent. */
+   *  upload, so the file goes up again under the new name, and only once that
+   *  copy has landed is the old one withdrawn: a failed re-upload loses nothing.
+   *  The chip is stale meanwhile, so a failed re-upload leaves it for Send to
+   *  retry from its file, and the old id is never sent. A running upload is
+   *  cancelled by a further toggle, which supersedes it. */
   function toggleSpoiler(att: (typeof pendingAttachments)[number], btn: HTMLButtonElement): void {
+    const upload = options.onUploadFile;
     const file = att.file;
-    if (file === undefined) return;
+    if (upload === undefined || file === undefined) return;
     const renamed = new File([file], toggleSpoilerFilename(file.name), {
       type: file.type,
       lastModified: file.lastModified,
     });
-    const settledId = att.upload === undefined && att.uploadedAt !== undefined ? att.id : undefined;
+    // The chip's id is the last copy the server holds, until a new one lands.
+    const oldId = att.id.startsWith("pending-") ? undefined : att.id;
     att.upload?.owner.destroy();
     att.previewEl.querySelector("progress")?.remove();
     att.file = renamed;
     att.filename = renamed.name;
-    att.uploadedAt = undefined;
+    att.uploadedAt = 0;
     relabelChip(att.previewEl, renamed.name);
     paintSpoilerButton(btn, renamed.name);
-    void runUpload(att, renamed, settledId === undefined ? undefined : discard(settledId));
+    const handle = startUpload(upload, renamed);
+    handle.result.then(
+      (r) => {
+        // A cancelled upload that landed anyway is a copy nobody will send.
+        if (handle.owner.signal.aborted) void discard(r.id);
+        else if (oldId !== undefined && r.id !== oldId) void discard(oldId);
+      },
+      () => {},
+    );
+    void followUpload(att, handle);
   }
 
   /** The chip's spoiler toggle; only a chip with its file can rename it. */
@@ -1214,6 +1226,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       class: "attachment-preview-spoiler",
       type: "button",
       "data-testid": "attachment-spoiler",
+      "aria-label": messagingText("attach.markSpoiler"),
+      title: messagingText("attach.markSpoiler"),
     });
     btn.appendChild(createIcon("eye-off", 14));
     paintSpoilerButton(btn, file.name);

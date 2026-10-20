@@ -1284,8 +1284,14 @@ function coverSpoiler(wrap: HTMLDivElement): HTMLDivElement {
     setInert(false);
     cover.remove();
     wrap.classList.add("revealed");
-    // The cover held focus: hand it to the media so the keyboard keeps its place.
-    wrap.querySelector<HTMLElement>("img, video, button")?.focus();
+    // The cover held focus: hand it to something focusable so the keyboard
+    // keeps its place. A still-loading image has nothing yet, so the box itself.
+    let target = wrap.querySelector<HTMLElement>("img[tabindex], .msg-media-play, video[controls]");
+    if (target === null) {
+      wrap.tabIndex = -1;
+      target = wrap;
+    }
+    target.focus();
   });
 
   wrap.appendChild(cover);
