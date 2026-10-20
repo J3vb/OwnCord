@@ -553,8 +553,9 @@ func routerVoiceRoutes(r chi.Router, cfg *config.Config, limiter *auth.RateLimit
 		Handle("/livekit/*", http.StripPrefix("/livekit", NewLiveKitProxy(cfg.Voice.LiveKitURL, cfg.Server.AllowedOrigins)))
 }
 
-// routerMetricsRoutes mounts the JSON metrics endpoint and, when an OTel
-// Prometheus exporter is wired, the Prometheus handler beside it.
+// routerMetricsRoutes mounts the JSON metrics endpoint, its Prometheus text
+// twin (every build), and, when an OTel Prometheus exporter is wired, that
+// exporter's handler beside them.
 func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc *service.Services, hub *ws.Hub, windows *metrics.Windows) {
 	// A nil *Windows must not become a non-nil method value: the handler reads
 	// a nil func as "no windowed source".
@@ -566,34 +567,40 @@ func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc 
 	// admin_allowed_cidrs) so a central scraper can be admitted without
 	// widening /admin. The shape is documented in docs/deployment.md — keep
 	// the two in sync.
-	r.With(AdminIPRestrict("server.metrics_allowed_cidrs", cfg.Server.MetricsCIDRs(), cfg.Server.TrustedProxies)).
-		Get("/api/v1/metrics", handleMetrics(MetricsSources{
-			ConnectedUsers:      hub.ClientCount,
-			VoiceSessions:       hub.VoiceSessionCount,
-			BroadcastDrops:      hub.BroadcastDropCount,
-			TopicSheds:          hub.TopicShedCount,
-			BroadcastMs:         hub.BroadcastMs,
-			DispatchLagMs:       hub.DispatchLagMs,
-			ChatAckMs:           hub.ChatAckMs,
-			VoiceJoinMs:         hub.VoiceJoinMs,
-			BroadcastQueueDepth: hub.BroadcastQueueDepth,
-			SeqMuMaxHoldMs:      hub.SeqMuMaxHoldMs,
-			LiveKitHealth:       hub.LiveKitHealthCheck,
-			ReconnectTiers:      hub.ReconnectTierStats,
-			Backpressure:        hub.BackpressureStats,
-			PresenceDrops:       hub.PresenceDropCount,
-			LossMarks:           hub.LossMarkCount,
-			ConnRejects:         hub.ConnRejectCount,
-			PersisterStats:      hub.EventPersisterStats,
-			DBStats:             func() sql.DBStats { return database.SQLDb().Stats() },
-			DBReaderStats:       func() sql.DBStats { return database.SQLReaderDB().Stats() },
-			PermCache:           svc.Permissions.CacheStats,
-			DiskFree:            func() (uint64, error) { return diskutil.FreeBytes(cfg.Server.DataDir) },
-			DiskMinFree:         cfg.Server.MinFreeDiskBytes(),
-			UploadBytes:         database.TotalAttachmentBytes,
-			PushCounters:        pushCountersSource(svc),
-			Windows:             windowSnapshot,
-		}))
+	src := MetricsSources{
+		ConnectedUsers:      hub.ClientCount,
+		VoiceSessions:       hub.VoiceSessionCount,
+		BroadcastDrops:      hub.BroadcastDropCount,
+		TopicSheds:          hub.TopicShedCount,
+		BroadcastMs:         hub.BroadcastMs,
+		DispatchLagMs:       hub.DispatchLagMs,
+		ChatAckMs:           hub.ChatAckMs,
+		VoiceJoinMs:         hub.VoiceJoinMs,
+		BroadcastQueueDepth: hub.BroadcastQueueDepth,
+		SeqMuMaxHoldMs:      hub.SeqMuMaxHoldMs,
+		LiveKitHealth:       hub.LiveKitHealthCheck,
+		ReconnectTiers:      hub.ReconnectTierStats,
+		Backpressure:        hub.BackpressureStats,
+		PresenceDrops:       hub.PresenceDropCount,
+		LossMarks:           hub.LossMarkCount,
+		ConnRejects:         hub.ConnRejectCount,
+		PersisterStats:      hub.EventPersisterStats,
+		DBStats:             func() sql.DBStats { return database.SQLDb().Stats() },
+		DBReaderStats:       func() sql.DBStats { return database.SQLReaderDB().Stats() },
+		PermCache:           svc.Permissions.CacheStats,
+		DiskFree:            func() (uint64, error) { return diskutil.FreeBytes(cfg.Server.DataDir) },
+		DiskMinFree:         cfg.Server.MinFreeDiskBytes(),
+		UploadBytes:         database.TotalAttachmentBytes,
+		PushCounters:        pushCountersSource(svc),
+		Windows:             windowSnapshot,
+		LatencyCounts:       hub.LatencyCounts,
+	}
+	perimeter := AdminIPRestrict("server.metrics_allowed_cidrs", cfg.Server.MetricsCIDRs(), cfg.Server.TrustedProxies)
+	r.With(perimeter).Get("/api/v1/metrics", handleMetrics(src))
+	// The same figures in Prometheus text format, in every build and behind the
+	// same perimeter (WP 4.3b); the OTel exporter below is the -tags otel
+	// alternative and stays where it was.
+	r.With(perimeter).Get("/api/v1/metrics/prometheus", handlePrometheusMetrics(src))
 
 	// Phase B Step 8 — OpenTelemetry Prometheus exporter. Mounted alongside
 	// the legacy JSON endpoint when a Prometheus exporter is wired (otel

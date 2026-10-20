@@ -253,6 +253,23 @@ func (h *Hub) VoiceJoinMs() VoiceJoinPhases {
 	}
 }
 
+// LatencyCounts holds the raw cumulative counts of every shipped latency
+// histogram, keyed by its JSON name: "ws_broadcast_ms", "ws_dispatch_lag_ms",
+// "chat_send_ack_ms" and "voice_join_ms.<phase>" (the Prometheus exposition,
+// WP 4.3b). The names are the ones WindowSources registers.
+type LatencyCounts map[string]metrics.Counts
+
+// LatencyCounts reads every latency histogram's raw counts. Each read is a
+// handful of atomic loads and takes no hub lock.
+func (h *Hub) LatencyCounts() LatencyCounts {
+	hists, _, _ := h.WindowSources()
+	out := make(LatencyCounts, len(hists))
+	for _, nh := range hists {
+		out[nh.Name] = nh.H.Counts()
+	}
+	return out
+}
+
 // WindowSources lists every figure the windowed metrics block samples (WP
 // 4.3a). The names are the JSON keys under /api/v1/metrics "windows", and the
 // voice phases are "voice_join_ms.<phase>". Every counter is an atomic load, so
