@@ -29,6 +29,7 @@ const patchable = fc.record({
   frozenReason: fc.option(text, { nil: null }),
   timeoutReason: fc.option(text, { nil: null }),
   capacity: fc.option(capacity, { nil: null }),
+  mentionCount: fc.integer({ min: 0, max: 120 }),
 });
 
 const createOnly = fc.record({
@@ -66,6 +67,8 @@ function mutateChrome(model: VoiceChannelChromeModel, field: string): VoiceChann
             ? { label: "1/5", title: "1 of 5" }
             : { label: `${model.capacity.label}x`, title: `${model.capacity.title}x` },
       };
+    case "mentionCount":
+      return { ...model, mentionCount: model.mentionCount + 1 };
     default:
       throw new Error(`no mutation for ${field}`);
   }
@@ -116,6 +119,7 @@ describe("voice channel row view", () => {
       "capacity",
       "frozenReason",
       "joined",
+      "mentionCount",
       "timeoutReason",
     ]);
   });
