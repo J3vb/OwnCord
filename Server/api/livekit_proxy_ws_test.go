@@ -458,6 +458,9 @@ func TestLiveKitProxy_WebSocket_LargeFrameLimit(t *testing.T) {
 				if err == nil {
 					t.Fatalf("read succeeded with %d bytes, want the connection closed", len(got))
 				}
+				if status := websocket.CloseStatus(err); status != websocket.StatusMessageTooBig {
+					t.Fatalf("close status = %v, want %v (err: %v)", status, websocket.StatusMessageTooBig, err)
+				}
 				return
 			}
 			if err != nil {
