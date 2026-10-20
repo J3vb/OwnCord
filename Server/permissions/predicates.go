@@ -273,6 +273,19 @@ func CanJoinVoice(s Subject) error {
 	return nil
 }
 
+// CanStayInVoice is CanJoinVoice for a member already in the room: every
+// rule of the join gate except the timeout. A timeout's voice half is a
+// server-mute applied only when the moderator could moderate voice
+// (service.ModerationService.Timeout), so a timed-out member who is already
+// in a room is not evicted — they cannot JOIN one (CanJoinVoice), but the
+// session they hold ends only for a reason that would refuse it on its own:
+// a lost CONNECT_VOICE or READ_MESSAGES, a ban or block, an archived or
+// deleted channel. Used by the stale-voice sweep and the token refresh.
+func CanStayInVoice(s Subject) error {
+	s.TimedOut = false
+	return CanJoinVoice(s)
+}
+
 // CanModerate is the report queue and B5-9's moderator-action gate:
 // MODERATE_MEMBERS or Administrator, server-wide. Deliberately independent of
 // s.Has/EffectiveChannelPerms — moderation authority is not a channel

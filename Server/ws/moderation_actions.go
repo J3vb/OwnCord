@@ -68,7 +68,59 @@ func (h *Hub) scheduleTimeoutExpiryRefresh(userID int64, expiresAt time.Time) {
 		}
 		h.publishMemberTimeouts(userID)
 		h.RefreshUserChannels(userID)
+		ctx, cancel := h.expiryCtx()
+		defer cancel()
+		h.liftExpiredTimeoutMute(ctx, userID)
 	})
+}
+
+// expiryCtx is the bounded context an expiry timer's voice work runs under:
+// derived from the hub's lifecycle context, so Stop interrupts it. A hub
+// built without NewHub has no lifecycle context and falls back to Background.
+func (h *Hub) expiryCtx() (context.Context, context.CancelFunc) {
+	parent := h.life
+	if parent == nil {
+		parent = context.Background()
+	}
+	return context.WithTimeout(parent, timeoutExpiryVoiceBudget)
+}
+
+// timeoutExpiryVoiceBudget bounds one expiry timer's voice unmute (a DB read
+// plus the SFU call).
+const timeoutExpiryVoiceBudget = 10 * time.Second
+
+// liftExpiredTimeoutMute lifts the voice server-mute a timeout left on
+// userID's live session once that timeout has run out on its own — the same
+// effect the maintenance tick's orphan reconcile has, without the wait of up
+// to fifteen minutes. Only a mute stamped with a moderation action id is a
+// timeout's (server_muted_by; a moderator's own mute carries NULL and is
+// never touched), and it is cleared only when userID has no active timeout
+// left: a newer timeout that superseded the expired one took the mute's
+// ownership and still holds it. UnmuteForTimeout clears by owner, so a tick
+// or a lift that already cleared it makes this a no-op.
+func (h *Hub) liftExpiredTimeoutMute(ctx context.Context, userID int64) {
+	if h.voice == nil || h.readers.Dispatch == nil {
+		return
+	}
+	state, err := h.voice.State(ctx, userID)
+	if err != nil {
+		slog.Warn("hub: timeout expiry could not read voice state", "err", err, "user_id", userID)
+		return
+	}
+	if state == nil || !state.ServerMuted || state.ServerMutedBy == nil {
+		return
+	}
+	active, err := h.readers.Dispatch.ListActiveTimeoutExpiries(ctx)
+	if err != nil {
+		slog.Warn("hub: timeout expiry could not list active timeouts", "err", err, "user_id", userID)
+		return
+	}
+	for _, t := range active {
+		if t.UserID == userID {
+			return
+		}
+	}
+	h.UnmuteForTimeout(ctx, userID, []int64{*state.ServerMutedBy})
 }
 
 // RearmTimeoutExpiries schedules the expiry refresh for every timeout active

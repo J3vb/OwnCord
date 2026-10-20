@@ -630,7 +630,9 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 			LeaveVoiceReason: voiceLeaveReasonTokenRefresh,
 		}
 	}
-	if joinErr := permissions.CanJoinVoice(sub); joinErr != nil {
+	// A timeout does not evict a member already in the room (CanStayInVoice);
+	// the token still carries their server-mute through state.ServerMuted below.
+	if joinErr := permissions.CanStayInVoice(sub); joinErr != nil {
 		return Result{Error: joinDenial(joinErr), LeaveVoice: true, LeaveVoiceReason: voiceLeaveReasonTokenRefresh}
 	}
 
