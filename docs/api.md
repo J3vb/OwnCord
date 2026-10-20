@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 197 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 198 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -170,6 +170,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/api/v1/livekit/health`                                             |
 | POST    | `/api/v1/livekit/webhook`                                            |
 | GET     | `/api/v1/metrics`                                                    |
+| GET     | `/api/v1/metrics/prometheus`                                         |
 | GET     | `/api/v1/moderation/appeals/`                                        |
 | GET     | `/api/v1/moderation/appeals/{id}`                                    |
 | POST    | `/api/v1/moderation/appeals/{id}/assign`                             |
@@ -3636,12 +3637,83 @@ that take their own deltas.
   now (`connected_users`, `hub_broadcast_queue_depth`, the disk and heap
   figures) are unchanged and not repeated.
 
-### GET /metrics (Prometheus)
+### GET /api/v1/metrics/prometheus
 
-A Prometheus text-format exporter is mounted at `/metrics` **only** when the
-server was built with `-tags otel` and `telemetry.exporter` is set to
-`prometheus`. It is admin-IP-restricted like the JSON endpoint. In the default
-build the route does not exist (404).
+The same figures as `GET /api/v1/metrics`, in the Prometheus text exposition
+format (version 0.0.4). It exists in **every build**, with no build tag and no
+config key, and it is limited exactly like the JSON endpoint: the addresses in
+`server.metrics_allowed_cidrs`, falling back to `server.admin_allowed_cidrs`. A
+scraper outside a private network needs `metrics_allowed_cidrs` set. It serves
+only aggregates: no per-user label, no version string, no path or address.
+
+**Auth:** IP restriction (metrics CIDRs, admin fallback)
+
+**Content-Type:** `text/plain; version=0.0.4; charset=utf-8`
+
+```text
+# HELP owncord_connected_users Users with a live WebSocket connection.
+# TYPE owncord_connected_users gauge
+owncord_connected_users 8
+# HELP owncord_ws_dispatch_lag_seconds Time a frame waited for the dispatch goroutine.
+# TYPE owncord_ws_dispatch_lag_seconds histogram
+owncord_ws_dispatch_lag_seconds_bucket{le="0.0005"} 1180
+owncord_ws_dispatch_lag_seconds_bucket{le="0.001"} 1196
+owncord_ws_dispatch_lag_seconds_bucket{le="+Inf"} 1204
+owncord_ws_dispatch_lag_seconds_sum 0.412
+owncord_ws_dispatch_lag_seconds_count 1204
+# HELP owncord_latency_max_seconds Largest single observation of each latency over the last minute (1m), fifteen minutes (15m) or the process lifetime. The one figure rate() and histogram_quantile() cannot derive.
+# TYPE owncord_latency_max_seconds gauge
+owncord_latency_max_seconds{metric="ws_dispatch_lag",window="1m"} 0.0021
+owncord_latency_max_seconds{metric="ws_dispatch_lag",window="lifetime"} 0.09
+```
+
+Names carry the `owncord_` prefix and base units: seconds and bytes, where the
+JSON uses milliseconds and megabytes. Counters end in `_total`.
+Large values may print in exponent form (for example `5.305304e+06`), which
+Prometheus parses.
+
+| Family                                                                                                                             | Type      | Labels                                                                                                                                  | JSON field                                                                       |
+| ---------------------------------------------------------------------------------------------------------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `owncord_uptime_seconds`, `owncord_goroutines`, `owncord_connected_users`, `owncord_voice_sessions`                                | gauge     |                                                                                                                                         | `uptime_seconds`, `goroutines`, `connected_users`, `voice_sessions`              |
+| `owncord_heap_alloc_bytes`, `owncord_heap_sys_bytes`                                                                               | gauge     |                                                                                                                                         | `heap_alloc_mb`, `heap_sys_mb`                                                   |
+| `owncord_gc_cycles_total`                                                                                                          | counter   |                                                                                                                                         | `num_gc`                                                                         |
+| `owncord_broadcast_drops_total`, `owncord_topic_sheds_total`, `owncord_delivery_loss_marks_total`, `owncord_ws_conn_rejects_total` | counter   |                                                                                                                                         | `broadcast_drops`, `topic_sheds_total`, `delivery_loss_marks`, `ws_conn_rejects` |
+| `owncord_ws_broadcast_seconds`, `owncord_ws_dispatch_lag_seconds`, `owncord_chat_send_ack_seconds`                                 | histogram |                                                                                                                                         | `ws_broadcast_ms`, `ws_dispatch_lag_ms`, `chat_send_ack_ms`                      |
+| `owncord_voice_join_seconds`                                                                                                       | histogram | `phase`: `precheck`, `leave`, `persist`, `token`, `complete`, `total`                                                                   | `voice_join_ms`                                                                  |
+| `owncord_latency_max_seconds`                                                                                                      | gauge     | `metric`: `ws_broadcast`, `ws_dispatch_lag`, `chat_send_ack`, `hub_seqmu_hold`, `voice_join_<phase>`; `window`: `1m`, `15m`, `lifetime` | the `max` fields, `hub_seqmu_max_hold_ms`, and the same under `windows`          |
+| `owncord_hub_broadcast_queue_depth`                                                                                                | gauge     |                                                                                                                                         | `hub_broadcast_queue_depth`                                                      |
+| `owncord_reconnect_tier_total`                                                                                                     | counter   | `tier`: `buffer`, `db`, `full`                                                                                                          | `reconnect_tier_*`                                                               |
+| `owncord_backpressure_total`                                                                                                       | counter   | `kind`: `queue_disconnect`, `high_fallback`, `low_drop`, `presence_drop`                                                                | `backpressure_*`                                                                 |
+| `owncord_db_wait_total`, `owncord_db_wait_seconds_total`                                                                           | counter   | `pool`: `writer`, `reader`                                                                                                              | `db_writer_wait_*`, `db_reader_wait_*`                                           |
+| `owncord_perm_cache_lookups_total`                                                                                                 | counter   | `result`: `hit`, `miss`                                                                                                                 | `perm_cache_hits`, `perm_cache_misses`                                           |
+| `owncord_push_total`                                                                                                               | counter   | `result`: `dispatched`, `failed`, `pruned`                                                                                              | `push_*`                                                                         |
+| `owncord_event_persister_total`                                                                                                    | counter   | `kind`: `persisted`, `dropped`, `flushes`, `errors`                                                                                     | `event_persister` (omitted while event persistence is off)                       |
+| `owncord_livekit_healthy`, `owncord_disk_low`                                                                                      | gauge 0/1 |                                                                                                                                         | `livekit_healthy`, `disk_low` (omitted when the JSON omits them)                 |
+| `owncord_disk_free_bytes`, `owncord_disk_min_free_bytes`, `owncord_upload_storage_used_bytes`                                      | gauge     |                                                                                                                                         | `disk_free_mb`, `disk_min_free_mb`, `upload_storage_used_mb`                     |
+
+Notes:
+
+- **Histogram buckets** are cumulative, in seconds (0.5 ms to 5 s, then `+Inf`).
+  `+Inf` and `_count` are the same number within one scrape. `_sum` is read
+  separately and can differ from the buckets by one observation still in flight.
+- **Windows are Prometheus's own.** Use `rate()`, `increase()` and
+  `histogram_quantile()` for deltas and quantiles; the JSON `windows` counter
+  deltas and the `p50`/`p95`/`p99` fields are not exported. The one figure a
+  query cannot derive is the worst single observation, so
+  `owncord_latency_max_seconds` carries a `window` label. A window the server
+  cannot answer yet (before its second sample) has no series, never a zero.
+- **Absent sources are omitted**, as in the JSON: no `owncord_livekit_healthy`
+  without a LiveKit probe, no `owncord_event_persister_total` with persistence
+  off, no disk or upload family when the figure is unavailable.
+- Each scrape runs the LiveKit health probe once, as each JSON read does.
+
+### GET /metrics (OpenTelemetry exporter)
+
+Only in a server built with `-tags otel` and `telemetry.exporter` set to
+`prometheus`: the OpenTelemetry SDK's own Prometheus exporter, mounted at
+`/metrics` and limited like the JSON endpoint. In the default build the route
+does not exist (404); use [`GET /api/v1/metrics/prometheus`](#get-apiv1metricsprometheus),
+which serves the built-in figures in every build.
 
 ---
 

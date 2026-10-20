@@ -1853,6 +1853,29 @@ Signals worth watching as your community grows. Every field is described in
 - **`backpressure_queue_disconnects` growing.** Clients are being disconnected
   because they read too slowly. Causes are slow links or an overloaded server.
 
+#### Scraping with Prometheus
+
+`GET /api/v1/metrics/prometheus` serves the same figures in Prometheus text
+format, in every build and with no setting to turn on. It sits behind the same
+`server.metrics_allowed_cidrs` limit, so a scraper that is not on loopback or a
+private network needs that key set to its address (see the config reference).
+
+```yaml
+scrape_configs:
+  - job_name: owncord
+    metrics_path: /api/v1/metrics/prometheus
+    scheme: https
+    tls_config:
+      insecure_skip_verify: true # a self-signed certificate; use ca_file if you can
+    static_configs:
+      - targets: ["owncord.example.net:8443"]
+```
+
+Prometheus computes its own windows, so alert on `rate()` and
+`histogram_quantile()` over `owncord_ws_dispatch_lag_seconds`, and on
+`owncord_latency_max_seconds{metric="hub_seqmu_hold",window="1m"}` for the worst single hold. Every
+family is listed in `docs/api.md`.
+
 ### LiveKit Health
 
 `GET /api/v1/livekit/health` checks that LiveKit answers.

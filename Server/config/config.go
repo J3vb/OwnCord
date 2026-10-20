@@ -149,8 +149,9 @@ type EventPersistenceConfig struct {
 // TelemetryConfig (Phase B Step 8) controls the OpenTelemetry exporter.
 type TelemetryConfig struct {
 	// Enabled toggles the OTel SDK. When false the server uses no-op
-	// tracer/meter providers and the legacy /metrics endpoint stays the
-	// only metrics surface.
+	// tracer/meter providers. The built-in metrics surfaces, GET
+	// /api/v1/metrics (JSON) and GET /api/v1/metrics/prometheus (Prometheus
+	// text), exist in every build and do not depend on this switch.
 	Enabled bool `yaml:"enabled"`
 	// Exporter is "none" | "prometheus" | "otlp".
 	Exporter string `yaml:"exporter"`

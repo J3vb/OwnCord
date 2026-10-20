@@ -270,90 +270,101 @@ type MetricsSources struct {
 	// Windows answers a window of the given length ending at the newest
 	// sample (metrics.Windows.Snapshot); nil leaves the "windows" key out.
 	Windows func(time.Duration) (metrics.WindowSnapshot, bool)
+	// LatencyCounts reads the raw counts of every latency histogram for the
+	// Prometheus exposition (ws.Hub.LatencyCounts); nil leaves the histogram
+	// families out. The JSON endpoint does not use it.
+	LatencyCounts func() ws.LatencyCounts
 }
 
 // handleMetrics returns an HTTP handler that reports runtime server metrics.
 func handleMetrics(src MetricsSources) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var m runtime.MemStats
-		runtime.ReadMemStats(&m)
-
-		uptime := time.Since(serverStartTime)
-		metrics := ServerMetrics{
-			Uptime:        uptime.Truncate(time.Second).String(),
-			UptimeSeconds: uptime.Seconds(),
-			GoRoutines:    runtime.NumGoroutine(),
-			HeapAllocMB:   float64(m.HeapAlloc) / 1024 / 1024,
-			HeapSysMB:     float64(m.HeapSys) / 1024 / 1024,
-			NumGC:         m.NumGC,
-		}
-
-		if src.ConnectedUsers != nil {
-			metrics.ConnectedUsers = src.ConnectedUsers()
-		}
-		if src.VoiceSessions != nil {
-			metrics.VoiceSessions = src.VoiceSessions()
-		}
-		if src.BroadcastDrops != nil {
-			metrics.BroadcastDrops = src.BroadcastDrops()
-		}
-		fillHubLatency(&metrics, src)
-		if src.LiveKitHealth != nil {
-			healthy, _ := src.LiveKitHealth(r.Context())
-			metrics.LiveKitHealthy = &healthy
-		}
-		fillDelivery(&metrics, src)
-		if src.PersisterStats != nil {
-			if persisted, dropped, flushes, errs, ok := src.PersisterStats(); ok {
-				metrics.EventPersister = &EventPersisterMetrics{
-					Persisted: persisted,
-					Dropped:   dropped,
-					Flushes:   flushes,
-					Errors:    errs,
-				}
-			}
-		}
-		if src.DBStats != nil {
-			st := src.DBStats()
-			metrics.DBWriterWaitCount = st.WaitCount
-			metrics.DBWriterWaitSeconds = st.WaitDuration.Seconds()
-		}
-		if src.DBReaderStats != nil {
-			st := src.DBReaderStats()
-			metrics.DBReaderWaitCount = st.WaitCount
-			metrics.DBReaderWaitSeconds = st.WaitDuration.Seconds()
-		}
-		if src.PermCache != nil {
-			metrics.PermCacheHits, metrics.PermCacheMisses = src.PermCache()
-		}
-		if src.ConnRejects != nil {
-			metrics.WSConnRejects = src.ConnRejects()
-		}
-		metrics.DiskMinFreeMB = float64(src.DiskMinFree) / 1024 / 1024
-		if src.DiskFree != nil {
-			if free, err := src.DiskFree(); err == nil {
-				mb := float64(free) / 1024 / 1024
-				metrics.DiskFreeMB = &mb
-				if src.DiskMinFree > 0 {
-					low := free < src.DiskMinFree
-					metrics.DiskLow = &low
-				}
-			}
-		}
-		if src.UploadBytes != nil {
-			if n, err := src.UploadBytes(r.Context()); err == nil {
-				mb := float64(n) / 1024 / 1024
-				metrics.UploadStorageUsedMB = &mb
-			}
-		}
-		if src.PushCounters != nil {
-			metrics.PushDispatched, metrics.PushFailed, metrics.PushPruned = src.PushCounters()
-		}
-
-		fillWindows(&metrics, src)
-
-		writeJSON(w, http.StatusOK, metrics)
+		writeJSON(w, http.StatusOK, collectMetrics(r.Context(), src))
 	}
+}
+
+// collectMetrics reads every source once into a ServerMetrics. It is the one
+// collector behind both encoders, the JSON handler above and the Prometheus
+// handler (metrics_prometheus.go), so the two formats cannot disagree.
+func collectMetrics(ctx context.Context, src MetricsSources) ServerMetrics {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+
+	uptime := time.Since(serverStartTime)
+	metrics := ServerMetrics{
+		Uptime:        uptime.Truncate(time.Second).String(),
+		UptimeSeconds: uptime.Seconds(),
+		GoRoutines:    runtime.NumGoroutine(),
+		HeapAllocMB:   float64(m.HeapAlloc) / 1024 / 1024,
+		HeapSysMB:     float64(m.HeapSys) / 1024 / 1024,
+		NumGC:         m.NumGC,
+	}
+
+	if src.ConnectedUsers != nil {
+		metrics.ConnectedUsers = src.ConnectedUsers()
+	}
+	if src.VoiceSessions != nil {
+		metrics.VoiceSessions = src.VoiceSessions()
+	}
+	if src.BroadcastDrops != nil {
+		metrics.BroadcastDrops = src.BroadcastDrops()
+	}
+	fillHubLatency(&metrics, src)
+	if src.LiveKitHealth != nil {
+		healthy, _ := src.LiveKitHealth(ctx)
+		metrics.LiveKitHealthy = &healthy
+	}
+	fillDelivery(&metrics, src)
+	if src.PersisterStats != nil {
+		if persisted, dropped, flushes, errs, ok := src.PersisterStats(); ok {
+			metrics.EventPersister = &EventPersisterMetrics{
+				Persisted: persisted,
+				Dropped:   dropped,
+				Flushes:   flushes,
+				Errors:    errs,
+			}
+		}
+	}
+	if src.DBStats != nil {
+		st := src.DBStats()
+		metrics.DBWriterWaitCount = st.WaitCount
+		metrics.DBWriterWaitSeconds = st.WaitDuration.Seconds()
+	}
+	if src.DBReaderStats != nil {
+		st := src.DBReaderStats()
+		metrics.DBReaderWaitCount = st.WaitCount
+		metrics.DBReaderWaitSeconds = st.WaitDuration.Seconds()
+	}
+	if src.PermCache != nil {
+		metrics.PermCacheHits, metrics.PermCacheMisses = src.PermCache()
+	}
+	if src.ConnRejects != nil {
+		metrics.WSConnRejects = src.ConnRejects()
+	}
+	metrics.DiskMinFreeMB = float64(src.DiskMinFree) / 1024 / 1024
+	if src.DiskFree != nil {
+		if free, err := src.DiskFree(); err == nil {
+			mb := float64(free) / 1024 / 1024
+			metrics.DiskFreeMB = &mb
+			if src.DiskMinFree > 0 {
+				low := free < src.DiskMinFree
+				metrics.DiskLow = &low
+			}
+		}
+	}
+	if src.UploadBytes != nil {
+		if n, err := src.UploadBytes(ctx); err == nil {
+			mb := float64(n) / 1024 / 1024
+			metrics.UploadStorageUsedMB = &mb
+		}
+	}
+	if src.PushCounters != nil {
+		metrics.PushDispatched, metrics.PushFailed, metrics.PushPruned = src.PushCounters()
+	}
+
+	fillWindows(&metrics, src)
+
+	return metrics
 }
 
 // fillHubLatency copies the hub's latency distributions, queue depth, seqMu
