@@ -92,6 +92,9 @@ type ProfilePatch struct {
 	Avatar      *string
 	DisplayName *string
 	About       *string
+	// BannerID (upload handler only) and BannerColor (#rgb or #rrggbb): "" clears.
+	BannerID    *string
+	BannerColor *string
 }
 
 // nullable turns a sanitized, trimmed patch value into the column value:
@@ -193,6 +196,11 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 		return nil, fmt.Errorf("%w: about must be at most %d characters", ErrBadRequest, MaxAboutLen)
 	}
 
+	cleanBannerColor, err := cleanBannerPatch(patch.BannerColor)
+	if err != nil {
+		return nil, err
+	}
+
 	// The update writes every column, so a partial patch has to be merged
 	// against the current row first — otherwise setting only a display name
 	// would silently clear the about text. That read-merge-write must be
@@ -228,8 +236,9 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 		displayName = nullable(*cleanDisplayName)
 	}
 	about := resolveOptional(patch.About, current.About)
+	bannerID, bannerColor := mergeBanner(current, patch.BannerID, cleanBannerColor)
 
-	if err := s.st.UpdateUserProfile(ctx, userID, username, avatar, displayName, about); err != nil {
+	if err := s.st.UpdateUserProfile(ctx, userID, username, avatar, displayName, about, bannerID, bannerColor); err != nil {
 		if db.IsUniqueConstraintError(err) {
 			return nil, fmt.Errorf("%w: username is already taken", ErrConflict)
 		}
@@ -251,8 +260,8 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 		// file it just stored on that assumption — would otherwise delete a
 		// file the committed avatar column now points at, permanently
 		// breaking it with no user_update ever broadcast. UpdateUserProfile
-		// only ever writes username/avatar/display_name/about, so merging
-		// those four onto the pre-write snapshot (current) reconstructs the
+		// only ever writes username/avatar/display_name/about and the
+		// banner, so merging those onto the pre-write snapshot (current) reconstructs the
 		// row that is now actually in the database without needing the read
 		// to succeed.
 		slog.Error("UpdateProfile post-commit re-read failed; returning locally merged row",
@@ -262,6 +271,7 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 		merged.Avatar = avatar
 		merged.DisplayName = displayName
 		merged.About = about
+		merged.BannerID, merged.BannerColor = bannerID, bannerColor
 		user = &merged
 	}
 	// Audit rows must survive a request canceled after the write committed.

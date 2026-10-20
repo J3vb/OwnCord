@@ -204,6 +204,8 @@ keeps it until one authenticates.
       "about": "A short bio.",
       "custom_status": "shipping phase 6",
       "custom_status_expires_at": "2026-10-15T18:00:00Z",
+      "banner": "/api/v1/files/7a1e...",
+      "banner_color": "#5865f2",
       "status": "invisible"
     },
     "server_name": "My Server",
@@ -218,8 +220,8 @@ keeps it until one authenticates.
 }
 ```
 
-`display_name`, `about` and `custom_status` are the signed-in user's own
-profile fields, `null` when unset. `display_name` is what clients render
+`display_name`, `about`, `custom_status`, `banner` and `banner_color` are the
+signed-in user's own profile fields, `null` when unset. `display_name` is what clients render
 instead of `username`; `@mentions` still resolve against `username`, which is
 the unique handle.
 
@@ -482,7 +484,7 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
 
 ### Payload Fields
 
-**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true, "user_notes": true }`. `user_notes` means the server stores private profile notes (`GET` and `PUT /api/v1/users/me/notes/{userId}`); a client that does not see it keeps notes in local storage. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
+**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true, "user_notes": true, "profile_banners": true }`. `profile_banners` means the server supports profile banners (`POST` and `DELETE /api/v1/users/me/banner`, `banner_color` on `PATCH /api/v1/users/me`); a client that does not see it shows no banner controls. `user_notes` means the server stores private profile notes (`GET` and `PUT /api/v1/users/me/notes/{userId}`); a client that does not see it keeps notes in local storage. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
 These fields advertise retry-safe `chat_send` support. Older servers omit them;
 clients must not infer support from the protocol epoch or silently retry a
 durable pending message against a server that no longer advertises support.
@@ -595,7 +597,7 @@ carries. It used to be absent here, so a DM mention badge silently reset to 0 on
 every reconnect; the ready payload now ships the stored value. A DM's
 `unread_count` is capped at 100 under the same rule as `channels[]` above.
 
-**members[]:** All registered users with `id`, `username`, `avatar`, `role` (lowercase name), `status`, `display_name` (`null` when unset — render it instead of `username`), `about` (the About Me bio, `null` when unset; sent for every member, invisible ones included), `created_at` (the account creation instant, RFC 3339 UTC like `2026-10-15T13:04:05Z`; for an approval-mode account this is the application time), `custom_status` (`null` when unset), `identity_public_key` (base64 long-term E2EE identity key, omitted when the user has not published one — see voice E2EE TOFU)
+**members[]:** All registered users with `id`, `username`, `avatar`, `role` (lowercase name), `status`, `display_name` (`null` when unset — render it instead of `username`), `about` (the About Me bio, `null` when unset; sent for every member, invisible ones included), `created_at` (the account creation instant, RFC 3339 UTC like `2026-10-15T13:04:05Z`; for an approval-mode account this is the application time), `custom_status` (`null` when unset), `identity_public_key` (base64 long-term E2EE identity key, omitted when the user has not published one — see voice E2EE TOFU), `banner` (the profile banner image path `/api/v1/files/{id}`) and `banner_color` (`#rgb` or `#rrggbb`, lower-case); both are omitted when unset, so absent means no banner
 
 **member_timeouts[]:** The active timeouts this viewer may see, as `{user_id, expires_at}` (RFC 3339 UTC); always an array, `[]` when there are none. A viewer who holds `MODERATE_MEMBERS` or `ADMINISTRATOR` gets every unexpired timeout, sorted by `user_id`; everyone else gets only their own entry, because a timeout is a sanction and other members are not told of it. It is the last field before `members` in the payload. An absent key means an older server: show no timeout icons. See [member_timeouts](#member_timeouts-server---client).
 
@@ -1567,6 +1569,8 @@ reconnect before the unban).
       "display_name": "New User",
       "about": "Hello there",
       "created_at": "2026-10-15T13:04:05Z",
+      "banner": "/api/v1/files/7a1e...",
+      "banner_color": "#5865f2",
       "identity_public_key": "base64-identity-pubkey"
     },
     "status": "online"
@@ -1577,7 +1581,9 @@ reconnect before the unban).
 `display_name` is the nickname to render instead of `username`; omitted when
 unset. `about` is the About Me bio (`null` when unset) and `created_at` the
 account creation instant (RFC 3339 UTC); both match the same fields of
-`ready.members[]`, and neither appears on `chat_message.user`.
+`ready.members[]`, and neither appears on `chat_message.user`. `banner` and
+`banner_color` are the profile banner, omitted when unset like in
+`ready.members[]`.
 `identity_public_key` is the user's long-term E2EE identity public key
 (see voice E2EE TOFU); omitted when the user has not published one. The
 top-level `status` is the viewer-safe presence the user comes online as (an
@@ -1713,8 +1719,9 @@ carries the current lists.
 ### user_update (Server -> Client, broadcast)
 
 Broadcast when a user changes their own profile via `PATCH /api/v1/users/me`,
-`POST /api/v1/users/me/avatar` or `DELETE /api/v1/users/me/avatar` (username, avatar, display name, about
-and/or identity key).
+`POST /api/v1/users/me/avatar`, `DELETE /api/v1/users/me/avatar`,
+`POST /api/v1/users/me/banner` or `DELETE /api/v1/users/me/banner` (username,
+avatar, display name, about, banner and/or identity key).
 
 ```json
 {
@@ -1726,14 +1733,16 @@ and/or identity key).
     "avatar": "/api/v1/files/5f2c...",
     "display_name": "New Name",
     "about": "A short bio.",
+    "banner": "/api/v1/files/7a1e...",
+    "banner_color": "#5865f2",
     "identity_public_key": "base64-identity-pubkey"
   }
 }
 ```
 
 The payload is a full snapshot, not a delta: it **replaces** the client's copy
-of that user's profile. `avatar`, `display_name` and `about` are always present
-and may be `null` (unset/cleared) — a profile edit that removes a field has to
+of that user's profile. `avatar`, `display_name`, `about`, `banner` and
+`banner_color` are always present and may be `null` (unset/cleared) — a profile edit that removes a field has to
 be distinguishable from one that leaves it alone.
 `identity_public_key` carries the user's current long-term E2EE identity key
 and is omitted when none is published; peers that pinned a different key must

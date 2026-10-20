@@ -40,6 +40,8 @@ func memberPayloadFor(user *db.User, roleName string) memberJoinUser {
 		IdentityPublicKey: user.IdentityPublicKey,
 		About:             user.About,
 		CreatedAt:         db.FormatMemberCreatedAt(user.CreatedAt),
+		Banner:            user.BannerPath(),
+		BannerColor:       user.BannerColor,
 	}
 }
 

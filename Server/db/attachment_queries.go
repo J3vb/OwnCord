@@ -167,6 +167,7 @@ func linkAttachmentsToMessage(ctx context.Context, exec attachmentLinker, messag
 		   AND (uploader_id = ? OR uploader_id IS NULL)
 		   AND NOT EXISTS (SELECT 1 FROM users u WHERE u.avatar = '/api/v1/files/' || attachments.id)
 		   AND NOT EXISTS (SELECT 1 FROM channels c WHERE c.dm_icon = attachments.id)
+		   AND NOT EXISTS (SELECT 1 FROM users u WHERE u.banner_id = attachments.id)
 		 RETURNING id`,
 		strings.Join(placeholders, ","),
 	)

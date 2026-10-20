@@ -26,6 +26,8 @@
             "user": {
               "about": "fixture profile text",
               "avatar": "https://fixtures.invalid/alice-avatar.png",
+              "banner": null,
+              "banner_color": null,
               "custom_status": "fixture custom status",
               "custom_status_expires_at": "<ts:null>",
               "display_name": "Alice Fixture",
@@ -46,6 +48,7 @@
               "message_deduplication": true,
               "message_retry_floor_ms": 0,
               "message_retry_window_seconds": 86400,
+              "profile_banners": true,
               "read_pointer": true,
               "user_notes": true
             },
@@ -281,6 +284,8 @@
             "user": {
               "about": null,
               "avatar": null,
+              "banner": null,
+              "banner_color": null,
               "custom_status": null,
               "custom_status_expires_at": "<ts:null>",
               "display_name": null,
@@ -301,6 +306,7 @@
               "message_deduplication": true,
               "message_retry_floor_ms": 0,
               "message_retry_window_seconds": 86400,
+              "profile_banners": true,
               "read_pointer": true,
               "user_notes": true
             },

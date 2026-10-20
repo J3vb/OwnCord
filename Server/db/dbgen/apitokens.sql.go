@@ -61,34 +61,14 @@ func (q *Queries) GetActiveAPIToken(ctx context.Context, tokenHash string) (ApiT
 const getOwnerUser = `-- name: GetOwnerUser :one
 SELECT id, username, password, avatar, role_id, totp_secret, status,
        created_at, last_seen, banned, ban_reason, ban_expires, identity_public_key,
-       display_name, about, custom_status, registration_status, custom_status_expires_at
+       display_name, about, custom_status, registration_status, custom_status_expires_at,
+       banner_id, banner_color
 FROM users
 WHERE banned = 0
    OR (ban_expires IS NOT NULL
        AND replace(ban_expires, ' ', 'T') <= strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 ORDER BY (SELECT r.position FROM roles r WHERE r.id = users.role_id) DESC, id ASC
 `
-
-type GetOwnerUserRow struct {
-	ID                    int64   `json:"id"`
-	Username              string  `json:"username"`
-	Password              string  `json:"password"`
-	Avatar                *string `json:"avatar"`
-	RoleID                int64   `json:"roleId"`
-	TotpSecret            *string `json:"totpSecret"`
-	Status                string  `json:"status"`
-	CreatedAt             string  `json:"createdAt"`
-	LastSeen              *string `json:"lastSeen"`
-	Banned                int64   `json:"banned"`
-	BanReason             *string `json:"banReason"`
-	BanExpires            *string `json:"banExpires"`
-	IdentityPublicKey     *string `json:"identityPublicKey"`
-	DisplayName           *string `json:"displayName"`
-	About                 *string `json:"about"`
-	CustomStatus          *string `json:"customStatus"`
-	RegistrationStatus    string  `json:"registrationStatus"`
-	CustomStatusExpiresAt *string `json:"customStatusExpiresAt"`
-}
 
 // The highest-privilege account (role with the greatest position), used as the
 // default identity for `token create`. FROM is users-only (role position is a
@@ -105,9 +85,9 @@ type GetOwnerUserRow struct {
 // so a lapsed temporary ban stays eligible; the replace() normalises the space
 // separator form of ban_expires to 'T' before comparing, because ' ' sorts
 // below 'T' and a same-day space-form expiry would otherwise read as lapsed.
-func (q *Queries) GetOwnerUser(ctx context.Context) (GetOwnerUserRow, error) {
+func (q *Queries) GetOwnerUser(ctx context.Context) (User, error) {
 	row := q.db.QueryRowContext(ctx, getOwnerUser)
-	var i GetOwnerUserRow
+	var i User
 	err := row.Scan(
 		&i.ID,
 		&i.Username,
@@ -127,6 +107,8 @@ func (q *Queries) GetOwnerUser(ctx context.Context) (GetOwnerUserRow, error) {
 		&i.CustomStatus,
 		&i.RegistrationStatus,
 		&i.CustomStatusExpiresAt,
+		&i.BannerID,
+		&i.BannerColor,
 	)
 	return i, err
 }

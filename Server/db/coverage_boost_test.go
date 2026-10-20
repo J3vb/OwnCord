@@ -541,7 +541,7 @@ func TestDeleteOrphanedAttachments_KeepsLiveAvatars(t *testing.T) {
 
 	_ = database.CreateAttachment(context.Background(), "avatar-1", userID, "me.png", "stored-avatar.png", "image/png", 100, nil, nil)
 	avatarURL := "/api/v1/files/avatar-1"
-	if err := database.UpdateUserProfile(context.Background(), userID, "avatar-owner", &avatarURL, nil, nil); err != nil {
+	if err := database.UpdateUserProfile(context.Background(), userID, "avatar-owner", &avatarURL, nil, nil, nil, nil); err != nil {
 		t.Fatalf("UpdateUserProfile: %v", err)
 	}
 

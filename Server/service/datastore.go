@@ -144,7 +144,7 @@ type Store interface {
 	CountPendingUsers(ctx context.Context) (int64, error)
 	ApprovePendingUser(ctx context.Context, userID int64) error
 	DenyPendingUser(ctx context.Context, userID int64) error
-	UpdateUserProfile(ctx context.Context, userID int64, username string, avatar, displayName, about *string) error
+	UpdateUserProfile(ctx context.Context, userID int64, username string, avatar, displayName, about, bannerID, bannerColor *string) error
 	UpdateUserCustomStatus(ctx context.Context, userID int64, customStatus *string) error
 	UpdateUserPresence(ctx context.Context, userID int64, status string, customStatus, expiresAt *string) error
 	NextCustomStatusExpiry(ctx context.Context) (string, bool, error)

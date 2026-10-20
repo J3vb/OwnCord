@@ -347,7 +347,7 @@ func (d *DB) GetUserByUsername(ctx context.Context, username string) (*User, err
 	if err != nil {
 		return nil, fmt.Errorf("GetUserByUsername: %w", err)
 	}
-	return userFromRow(dbgen.GetUserByIDRow(u)), nil
+	return userFromGen(u), nil
 }
 
 // GetUserByID returns the user with the given ID, or nil if not found.
@@ -359,7 +359,7 @@ func (d *DB) GetUserByID(ctx context.Context, id int64) (*User, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GetUserByID: %w", err)
 	}
-	return userFromRow(u), nil
+	return userFromGen(u), nil
 }
 
 // UpdateUserStatus sets the status column for the given user ID.
@@ -728,30 +728,6 @@ func (d *DB) RevokeInvite(ctx context.Context, code string) error {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// MemberSummary is a lightweight user shape for the ready payload.
-type MemberSummary struct {
-	ID       int64   `json:"id"`
-	Username string  `json:"username"`
-	Avatar   *string `json:"avatar"`
-	Status   string  `json:"status"`
-	Role     string  `json:"role"`
-	// IdentityPublicKey is the user's long-term E2EE identity public key
-	// (base64), pinned by peers on first sight (F3 TOFU). Omitted when the
-	// user has not published one.
-	IdentityPublicKey *string `json:"identity_public_key,omitempty"`
-	// DisplayName is the nickname to render instead of Username. Null when
-	// unset; clients fall back to Username.
-	DisplayName *string `json:"display_name"`
-	// About is the profile bio (About Me). Null when unset.
-	About *string `json:"about"`
-	// CreatedAt is the account creation instant, "2006-01-02T15:04:05Z".
-	CreatedAt string `json:"created_at"`
-	// CustomStatus is the free-text status line shown under the name. Null
-	// when unset. It must stay the LAST field: encodeRoster in package ws
-	// splices the per-viewer status and custom_status around it.
-	CustomStatus *string `json:"custom_status"`
-}
-
 // MemberCreatedAtLayout is the wire layout of a member's created_at: the same
 // shape ListMembers renders with strftime('%Y-%m-%dT%H:%M:%SZ', ...).
 const MemberCreatedAtLayout = "2006-01-02T15:04:05Z"
@@ -767,49 +743,6 @@ func FormatMemberCreatedAt(raw string) string {
 		}
 	}
 	return raw
-}
-
-// ForViewer returns a copy of the summary as viewerID may see it: an invisible
-// member is offline to everyone but themselves. Ready payloads go through this
-// so "who is invisible" is decided in exactly one place.
-func (m MemberSummary) ForViewer(viewerID int64) MemberSummary {
-	m.Status = StatusForViewer(m.Status, m.ID, viewerID)
-	// A connected-but-invisible member collapses to "offline" above, but their
-	// custom_status is a separate column BroadcastStatus never touches. Left
-	// alone, a viewer sees {status:"offline", custom_status:"<text>"} for that
-	// member while every genuinely disconnected member is
-	// {status:"offline", custom_status:null} — the surviving text is a tell
-	// that the member is actually online. Blank it at the same choke point
-	// that collapses the status so no other caller has to remember to.
-	if m.ID != viewerID && m.Status == StatusOffline {
-		m.CustomStatus = nil
-	}
-	return m
-}
-
-// ListMembers returns non-banned users as lightweight summaries.
-// M-12: Limited to 1000 rows to prevent unbounded result sets on large servers.
-func (d *DB) ListMembers(ctx context.Context) ([]MemberSummary, error) {
-	rows, err := d.q.ListMembers(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("ListMembers: %w", err)
-	}
-	members := make([]MemberSummary, 0, len(rows))
-	for _, r := range rows {
-		members = append(members, MemberSummary{
-			ID:                r.ID,
-			Username:          r.Username,
-			Avatar:            r.Avatar,
-			Status:            r.Status,
-			Role:              r.Lower,
-			IdentityPublicKey: r.IdentityPublicKey,
-			DisplayName:       r.DisplayName,
-			About:             r.About,
-			CreatedAt:         r.CreatedAt,
-			CustomStatus:      r.CustomStatus,
-		})
-	}
-	return members, nil
 }
 
 // MemberGeneration returns the member generation: a counter SQLite triggers

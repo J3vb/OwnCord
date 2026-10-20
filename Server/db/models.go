@@ -38,6 +38,18 @@ type User struct {
 	// CustomStatusExpiryLayout text. Nil = no expiry. Only ever set with a
 	// non-nil CustomStatus.
 	CustomStatusExpiresAt *string
+	// BannerID is the attachment id of the profile banner image (migration
+	// 069). Nil = no image. The file is public while this names it.
+	BannerID *string
+	// BannerColor is the profile banner colour, lower-case #rgb or #rrggbb.
+	// Nil = unset.
+	BannerColor *string
+}
+
+// BannerPath is the URL the banner image is served from, nil when none. A
+// method, so a caller that only holds a User needs no db function.
+func (u *User) BannerPath() *string {
+	return BannerURL(u.BannerID)
 }
 
 // EffectiveDisplayName returns the name to render for the user: the display

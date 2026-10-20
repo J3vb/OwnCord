@@ -94,7 +94,7 @@ func TestDeleteAvatar_KeepsConcurrentRename(t *testing.T) {
 		t.Fatalf("GetUserByUsername: %v", err)
 	}
 	av := "https://example.com/a.png"
-	if err := database.UpdateUserProfile(context.Background(), u.ID, "new_name", &av, nil, nil); err != nil {
+	if err := database.UpdateUserProfile(context.Background(), u.ID, "new_name", &av, nil, nil, nil, nil); err != nil {
 		t.Fatalf("rename: %v", err)
 	}
 
