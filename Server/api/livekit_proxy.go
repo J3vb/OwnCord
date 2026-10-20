@@ -222,6 +222,9 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL) {
 		return
 	}
 	defer backConn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort close on defer
+	// The library default (32 KiB) would tear down both legs on a large
+	// signaling frame before copyWS's own limit is reached.
+	backConn.SetReadLimit(wsProxyMaxMessageSize)
 
 	// Accept the frontend WebSocket. The Origin was already decided by
 	// isOriginAllowed before this handler was reached; letting Accept run its
@@ -237,6 +240,7 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL) {
 		return
 	}
 	defer frontConn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort close on defer
+	frontConn.SetReadLimit(wsProxyMaxMessageSize)
 
 	// Use a cancellable context so when one direction finishes, the other
 	// goroutine's copyWS read/write is unblocked and can drain cleanly.
