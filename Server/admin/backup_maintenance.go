@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -143,25 +145,147 @@ func runScheduledBackup(ctx context.Context, database *db.DB, interval time.Dura
 	return nil
 }
 
-// preRestoreBackupPrefix names the safety copy handleRestoreBackup writes
-// immediately before it overwrites the live database. Those copies are not
-// retention history: an operator needs the pre-restore state precisely when
-// they are recovering from a bad restore, which may be long after the
-// retention window, so pruning never removes them.
-const preRestoreBackupPrefix = "pre_restore_"
+// PreRestoreBackupPrefix names the safety copy handleRestoreBackup (and the
+// restore CLI) writes immediately before overwriting the live database. Those
+// copies are not retention history: an operator needs the pre-restore state
+// precisely when they are recovering from a bad restore, which may be long
+// after the retention window, so the day-based retention never removes them.
+// PruneSafetyCopies bounds them by count instead.
+const PreRestoreBackupPrefix = "pre_restore_"
 
 // PreMigrateBackupPrefix names the safety copy the boot path writes before a
 // pending migration moves the schema (internal/app/database.go). Like the
-// pre_restore_ copies it is not retention history — it is the rollback target
-// for a schema move — so pruning never removes it.
+// pre_restore_ copies it is the rollback target for a schema move, so the
+// day-based retention never removes it; PruneSafetyCopies bounds it by count.
 const PreMigrateBackupPrefix = "pre_migrate_"
+
+// SafetyCopiesKept is how many pre_restore_ and pre_migrate_ copies, each,
+// survive a prune.
+const SafetyCopiesKept = 3
+
+// removeSafetyCopy is the removal PruneSafetyCopies performs; a variable so a
+// test can make one removal fail.
+var removeSafetyCopy = os.Remove
+
+// SetRemoveSafetyCopyForTest replaces the removal PruneSafetyCopies performs
+// and returns a function that restores the previous one. It exists so tests in
+// other packages can exercise the prune-failure path; production code must not
+// call it.
+func SetRemoveSafetyCopyForTest(fn func(string) error) (restore func()) {
+	prev := removeSafetyCopy
+	removeSafetyCopy = fn
+	return func() { removeSafetyCopy = prev }
+}
 
 // isSafetyCopy reports whether a backup file name is a safety copy rather
 // than retention history. Both the pre-restore and pre-migration prefixes
-// count; retention must never prune either.
+// count; day-based retention must never prune either (PruneSafetyCopies does,
+// by count).
 func isSafetyCopy(name string) bool {
 	base := filepath.Base(name)
-	return strings.HasPrefix(base, preRestoreBackupPrefix) || strings.HasPrefix(base, PreMigrateBackupPrefix)
+	return strings.HasPrefix(base, PreRestoreBackupPrefix) || strings.HasPrefix(base, PreMigrateBackupPrefix)
+}
+
+// PruneSafetyCopies keeps the newest keep top-level *.db files of each safety
+// prefix (pre_restore_, pre_migrate_) in dir and removes the rest. Newest is by
+// mtime, with the name as the tie-break (not name order alone: _10 sorts before
+// _2, and a rollback re-upgrade breaks it). Paths in protect are never removed.
+// keep < 1 is treated as 1. A missing dir is not an error. Every failed removal
+// is reported (joined) after the loop has tried all of them; the caller treats
+// the error as advisory.
+func PruneSafetyCopies(dir string, keep int, protect ...string) (removed []string, err error) {
+	if keep < 1 {
+		keep = 1
+	}
+	entries, rdErr := os.ReadDir(dir)
+	if rdErr != nil {
+		if errors.Is(rdErr, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("prune safety copies: reading %s: %w", dir, rdErr)
+	}
+	isProtected := protectedMatcher(protect)
+	for _, prefix := range []string{PreRestoreBackupPrefix, PreMigrateBackupPrefix} {
+		names := safetyCopiesNewestFirst(entries, prefix)
+		if len(names) <= keep {
+			continue
+		}
+		var errs []error
+		for _, name := range names[keep:] {
+			path := filepath.Join(dir, name)
+			if isProtected(path) {
+				continue
+			}
+			if rmErr := removeSafetyCopy(path); rmErr != nil {
+				errs = append(errs, fmt.Errorf("removing %s: %w", path, rmErr))
+				continue
+			}
+			removed = append(removed, name)
+		}
+		err = errors.Join(err, errors.Join(errs...))
+	}
+	return removed, err
+}
+
+// protectedMatcher reports whether a candidate path is one of protect. It
+// compares file identity as well as the cleaned absolute path: path strings
+// differ by case on Windows (d:\ vs D:\) and through symlinks or hard links,
+// and a restore source must never be deleted because its spelling differed.
+func protectedMatcher(protect []string) func(path string) bool {
+	paths := make(map[string]bool, len(protect))
+	var infos []os.FileInfo
+	for _, p := range protect {
+		if abs, absErr := filepath.Abs(p); absErr == nil {
+			paths[filepath.Clean(abs)] = true
+		} else {
+			paths[filepath.Clean(p)] = true
+		}
+		if fi, statErr := os.Stat(p); statErr == nil {
+			infos = append(infos, fi)
+		}
+	}
+	return func(path string) bool {
+		abs, absErr := filepath.Abs(path)
+		if absErr != nil {
+			abs = path
+		}
+		if paths[filepath.Clean(abs)] {
+			return true
+		}
+		fi, statErr := os.Stat(path)
+		return statErr == nil && slices.ContainsFunc(infos, func(pi os.FileInfo) bool { return os.SameFile(pi, fi) })
+	}
+}
+
+// safetyCopiesNewestFirst lists the top-level prefix*.db files among entries,
+// newest mtime first, name descending as the tie-break.
+func safetyCopiesNewestFirst(entries []os.DirEntry, prefix string) []string {
+	type copyInfo struct {
+		name  string
+		mtime time.Time
+	}
+	var copies []copyInfo
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), prefix) || !strings.HasSuffix(e.Name(), ".db") {
+			continue
+		}
+		info, infoErr := e.Info()
+		if infoErr != nil {
+			continue
+		}
+		copies = append(copies, copyInfo{name: e.Name(), mtime: info.ModTime()})
+	}
+	sort.Slice(copies, func(i, j int) bool {
+		if !copies[i].mtime.Equal(copies[j].mtime) {
+			return copies[i].mtime.After(copies[j].mtime)
+		}
+		return copies[i].name > copies[j].name
+	})
+	names := make([]string, len(copies))
+	for i, c := range copies {
+		names[i] = c.name
+	}
+	return names
 }
 
 // pruneExpiredBackups deletes *.db backups whose mtime is older than the

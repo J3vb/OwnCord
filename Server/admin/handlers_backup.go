@@ -283,7 +283,7 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 		// the same directory the rest of the backup handlers read and write, or
 		// a server started from another working directory writes it somewhere
 		// the operator will never find it.
-		preRestore := filepath.Join(backupBaseDir, preRestoreBackupPrefix+time.Now().UTC().Format("20060102_150405")+".db")
+		preRestore := filepath.Join(backupBaseDir, PreRestoreBackupPrefix+time.Now().UTC().Format("20060102_150405")+".db")
 		if err := database.BackupToSafe(context.WithoutCancel(r.Context()), preRestore, backupBaseDir); err != nil {
 			// Fail closed. The admin panel promises "a pre-restore backup will
 			// be created" before an irreversible overwrite; proceeding without
@@ -340,6 +340,16 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 		}
 
 		slog.Warn("database file replaced — restarting to load the restored data", "backup", name)
+
+		// Only now, with the restore done, trim old safety copies. The new copy
+		// and the restore source are protected (an operator undoing a bad
+		// restore restores from a pre_restore_ copy). A prune failure is logged
+		// and never changes the outcome. The database is closed: no audit row.
+		if removed, pruneErr := PruneSafetyCopies(backupBaseDir, SafetyCopiesKept, preRestore, target); pruneErr != nil {
+			slog.Warn("could not prune old safety copies", "dir", backupBaseDir, "error", pruneErr)
+		} else if len(removed) > 0 {
+			slog.Info("pruned old safety copies", "count", len(removed), "names", removed)
+		}
 
 		writeJSON(w, http.StatusOK, map[string]string{
 			"message": "database restored — server restarting",

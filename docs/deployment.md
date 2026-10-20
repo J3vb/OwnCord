@@ -1097,8 +1097,10 @@ loop applies them, checking every 15 minutes:
   A manual backup resets the clock too.
 - Old backups are deleted after the number of days you set. The newest backup
   is always kept, so a schedule that stopped can never delete your last copy.
-- Safety copies named `pre_restore_*` and `pre_migrate_*` are never deleted
-  automatically. Delete them by hand.
+- Safety copies (`pre_restore_*`, `pre_migrate_*`) are not affected by the days
+  setting. The server keeps the newest 3 of each kind and deletes older ones
+  after it writes a new one. It never deletes the copy it just wrote or the
+  backup being restored. Copy one elsewhere if you need to keep it longer.
 
 ### The full archive
 
@@ -1155,7 +1157,7 @@ backup.
   that name is taken, it adds `_2`, `_3` and so on, so an earlier copy is never
   overwritten.
 - It is checked with `integrity_check`.
-- It is never deleted by the retention setting, like `pre_restore_*` copies.
+- It is not removed by the days setting; the newest 3 `pre_migrate_*` copies are kept.
 - If the server cannot write it, it refuses to start rather than migrate
   without it.
 - If the database has not changed since the last copy for that migration (for
@@ -1347,7 +1349,7 @@ old data:
 | ------------------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `chatserver.db` + `chatserver.db-wal`       | every feature                                                             | messages: the server's or a channel's retention window (`0` = keep forever); stored events: 24 hours  | the retention sweep (up to 5,000 messages per run); the event pruner, every 60 minutes; the WAL after an erasure  |
 | `uploads/`                                  | attachments, avatars, emoji, and a preview of large images (`thumbs/`)    | `upload.max_size_mb` per file (default 100); `upload.user_quota_mb` per user (default `0` = no limit) | the orphan sweep (files unlinked for over 1 hour), retention, erasure, and reconciliation (up to 500 files a run) |
-| `backups/`                                  | manual and scheduled backups, and `pre_restore_*.db` / `pre_migrate_*.db` | **Keep backups for (days)** on the **Backups & restore** page                                         | retention; it always keeps the newest backup and never deletes `pre_restore_*` or `pre_migrate_*` copies          |
+| `backups/`                                  | manual and scheduled backups, and `pre_restore_*.db` / `pre_migrate_*.db` | **Keep backups for (days)** on the **Backups & restore** page                                         | retention; it always keeps the newest backup and keeps the newest 3 `pre_restore_*` and 3 `pre_migrate_*` copies  |
 | `acme_certs/`                               | `tls.mode: acme` only                                                     | one certificate for your domain                                                                       | the ACME client handles renewal                                                                                   |
 | `livekit/`                                  | `voice.auto_download_livekit`                                             | one pinned LiveKit release                                                                            | never; delete the file to force a fresh download                                                                  |
 | `plugins/`                                  | plugins, in builds made with `-tags wazero`                               | whatever the plugins write                                                                            | never                                                                                                             |

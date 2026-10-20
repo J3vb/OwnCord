@@ -222,6 +222,10 @@ and only when it changes something a contributor or fork holder must do
 - Compact mode now changes only the message list, as in Discord: the channel list, members, header, voice list and user bar keep their normal size.
 - On Linux the app's log now says why it closed: a window close, tray Quit, a signal and which program sent it, a frozen window or webview, rising memory, or (on the next start) a run that was killed without a trace. A support bundle carries all of it.
 
+**Accounts & admin**
+
+- The server now keeps only the newest 3 pre-restore and 3 pre-migration safety copies, so repeated upgrades and restores no longer fill the backup disk. Copy any older one you want to keep before upgrading.
+
 ### Fixed
 
 **Desktop UI**

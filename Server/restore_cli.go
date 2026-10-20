@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 )
@@ -152,6 +153,17 @@ func replaceLiveDatabase(source, dbPath, backupDir string) int {
 
 	fmt.Printf("restored %s from %s\n", dbPath, source)
 	if safety != "" {
+		// Restore succeeded: trim old safety copies, keeping the new one and
+		// the source. A failure only warns; the restore stands.
+		removed, pruneErr := admin.PruneSafetyCopies(backupDir, admin.SafetyCopiesKept, safety, source)
+		if pruneErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not prune old safety copies: %v\n", pruneErr)
+		}
+		if len(removed) > 0 {
+			fmt.Printf("pruned %d old safety copies\n", len(removed))
+		}
+	}
+	if safety != "" {
 		fmt.Printf("pre-restore safety copy: %s\n", safety)
 	} else {
 		fmt.Printf("the previous database files, if any, were moved aside to %s*\n", aside)
@@ -202,7 +214,7 @@ func safetyCopy(dbPath, backupDir string) (string, error) {
 	}
 	defer src.Close() //nolint:errcheck
 
-	out := filepath.Join(backupDir, "pre_restore_"+time.Now().UTC().Format("20060102_150405")+".db")
+	out := filepath.Join(backupDir, admin.PreRestoreBackupPrefix+time.Now().UTC().Format("20060102_150405")+".db")
 	if err := src.BackupToSafe(context.Background(), out, backupDir); err != nil {
 		return "", err
 	}

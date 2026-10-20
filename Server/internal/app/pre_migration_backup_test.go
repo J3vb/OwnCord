@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -402,4 +403,100 @@ func hasVersion(t *testing.T, path, version string) bool {
 		t.Fatalf("count schema_versions in %s: %v", path, err)
 	}
 	return n > 0
+}
+
+// upgradeRounds runs rounds upgrades in a row against one backup directory.
+// Each round rolls the database back to the pre-upgrade archive, writes a new
+// user (so the database changed since the last copy) and boots, which makes
+// backupBeforePendingMigrations write a new pre_migrate_ copy. After each round
+// the copy it wrote is stamped older, so mtime order matches round order.
+// It returns the names written, oldest first, and the last boot's error.
+func upgradeRounds(t *testing.T, rounds int) (backupDir string, names []string, lastErr error) {
+	t.Helper()
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "chatserver.db")
+	archive := filepath.Join(dir, "archive.db")
+	backupDir = filepath.Join(dir, "backups")
+	t.Cleanup(func() { admin.SetBackupDir(filepath.Join("data", "backups")) })
+	admin.SetBackupDir(backupDir)
+
+	seed, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open seed: %v", err)
+	}
+	if err := db.MigrateFS(seed, migrationsUpTo(t, "020_")); err != nil {
+		t.Fatalf("MigrateFS(<020): %v", err)
+	}
+	if err := seed.Close(); err != nil {
+		t.Fatalf("Close seed: %v", err)
+	}
+	copyFile(t, dbPath, archive)
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	base := time.Now().Add(-48 * time.Hour)
+	for i := range rounds {
+		for _, suffix := range []string{"-wal", "-shm"} {
+			_ = os.Remove(dbPath + suffix)
+		}
+		copyFile(t, archive, dbPath)
+		d, err := db.Open(dbPath)
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		if _, err := d.CreateUser(context.Background(), "user-"+string(rune('a'+i)), "hash", 4); err != nil {
+			t.Fatalf("CreateUser: %v", err)
+		}
+		name, bErr := backupBeforePendingMigrations(log, d, dbPath)
+		if err := d.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		lastErr = bErr
+		if bErr != nil {
+			return backupDir, names, lastErr
+		}
+		names = append(names, name)
+		ts := base.Add(time.Duration(i) * time.Hour)
+		if err := os.Chtimes(filepath.Join(backupDir, name), ts, ts); err != nil {
+			t.Fatalf("Chtimes: %v", err)
+		}
+	}
+	return backupDir, names, lastErr
+}
+
+// TestPreMigrationBackup_PrunesOlderCopies: four upgrades in a row leave the
+// newest three pre_migrate_ copies, the newest included.
+func TestPreMigrationBackup_PrunesOlderCopies(t *testing.T) {
+	backupDir, names, err := upgradeRounds(t, 4)
+	if err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != admin.SafetyCopiesKept {
+		t.Fatalf("backup dir holds %d files, want %d", len(entries), admin.SafetyCopiesKept)
+	}
+	if _, statErr := os.Stat(filepath.Join(backupDir, names[0])); statErr == nil {
+		t.Errorf("oldest copy %s was kept", names[0])
+	}
+	if _, statErr := os.Stat(filepath.Join(backupDir, names[3])); statErr != nil {
+		t.Errorf("newest copy %s is missing: %v", names[3], statErr)
+	}
+}
+
+// TestPreMigrationBackup_PruneFailureStillBoots: a removal failure while
+// pruning is only logged; the backup call still returns the new name, nil.
+func TestPreMigrationBackup_PruneFailureStillBoots(t *testing.T) {
+	defer admin.SetRemoveSafetyCopyForTest(func(string) error { return errors.New("injected remove failure") })()
+	backupDir, names, err := upgradeRounds(t, 4)
+	if err != nil {
+		t.Fatalf("a prune failure refused the boot: %v", err)
+	}
+	if len(names) != 4 {
+		t.Fatalf("names = %v, want 4 copies written", names)
+	}
+	if _, statErr := os.Stat(filepath.Join(backupDir, names[3])); statErr != nil {
+		t.Errorf("newest copy is missing: %v", statErr)
+	}
 }
