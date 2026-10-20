@@ -48,7 +48,13 @@ var (
 	erasureScanWindow = 5000
 )
 
-// erasureHook runs the test seam; nil in production.
+// erasureHook runs the test seam (testErasureChunkHook): called after each
+// chunked-erasure transaction commits, with the stage ("lock", "chunk",
+// "finish", "checkpoint") and, for "chunk", the 1-based count of drain chunks
+// committed in this call. A non-nil error aborts the erasure at that point,
+// which is how a test stands in for a crash mid-drain; the hook may also
+// block to hold the erasure between two stages. Nil in production, no
+// exported setter.
 func (d *DB) erasureHook(stage string, n int) error {
 	if d.testErasureChunkHook == nil {
 		return nil
