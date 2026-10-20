@@ -207,6 +207,54 @@ export default tseslint.config(
       ],
     },
   },
+  // --- Row views draw from a model and never read a store (5.4e) ---
+  // This block replaces the native-import config above for view files, so it
+  // repeats that ban. no-restricted-syntax covers a dynamic `import()`.
+  {
+    files: ["src/**/*.view.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@tauri-apps/*"],
+              message:
+                "Native imports belong in src/platform/desktop (B7-4/B7-5). See docs/architecture/platform-contracts.md.",
+            },
+            {
+              group: [
+                "@stores/*",
+                "**/stores/*",
+                "@features/*/store",
+                "**/features/*/store",
+                "./store",
+                "**/store",
+                "@lib/livekitSession",
+                "**/lib/livekitSession",
+              ],
+              message:
+                "A *.view.ts draws from its row model and imports no store or voice session; build the model in the caller (5.4e).",
+            },
+          ],
+        },
+      ],
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "ImportExpression[source.value=/^@tauri-apps\\//]",
+          message:
+            "Native imports belong in src/platform/desktop (B7-4/B7-5). See docs/architecture/platform-contracts.md.",
+        },
+        {
+          selector:
+            "ImportExpression[source.value=/(^@stores\\/|\\/stores\\/|(^|\\/)store$|livekitSession$)/]",
+          message:
+            "A *.view.ts draws from its row model and imports no store or voice session; build the model in the caller (5.4e).",
+        },
+      ],
+    },
+  },
   {
     ignores: ["dist/", "src-tauri/", "node_modules/", "public/", "*.js", "*.cjs"],
   },
