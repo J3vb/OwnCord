@@ -291,6 +291,49 @@ describe("member list windowing above 200 members (real layout)", () => {
     expectNoOverlap(host.root);
   });
 
+  it("a taller header drawn next to a shorter one already measured leaves no overlap", async () => {
+    const long = "Members of the very long wrapping role name";
+    setRoles([
+      { id: 1, name: "owner", color: null, permissions: 0 },
+      { id: 2, name: "admin", color: null, permissions: 0 },
+      { id: 3, name: "member", color: null, permissions: 0 },
+      { id: 4, name: "crew", color: null, permissions: 0 },
+      { id: 5, name: long, color: null, permissions: 0 },
+    ]);
+    setMembers(
+      roster(MEMBERS).map((m) =>
+        m.id > 1975 && m.id <= 1990
+          ? { ...m, role: "crew", status: "online" as const, custom_status: null }
+          : m.id > 1990
+            ? { ...m, role: long.toLowerCase(), status: "online" as const, custom_status: null }
+            : m,
+      ),
+    );
+    membersStore.flush();
+    const host = (mounted = mountSidebar());
+    await settle();
+    const crew = () =>
+      [...host.root.querySelectorAll<HTMLElement>(".member-role-group")].find((el) =>
+        el.textContent?.startsWith("CREW"),
+      );
+    // Walk down until the short CREW header is drawn, then jump so the long
+    // header and the rows after it are drawn in the same frame.
+    while (crew() === undefined) {
+      host.scroller.scrollTop += 300;
+      await settle();
+    }
+    host.scroller.scrollTop += 900;
+    await settle();
+    const wrapped = [...host.root.querySelectorAll<HTMLElement>(".member-role-group")].find((el) =>
+      el.textContent?.startsWith("MEMBERS OF"),
+    );
+    expect(wrapped).toBeDefined();
+    expect(wrapped!.getBoundingClientRect().height).toBeGreaterThan(
+      crew()!.getBoundingClientRect().height,
+    );
+    expectNoOverlap(host.root);
+  });
+
   it("focusMember for a gone member focuses a visible row and does not scroll", async () => {
     const host = (mounted = mountColumn());
     await settle();

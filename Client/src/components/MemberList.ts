@@ -582,8 +582,6 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
   let offsetsDirty = true;
   let revealKey: string | null = null;
   const heights = [...ESTIMATED_HEIGHTS];
-  // The kinds the latest measure() found in the DOM, as a bit mask.
-  let seenMask = 0;
   const kindByEl = new WeakMap<Element, number>();
   const topByKey = new Map<string, number>();
   const samples: (Element | null)[] = [null, null, null, null];
@@ -872,7 +870,6 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
    *  The larger measurement within a kind wins, so a taller glyph fallback
    *  leaves a gap and never an overlap. */
   function measure(): boolean {
-    seenMask = 0;
     if (root === null) return false;
     const seen = [0, 0, 0, 0];
     const margins = [0, 0, 0, 0];
@@ -890,7 +887,6 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
     let changed = false;
     for (let kind = 0; kind < heights.length; kind++) {
       if (seen[kind] === 0) continue;
-      seenMask |= 1 << kind;
       const total = seen[kind]! + margins[kind]!;
       if (Math.abs(total - heights[kind]!) < 0.01) continue;
       heights[kind] = total;
@@ -914,11 +910,10 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
     return out;
   }
 
-  /** Draw the window and the pinned rows; returns the kinds drawn as a bit mask. */
-  function paint(): number {
-    if (root === null) return 0;
+  /** Draw the window and the pinned rows. */
+  function paint(): void {
+    if (root === null) return;
     const wanted: ListItem[] = [];
-    let used = 0;
     topByKey.clear();
     // Rows are positioned from the root's padding edge, so its own padding is
     // added back to keep the spacing the flowed list has.
@@ -941,7 +936,6 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
       const draw = (at: number): void => {
         const item = items[at]!;
         topByKey.set(item.key, padTop + offsets[at]!);
-        used |= 1 << kindOf(item);
         wanted.push(item);
       };
       for (const at of range.pinned) if (at < range.start) draw(at);
@@ -952,7 +946,6 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
     const total = offsets[offsets.length - 1]! + (borderBox ? padTop + padBottom : 0);
     root.style.position = "relative";
     root.style.height = `${total}px`;
-    return used;
   }
 
   function runFrame(): void {
@@ -988,9 +981,10 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
           offsets = buildOffsets(items.map((item) => heights[kindOf(item)]!));
           offsetsDirty = false;
         }
-        const used = paint();
-        // A kind drawn without a row measured in this frame keeps a stale height.
-        if ((used & ~seenMask) === 0) break;
+        paint();
+        // Re-measure what was just drawn: a new row of a kind can be taller
+        // than the one measured before (a wrapped role name, a font change
+        // while no row of that kind was drawn).
         if (!measure()) break;
       }
       sampleRows();
