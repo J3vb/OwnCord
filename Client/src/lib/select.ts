@@ -101,20 +101,25 @@ export function eventSource<T>(eventName: string, read: () => T): Source<T> {
       if (signal === undefined) throw new Error("eventSource.subscribe needs an owning signal");
       if (signal.aborted) return () => {};
       listening++;
-      signal.addEventListener("abort", () => listening--, { once: true });
-      window.addEventListener(
-        eventName,
-        (e) => {
-          // The next getState() reads, inside select's try.
-          if (e !== lastEvent) {
-            lastEvent = e;
-            cached = null;
-          }
-          listener();
-        },
-        { signal },
-      );
-      return () => {};
+      let active = true;
+      const handler = (e: Event): void => {
+        // The next getState() reads, inside select's try.
+        if (e !== lastEvent) {
+          lastEvent = e;
+          cached = null;
+        }
+        listener();
+      };
+      const stop = (): void => {
+        if (!active) return;
+        active = false;
+        listening--;
+        window.removeEventListener(eventName, handler);
+        signal.removeEventListener("abort", stop);
+      };
+      signal.addEventListener("abort", stop, { once: true });
+      window.addEventListener(eventName, handler, { signal });
+      return stop;
     },
   };
 }

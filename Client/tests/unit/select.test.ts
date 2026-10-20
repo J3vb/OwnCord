@@ -219,6 +219,23 @@ describe("eventSource", () => {
     ac.abort();
   });
 
+  it("stops listening when the returned unsubscribe runs, with the signal still live", () => {
+    let n = 0;
+    const read = vi.fn(() => ++n);
+    const src = eventSource("select-test-unsub", read);
+    const ac = new AbortController();
+    const listener = vi.fn();
+    const unsubscribe = src.subscribe(listener, ac.signal);
+    expect(src.getState()).toBe(1);
+    unsubscribe();
+    unsubscribe();
+    window.dispatchEvent(new Event("select-test-unsub"));
+    expect(listener).not.toHaveBeenCalled();
+    expect(src.getState()).toBe(2);
+    expect(src.getState()).toBe(3);
+    ac.abort();
+  });
+
   it("refuses an unowned subscription", () => {
     expect(() => eventSource("select-test-unowned", () => 1).subscribe(() => {})).toThrow(
       /owning signal/,
