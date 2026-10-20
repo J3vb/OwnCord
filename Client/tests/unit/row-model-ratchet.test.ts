@@ -7,10 +7,10 @@ import { describe, expect, it } from "vitest";
 
 const srcRoot = path.resolve(__dirname, "../../src");
 
-const HAND_WRITTEN_SIGNATURE: readonly string[] = [
-  "components/DmSidebar.ts",
-  "pages/main-page/SidebarDmSection.ts",
-];
+const HAND_WRITTEN_SIGNATURE: Readonly<Record<string, number>> = {
+  "components/DmSidebar.ts": 1,
+  "pages/main-page/SidebarDmSection.ts": 1,
+};
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -38,20 +38,26 @@ function callArguments(text: string): string[] {
   return calls;
 }
 
-function hasHandWrittenSignature(text: string): boolean {
-  return callArguments(text).some((args) => /\bsignature\b/.test(args));
+function countHandWrittenSignatures(text: string): number {
+  return callArguments(text).filter((args) => /\bsignature\b/.test(args)).length;
 }
 
-function offenders(): string[] {
-  return sourceFiles(srcRoot)
-    .filter((file) => hasHandWrittenSignature(readFileSync(file, "utf8")))
-    .map((file) => path.relative(srcRoot, file).split(path.sep).join("/"))
-    .toSorted();
+function hasHandWrittenSignature(text: string): boolean {
+  return countHandWrittenSignatures(text) > 0;
+}
+
+function offenders(): Record<string, number> {
+  const found: Record<string, number> = {};
+  for (const file of sourceFiles(srcRoot)) {
+    const count = countHandWrittenSignatures(readFileSync(file, "utf8"));
+    if (count > 0) found[path.relative(srcRoot, file).split(path.sep).join("/")] = count;
+  }
+  return found;
 }
 
 describe("reconcileChildren hand-written signature ratchet", () => {
-  it("matches the shrink-only list exactly (new use fails; a stale entry fails)", () => {
-    expect(offenders()).toEqual([...HAND_WRITTEN_SIGNATURE].toSorted());
+  it("matches the shrink-only call-site counts exactly (a new call fails; a stale entry fails)", () => {
+    expect(offenders()).toEqual(HAND_WRITTEN_SIGNATURE);
   });
 
   it("detects a hand-written signature and ignores a call without one", () => {
@@ -59,6 +65,11 @@ describe("reconcileChildren hand-written signature ratchet", () => {
       hasHandWrittenSignature(`reconcileChildren(list, items, { key, signature: sig, create });`),
     ).toBe(true);
     expect(hasHandWrittenSignature(`reconcileChildren(list, items, { key, create });`)).toBe(false);
+    expect(
+      countHandWrittenSignatures(
+        `reconcileChildren(a, b, { signature: x }); reconcileChildren(c, d, { signature: y });`,
+      ),
+    ).toBe(2);
     expect(hasHandWrittenSignature(`const signature = 1; reconcileModels(a, b, { key });`)).toBe(
       false,
     );
