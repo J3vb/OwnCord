@@ -16,8 +16,10 @@ const log = createLogger("select");
 
 export interface Source<T> {
   getState(): T;
-  /** `signal`, when given, also ends the subscription (select passes its own). */
-  subscribe(listener: (state: T) => void, signal?: AbortSignal): () => void;
+  /** select passes its own signal; a source may use it to end the subscription
+   *  (eventSource does), and select also calls the returned unsubscribe on abort. */
+  /** The listener is only told that something changed; select reads the state. */
+  subscribe(listener: () => void, signal?: AbortSignal): () => void;
 }
 
 type StatesOf<S> = { readonly [K in keyof S]: S[K] extends Source<infer T> ? T : never };
@@ -103,11 +105,12 @@ export function eventSource<T>(eventName: string, read: () => T): Source<T> {
       window.addEventListener(
         eventName,
         (e) => {
+          // The next getState() reads, inside select's try.
           if (e !== lastEvent) {
             lastEvent = e;
-            cached = { value: read() };
+            cached = null;
           }
-          listener(get());
+          listener();
         },
         { signal },
       );

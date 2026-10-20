@@ -72,20 +72,19 @@ describe("select", () => {
   it("abort unsubscribes every source and the event listener", () => {
     const a = box();
     const b = box();
-    const unsubA = vi.spyOn(a, "subscribe");
-    const onChange = vi.fn();
-    const ev = eventSource("select-test-abort", () => Math.random());
-    const remove = vi.spyOn(window, "addEventListener");
-    select([a, b, ev], (x, y, z) => x.n + y.n + z, onChange, { signal: fresh() });
-    expect(unsubA).toHaveBeenCalledTimes(1);
+    const unsubs = [a, b].map((store) => {
+      const unsub = vi.fn();
+      vi.spyOn(store, "subscribe").mockReturnValue(unsub);
+      return unsub;
+    });
+    const read = vi.fn(() => 1);
+    const ev = eventSource("select-test-abort", read);
+    select([a, b, ev], (x, y, z) => x.n + y.n + z, vi.fn(), { signal: fresh() });
     ac.abort();
-    a.setState(() => ({ n: 5 }));
-    a.flush();
-    b.setState(() => ({ n: 5 }));
-    b.flush();
+    for (const unsub of unsubs) expect(unsub).toHaveBeenCalledTimes(1);
+    read.mockClear();
     window.dispatchEvent(new Event("select-test-abort"));
-    expect(onChange).not.toHaveBeenCalled();
-    remove.mockRestore();
+    expect(read).not.toHaveBeenCalled();
   });
 
   it("aborted signal subscribes nothing", () => {
@@ -151,10 +150,19 @@ describe("select", () => {
   it("abort inside onChange stops later notifications in the same flush", () => {
     const a = box(1);
     const b = box(1);
+    // A source whose unsubscribe does nothing, so only select's own abort
+    // check can drop the notification that follows.
+    let notifyLeaky = (): void => {};
+    const leaky = {
+      getState: () => b.getState(),
+      subscribe: (listener: () => void) => {
+        notifyLeaky = listener;
+        return () => {};
+      },
+    };
     const seen: number[] = [];
-    // Both sources notify in one flush each; the second must be dropped.
     select(
-      [a, b],
+      [a, leaky],
       (x, y) => x.n + y.n,
       (n) => {
         seen.push(n);
@@ -163,10 +171,10 @@ describe("select", () => {
       { signal: fresh() },
     );
     a.setState(() => ({ n: 2 }));
-    b.setState(() => ({ n: 2 }));
     a.flush();
-    b.flush();
-    expect(seen).toEqual([4]);
+    b.setState(() => ({ n: 5 }));
+    notifyLeaky();
+    expect(seen).toEqual([3]);
   });
 
   it("a source listed twice subscribes once", () => {
@@ -188,7 +196,7 @@ describe("eventSource", () => {
     const src = eventSource("select-test-cache", read);
     const ac = new AbortController();
     const seen: unknown[] = [];
-    src.subscribe((s) => seen.push(s), ac.signal);
+    src.subscribe(() => seen.push(src.getState()), ac.signal);
     expect(src.getState()).toBe(src.getState());
     expect(read).toHaveBeenCalledTimes(1);
     window.dispatchEvent(new Event("select-test-cache"));
@@ -204,8 +212,8 @@ describe("eventSource", () => {
     const read = vi.fn(() => 1);
     const src = eventSource("select-test-shared", read);
     const ac = new AbortController();
-    src.subscribe(() => {}, ac.signal);
-    src.subscribe(() => {}, ac.signal);
+    src.subscribe(() => src.getState(), ac.signal);
+    src.subscribe(() => src.getState(), ac.signal);
     window.dispatchEvent(new Event("select-test-shared"));
     expect(read).toHaveBeenCalledTimes(1);
     ac.abort();

@@ -7,6 +7,7 @@
 import { createElement, setOwnedTimeout } from "@lib/dom";
 import { reconcileModels } from "@lib/reconcile";
 import { select } from "@lib/select";
+import { shallowEqual } from "@lib/store";
 import { buildOffsets, rangeFor } from "@lib/virtualRange";
 import { registerSessionReset } from "@lib/sessionRegistry";
 import type { MountableComponent } from "@lib/safe-render";
@@ -967,7 +968,12 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
       () => {
         render();
       },
-      { signal: disposable.signal },
+      // Each slice keeps its own shallow compare, so a copied Map with the
+      // same entries does not re-render.
+      {
+        signal: disposable.signal,
+        equals: (a, b) => shallowEqual(a.members, b.members) && shallowEqual(a.roles, b.roles),
+      },
     );
 
     disposable.addCleanup(() => scrollBinding?.destroy());
