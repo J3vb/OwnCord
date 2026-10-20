@@ -463,13 +463,16 @@ func (q *Queries) ListChannels(ctx context.Context) ([]ListChannelsRow, error) {
 	return items, nil
 }
 
-const setChannelAFK = `-- name: SetChannelAFK :exec
-UPDATE channels SET afk = 1 WHERE id = ?
+const setChannelAFK = `-- name: SetChannelAFK :execrows
+UPDATE channels SET afk = 1 WHERE id = ? AND type = 'voice' AND archived = 0
 `
 
-func (q *Queries) SetChannelAFK(ctx context.Context, id int64) error {
-	_, err := q.db.ExecContext(ctx, setChannelAFK, id)
-	return err
+func (q *Queries) SetChannelAFK(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setChannelAFK, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const setChannelSlowMode = `-- name: SetChannelSlowMode :exec

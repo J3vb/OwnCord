@@ -34,8 +34,8 @@ FROM channels WHERE afk = 1;
 -- name: ClearAFKChannel :exec
 UPDATE channels SET afk = 0 WHERE afk = 1;
 
--- name: SetChannelAFK :exec
-UPDATE channels SET afk = 1 WHERE id = ?;
+-- name: SetChannelAFK :execrows
+UPDATE channels SET afk = 1 WHERE id = ? AND type = 'voice' AND archived = 0;
 
 -- name: CreateChannel :execresult
 INSERT INTO channels (name, type, category, topic, position) VALUES (?, ?, ?, ?, ?);

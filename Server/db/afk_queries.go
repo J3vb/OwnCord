@@ -29,7 +29,9 @@ func (d *DB) GetAFKChannel(ctx context.Context) (*Channel, error) {
 // rows. The clear runs before the set because the index is checked per
 // statement.
 //
-// The caller validates that channelID names a flaggable channel.
+// The set only matches a live voice channel; if the channel was deleted or
+// archived after the caller validated it, nothing commits and ErrNotFound is
+// returned.
 func (d *DB) SetAFKChannel(ctx context.Context, channelID *int64) (*int64, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -53,8 +55,12 @@ func (d *DB) SetAFKChannel(ctx context.Context, channelID *int64) (*int64, error
 		return nil, fmt.Errorf("SetAFKChannel clear: %w", err)
 	}
 	if channelID != nil {
-		if err := q.SetChannelAFK(ctx, *channelID); err != nil {
+		n, err := q.SetChannelAFK(ctx, *channelID)
+		if err != nil {
 			return nil, fmt.Errorf("SetAFKChannel set: %w", err)
+		}
+		if n == 0 {
+			return nil, fmt.Errorf("SetAFKChannel set: channel %d: %w", *channelID, ErrNotFound)
 		}
 	}
 	if err := tx.Commit(); err != nil {

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -402,6 +403,9 @@ func (s *ChannelService) SetAFKChannel(ctx context.Context, actorID int64, chann
 	}
 
 	prevID, err := s.afk.SetAFKChannel(ctx, channelID)
+	if errors.Is(err, db.ErrNotFound) {
+		return AFKChange{}, fmt.Errorf("%w: channel not found", ErrNotFound)
+	}
 	if err != nil {
 		return AFKChange{}, fmt.Errorf("%w: failed to set afk channel: %w", ErrInternal, err)
 	}
