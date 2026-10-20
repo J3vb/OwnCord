@@ -255,6 +255,9 @@ export function attachDragHandlers(
   signal: AbortSignal,
   lifetimeSignal: AbortSignal,
   onReorderChannel?: (reorders: readonly ChannelReorderData[]) => void,
+  /** The caller's answer to "may this user manage channels"; omitted, it is
+   *  read from the stores here. */
+  canManage?: boolean,
 ): void {
   if (onReorderChannel === undefined) {
     return;
@@ -263,7 +266,7 @@ export function attachDragHandlers(
   // delete, reorder) — a custom role holding the bit gets the same rows the
   // Edit/Delete menu already offers it, and a role merely *named* "admin"
   // without the bit does not get a drag the server will 403.
-  if (!canManageChannels()) {
+  if (!(canManage ?? canManageChannels())) {
     return;
   }
 

@@ -5,13 +5,15 @@ import {
   currentUserPermissions,
   isLegacyAdminRole,
   roleHasPermission,
+  roleHasPermissionIn,
+  permissionsForRoleIn,
   canManageChannels,
   canViewAuditLog,
   canManageInvites,
   canModerateMembers,
 } from "../../src/lib/permissions";
 import { Permission } from "../../src/lib/types";
-import { setRoles } from "../../src/stores/channels.store";
+import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
 
 // Default role permission values (from SCHEMA.md)
@@ -291,5 +293,40 @@ describe("canManageChannels / canViewAuditLog / canManageInvites / canModerateMe
     expect(canModerateMembers()).toBe(true);
     signInAs("Member");
     expect(canModerateMembers()).toBe(false);
+  });
+});
+
+describe("pure role variants", () => {
+  const ROLES = [
+    { id: 1, name: "Owner", color: null, permissions: OWNER_PERMS },
+    { id: 3, name: "Moderator", color: null, permissions: MODERATOR_PERMS },
+    { id: 4, name: "Muted", color: null, permissions: 0 },
+  ];
+  const PERMS = [
+    Permission.MANAGE_CHANNELS,
+    Permission.MANAGE_MESSAGES,
+    Permission.MANAGE_INVITES,
+    Permission.KICK_MEMBERS,
+    Permission.MANAGE_SERVER,
+  ];
+
+  it("roleHasPermissionIn agrees with roleHasPermission over the store's roles", () => {
+    setRoles(ROLES);
+    // "admin" is absent from the list: the legacy fallback must agree too.
+    for (const role of ["owner", "Moderator", "muted", "admin", "member", ""]) {
+      for (const perm of PERMS) {
+        expect(
+          roleHasPermissionIn(channelsStore.getState().roles, role, perm),
+          `${role}/${perm}`,
+        ).toBe(roleHasPermission(role, perm));
+      }
+    }
+  });
+
+  it("permissionsForRoleIn matches case-insensitively", () => {
+    expect(permissionsForRoleIn(ROLES, "mOdErAtOr")).toBe(MODERATOR_PERMS);
+    expect(permissionsForRoleIn(ROLES, "MUTED")).toBe(0);
+    expect(permissionsForRoleIn(ROLES, "nobody")).toBeNull();
+    expect(permissionsForRoleIn([], "owner")).toBeNull();
   });
 });

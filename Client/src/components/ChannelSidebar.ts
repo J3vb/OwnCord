@@ -3,23 +3,23 @@
  * unread indicators, and collapse/expand behavior.
  * Voice channels show connected users; a click joins, or opens the call once joined.
  * The voice rows draw from row models (features/channels/voiceRow*.ts) that
- * one `select` over their stores keeps current (5.4c-2).
+ * one `select` over their stores keeps current (5.4c-2); the text rows and the
+ * category groups draw from models too (features/channels/channelRow*.ts, 5.4d).
  */
 
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
-import { reconcileChildren, reconcileModels, sameModel } from "@lib/reconcile";
+import { reconcileModels, sameModel } from "@lib/reconcile";
 import { select, eventSource, type Selection } from "@lib/select";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
-import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
-import { channelsStore, getChannelsByCategory, categoryLabel } from "@stores/channels.store";
+import { channelsStore } from "@stores/channels.store";
 import { navigateToChannel } from "@lib/channel-navigation";
 import { isChannelMuted } from "@lib/channel-mutes";
-import { HIDE_MUTED_CHANNELS_KEY, hiddenByMute } from "@lib/hide-muted-channels";
+import { HIDE_MUTED_CHANNELS_KEY, isHideMutedChannels } from "@lib/hide-muted-channels";
 import type { Channel, ChannelsState } from "@stores/channels.store";
 import { authStore, getCurrentUser, type AuthState } from "@stores/auth.store";
-import { uiStore, toggleCategory, isCategoryCollapsed, type UiState } from "@stores/ui.store";
+import { uiStore, toggleCategory, type UiState } from "@stores/ui.store";
 import { safetyStore, type SafetyState } from "../features/safety/store";
 import { voiceStore } from "@stores/voice.store";
 import type { PeerVerification, VoiceState, VoiceUser } from "@stores/voice.store";
@@ -35,20 +35,33 @@ import { attachVoiceUserDrag, markVoiceDropTarget } from "../features/voice/drag
 import { openIdentityMismatchModal } from "../features/voice/peerVerification";
 import { createAvatarElement, pickAvatarColor } from "@components/message-list/avatar";
 import { membersStore, type Member, type MembersState } from "@stores/members.store";
-import { roleHasPermission, canManageChannels, currentUserPermissions } from "@lib/permissions";
+import { roleHasPermission } from "@lib/permissions";
 import { Permission } from "@lib/types";
 import { shellText } from "../i18n/shell";
 import { voiceText } from "../i18n/voice";
 import { joinRetryInMs } from "../features/voice/joinBackoff";
 import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup";
-// nsfwIndicator/privateIndicator: shared with the text rows until 5.4d moves them onto models.
+import {
+  drawCategoryGroup,
+  drawTextChannelRow,
+  type CategoryGroupModel,
+} from "../features/channels/channelRow.view";
+import {
+  categoryGroupModel,
+  channelAccess,
+  channelGroups,
+  channelRowModel,
+  visibleRows,
+  type ChannelGroup,
+  type ChannelListContext,
+  type ChannelListInputs,
+  type ChannelRowModel,
+} from "../features/channels/channelRowModel";
 import {
   drawVoiceChannelChrome,
   drawVoiceUserRow,
-  nsfwIndicator,
   patchVoiceChannelChrome,
   patchVoiceUserRow,
-  privateIndicator,
   VOICE_USER_PATCH_FIELDS,
   type VoiceChannelChromeModel,
   type VoiceUserRowModel,
@@ -118,82 +131,6 @@ export interface ChannelSidebarOptions {
   readonly onWatchStream?: (userId: number) => void;
 }
 
-function renderTextChannelItem(
-  channel: Channel,
-  isActive: boolean,
-  signal: AbortSignal,
-): HTMLDivElement {
-  const classes = [
-    "channel-item",
-    isActive ? "active" : "",
-    // A muted channel is quiet: no bold name and no pill for plain unread.
-    // A mention is addressed to the reader, so it still lights the row.
-    rowLooksUnread(channel) ? "unread" : "",
-    channel.mentionCount > 0 ? "mentioned" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  const item = createElement("div", {
-    class: classes,
-    "data-testid": `channel-${channel.id}`,
-    // Roving list item: reachable by Tab once, then arrow-stepped (B9-21).
-    role: "link",
-    tabindex: "-1",
-  });
-  item.dataset.channelId = String(channel.id);
-  item.setAttribute("aria-current", isActive ? "page" : "false");
-  // The pill is drawn in CSS only, so name the unread state for screen
-  // readers; a mention announces itself through its badge.
-  if (rowLooksUnread(channel) && channel.mentionCount === 0) {
-    item.setAttribute("aria-description", shellText("channel.unread"));
-  }
-
-  const prefix = createElement("span", { class: "ch-icon", "aria-hidden": "true" });
-  if (channel.type === "announcement") {
-    prefix.appendChild(createIcon("megaphone", 16));
-  } else {
-    prefix.textContent = "#";
-  }
-  const name = createElement("span", { class: "ch-name" }, channel.name);
-
-  appendChildren(item, prefix, name);
-
-  // Age-restricted marker. Next to the name rather than replacing the "#", so
-  // the channel still reads as a channel and the mark is visible whether or
-  // not the reader has already accepted the gate this session.
-  if (channel.nsfw) {
-    item.appendChild(nsfwIndicator(channel.id));
-  }
-  if (channel.isPrivate) {
-    item.appendChild(privateIndicator(channel.id));
-  }
-
-  // A server channel shows plain unread as a bold name and a white pill only
-  // (Discord parity): the count is for mentions and for DMs. A mute silences
-  // chatter, never something addressed to the reader, so the mention badge is
-  // left alone.
-  const muted = isChannelMuted(channel.id);
-  if (muted) {
-    item.classList.add("muted");
-  }
-
-  // The mention badge counts the mentions, not the messages.
-  if (channel.mentionCount > 0) {
-    const badge = createElement(
-      "span",
-      { class: "mention-badge", "data-testid": `channel-mentions-${channel.id}` },
-      String(channel.mentionCount),
-    );
-    badge.title = shellText("channel.mentions", { count: channel.mentionCount });
-    item.appendChild(badge);
-  }
-
-  item.addEventListener("click", () => navigateToChannel(channel.id), { signal });
-
-  return item;
-}
-
 /** Moderation section for one participant row, from the channel's
  *  server-computed can_moderate_voice (B9-14, Q5): undefined when it is false
  *  (which hides the section entirely), and the reason it is unavailable when
@@ -234,40 +171,6 @@ export function buildVoiceModOptions(
     onMove: (toChannelId) => cb.onMove(user.userId, toChannelId),
     onDisconnect: () => cb.onDisconnect(user.userId),
   };
-}
-
-/** Whether a text-style row has unread messages; voice rows never do. */
-function rowIsUnread(channel: Channel): boolean {
-  return channel.type !== "voice" && channel.unreadCount > 0;
-}
-
-/**
- * Whether a row draws the "unread" class: a muted channel is quiet (no bold,
- * no pill) unless it has a mention. Every row that looks unread is also shown
- * under a collapsed category (see `rowVisibleWhenCollapsed`), so a collapsed
- * header needs no "unread hidden" marker.
- */
-function rowLooksUnread(channel: Channel): boolean {
-  return rowIsUnread(channel) && (!isChannelMuted(channel.id) || channel.mentionCount > 0);
-}
-
-/** Whether a voice channel has people in it, or is the one you are connected to. */
-function voiceChannelOccupied(channelId: number): boolean {
-  const voice = voiceStore.getState();
-  return voice.currentChannelId === channelId || (voice.voiceUsers.get(channelId)?.size ?? 0) > 0;
-}
-
-/**
- * Whether a channel row still shows under a collapsed category: the channel
- * you are viewing, any mention (muted or not, a mention always shows), an
- * unread row that is not muted, and voice channels you are in or that have
- * people in them (Discord parity, so a live call stays visible).
- */
-function rowVisibleWhenCollapsed(channel: Channel, activeChannelId: number | null): boolean {
-  if (channel.id === activeChannelId) return true;
-  if (channel.mentionCount > 0) return true;
-  if (channel.type === "voice") return voiceChannelOccupied(channel.id);
-  return rowIsUnread(channel) && !isChannelMuted(channel.id);
 }
 
 /** A peer verification map for a voice state that has none yet: one shared
@@ -346,92 +249,6 @@ function occupiedKey(inputs: VoiceRowInputs): string {
     if (users.size > 0) ids.push(channelId);
   }
   return ids.toSorted((a, b) => a - b).join(",");
-}
-
-function renderChannelItem(
-  channel: Channel,
-  isActive: boolean,
-  signal: AbortSignal,
-  lifetimeSignal: AbortSignal,
-  /** Builds a voice channel's wrapper: its chrome, click and participant rows. */
-  createVoiceRow: (channel: Channel, signal: AbortSignal) => HTMLDivElement,
-  onEditChannel?: (channel: Channel) => void,
-  onDeleteChannel?: (channel: Channel) => void,
-  containerEl?: HTMLElement,
-  channels?: readonly Channel[],
-  onReorderChannel?: (reorders: readonly ChannelReorderData[]) => void,
-  onPurgeChannel?: (channel: Channel, count: number) => Promise<void>,
-  menuChannels: readonly Channel[] | undefined = channels,
-  onInviteFromChannel?: (channel: Channel) => void,
-): HTMLDivElement {
-  const el =
-    channel.type === "voice"
-      ? createVoiceRow(channel, signal)
-      : renderTextChannelItem(channel, isActive, signal);
-  attachChannelContextMenu(
-    el,
-    channel,
-    signal,
-    lifetimeSignal,
-    onEditChannel,
-    onDeleteChannel,
-    onPurgeChannel,
-    menuChannels,
-    onReorderChannel,
-    onInviteFromChannel,
-  );
-  if (containerEl !== undefined && channels !== undefined) {
-    attachDragHandlers(
-      el,
-      channel,
-      containerEl,
-      channels,
-      signal,
-      lifetimeSignal,
-      onReorderChannel,
-    );
-  }
-  return el;
-}
-
-/**
- * Everything a channel row renders, as one string. A changed value rebuilds
- * just that row (B9-21); an unchanged value reuses the node, so focus, a
- * hovered/open state and the scroll position all survive an unrelated update.
- *
- * The group's channel order is folded in so a reorder rebuilds the affected
- * rows: each row's drag handler captures the ordered channel array at attach
- * time, and a reused node would otherwise drop against a stale order.
- *
- * A voice row's participants and live state are not in it: they are drawn
- * from row models (`updateVoiceRow`), which patch or rebuild only the part
- * that changed, so a voice wrapper keeps its node like a text row.
- */
-function channelRowSignature(
-  channel: Channel,
-  activeChannelId: number | null,
-  orderIds: string,
-): string {
-  return [
-    channel.id,
-    channel.name,
-    channel.type,
-    channel.nsfw ? "n" : "",
-    channel.isPrivate ? "p" : "",
-    channel.voiceMaxUsers,
-    activeChannelId === channel.id ? "a" : "",
-    isChannelMuted(channel.id) ? "m" : "",
-    channel.unreadCount,
-    channel.mentionCount,
-    orderIds,
-  ].join("|");
-}
-
-interface GroupRender {
-  /** Category name, or null for the uncategorized group. */
-  readonly name: string | null;
-  readonly channels: readonly Channel[];
-  readonly orderIds: string;
 }
 
 export function createChannelSidebar(options: ChannelSidebarOptions): MountableComponent {
@@ -786,15 +603,40 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     restoreVoiceFocus(focus);
   }
 
+  /** The channel list's inputs, read now (5.4d-1); 5.4d-2 hands them over from
+   *  one `select`. The mute token is fixed: the mute list is read live through
+   *  `listCtx.isMuted` and every mute event redraws. */
+  const muteToken = {};
+  function readListInputs(): ChannelListInputs {
+    const channelsState = channelsStore.getState();
+    return {
+      channels: channelsState.channels,
+      activeChannelId: channelsState.activeChannelId,
+      selfRole: authStore.getState().user?.role ?? "",
+      roles: channelsState.roles,
+      collapsed: uiStore.getState().collapsedCategories,
+      hideMuted: isHideMutedChannels(),
+      mute: muteToken,
+    };
+  }
+  const listCtx: ChannelListContext = {
+    isMuted: isChannelMuted,
+    canCreate: onCreateChannel !== undefined,
+    canReorder: onReorderChannel !== undefined,
+  };
+  const UNCATEGORIZED_KEY = "\u0000uncategorized";
+
   function drawChannels(): void {
-    if (channelList === null) {
+    // voiceSel exists from mount() on, which is also when channelList does.
+    if (channelList === null || voiceSel === null) {
       return;
     }
 
-    const grouped = getChannelsByCategory();
-    const activeChannelId = channelsStore.getState().activeChannelId;
+    const list = readListInputs();
+    const voice = voiceSel.get();
+    const groups = channelGroups(list);
 
-    if (grouped.size === 0) {
+    if (groups.length === 0) {
       for (const child of Array.from(channelList.children)) {
         disposeOwned(child);
         child.remove();
@@ -809,7 +651,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
       // With zero channels there is no category header, so the per-category
       // "+" (the only create affordance) never renders. Offer one here for a
       // manager; a non-manager gets the plain message (#9).
-      if (onCreateChannel !== undefined && canManageChannels()) {
+      if (onCreateChannel !== undefined && channelAccess(list).manageChannels) {
         const createBtn = createElement(
           "button",
           {
@@ -835,37 +677,20 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     }
     channelList.querySelector(".channel-list-empty")?.remove();
 
-    const canManage = canManageChannels();
-    const canModerate = canModerateVoice();
-    const permissions = currentUserPermissions();
-
-    // One entry per category, in the map's order; the null key is the
-    // uncategorized group.
-    const groups: GroupRender[] = [];
-    for (const [category, channels] of grouped) {
-      groups.push({ name: category, channels, orderIds: channels.map((c) => c.id).join(",") });
-    }
-
     /** One group's rows, keyed and reused (B9-21). A collapsed category
-     *  keeps only the rows `rowVisibleWhenCollapsed` allows. */
-    function reconcileRows(container: HTMLElement, g: GroupRender): void {
-      const collapsed = g.name !== null && isCategoryCollapsed(g.name);
-      // Hide Muted Channels drops muted rows here, not from `g.channels`: the
-      // header (kept even when every row is hidden) and the drag-reorder maths
-      // still see the whole category.
-      const rows = g.channels.filter(
-        (ch) =>
-          !hiddenByMute(ch, activeChannelId, voiceChannelOccupied) &&
-          (!collapsed || rowVisibleWhenCollapsed(ch, activeChannelId)),
-      );
+     *  keeps only the rows `visibleRows` allows. */
+    function reconcileRows(container: HTMLElement, g: ChannelGroup): void {
+      const rows = visibleRows(g, list, voice, listCtx);
+      const byId = new Map(rows.map((c) => [c.id, c]));
       const header = container.parentElement?.querySelector(".category") ?? null;
-      const groupKey = g.name ?? "\u0000uncategorized";
+      const groupKey = g.name ?? UNCATEGORIZED_KEY;
       let shown = shownRowsByGroup.get(groupKey);
       if (shown === undefined) {
         shown = [];
         shownRowsByGroup.set(groupKey, shown);
       }
       shown.splice(0, shown.length, ...rows);
+      const collapsed = g.name !== null && list.collapsed.has(g.name);
       // A focused row a collapsed category stops showing (read, muted, emptied)
       // hands focus to the category's arrow instead of dropping it to the page.
       // The row is the container's child holding focus, so a focused
@@ -887,36 +712,57 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
       const lostIndex = losesFocus
         ? Array.from(container.querySelectorAll(".channel-item")).indexOf(focusedRow)
         : -1;
-      reconcileChildren(container, rows, {
+      reconcileModels<Channel, ChannelRowModel>(container, rows, {
         key: (ch) => String(ch.id),
-        signature: (ch) => channelRowSignature(ch, activeChannelId, g.orderIds),
-        create: (ch) => {
+        model: (ch) => channelRowModel(ch, g, list, listCtx),
+        create: (model, atEvent) => {
+          const ch = byId.get(model.channelId);
+          // i18n-exempt: developer-facing invariant error, never shown to a user
+          if (ch === undefined) throw new Error("channel row built for a channel not in the pass");
           const owner = new Disposable();
-          const el = renderChannelItem(
+          const { signal } = owner;
+          const el =
+            model.kind === "voice" ? createVoiceRow(ch, signal) : drawTextChannelRow(model);
+          if (model.kind !== "voice") {
+            el.addEventListener("click", () => navigateToChannel(model.channelId), { signal });
+          }
+          attachChannelContextMenu(
+            el,
             ch,
-            ch.id === activeChannelId,
-            owner.signal,
+            signal,
             // Sidebar-lifetime signal (aborted only in destroy()) for anything
             // that owns DOM mounted outside this render's rows — a menu or
             // modal on document.body must not be torn down by an unrelated
             // re-render (OC-0281, OC-0282).
             disposable.signal,
-            createVoiceRow,
-            onEditChannel,
-            onDeleteChannel,
+            // A row now outlives a channel edit, so the actions take the live
+            // channel, not the one this row was built for.
+            onEditChannel === undefined ? undefined : () => onEditChannel(atEvent()),
+            onDeleteChannel === undefined ? undefined : () => onDeleteChannel(atEvent()),
+            onPurgeChannel === undefined
+              ? undefined
+              : (_channel, count) => onPurgeChannel(atEvent(), count),
+            shown,
+            onReorderChannel,
+            onInviteFromChannel === undefined ? undefined : () => onInviteFromChannel(atEvent()),
+            model.access,
+          );
+          attachDragHandlers(
+            el,
+            ch,
             container,
             g.channels,
+            signal,
+            disposable.signal,
             onReorderChannel,
-            onPurgeChannel,
-            shown,
-            onInviteFromChannel,
+            model.access.manageChannels,
           );
           ownerByEl.set(el, owner);
           return el;
         },
         // A reused voice wrapper brings its chrome and participants up to date.
-        update: (el, ch) => {
-          if (ch.type === "voice") updateVoiceRow(el, ch);
+        update: (el, ch, model) => {
+          if (model.kind === "voice") updateVoiceRow(el, ch);
         },
         dispose: disposeOwned,
       });
@@ -932,20 +778,18 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
       }
     }
 
-    reconcileChildren(channelList, groups, {
-      key: (g) => g.name ?? "\u0000uncategorized",
-      // A group rebuilds when its own chrome or permission-dependent
-      // affordances change; an unchanged group reuses its element and
-      // reconciles its rows in place.
-      signature: (g) =>
-        [
-          g.name ?? "",
-          g.name !== null && isCategoryCollapsed(g.name) ? "c" : "e",
-          canManage ? "C" : "",
-          canModerate ? "M" : "",
-          permissions,
-        ].join("|"),
-      create: (g) => buildCategoryGroup(g, reconcileRows),
+    const groupsByKey = new Map(groups.map((g) => [g.name ?? UNCATEGORIZED_KEY, g]));
+    reconcileModels<ChannelGroup, CategoryGroupModel>(channelList, groups, {
+      key: (g) => g.name ?? UNCATEGORIZED_KEY,
+      // A group rebuilds when its own header changes (collapse, the "+");
+      // an unchanged group reuses its element and reconciles its rows in place.
+      model: (g) => categoryGroupModel(g, list, listCtx),
+      create: (model) => {
+        const g = groupsByKey.get(model.name ?? UNCATEGORIZED_KEY);
+        // i18n-exempt: developer-facing invariant error, never shown to a user
+        if (g === undefined) throw new Error("category group built for a group not in the pass");
+        return buildCategoryGroup(model, g, reconcileRows);
+      },
       update: (el, g) => {
         const container = el.querySelector<HTMLElement>(".category-channels-container");
         if (container !== null) reconcileRows(container, g);
@@ -956,89 +800,39 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     setRovingTabindex(channelList, ".channel-item");
   }
 
-  /** Build the header and rows for one category group. */
+  /** Draw one category group from its model, bind its header, then fill its rows. */
   function buildCategoryGroup(
-    g: GroupRender,
-    reconcileRows: (container: HTMLElement, g: GroupRender) => void,
+    model: CategoryGroupModel,
+    g: ChannelGroup,
+    reconcileRows: (container: HTMLElement, g: ChannelGroup) => void,
   ): HTMLDivElement {
-    const group = createElement("div", {});
+    const group = drawCategoryGroup(model);
     const owner = new Disposable();
     ownerByEl.set(group, owner);
     const { signal } = owner;
+    const name = model.name;
 
-    if (g.name !== null) {
-      const collapsed = isCategoryCollapsed(g.name);
-      const header = createElement("div", {
-        class: collapsed ? "category collapsed" : "category",
-      });
-      header.dataset.category = g.name;
-      const categoryNameId = `category-name-${g.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
-
-      // The arrow is the keyboard-operated collapse control; the header div
-      // itself keeps its mouse click handler. A real <button> here (rather
-      // than making the whole header a button) keeps the header's own "+" from
-      // being an interactive element nested inside another one. The label
-      // names the arrow (aria-labelledby), so no second copy of the category
-      // name is needed.
-      const label = createElement(
-        "span",
-        { class: "category-name", id: categoryNameId },
-        categoryLabel(g.name),
-      );
-      const arrow = createElement("button", {
-        type: "button",
-        class: "category-arrow",
-        "aria-expanded": collapsed ? "false" : "true",
-        "aria-labelledby": categoryNameId,
-      });
-      arrow.appendChild(createIcon(collapsed ? "chevron-right" : "chevron-down", 12));
-
-      appendChildren(header, arrow, label);
-
-      if (onCreateChannel !== undefined && canManageChannels()) {
-        const addBtn = createElement(
-          "button",
-          {
-            type: "button",
-            class: "category-add-btn",
-            title: shellText("channel.create"),
-            "aria-label": shellText("channel.create"),
-            "data-testid": `create-channel-${g.name.toLowerCase().replace(/\s+/g, "-")}`,
-          },
-          "+",
-        );
-        addBtn.addEventListener(
+    if (name !== null) {
+      const header = group.querySelector<HTMLElement>(":scope > .category");
+      const arrow = header?.querySelector<HTMLElement>(":scope > .category-arrow") ?? null;
+      if (header !== null && arrow !== null) {
+        header.querySelector(":scope > .category-add-btn")?.addEventListener(
           "click",
           (e) => {
             e.stopPropagation();
-            onCreateChannel(g.name!);
+            onCreateChannel?.(name);
           },
           { signal },
         );
-        header.appendChild(addBtn);
+        header.addEventListener("click", () => toggleCategory(name), { signal });
+        attachCategoryContextMenu(header, arrow, name, signal, disposable.signal);
       }
-
-      header.addEventListener(
-        "click",
-        () => {
-          toggleCategory(g.name!);
-        },
-        { signal },
-      );
-
-      attachCategoryContextMenu(header, arrow, g.name, signal, disposable.signal);
-
-      group.appendChild(header);
     }
 
-    // Built even when collapsed: the joined voice channel stays visible there,
-    // and a later join or leave reconciles this container in place.
-    const container = createElement("div", { class: "category-channels-container" });
+    const container = group.querySelector<HTMLElement>(":scope > .category-channels-container");
     // Populate through the reconciler so every row gets its key metadata; a
     // later in-place update can then recognise and reuse them.
-    group.appendChild(container);
-    reconcileRows(container, g);
-
+    if (container !== null) reconcileRows(container, g);
     return group;
   }
 

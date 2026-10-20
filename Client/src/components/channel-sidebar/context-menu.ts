@@ -20,6 +20,7 @@ import {
   canManageInvites,
 } from "@lib/permissions";
 import { Permission } from "@lib/types";
+import type { ChannelAccess } from "../../features/channels/channelRow.view";
 import { formatChannelLink } from "@lib/deep-link";
 import { markChannelRead, hasUnread } from "@lib/read-state";
 import {
@@ -83,15 +84,18 @@ export function attachChannelContextMenu(
   channels?: readonly Channel[],
   onReorder?: (reorders: readonly ChannelReorderData[]) => void,
   onInvite?: (channel: Channel) => void,
+  /** What the role may do, decided by the caller (the sidebar's row model);
+   *  omitted, each entry reads the stores here. */
+  access?: ChannelAccess,
 ): void {
-  const canManage = canManageChannels();
+  const canManage = access?.manageChannels ?? canManageChannels();
 
   // Voice channels hold no messages, and the server rejects a purge in a DM,
   // so the section is offered only where it can succeed.
   const canPurge =
     onPurge !== undefined &&
     channel.type !== "voice" &&
-    hasPermission(currentUserPermissions(), Permission.MANAGE_MESSAGES);
+    (access?.manageMessages ?? hasPermission(currentUserPermissions(), Permission.MANAGE_MESSAGES));
 
   const showEdit = canManage && onEdit !== undefined;
   const showDelete = canManage && onDelete !== undefined;
@@ -104,7 +108,7 @@ export function attachChannelContextMenu(
   const showMove = canManage && channels !== undefined && onReorder !== undefined;
   // Invite People opens the invite manager, which only MANAGE_INVITES holders
   // can list or create from; the server enforces the same bit.
-  const showInvite = onInvite !== undefined && canManageInvites();
+  const showInvite = onInvite !== undefined && (access?.manageInvites ?? canManageInvites());
   // The link opens the channel's message view, so a voice channel has none to
   // offer (joining one is a click on its row, not a link).
   const showCopyLink = channel.type !== "voice";
