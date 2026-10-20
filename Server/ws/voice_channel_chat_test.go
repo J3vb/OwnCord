@@ -141,7 +141,7 @@ func TestVoiceChannelChat_NotJoinedMayReadAndSend(t *testing.T) {
 // channel's chat. Focus and send answer FORBIDDEN, the subscription is
 // dropped, a later chat_message does not reach them, and no channel_activity
 // entry names the channel.
-func TestVoiceChannelChat_ReadRevokedMidCall(t *testing.T) {
+func TestVoiceChannelChat_ReadRevokedMidSession(t *testing.T) {
 	f := newActivityFixture(t)
 	startActivityHub(t, f.hub)
 	ctx := context.Background()

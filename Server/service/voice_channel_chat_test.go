@@ -110,7 +110,7 @@ func TestVoiceChannelChat_SlowModeApplies(t *testing.T) {
 // ignores it), so a timed-out member can sit in the voice channel. Their chat
 // send is refused with the timeout error, while reading, focus and history
 // still work.
-func TestVoiceChannelChat_TimedOutInCallCannotSend(t *testing.T) {
+func TestVoiceChannelChat_TimedOutCannotSend(t *testing.T) {
 	svc, chans, database := newVoiceChatFixture(t)
 	ctx := context.Background()
 	if _, err := database.CreateMessage(ctx, vcChatChannel, vcChatTarget, "before the timeout", nil); err != nil {
