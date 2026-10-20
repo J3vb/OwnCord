@@ -30,10 +30,21 @@ const (
 	// from the caller's context (see detachFetch). It matches the http.Client
 	// timeout NewUpdater sets, so a caller that stays connected sees the same
 	// effective deadline as before.
-	fetchTimeout     = 30 * time.Second
-	checksumAsset    = "checksums.sha256"
-	manifestAsset    = "server-update-manifest.json"
-	manifestSigAsset = manifestAsset + ".sig"
+	fetchTimeout = 30 * time.Second
+	// metadataClientTimeout bounds a whole metadata exchange (release lookup,
+	// checksum and manifest files). The release asset download does not use it:
+	// see downloadHTTPClient.
+	metadataClientTimeout = 30 * time.Second
+	// responseHeaderTimeout bounds the wait for response headers on any
+	// outbound request, so a server that accepts the connection and then says
+	// nothing is abandoned.
+	responseHeaderTimeout = 30 * time.Second
+	// defaultDownloadStallTimeout abandons an asset download that has received
+	// no body bytes for this long.
+	defaultDownloadStallTimeout = 60 * time.Second
+	checksumAsset               = "checksums.sha256"
+	manifestAsset               = "server-update-manifest.json"
+	manifestSigAsset            = manifestAsset + ".sig"
 
 	// The four published server assets. The amd64 pair's names are frozen:
 	// servers deployed before arm64 existed match them exactly, so renaming
@@ -98,6 +109,9 @@ type Updater struct {
 	mu             syncutil.Mutex
 	httpClient     *http.Client
 	signingKeyText string
+	// downloadStallTimeout aborts an asset download when no body bytes arrive
+	// for this long. Zero means defaultDownloadStallTimeout.
+	downloadStallTimeout time.Duration
 }
 
 // NewUpdater creates an Updater for the given repository.
@@ -110,8 +124,11 @@ func NewUpdater(currentVersion, githubToken, repoOwner, repoName string) *Update
 		signingKeyText: defaultServerSignaturePublicKey,
 	}
 	// Each redirect hop passes the same host check as the first request.
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = responseHeaderTimeout
 	u.httpClient = &http.Client{
-		Timeout: 30 * time.Second,
+		Transport: transport,
+		Timeout:   metadataClientTimeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
 				return fmt.Errorf("stopped after %d redirects", len(via))

@@ -277,6 +277,10 @@ and only when it changes something a contributor or fork holder must do
 - Voice signaling through the server's built-in proxy dropped the call connection when a single message passed 32 KiB, which could happen in a busy room. Messages up to 256 KiB now pass through.
 - Timing out someone who was in a voice channel kicked them out of it within a minute, even when the moderator could not mute them. They now stay in the call (muted if the moderator could mute members), and the mute lifts the moment the timeout ends instead of up to 15 minutes later. They still cannot join a voice channel while timed out.
 
+**Server (operators)**
+
+- Updating the server from the admin panel no longer fails on a slow connection: the download is no longer cut off after 30 seconds. It still gives up if no data arrives for 60 seconds or the whole update takes more than 5 minutes.
+
 ## v2.3.0-beta.1
 
 **OwnCord 2.3 beta 1** (the fourth public beta) is the voice release of the self-hosted chat app with channels, direct messages, voice and video, and file sharing. Calls get their own view with tiles and a control bar, voice settings work the way Discord's do, streaming gets a stream card with Change source, and the app tells you what changed after an update. It also fixes a long list of voice, scrolling and server problems.
