@@ -475,8 +475,10 @@ describe("startAutoIdle with an OS idle source", () => {
   });
 });
 
-describe("startAutoIdle in a voice call", () => {
-  // Sitting in a call without touching anything is not being away.
+describe("startAutoIdle in a voice channel or DM call (roadmap 8.2)", () => {
+  // The controller knows nothing about calls: the normal timer applies in a
+  // voice channel or DM call exactly as everywhere else, so each case below
+  // is the plain controller with no call state anywhere.
   let controller: AutoIdleController | null = null;
 
   beforeEach(() => {
@@ -490,105 +492,95 @@ describe("startAutoIdle in a voice call", () => {
     vi.useRealTimers();
   });
 
-  it("does not go idle while in a call, and leaving restarts the full delay", () => {
+  it("takes no call input and exposes no call hook", () => {
+    controller = startAutoIdle({ onStatusChange: vi.fn(), target: createTarget() });
+    expect(Object.keys(controller).sort()).toEqual(["destroy", "notifyActivity"]);
+  });
+
+  it("goes idle after the normal delay with no input, and the first input restores Online", () => {
     saveUserStatus("online");
     const onStatusChange = vi.fn();
-    controller = startAutoIdle({ onStatusChange, target: createTarget(), inCall: true });
+    const target = createTarget();
+    controller = startAutoIdle({ onStatusChange, target });
 
-    vi.advanceTimersByTime(AUTO_IDLE_DELAY_MS * 3);
-    expect(onStatusChange).not.toHaveBeenCalled();
-    expect(loadUserStatus()).toBe("online");
-
-    controller.setInCall(false);
     vi.advanceTimersByTime(AUTO_IDLE_DELAY_MS - 1);
     expect(onStatusChange).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
     expect(onStatusChange).toHaveBeenCalledExactlyOnceWith("idle");
-  });
+    expect(loadUserStatus()).toBe("idle");
+    expect(loadUserStatusOrigin()).toBe("auto");
 
-  it("joining a call partway through the delay stops the pending idle", () => {
-    saveUserStatus("online");
-    const onStatusChange = vi.fn();
-    controller = startAutoIdle({ onStatusChange, target: createTarget() });
-
-    vi.advanceTimersByTime(AUTO_IDLE_DELAY_MS / 2);
-    controller.setInCall(true);
-    vi.advanceTimersByTime(AUTO_IDLE_DELAY_MS * 2);
-    expect(onStatusChange).not.toHaveBeenCalled();
-  });
-
-  it("a repeated leave does not push the delay back", () => {
-    saveUserStatus("online");
-    const onStatusChange = vi.fn();
-    controller = startAutoIdle({ onStatusChange, target: createTarget(), inCall: true });
-
-    controller.setInCall(false);
-    vi.advanceTimersByTime(AUTO_IDLE_DELAY_MS / 2);
-    controller.setInCall(false);
-    vi.advanceTimersByTime(AUTO_IDLE_DELAY_MS / 2);
-    expect(onStatusChange).toHaveBeenCalledExactlyOnceWith("idle");
-  });
-
-  it("ignores OS idle time while in a call and counts it only from the leave", async () => {
-    saveUserStatus("online");
-    const onStatusChange = vi.fn();
-    controller = startAutoIdle({
-      onStatusChange,
-      target: createTarget(),
-      inCall: true,
-      // The user has touched nothing for an hour, the whole call.
-      systemIdleMs: async () => 60 * 60 * 1000,
-    });
-
-    await vi.advanceTimersByTimeAsync(AUTO_IDLE_DELAY_MS * 2);
-    expect(onStatusChange).not.toHaveBeenCalled();
-
-    controller.setInCall(false);
-    await vi.advanceTimersByTimeAsync(AUTO_IDLE_DELAY_MS - SYSTEM_IDLE_POLL_MS);
-    expect(onStatusChange).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(SYSTEM_IDLE_POLL_MS);
-    expect(onStatusChange).toHaveBeenCalledExactlyOnceWith("idle");
-  });
-
-  it("joining a call with no input undoes an automatic Idle", () => {
-    saveUserStatus("online");
-    const onStatusChange = vi.fn();
-    controller = startAutoIdle({ onStatusChange, target: createTarget() });
-    vi.advanceTimersByTime(AUTO_IDLE_DELAY_MS);
-    expect(onStatusChange).toHaveBeenLastCalledWith("idle");
-
-    controller.setInCall(true);
+    target.fire();
     expect(onStatusChange).toHaveBeenLastCalledWith("online");
+    expect(onStatusChange).toHaveBeenCalledTimes(2);
     expect(loadUserStatus()).toBe("online");
     expect(loadUserStatusOrigin()).toBe("manual");
   });
 
-  it("starting in a call from a persisted automatic Idle returns to Online", () => {
-    saveUserStatus("idle", "auto");
-    const onStatusChange = vi.fn();
-    controller = startAutoIdle({ onStatusChange, target: createTarget(), inCall: true });
-    expect(onStatusChange).toHaveBeenCalledExactlyOnceWith("online");
-  });
-
-  it("joining a call leaves a manually chosen Idle alone", () => {
-    saveUserStatus("idle", "manual");
-    const onStatusChange = vi.fn();
-    controller = startAutoIdle({ onStatusChange, target: createTarget() });
-    controller.setInCall(true);
-    expect(onStatusChange).not.toHaveBeenCalled();
-    expect(loadUserStatus()).toBe("idle");
-  });
-
-  it("still returns to Online on activity while in a call", () => {
+  it("restores Online on input and then idles again after another full delay", () => {
     saveUserStatus("online");
     const onStatusChange = vi.fn();
     const target = createTarget();
     controller = startAutoIdle({ onStatusChange, target });
 
     vi.advanceTimersByTime(AUTO_IDLE_DELAY_MS);
-    expect(onStatusChange).toHaveBeenLastCalledWith("idle");
-    controller.setInCall(true);
     target.fire();
-    expect(onStatusChange).toHaveBeenLastCalledWith("online");
+    expect(loadUserStatus()).toBe("online");
+
+    vi.advanceTimersByTime(AUTO_IDLE_DELAY_MS - 1);
+    expect(loadUserStatus()).toBe("online");
+    vi.advanceTimersByTime(1);
+    expect(onStatusChange).toHaveBeenLastCalledWith("idle");
+    expect(loadUserStatus()).toBe("idle");
+  });
+
+  it("an OS idle source reporting an hour of quiet counts at the first poll", async () => {
+    saveUserStatus("online");
+    const onStatusChange = vi.fn();
+    controller = startAutoIdle({
+      onStatusChange,
+      target: createTarget(),
+      systemIdleMs: async () => 60 * 60 * 1000,
+    });
+
+    await vi.advanceTimersByTimeAsync(SYSTEM_IDLE_POLL_MS);
+    expect(onStatusChange).toHaveBeenCalledExactlyOnceWith("idle");
+    expect(loadUserStatusOrigin()).toBe("auto");
+  });
+
+  it("starting from a persisted automatic Idle, the first input returns to Online", () => {
+    saveUserStatus("idle", "auto");
+    const onStatusChange = vi.fn();
+    const target = createTarget();
+    controller = startAutoIdle({ onStatusChange, target });
+    expect(onStatusChange).not.toHaveBeenCalled();
+
+    target.fire();
+    expect(onStatusChange).toHaveBeenCalledExactlyOnceWith("online");
+  });
+
+  it("a manual Do Not Disturb survives the timeout and input", () => {
+    saveUserStatus("dnd", "manual");
+    const onStatusChange = vi.fn();
+    const target = createTarget();
+    controller = startAutoIdle({ onStatusChange, target });
+
+    vi.advanceTimersByTime(AUTO_IDLE_DELAY_MS * 2);
+    target.fire();
+    expect(onStatusChange).not.toHaveBeenCalled();
+    expect(loadUserStatus()).toBe("dnd");
+  });
+
+  it("a manual Idle survives the timeout and input", () => {
+    saveUserStatus("idle", "manual");
+    const onStatusChange = vi.fn();
+    const target = createTarget();
+    controller = startAutoIdle({ onStatusChange, target });
+
+    vi.advanceTimersByTime(AUTO_IDLE_DELAY_MS * 2);
+    target.fire();
+    expect(onStatusChange).not.toHaveBeenCalled();
+    expect(loadUserStatus()).toBe("idle");
+    expect(loadUserStatusOrigin()).toBe("manual");
   });
 });

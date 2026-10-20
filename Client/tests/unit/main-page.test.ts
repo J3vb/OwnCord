@@ -103,17 +103,16 @@ vi.mock("@lib/audioElements", () => ({
   setAudioVolumeHost: mockSetAudioVolumeHost,
 }));
 
-const { capturedAutoIdleOptions, autoIdleSetInCall } = vi.hoisted(() => ({
+const { capturedAutoIdleOptions } = vi.hoisted(() => ({
   capturedAutoIdleOptions: {
-    current: null as null | { onStatusChange: (status: string) => void; inCall?: boolean },
+    current: null as null | { onStatusChange: (status: string) => void },
   },
-  autoIdleSetInCall: vi.fn(),
 }));
 
 vi.mock("@lib/autoIdle", () => ({
   startAutoIdle: (options: { onStatusChange: (status: string) => void }) => {
     capturedAutoIdleOptions.current = options;
-    return { destroy: vi.fn(), setInCall: autoIdleSetInCall };
+    return { destroy: vi.fn() };
   },
 }));
 
@@ -358,7 +357,7 @@ import {
 } from "../../src/components/message-list/attachments";
 import { desktop } from "../../src/platform/desktop";
 import { SCREENSHARE_TILE_ID_OFFSET } from "../../src/lib/constants";
-import { saveUserStatus } from "../../src/lib/userStatus";
+import { loadUserStatus, loadUserStatusOrigin, saveUserStatus } from "../../src/lib/userStatus";
 import { markAllRead } from "../../src/lib/read-state";
 import { startRingChime, startRingback, stopRingback } from "../../src/lib/notificationSound";
 import {
@@ -3653,25 +3652,32 @@ describe("MainPage — presence", () => {
     localStorage.removeItem("owncord:settings:userStatusOrigin");
   });
 
-  it("pauses auto-idle while in a voice call and resumes it on leave (1A-7)", () => {
-    autoIdleSetInCall.mockClear();
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+  it("voice call start and end do not touch auto-idle (roadmap 8.2)", () => {
+    const ws = fakeWs();
+    saveUserStatus("idle", "auto");
+    page = createMainPage({ ws, api: fakeApi() });
     page.mount(container);
-    expect(capturedAutoIdleOptions.current!.inCall).toBe(false);
+    // No call option is handed to the idle watcher.
+    expect(capturedAutoIdleOptions.current).not.toBeNull();
+    expect("inCall" in capturedAutoIdleOptions.current!).toBe(false);
 
-    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 7 }));
-    voiceStore.flush();
-    expect(autoIdleSetInCall).toHaveBeenLastCalledWith(true);
-
-    // A channel switch is still a call: no new edge.
-    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 8 }));
-    voiceStore.flush();
-    expect(autoIdleSetInCall).toHaveBeenCalledOnce();
-
-    voiceStore.setState((prev) => ({ ...prev, currentChannelId: null }));
-    voiceStore.flush();
-    expect(autoIdleSetInCall).toHaveBeenLastCalledWith(false);
-    expect(autoIdleSetInCall).toHaveBeenCalledTimes(2);
+    // A voice channel and a DM call go through the same store field. Joining
+    // and leaving while automatically Idle sends no presence and leaves the
+    // status alone.
+    // Let any mount-time presence send and its limiter window settle first, so
+    // a send caused by the call edge cannot hide behind the rate limit.
+    vi.advanceTimersByTime(60_000);
+    for (const channelId of [7, 9001]) {
+      vi.mocked(ws.send).mockClear();
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: channelId }));
+      voiceStore.flush();
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: null }));
+      voiceStore.flush();
+      vi.advanceTimersByTime(60_000);
+      expect(ws.send).not.toHaveBeenCalled();
+      expect(loadUserStatus()).toBe("idle");
+      expect(loadUserStatusOrigin()).toBe("auto");
+    }
   });
 
   it("retries the return-to-online presence_update once the limiter's window reopens instead of dropping it forever (OC-0111)", () => {
