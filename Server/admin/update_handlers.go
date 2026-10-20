@@ -70,9 +70,10 @@ func handleCheckUpdate(u *updater.Updater) http.HandlerFunc {
 var applyRestartDelay = 5 * time.Second
 
 // applyBudget bounds one POST /updates/apply: the release check, the asset
-// download and verification. It matches the transfer lifetime in api
-// (transferMaxLifetime). The same value bounds the request context and the
-// connection deadlines (see extendApplyDeadlines).
+// download and its verification, together. It matches the transfer lifetime in
+// api (transferMaxLifetime). The request context ends at this budget, and the
+// connection deadlines are set from that context's deadline plus
+// applyDeadlineMargin (see extendApplyDeadlines).
 const applyBudget = 10 * time.Minute
 
 // applyDeadlineMargin is added to applyBudget for the connection deadlines so
@@ -89,8 +90,7 @@ const applyDeadlineMargin = 30 * time.Second
 // connection (a test recorder), so there is no deadline to extend. The
 // ResponseController reaches the connection through any wrapper that exposes
 // Unwrap.
-func extendApplyDeadlines(w http.ResponseWriter) {
-	deadline := time.Now().Add(applyBudget + applyDeadlineMargin)
+func extendApplyDeadlines(w http.ResponseWriter, deadline time.Time) {
 	ctl := http.NewResponseController(w)
 	_ = ctl.SetReadDeadline(deadline)
 	_ = ctl.SetWriteDeadline(deadline)
@@ -159,11 +159,22 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 			}
 		}()
 
-		// The download below can outlast the server's WriteTimeout.
-		extendApplyDeadlines(w)
+		// One budget for the check and the download. EndApplies cancels it at
+		// shutdown. The connection deadlines are derived from it, so the final
+		// response can always still be written after the context expires.
+		ctx, cancel := context.WithTimeout(r.Context(), applyBudget)
+		defer cancel()
+		srv, _ := r.Context().Value(http.ServerContextKey).(*http.Server)
+		defer trackApply(srv, cancel)()
+		if dl, ok := ctx.Deadline(); ok {
+			extendApplyDeadlines(w, dl.Add(applyDeadlineMargin))
+		}
 
 		// Check for available update.
-		info, err := u.CheckForUpdate(r.Context())
+		info, err := u.CheckForUpdate(ctx)
+		if err == nil && ctx.Err() != nil {
+			err = ctx.Err() // the check does not stop on cancel; the apply must
+		}
 		if err != nil {
 			slog.Error("update check failed during apply", "err", err)
 			writeErr(w, http.StatusBadGateway, "UPDATE_CHECK_FAILED", "failed to check for updates — see server logs")
@@ -192,15 +203,19 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 		newPath := exePath + ".new"
 
 		// Download and verify.
-		ctx, cancel := context.WithTimeout(r.Context(), applyBudget)
-		defer cancel()
 
 		// DownloadAndVerify stages the binary and returns its trusted hash
 		// (bound to the signed release manifest). The apply goroutine below
 		// re-verifies the staged file against this hash through an open
 		// handle — never by path — before the rename.
 		stagedHash, err := u.DownloadAndVerify(ctx, info.Latest, info.DownloadURL, info.ChecksumURL, info.SignatureURL, info.ManifestURL, info.ManifestSignatureURL, newPath)
+		if err == nil && ctx.Err() != nil {
+			// Cancelled (shutdown) after verification but before the swap was
+			// promised: do not start it, and do not leave the staged file.
+			err = ctx.Err()
+		}
 		if err != nil {
+			_ = os.Remove(newPath)
 			slog.Error("update download/verify failed", "err", err)
 			writeErr(w, http.StatusBadGateway, "DOWNLOAD_FAILED", "download or verification failed — see server logs")
 			return

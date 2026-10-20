@@ -617,24 +617,24 @@ func TestApplyUpdate_ReadOnlyInstallRefusedBeforeDownload(t *testing.T) {
 	}
 }
 
-// A slow release lookup that outlasts the server's WriteTimeout must still
-// reach an HTTP/2 client: the handler extends the connection deadlines. The
-// slow stage stands in for the download, which sits under the same deadlines.
-func TestAdminAPI_ApplyUpdate_OutlastsServerWriteTimeout(t *testing.T) {
-	const writeTimeout = 400 * time.Millisecond
+// newApplyTestServer serves the admin API over HTTP/2 TLS against a mock
+// GitHub whose release lookup (same version, so NO_UPDATE) sleeps for delay.
+func newApplyTestServer(t *testing.T, writeTimeout, delay time.Duration) (*httptest.Server, string) {
+	t.Helper()
+	t.Setenv("OWNCORD_CONTAINER", "0")
+	t.Cleanup(admin.SetInstallWritable(func() error { return nil }))
 	mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(3 * writeTimeout)
+		time.Sleep(delay)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"tag_name": "v1.0.0",
 			"html_url": "https://github.com/J3vb/OwnCord/releases/tag/v1.0.0",
 			"assets":   []map[string]any{},
 		})
 	}))
-	defer mockGH.Close()
+	t.Cleanup(mockGH.Close)
 
 	u := updater.NewUpdater("1.0.0", "", "J3vb", "OwnCord")
 	u.SetBaseURL(mockGH.URL)
-
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
@@ -643,8 +643,12 @@ func TestAdminAPI_ApplyUpdate_OutlastsServerWriteTimeout(t *testing.T) {
 	srv.EnableHTTP2 = true
 	srv.Config.WriteTimeout = writeTimeout
 	srv.StartTLS()
-	defer srv.Close()
+	t.Cleanup(srv.Close)
+	return srv, token
+}
 
+func postApply(t *testing.T, srv *httptest.Server, token string) (*http.Response, string) {
+	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, srv.URL+"/updates/apply", nil)
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
@@ -652,13 +656,54 @@ func TestAdminAPI_ApplyUpdate_OutlastsServerWriteTimeout(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := srv.Client().Do(req)
 	if err != nil {
-		t.Fatalf("request failed (stream reset by WriteTimeout?): %v", err)
+		t.Fatalf("request failed: %v", err)
 	}
 	defer resp.Body.Close() //nolint:errcheck
+	var body map[string]string
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	return resp, body["error"]
+}
+
+// A slow release lookup that outlasts the server's WriteTimeout must still
+// reach an HTTP/2 client: the handler extends the connection deadlines. The
+// slow stage stands in for the download, which sits under the same deadlines.
+func TestAdminAPI_ApplyUpdate_OutlastsServerWriteTimeout(t *testing.T) {
+	srv, token := newApplyTestServer(t, time.Second, 3*time.Second)
+	resp, code := postApply(t, srv, token)
 	if resp.ProtoMajor != 2 {
 		t.Fatalf("protocol = %s, want HTTP/2", resp.Proto)
 	}
-	if resp.StatusCode != http.StatusConflict {
-		t.Errorf("status = %d, want 409 NO_UPDATE", resp.StatusCode)
+	if resp.StatusCode != http.StatusConflict || code != "NO_UPDATE" {
+		t.Errorf("status = %d error = %q, want 409 NO_UPDATE", resp.StatusCode, code)
+	}
+}
+
+// The shutdown hook cancels an apply that is already running: the handler
+// stops with 502 instead of carrying on to its 409, and does not hold the
+// drain for the rest of its budget.
+func TestAdminAPI_ApplyUpdate_EndAppliesCancelsInFlight(t *testing.T) {
+	srv, token := newApplyTestServer(t, 5*time.Second, 600*time.Millisecond)
+	hook := admin.EndApplies(srv.Config)
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		hook()
+	}()
+	start := time.Now()
+	resp, _ := postApply(t, srv, token)
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502 (cancelled by shutdown)", resp.StatusCode)
+	}
+	if time.Since(start) > 3*time.Second {
+		t.Errorf("apply took %v after shutdown hook", time.Since(start))
+	}
+}
+
+// An apply that starts after the hook ran is refused straight away.
+func TestAdminAPI_ApplyUpdate_AfterEndAppliesIsCancelled(t *testing.T) {
+	srv, token := newApplyTestServer(t, 5*time.Second, 0)
+	admin.EndApplies(srv.Config)()
+	resp, _ := postApply(t, srv, token)
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502 (apply after shutdown began)", resp.StatusCode)
 	}
 }

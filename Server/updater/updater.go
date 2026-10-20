@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"runtime"
 	"strings"
@@ -132,10 +133,15 @@ func NewUpdater(currentVersion, githubToken, repoOwner, repoName string) *Update
 		transport = base.Clone()
 	} else {
 		transport = &http.Transport{
-			Proxy:               http.ProxyFromEnvironment,
-			ForceAttemptHTTP2:   true,
-			TLSHandshakeTimeout: 10 * time.Second,
-			IdleConnTimeout:     90 * time.Second,
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			ExpectContinueTimeout: time.Second,
+			ForceAttemptHTTP2:     true,
+			TLSHandshakeTimeout:   10 * time.Second,
+			IdleConnTimeout:       90 * time.Second,
 		}
 	}
 	transport.ResponseHeaderTimeout = responseHeaderTimeout

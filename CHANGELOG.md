@@ -247,7 +247,7 @@ and only when it changes something a contributor or fork holder must do
 
 - Downloading a backup from the admin panel stopped partway through when it took longer than 30 seconds, leaving a failed download and a spent link. It now keeps going while data is flowing, and ends only if the browser stops receiving it.
 - "Update now" on a server whose install folder the service cannot write to failed with a vague download error after the download. The Updates page now says the server cannot replace its own program file and to install the release by hand, and nothing is downloaded or restarted.
-- **Update now** on the Updates page no longer fails on a slow connection: the download is not cut off after 30 seconds, and the page still gets the result when the update takes longer than the server's 30-second response limit. The server gives up if no data arrives for 60 seconds or the whole update takes more than 10 minutes.
+- **Update now** on the Updates page no longer fails on a slow connection: the download is not cut off after 30 seconds, and the page still gets the result when the update takes longer than the server's 30-second response limit. The server gives up if no data arrives for 60 seconds or the update check and download together take more than 10 minutes.
 
 **Login & connection**
 
