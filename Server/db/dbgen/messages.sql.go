@@ -99,7 +99,7 @@ SELECT c.id,
        COALESCE((SELECT rs.last_message_id FROM read_states rs
                   WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS last_read
 FROM channels c
-WHERE c.type IN ('text', 'announcement')
+WHERE c.type IN ('text', 'announcement', 'voice')
    OR (c.type = 'dm' AND EXISTS (SELECT 1 FROM dm_participants dp
                                   WHERE dp.channel_id = c.id AND dp.user_id = ?))
 `

@@ -165,13 +165,6 @@ func TestChannelActivity_ReachesUnfocusedReadersOnly(t *testing.T) {
 		}
 	}
 
-	// A voice channel never carries the hint.
-	f.hub.activity.note(activityNote{channelID: f.voiceID, msgID: msgID + 1, authorID: f.author.ID})
-	f.flush()
-	if got := activityFrames(readerSend); len(got) != 0 {
-		t.Errorf("voice channel hint reached the reader: %+v", got)
-	}
-
 	// A DM send records nothing: its participants already get chat_message.
 	if _, _, err := f.db.GetOrCreateDMChannel(ctx, f.author.ID, reader.ID); err != nil {
 		t.Fatalf("GetOrCreateDMChannel: %v", err)
