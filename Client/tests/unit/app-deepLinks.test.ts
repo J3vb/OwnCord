@@ -29,7 +29,6 @@ const hoisted = vi.hoisted(() => ({
   deactivatePendingMessages: vi.fn(),
   openMessageTarget: vi.fn(),
   confirmInviteJoin: vi.fn(),
-  failConfirmLoad: false,
   warn: vi.fn(),
   init: vi.fn(),
   setInviteJoinHandler: vi.fn(),
@@ -60,10 +59,9 @@ vi.mock("@stores/auth.store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@stores/auth.store")>()),
   clearAuth: (...args: unknown[]) => hoisted.clearAuth(...args),
 }));
-vi.mock("@components/InviteJoinConfirm", () => {
-  if (hoisted.failConfirmLoad) throw new Error("chunk 404");
-  return { confirmInviteJoin: hoisted.confirmInviteJoin };
-});
+vi.mock("@components/InviteJoinConfirm", () => ({
+  confirmInviteJoin: hoisted.confirmInviteJoin,
+}));
 
 // Imported after each vi.resetModules(), so they are the instances deepLinks.ts sees.
 let authStore: typeof import("@stores/auth.store").authStore;
@@ -106,10 +104,10 @@ beforeEach(async () => {
   vi.clearAllMocks();
   vi.resetModules();
   events.length = 0;
+  hoisted.applyInvite.mockImplementation(() => events.push("applyInvite"));
   ({ authStore, setAuth } = await import("@stores/auth.store"));
   ({ joinVoiceChannel, leaveVoiceChannel } = await import("@stores/voice.store"));
   hoisted.inFlight = false;
-  hoisted.failConfirmLoad = false;
   authStore.setState((s) => ({ ...s, isAuthenticated: false, serverName: null }));
   leaveVoiceChannel();
   document.body.innerHTML = '<div id="app"></div>';
@@ -177,7 +175,7 @@ describe("E2: an invite link with the connect page mounted", () => {
     setAuth("tok", USER, "Srv", "");
     joinFromChat("ABC123");
 
-    expect(events).toEqual(["endSession", "abandonInFlight", "clearAuth"]);
+    expect(events).toEqual(["endSession", "abandonInFlight", "clearAuth", "applyInvite"]);
     expect(hoisted.clearAuth).toHaveBeenCalledWith();
     expect(hoisted.applyInvite).toHaveBeenCalledWith("ABC123", undefined);
   });
@@ -185,7 +183,7 @@ describe("E2: an invite link with the connect page mounted", () => {
   it("leaves a not-yet-authenticated in-flight session to abandonInFlight alone", () => {
     hoisted.inFlight = true;
     joinFromChat("ABC123");
-    expect(events).toEqual(["endSession", "abandonInFlight"]);
+    expect(events).toEqual(["endSession", "abandonInFlight", "applyInvite"]);
   });
 });
 
@@ -246,7 +244,7 @@ describe("an invite link from outside the app", () => {
       { title: string; confirmLabel: string },
     ];
     expect(body).toContain("Srv");
-    expect(opts.title).toContain("h.example");
+    expect(opts.title).toBe("Open invite for h.example?");
     // Asking changes nothing until the user confirms.
     expect(hoisted.applyInvite).not.toHaveBeenCalled();
     expect(endSession).not.toHaveBeenCalled();
@@ -266,7 +264,7 @@ describe("an invite link from outside the app", () => {
       { title: string },
     ];
     expect(body).toContain("this server");
-    expect(opts.title).not.toContain("h.example");
+    expect(opts.title).toBe("Open this invite?");
     expect(endSession).not.toHaveBeenCalled();
   });
 
@@ -289,6 +287,29 @@ describe("an invite link from outside the app", () => {
     invite("ABC123");
     await vi.waitFor(() => expect(hoisted.confirmInviteJoin).toHaveBeenCalledTimes(1));
     expect(hoisted.clearAuth).not.toHaveBeenCalled();
+  });
+
+  it("logs a confirmation chunk that fails to load, and changes nothing", async () => {
+    setAuth("tok", USER, "Srv", "");
+    vi.doMock("@components/InviteJoinConfirm", () => {
+      throw new Error("chunk 404");
+    });
+    try {
+      invite("ABC123");
+      await vi.waitFor(() =>
+        expect(hoisted.warn).toHaveBeenCalledWith(
+          "Invite confirmation failed to open",
+          expect.any(Error),
+        ),
+      );
+      expect(hoisted.confirmInviteJoin).not.toHaveBeenCalled();
+      expect(hoisted.applyInvite).not.toHaveBeenCalled();
+      expect(endSession).not.toHaveBeenCalled();
+    } finally {
+      vi.doMock("@components/InviteJoinConfirm", () => ({
+        confirmInviteJoin: hoisted.confirmInviteJoin,
+      }));
+    }
   });
 
   it("logs a confirmation dialog that fails to open, and changes nothing", async () => {

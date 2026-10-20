@@ -5,7 +5,7 @@
  * captured. main-connectRoute-wiring.test.ts pins the tuple slots with the
  * certificate prompts mocked; this file covers what that mocking hides:
  *  - a first-use certificate accept re-runs the connect page's health checks
- *    through the router's slot, and stops once that page is left;
+ *    through the router's slot;
  *  - an owncord:// invite arriving while the main page is showing signs out
  *    for a server switch, and the connect page the logout navigates to takes
  *    the link once.

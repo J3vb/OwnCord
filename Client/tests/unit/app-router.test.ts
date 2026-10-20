@@ -87,6 +87,8 @@ function mockMainPage(): void {
 
 type Router = typeof import("../../src/app/router");
 let router: Router;
+// Imported after each vi.resetModules(), so it is the instance router.ts sees.
+let setAuth: typeof import("@stores/auth.store").setAuth;
 let appEl: HTMLElement;
 const unauthorized = vi.fn();
 
@@ -108,6 +110,7 @@ beforeEach(async () => {
   hoisted.connectThrows = false;
   document.body.innerHTML = '<div id="app"></div>';
   appEl = document.getElementById("app")!;
+  ({ setAuth } = await import("@stores/auth.store"));
   router = await import("../../src/app/router");
   router.configureRouter(
     {} as ApiClient,
@@ -294,5 +297,43 @@ describe("render recovery sign out", () => {
     router.renderRecovery.signOut();
     expect(router.activePageId()).toBe("connect");
     expect(hoisted.renderConnect).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("render recovery sign out after a sign-in", () => {
+  it("leaves the navigation to the logout subscriber: nothing renders or navigates here", async () => {
+    await router.renderActive();
+    setAuth("tok", { id: 1, username: "alex", avatar: null, role: "member" }, "Srv", "");
+    hoisted.renderConnect.mockClear();
+
+    router.renderRecovery.signOut();
+
+    expect(hoisted.renderConnect).not.toHaveBeenCalled();
+    expect(router.activePageId()).toBe("connect");
+  });
+});
+
+describe("E1 with E2: an invite arrives while the MainPage chunk is still loading", () => {
+  it("drops the stale main mount, and the connect mount takes the link exactly once", async () => {
+    await router.renderActive();
+    router.navigate("main");
+    // The chunk is still loading (the gate is closed). The invite handler
+    // queues the link and signs out; the logout subscriber navigates to connect.
+    router.queuePendingInvite({ code: "ABC123", host: "h.example" });
+    router.navigate("connect");
+    hoisted.gate.resolve();
+    await settle();
+
+    expect(hoisted.createMainPage).not.toHaveBeenCalled();
+    expect(appEl.querySelector("#main")).toBeNull();
+    expect(appEl.querySelector("#connect")).not.toBeNull();
+    // Initial mount plus the one the navigation made; the link went to the latter.
+    expect(hoisted.renderConnect).toHaveBeenCalledTimes(2);
+    const take = lastTakePendingInvite();
+    expect(take()).toEqual({ code: "ABC123", host: "h.example" });
+    expect(take()).toBeNull();
+    // The page that took it is the mounted one: its hook is live, nothing is pending.
+    expect(router.applyInviteNow("ABC123")).toBe(false);
+    expect(hoisted.applyInvite).not.toHaveBeenCalled();
   });
 });

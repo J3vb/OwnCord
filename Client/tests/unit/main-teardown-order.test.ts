@@ -196,7 +196,7 @@ vi.mock("@pages/ConnectPage", () => ({
 }));
 
 // MainPage.ts pulls in the whole chat/voice UI stack. These tests need a real
-// "connect" -> "main" -> "connect" round trip through the router (main.ts only
+// "connect" -> "main" -> "connect" round trip through the router (the router only
 // navigates to "main" from the connected overlay's onReady callback), but do
 // not care what MainPage renders, so stand in with a lightweight shape.
 vi.mock("@pages/MainPage", () => ({
@@ -336,7 +336,7 @@ describe("main.ts session teardown order", () => {
   // Order B: the pre-auth deadline calls ws.disconnect() before its explicit
   // cleanups. The first two entries are api.endSession() disposing the
   // owner scope, which runs the dispatcher and session cleanups registered on
-  // it; the explicit cleanups main.ts then runs land AFTER ws.disconnect().
+  // it; the explicit cleanups session.ts then runs land AFTER ws.disconnect().
   it("pre-auth deadline: endSession, then ws.disconnect, then the explicit cleanups", async () => {
     await startLogin(HOST);
     events.length = 0;

@@ -1,6 +1,6 @@
 /**
  * A rejected `import("@pages/MainPage")` must not leave a blank window
- * (roadmap 4.12): main.ts shows the render fallback with its Reload and Sign
+ * (roadmap 4.12): the router (src/app/router.ts) shows the render fallback with its Reload and Sign
  * out buttons instead. The mount-throws case is in main.test.ts, which stubs a
  * MainPage that loads. The mocks below mirror main.test.ts's.
  */
@@ -187,7 +187,7 @@ vi.mock("@pages/ConnectPage", () => ({
 }));
 
 // MainPage.ts pulls in the whole chat/voice UI stack. OC-0028 needs a real
-// "main" -> "connect" round trip through the router (main.ts only navigates
+// "main" -> "connect" round trip through the router (the router only navigates
 // away from "connect" via the connected overlay's onReady -> router.navigate
 // ("main") callback), but doesn't care what MainPage renders, so stand in
 // with the same lightweight shape main-page.test.ts's own mocks return.

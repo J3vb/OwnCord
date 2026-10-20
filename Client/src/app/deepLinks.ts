@@ -29,9 +29,9 @@ function handleInviteDeepLink(code: string, host?: string): void {
   if (activePageId() === "main") {
     // Let the logout path do the teardown instead of navigating behind a
     // live session: clearAuth() fires while the router is still on "main",
-    // so the authStore subscriber above runs its full teardown (voice leave,
+    // so the authStore subscriber in session.ts runs its full teardown (voice leave,
     // dispatcher/session cleanup, ws.disconnect) and navigates to "connect"
-    // itself — whose render branch consumes the pending invite below.
+    // itself — whose render branch (router.ts) consumes the pending invite.
     //
     // "server_switch", not the default "user": the invite is not a logout, so
     // the current server's credential must survive (the user may return to A
