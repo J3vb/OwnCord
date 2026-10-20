@@ -336,3 +336,31 @@ func TestHandleRestoreBackup_CarriesTheLiveSeqFloor(t *testing.T) {
 		t.Fatalf("sidecar = %q, want the live floor", got)
 	}
 }
+
+// TestHandleRestoreBackup_RefusesWhenTheSeqFloorCannotBeStored: with the live
+// floor unable to reach the sidecar, the backup must not replace the database.
+func TestHandleRestoreBackup_RefusesWhenTheSeqFloorCannotBeStored(t *testing.T) {
+	f := newFileRestoreFixture(t)
+	if err := f.database.SetSetting(context.Background(), db.WSSeqFloorSettingKey, "5000000000"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(f.dbPath+".ws-seq-floor", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, restoreHook := admin.StubRestart()
+	defer restoreHook()
+
+	w := doRequest(t, f.handler, http.MethodPost, "/backups/"+f.backupName+"/restore", f.token, nil)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body: %s", w.Code, w.Body.String())
+	}
+	live, err := db.Open(f.dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer live.Close() //nolint:errcheck
+	got, err := live.GetSetting(context.Background(), db.WSSeqFloorSettingKey)
+	if err != nil || got != "5000000000" {
+		t.Errorf("live floor = %q, %v; the refused restore must leave the live database in place", got, err)
+	}
+}

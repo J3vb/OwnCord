@@ -3,6 +3,7 @@ package admin
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -425,12 +426,17 @@ func closeForRestore(ctx context.Context, w http.ResponseWriter, database *db.DB
 
 	// Carry the live event sequence floor across the replacement too, so the
 	// next boot reserves its block above everything this server handed out.
-	// Best-effort: the restore goes on without it, as the sidecar a previous
-	// boot wrote still protects it.
+	// A floor that cannot be stored refuses the restore, as the retry cutoff
+	// below does; any other trouble (an unreadable live database) only warns.
 	// A client disconnect must not skip the fold, so it gets its own bounded context.
 	carryCtx, carryCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	err = db.CarryWSSeqFloorForRestore(carryCtx, dbPath)
 	carryCancel()
+	if errors.Is(err, db.ErrWSSeqFloorNotStored) {
+		slog.Error("restore refused: could not preserve the event sequence floor", "err", err)
+		return fail(
+			"could not preserve the event sequence floor — database untouched, server restarting", "backup_restore_floor_failed")
+	}
 	if err != nil {
 		slog.Warn("restore: could not carry the live ws seq floor across the restore", "err", err)
 	}

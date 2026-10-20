@@ -115,9 +115,15 @@ func replaceLiveDatabase(source, dbPath, backupDir string) int {
 	}
 
 	// Carry the live event sequence floor across the replacement as well, so
-	// the next boot reserves above what the old database handed out. A
-	// missing or unreadable live database only warns; the restore goes on.
-	if err := db.CarryWSSeqFloorForRestore(context.Background(), dbPath); err != nil && !onlyMissingFile(err) {
+	// the next boot reserves above what the old database handed out. A floor
+	// that cannot be stored refuses the restore; a missing or unreadable live
+	// database only warns.
+	err := db.CarryWSSeqFloorForRestore(context.Background(), dbPath)
+	if errors.Is(err, db.ErrWSSeqFloorNotStored) {
+		fmt.Fprintf(os.Stderr, "error: could not preserve the event sequence floor — database untouched: %v\n", err)
+		return 1
+	}
+	if err != nil && !onlyMissingFile(err) {
 		fmt.Fprintf(os.Stderr, "warning: could not carry the live event sequence floor across the restore (%v)\n", err)
 	}
 

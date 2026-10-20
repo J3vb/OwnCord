@@ -145,6 +145,7 @@ func TestCarryWSSeqFloorForRestore_ErrorPaths(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
+			wantIs:      ErrWSSeqFloorNotStored,
 			wantMsg:     "persisting ws seq floor",
 			wantDirSide: true,
 		},

@@ -125,14 +125,19 @@ func wsSeqFloorPathFor(dbPath string) string {
 	return p + wsSeqFloorSuffix
 }
 
+// ErrWSSeqFloorNotStored means CarryWSSeqFloorForRestore found a floor to keep
+// but could not write it beside the database, so a restore must not go on.
+var ErrWSSeqFloorNotStored = errors.New("ws seq floor sidecar not stored")
+
 // CarryWSSeqFloorForRestore must run after the live database is closed and
 // before a backup is copied over it. It folds the live settings.ws_seq_floor
 // into the sidecar (keeping the larger of the two), so a restore that rewinds
 // the settings row cannot make the next boot reuse a block the pre-restore
 // server already handed out. This also covers an install whose sidecar has
-// never been written. It is best-effort: when the live database is missing or
-// unreadable only the existing sidecar protects the next boot, and the error
-// is returned for the caller to log, not to abort the restore.
+// never been written. When the live database is missing or unreadable only
+// the existing sidecar protects the next boot, and that error is for the
+// caller to log. A floor that cannot be written wraps ErrWSSeqFloorNotStored,
+// and the caller must refuse the restore.
 func CarryWSSeqFloorForRestore(ctx context.Context, dbPath string) error {
 	path := wsSeqFloorPathFor(dbPath)
 	if path == "" {
@@ -145,7 +150,7 @@ func CarryWSSeqFloorForRestore(ctx context.Context, dbPath string) error {
 		return errors.Join(rerr, lerr)
 	}
 	if err := writeWSSeqFloorFile(path, floor); err != nil {
-		return errors.Join(rerr, lerr, err)
+		return errors.Join(rerr, lerr, fmt.Errorf("%w: %w", ErrWSSeqFloorNotStored, err))
 	}
 	return errors.Join(rerr, lerr)
 }
