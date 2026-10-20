@@ -340,6 +340,6 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 			return
 		}
 		c.touch()
-		hub.handleMessage(c, msg)
+		hub.handleMessage(c, msg) //nolint:contextcheck // handleMessage derives its per-frame deadline from c.ctx, the same connection context readPump runs on.
 	}
 }

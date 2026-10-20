@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // ReadPointer and ReadPointerOp re-export the db shapes so ws callers stay off
@@ -60,7 +61,12 @@ func (s *MessageService) MoveReadPointer(ctx context.Context, userID, channelID 
 		return db.ReadPointer{}, err
 	}
 
-	s.mentionEmitMu.Lock()
+	// The wait for the lock honours ctx: the mention worker holds it across a
+	// write on its own lifecycle context, so a stalled write there must end this
+	// call at the caller's deadline instead of parking the read goroutine.
+	if err := syncutil.LockContext(ctx, &s.mentionEmitMu); err != nil {
+		return db.ReadPointer{}, fmt.Errorf("move read pointer: %w", err)
+	}
 	defer s.mentionEmitMu.Unlock()
 
 	// Read-at-latest fires on every refocus and "Mark as Read" click, and a

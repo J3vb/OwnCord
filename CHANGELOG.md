@@ -244,6 +244,10 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
+**Messages & files**
+
+- A command that waits on a stalled database for more than 10 seconds now fails with "The server is busy — retry in a moment" (a Retry button on a message) instead of waiting indefinitely. Nothing was applied when this appears, so Retry never double-posts. Voice moderation and slash commands are not affected.
+
 **Desktop UI**
 
 - An app that fails to start now shows an error dialog instead of closing without a word: on Linux desktops (a run with no display still prints the error only), and on every platform when the main window or tray cannot be created.
