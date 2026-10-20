@@ -12,9 +12,8 @@ import {
   safeMount,
   type RenderRecovery,
 } from "@lib/safe-render";
-import { createApiClient, ApiClientError, errorText } from "@lib/api";
+import { createApiClient, ApiClientError } from "@lib/api";
 import { SessionScope } from "@lib/sessionScope";
-import { setOwnedTimeout } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { installGlobalGuards } from "./app/globalGuards";
 import type { PageId } from "./app/context";
@@ -50,12 +49,7 @@ import {
 import type { MountableComponent } from "@lib/safe-render";
 import { createLogger, applyStoredLogLevel } from "@lib/logger";
 import { initLogPersistence, flushLogs } from "@lib/logPersistence";
-import {
-  loadCredential,
-  deleteCredential,
-  loginWithSavedPassword,
-  parseRelayedLogin,
-} from "@lib/credentials";
+import { deleteCredential, loginWithSavedPassword, parseRelayedLogin } from "@lib/credentials";
 import { initWindowState } from "@lib/window-state";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import { parseRegistrationMode, retentionNotice } from "@lib/types";
@@ -69,13 +63,13 @@ import { connectText } from "./i18n/connect";
 import { installCertPrompts } from "./app/certPrompts";
 import { createConnectProfiles } from "./app/connectProfiles";
 import {
-  checkHealth,
   configureServerHealth,
   probeServerInfo,
   runHealthChecks,
   serverInfoFor,
   serverInfoProbing,
 } from "./app/serverHealth";
+import { createAutoLogin } from "./app/autoLogin";
 
 // First, while storage still holds only what earlier sessions wrote: that is
 // how an install from before the notification level is told from a new one.
@@ -495,7 +489,7 @@ async function renderPage(pageId: PageId): Promise<void> {
           profileManager.removeProfile(profileId);
           if (host && !profileManager.getAll().some((p) => p.host === host)) {
             void deleteCredential(host);
-            if (serverWait?.host === host) serverWait.scope.dispose();
+            forgetServerWait(host);
           }
           persistProfiles();
           connectPage.refreshProfiles(getProfileList());
@@ -506,10 +500,10 @@ async function renderPage(pageId: PageId): Promise<void> {
           connectPage.refreshProfiles(getProfileList());
         },
         onAutoLoginCancel() {
-          autoLoginCancelled = true;
+          cancelAutoLogin();
           deactivatePendingMessages();
           api.endSession();
-          // Every read of this flag below runs before the overlay carrying
+          // Every read of this flag (in app/autoLogin.ts) runs before the overlay carrying
           // this Cancel button is ever painted, so by the time a click
           // reaches here the session is already in flight (startSession has
           // called ws.connect and registered listeners). Tear it down the
@@ -523,118 +517,14 @@ async function renderPage(pageId: PageId): Promise<void> {
       getProfileList(),
     );
 
-    let autoLoginCancelled = false;
-    let serverWait: { readonly host: string; readonly scope: SessionScope } | null = null;
-
-    interface ResumableProfile {
-      readonly name: string;
-      readonly host: string;
-      readonly autoConnect: boolean;
-      readonly rememberPassword: boolean;
-    }
-
-    // A stored-token resume that timed out against a down server (a home
-    // server still booting after a power cut) keeps probing it, 5 s doubling to
-    // 30 s, and resumes once when it answers. The wait belongs to the API
-    // session the timeout left behind, so whatever ends that session ends the
-    // wait: a manual login, Cancel, typing or picking another server
-    // (onAutoLoginCancel), the resume itself (startSession's setConfig),
-    // deleting the server's last profile, or leaving this page.
-    function waitForServer(profile: ResumableProfile): void {
-      const wait = pageOwner.fork(api.getSession().signal);
-      serverWait = { host: profile.host, scope: wait };
-      wait.addCleanup(() => connectPage.hideServerWait());
-      connectPage.showServerWait(profile.name, profile.host);
-      const probeAfter = (delayMs: number): void => {
-        setOwnedTimeout(
-          wait.signal,
-          () => {
-            void checkHealth(connectPage, profile.host, wait).then((up) => {
-              if (!wait.isCurrent()) return;
-              const current = profileManager.getAll().find((p) => p.host === profile.host);
-              if (current === undefined) {
-                wait.dispose();
-                return;
-              }
-              if (!up) {
-                probeAfter(Math.min(delayMs * 2, 30_000));
-                return;
-              }
-              wait.dispose();
-              void resumeStoredSession(current, false);
-            });
-          },
-          delayMs,
-        );
-      };
-      probeAfter(5_000);
-    }
-
-    // Resume a profile's session from its stored token — startup auto-login
-    // and a quick switch back to a server share this path. No-op when the
-    // host has no stored token. A resume the wait itself started does not wait
-    // again: a server that answers but never signs in gets the offline error.
-    async function resumeStoredSession(
-      profile: ResumableProfile,
-      waitIfDown = true,
-    ): Promise<void> {
-      // The stored token outlives an opt-out whose delete failed, so the
-      // profile's own setting decides, not the credential's presence.
-      if (profile.rememberPassword !== true && profile.autoConnect !== true) return;
-      const attempt = api.getSession();
-      try {
-        const cred = await loadCredential(profile.host);
-        if (!pageOwner.isCurrent() || !attempt.isCurrent()) return;
-        if (cred?.username && cred?.token && !autoLoginCancelled) {
-          // Pass autoConnect so the checkbox still reads correctly if the
-          // user cancels and lands back on the form.
-          connectPage.selectServer(
-            profile.host,
-            cred.username,
-            profile.autoConnect,
-            profile.rememberPassword,
-          );
-          connectPage.showAutoConnecting(profile.name);
-
-          if (autoLoginCancelled) return;
-
-          // Use stored token directly for reconnection, preserving the
-          // profile's existing rememberPassword and autoConnect.
-          //
-          // The credential re-save no longer has to be suppressed here.
-          // save_credential used to treat an absent password as "erase it",
-          // so re-saving without one destroyed the password the user opted
-          // to remember; it now preserves the stored password unless asked
-          // to clear it, so this path can refresh the token normally.
-          api.setConfig({ host: profile.host });
-          ensureProfileExists(
-            profile.host,
-            cred.username,
-            profile.rememberPassword,
-            profile.autoConnect,
-          );
-          startSession(
-            profile.host,
-            cred.token,
-            cred.username,
-            undefined,
-            profile.rememberPassword,
-            false,
-            waitIfDown ? () => waitForServer(profile) : undefined,
-            profile.autoConnect,
-          );
-        }
-      } catch (err) {
-        // A superseded attempt (e.g. a manual login started while this
-        // credential read was still pending) must not paint an error over
-        // the login that superseded it.
-        if (!autoLoginCancelled && pageOwner.isCurrent() && attempt.isCurrent()) {
-          const message = errorText(err, connectText("session.autoLoginFailed"));
-          log.warn("Auto-login failed", { host: profile.host, error: message });
-          connectPage.showError(connectText("session.autoLoginFailedDetail", { message }));
-        }
-      }
-    }
+    const [startAutoLogin, cancelAutoLogin, forgetServerWait] = createAutoLogin(
+      api,
+      profileManager,
+      pageOwner,
+      connectPage,
+      ensureProfileExists,
+      getProfileList,
+    );
 
     safeMount(connectPage, appEl!, renderRecovery);
 
@@ -696,72 +586,7 @@ async function renderPage(pageId: PageId): Promise<void> {
       pendingInviteLink = null;
     }
 
-    // Profile loading must not later start auto-login over a manual attempt.
-    // Capture ownership before its first await, not after credentials arrive.
-    const startupAttempt = api.getSession();
-    // Load saved profiles and kick off health checks
-    void (async () => {
-      try {
-        await profileManager.loadProfiles();
-        if (!pageOwner.isCurrent()) return;
-        const profiles = getProfileList();
-        connectPage.refreshProfiles(profiles);
-        runHealthChecks(connectPage, profiles, pageOwner);
-      } catch (err) {
-        if (!pageOwner.isCurrent()) return;
-        log.warn("Failed to load profiles, using defaults", err);
-        runHealthChecks(connectPage, getProfileList(), pageOwner);
-      }
-
-      // Consume any pending skip-auto-login flag on THIS mount regardless of
-      // which branch below returns early. It is the single source of truth
-      // for "an explicit logout just happened, don't auto-login" (set by the
-      // isAuthenticated subscriber further down), and every connect-page
-      // mount — quick-switch included — must clear it here or it survives in
-      // sessionStorage and goes on to suppress a later, unrelated
-      // auto-login (OC-0028).
-      const skipAutoLogin = sessionStorage.getItem("owncord:skip-auto-login") !== null;
-      sessionStorage.removeItem("owncord:skip-auto-login");
-
-      // Quick-switch: if the user switched servers via the overlay, auto-select
-      // the target server profile so they can reconnect with one click.
-      const quickSwitchTarget = sessionStorage.getItem("owncord:quick-switch-target");
-      if (quickSwitchTarget !== null) {
-        sessionStorage.removeItem("owncord:quick-switch-target");
-        const targetProfile = profileManager.getAll().find((p) => p.host === quickSwitchTarget);
-        connectPage.selectServer(
-          quickSwitchTarget,
-          targetProfile?.username ?? undefined,
-          targetProfile?.autoConnect,
-          targetProfile?.rememberPassword,
-        );
-        // A quick switch keeps each server's saved sign-in (B7-13), so
-        // switching back resumes with the stored token exactly as auto-login
-        // does. Without a stored credential the prefilled form stays up.
-        if (targetProfile !== undefined && startupAttempt.isCurrent()) {
-          await resumeStoredSession(targetProfile);
-        }
-        return; // Skip auto-login when switching servers
-      }
-
-      // A logout that deleted this host's credential is on its way out as a
-      // fire-and-forget delete_credential. Auto-login below would read the
-      // same account back concurrently, and the credential commands run off
-      // the IPC thread now (`#[tauri::command(async)]`), so a read that wins
-      // that race signs the user straight back into the server they just left.
-      // Suppressing the attempt removes the race instead of relying on the
-      // delete being dispatched early enough to win it — and an auto-login
-      // immediately after an explicit logout is wrong regardless of timing.
-      if (skipAutoLogin || !startupAttempt.isCurrent()) {
-        return;
-      }
-
-      // Auto-login: if a profile has autoConnect enabled, try to reconnect
-      // using the stored token (password is no longer returned from the
-      // credential store over IPC for security).
-      const autoProfile = profileManager.getAutoConnectProfile();
-      if (autoProfile) await resumeStoredSession(autoProfile);
-    })();
+    startAutoLogin();
   } else {
     // MainPage (and the LiveKit voice stack it statically imports) loads
     // lazily so it stays out of the startup path. The chunk is pre-warmed as
