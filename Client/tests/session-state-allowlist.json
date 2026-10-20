@@ -182,18 +182,6 @@
       "reason": "Client diagnostics and log subscribers, not server data"
     },
     {
-      "file": "lib/media-visibility.ts",
-      "binding": "allTracked",
-      "category": "dom-owned",
-      "reason": "Weak references to live images"
-    },
-    {
-      "file": "lib/media-visibility.ts",
-      "binding": "tracked",
-      "category": "dom-owned",
-      "reason": "WeakMap keyed by live image elements"
-    },
-    {
       "file": "lib/notificationSound.ts",
       "binding": "ringInterval",
       "category": "transient",
