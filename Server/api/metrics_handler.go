@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"net/http"
 	"runtime"
+	"slices"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/metrics"
@@ -112,6 +113,125 @@ type ServerMetrics struct {
 	PushPruned     uint64 `json:"push_pruned"`
 
 	EventPersister *EventPersisterMetrics `json:"event_persister,omitempty"`
+
+	// Windows holds the same latency, worst-hold and counter figures over the
+	// last minute ("1m") and fifteen minutes ("15m"), where every figure above
+	// is cumulative since boot (WP 4.3a). Omitted until the sampler has two
+	// samples, and when no windowed source is wired.
+	Windows map[string]*WindowMetrics `json:"windows,omitempty"`
+}
+
+// metricsWindows are the two windows reported, newest-ending, by JSON key.
+var metricsWindows = []struct {
+	key string
+	d   time.Duration
+}{{"1m", time.Minute}, {"15m", 15 * time.Minute}}
+
+// WindowMetrics is one window of ServerMetrics.Windows. The field names repeat
+// the top-level keys; the counters are the growth over the window. Seconds is
+// what the window really covers (shorter than its name for a young process) and
+// AsOf the newest sample it ends at, at most one sampler tick old.
+type WindowMetrics struct {
+	Seconds float64 `json:"seconds"`
+	AsOf    string  `json:"as_of"`
+
+	BroadcastMs    *metrics.Summary    `json:"ws_broadcast_ms,omitempty"`
+	DispatchLagMs  *metrics.Summary    `json:"ws_dispatch_lag_ms,omitempty"`
+	ChatAckMs      *metrics.Summary    `json:"chat_send_ack_ms,omitempty"`
+	VoiceJoinMs    *ws.VoiceJoinPhases `json:"voice_join_ms,omitempty"`
+	SeqMuMaxHoldMs float64             `json:"hub_seqmu_max_hold_ms"`
+
+	BroadcastDrops               uint64  `json:"broadcast_drops"`
+	TopicSheds                   uint64  `json:"topic_sheds_total"`
+	ReconnectTierBuffer          uint64  `json:"reconnect_tier_buffer"`
+	ReconnectTierDB              uint64  `json:"reconnect_tier_db"`
+	ReconnectTierFull            uint64  `json:"reconnect_tier_full"`
+	BackpressureQueueDisconnects uint64  `json:"backpressure_queue_disconnects"`
+	BackpressureHighFallbacks    uint64  `json:"backpressure_high_fallbacks"`
+	BackpressureLowDrops         uint64  `json:"backpressure_low_drops"`
+	BackpressurePresenceDrops    uint64  `json:"backpressure_presence_drops"`
+	DeliveryLossMarks            uint64  `json:"delivery_loss_marks"`
+	WSConnRejects                uint64  `json:"ws_conn_rejects"`
+	DBWriterWaitCount            uint64  `json:"db_writer_wait_count"`
+	DBWriterWaitSeconds          float64 `json:"db_writer_wait_seconds"`
+	DBReaderWaitCount            uint64  `json:"db_reader_wait_count"`
+	DBReaderWaitSeconds          float64 `json:"db_reader_wait_seconds"`
+}
+
+// Window source names that are not JSON keys: the database wait time is
+// sampled in nanoseconds and reported in seconds.
+const (
+	windowDBWriterWaitNanos = "db_writer_wait_nanos"
+	windowDBReaderWaitNanos = "db_reader_wait_nanos"
+)
+
+// NewWindowMetrics maps one snapshot, whose names are the sources' JSON keys,
+// onto the response shape. A name the sources did not register stays zero (or
+// nil for a summary).
+func NewWindowMetrics(s metrics.WindowSnapshot) *WindowMetrics {
+	summary := func(name string) *metrics.Summary {
+		v, ok := s.Histograms[name]
+		if !ok {
+			return nil
+		}
+		return &v
+	}
+	w := &WindowMetrics{
+		Seconds:        s.Seconds,
+		AsOf:           s.AsOf.UTC().Format(time.RFC3339),
+		BroadcastMs:    summary("ws_broadcast_ms"),
+		DispatchLagMs:  summary("ws_dispatch_lag_ms"),
+		ChatAckMs:      summary("chat_send_ack_ms"),
+		SeqMuMaxHoldMs: s.MaxGauges["hub_seqmu_max_hold_ms"],
+
+		BroadcastDrops:               s.Counters["broadcast_drops"],
+		TopicSheds:                   s.Counters["topic_sheds_total"],
+		ReconnectTierBuffer:          s.Counters["reconnect_tier_buffer"],
+		ReconnectTierDB:              s.Counters["reconnect_tier_db"],
+		ReconnectTierFull:            s.Counters["reconnect_tier_full"],
+		BackpressureQueueDisconnects: s.Counters["backpressure_queue_disconnects"],
+		BackpressureHighFallbacks:    s.Counters["backpressure_high_fallbacks"],
+		BackpressureLowDrops:         s.Counters["backpressure_low_drops"],
+		BackpressurePresenceDrops:    s.Counters["backpressure_presence_drops"],
+		DeliveryLossMarks:            s.Counters["delivery_loss_marks"],
+		WSConnRejects:                s.Counters["ws_conn_rejects"],
+		DBWriterWaitCount:            s.Counters["db_writer_wait_count"],
+		DBWriterWaitSeconds:          float64(s.Counters[windowDBWriterWaitNanos]) / float64(time.Second),
+		DBReaderWaitCount:            s.Counters["db_reader_wait_count"],
+		DBReaderWaitSeconds:          float64(s.Counters[windowDBReaderWaitNanos]) / float64(time.Second),
+	}
+	// All six phases are registered together; a missing one means no voice
+	// source, and the key is left out rather than half filled.
+	phases := [6]*metrics.Summary{
+		summary("voice_join_ms.precheck"), summary("voice_join_ms.leave"),
+		summary("voice_join_ms.persist"), summary("voice_join_ms.token"),
+		summary("voice_join_ms.complete"), summary("voice_join_ms.total"),
+	}
+	if !slices.Contains(phases[:], nil) {
+		w.VoiceJoinMs = &ws.VoiceJoinPhases{
+			Precheck: *phases[0], Leave: *phases[1], Persist: *phases[2],
+			Token: *phases[3], Complete: *phases[4], Total: *phases[5],
+		}
+	}
+	return w
+}
+
+// fillWindows adds the windowed block. A window the sampler cannot yet answer
+// is left out, so nothing reports a reassuring zero.
+func fillWindows(m *ServerMetrics, src MetricsSources) {
+	if src.Windows == nil {
+		return
+	}
+	for _, win := range metricsWindows {
+		snap, ok := src.Windows(win.d)
+		if !ok {
+			continue
+		}
+		if m.Windows == nil {
+			m.Windows = make(map[string]*WindowMetrics, len(metricsWindows))
+		}
+		m.Windows[win.key] = NewWindowMetrics(snap)
+	}
 }
 
 // MetricsSources provides the live data feeds for handleMetrics. Any nil
@@ -147,6 +267,9 @@ type MetricsSources struct {
 	// PushCounters is nil when dispatch is off (the compiled default); the
 	// three fields stay at their zero value then.
 	PushCounters func() (dispatched, failed, pruned uint64)
+	// Windows answers a window of the given length ending at the newest
+	// sample (metrics.Windows.Snapshot); nil leaves the "windows" key out.
+	Windows func(time.Duration) (metrics.WindowSnapshot, bool)
 }
 
 // handleMetrics returns an HTTP handler that reports runtime server metrics.
@@ -226,6 +349,8 @@ func handleMetrics(src MetricsSources) http.HandlerFunc {
 		if src.PushCounters != nil {
 			metrics.PushDispatched, metrics.PushFailed, metrics.PushPruned = src.PushCounters()
 		}
+
+		fillWindows(&metrics, src)
 
 		writeJSON(w, http.StatusOK, metrics)
 	}

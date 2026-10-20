@@ -253,6 +253,43 @@ func (h *Hub) VoiceJoinMs() VoiceJoinPhases {
 	}
 }
 
+// WindowSources lists every figure the windowed metrics block samples (WP
+// 4.3a). The names are the JSON keys under /api/v1/metrics "windows", and the
+// voice phases are "voice_join_ms.<phase>". Every counter is an atomic load, so
+// the sampler takes no hub lock. The returned slices are fresh and point at the
+// hub's own histograms, which live as long as the hub.
+func (h *Hub) WindowSources() ([]metrics.NamedHistogram, []metrics.NamedMaxGauge, []metrics.NamedCounter) {
+	v := &h.latency.voiceJoin
+	hists := []metrics.NamedHistogram{
+		{Name: "ws_broadcast_ms", H: &h.latency.broadcast},
+		{Name: "ws_dispatch_lag_ms", H: &h.latency.dispatchLag},
+		{Name: "chat_send_ack_ms", H: &h.latency.chatAck},
+		{Name: "voice_join_ms.precheck", H: &v.precheck},
+		{Name: "voice_join_ms.leave", H: &v.leave},
+		{Name: "voice_join_ms.persist", H: &v.persist},
+		{Name: "voice_join_ms.token", H: &v.token},
+		{Name: "voice_join_ms.complete", H: &v.complete},
+		{Name: "voice_join_ms.total", H: &v.total},
+	}
+	gauges := []metrics.NamedMaxGauge{
+		{Name: "hub_seqmu_max_hold_ms", G: &h.latency.seqMuHold},
+	}
+	counters := []metrics.NamedCounter{
+		{Name: "broadcast_drops", Read: h.BroadcastDropCount},
+		{Name: "topic_sheds_total", Read: h.TopicShedCount},
+		{Name: "reconnect_tier_buffer", Read: h.reconnectTierBuf.Load},
+		{Name: "reconnect_tier_db", Read: h.reconnectTierDB.Load},
+		{Name: "reconnect_tier_full", Read: h.reconnectTierFull.Load},
+		{Name: "backpressure_queue_disconnects", Read: h.bpQueueDisconnects.Load},
+		{Name: "backpressure_high_fallbacks", Read: h.bpHighFallbacks.Load},
+		{Name: "backpressure_low_drops", Read: h.bpLowDrops.Load},
+		{Name: "backpressure_presence_drops", Read: h.PresenceDropCount},
+		{Name: "delivery_loss_marks", Read: h.LossMarkCount},
+		{Name: "ws_conn_rejects", Read: h.ConnRejectCount},
+	}
+	return hists, gauges, counters
+}
+
 // IsUserConnected returns true if a client with the given userID is already
 // registered in the hub. Safe to call from any goroutine.
 func (h *Hub) IsUserConnected(userID int64) bool {

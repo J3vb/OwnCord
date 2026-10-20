@@ -35,9 +35,25 @@ type Summary struct {
 // usable and starts empty; it must not be copied after first use (its buckets
 // are atomics).
 type Histogram struct {
-	buckets [len(latencyBoundsMs) + 1]atomic.Uint64 // last bucket is +Inf
+	buckets [numBuckets]atomic.Uint64 // last bucket is +Inf
 	total   atomic.Uint64
-	max     atomic.Uint64 // microseconds
+	max     atomic.Uint64 // microseconds, lifetime
+	// sum is every observation added up, in microseconds (the Prometheus
+	// exposition's _sum, WP 4.3b). Written by Observe, read by Counts.
+	sum atomic.Uint64
+	// intervalMax is the largest observation since the last takeIntervalMax,
+	// in microseconds. Observe raises it beside max; only the Windows sampler
+	// resets it, so the lifetime max above is never disturbed.
+	intervalMax atomic.Uint64
+}
+
+// numBuckets is the bucket count: one per bound plus the +Inf bucket.
+const numBuckets = len(latencyBoundsMs) + 1
+
+// Counts is a raw read of a Histogram's cumulative state.
+type Counts struct {
+	Buckets   [numBuckets]uint64 // last bucket is +Inf
+	SumMicros uint64
 }
 
 // Observe records one observation, in milliseconds. Allocation-free.
@@ -52,10 +68,42 @@ func (h *Histogram) Observe(ms float64) {
 			break
 		}
 	}
+	// The maxima are stored BEFORE the counts. The Windows sampler reads the
+	// buckets and then swaps intervalMax, so a counted observation's max is in
+	// that interval or an earlier one. Each observation is counted once and its
+	// max is held by exactly one interval, but at a sample boundary the count
+	// and the max can land in adjacent windows.
+	micros := uint64(ms * 1000)
+	atomicMax(&h.max, micros)
+	atomicMax(&h.intervalMax, micros)
 	h.buckets[i].Add(1)
 	h.total.Add(1)
-	atomicMax(&h.max, uint64(ms*1000))
+	h.sum.Add(micros)
 }
+
+// Counts returns the cumulative bucket counts and the sum of observations, in
+// microseconds. Every bucket only grows, so a later Counts minus an earlier
+// one is never negative. The reads are individually atomic, not a single
+// consistent cut.
+func (h *Histogram) Counts() Counts {
+	var c Counts
+	for i := range h.buckets {
+		c.Buckets[i] = h.buckets[i].Load()
+	}
+	c.SumMicros = h.sum.Load()
+	return c
+}
+
+// readBuckets copies the bucket counters into dst without allocating.
+func (h *Histogram) readBuckets(dst *[numBuckets]uint64) {
+	for i := range h.buckets {
+		dst[i] = h.buckets[i].Load()
+	}
+}
+
+// takeIntervalMax returns the largest observation (microseconds) since the
+// previous call and resets it. Only the Windows sampler calls it.
+func (h *Histogram) takeIntervalMax() uint64 { return h.intervalMax.Swap(0) }
 
 // Snapshot returns the current distribution. A histogram with no observations
 // reports the zero Summary.
@@ -64,28 +112,33 @@ func (h *Histogram) Snapshot() Summary {
 	if total == 0 {
 		return Summary{}
 	}
+	var buckets [numBuckets]uint64
+	h.readBuckets(&buckets)
+	maxMicros := h.max.Load()
 	return Summary{
 		Count: total,
-		P50:   h.quantile(total, 0.50),
-		P95:   h.quantile(total, 0.95),
-		P99:   h.quantile(total, 0.99),
-		Max:   float64(h.max.Load()) / 1000,
+		P50:   quantile(&buckets, total, maxMicros, 0.50),
+		P95:   quantile(&buckets, total, maxMicros, 0.95),
+		P99:   quantile(&buckets, total, maxMicros, 0.99),
+		Max:   float64(maxMicros) / 1000,
 	}
 }
 
-// quantile returns the upper bound of the bucket holding the q-quantile,
-// capped at the exact max so no quantile reads above max. When the quantile
-// lands in the +Inf bucket it is the exact max.
-func (h *Histogram) quantile(total uint64, q float64) float64 {
+// quantile returns the upper bound of the bucket holding the q-quantile of
+// buckets (total observations), capped at maxMicros so no quantile reads above
+// the max. When the quantile lands in the +Inf bucket it is the exact max. It
+// is pure: the lifetime Snapshot and the windowed figures both call it.
+func quantile(buckets *[numBuckets]uint64, total, maxMicros uint64, q float64) float64 {
 	target := uint64(math.Ceil(float64(total) * q))
+	maxMs := float64(maxMicros) / 1000
 	var cumulative uint64
 	for i := range latencyBoundsMs {
-		cumulative += h.buckets[i].Load()
+		cumulative += buckets[i]
 		if cumulative >= target {
-			return min(latencyBoundsMs[i], float64(h.max.Load())/1000)
+			return min(latencyBoundsMs[i], maxMs)
 		}
 	}
-	return float64(h.max.Load()) / 1000
+	return maxMs
 }
 
 // MaxGauge holds the largest value observed since start, in milliseconds. Like
@@ -93,6 +146,9 @@ func (h *Histogram) quantile(total uint64, q float64) float64 {
 // figure needs (hub_seqmu_max_hold_ms).
 type MaxGauge struct {
 	micros atomic.Uint64
+	// intervalMax is the largest value since the last takeIntervalMax; see
+	// Histogram.intervalMax.
+	intervalMax atomic.Uint64
 }
 
 // Observe records ms if it is the new maximum. Negative and NaN values are
@@ -101,8 +157,14 @@ func (g *MaxGauge) Observe(ms float64) {
 	if ms < 0 || math.IsNaN(ms) {
 		return
 	}
-	atomicMax(&g.micros, uint64(ms*1000))
+	micros := uint64(ms * 1000)
+	atomicMax(&g.micros, micros)
+	atomicMax(&g.intervalMax, micros)
 }
+
+// takeIntervalMax returns the largest value (microseconds) since the previous
+// call and resets it. Only the Windows sampler calls it.
+func (g *MaxGauge) takeIntervalMax() uint64 { return g.intervalMax.Swap(0) }
 
 // Millis returns the largest value observed, in milliseconds.
 func (g *MaxGauge) Millis() float64 { return float64(g.micros.Load()) / 1000 }

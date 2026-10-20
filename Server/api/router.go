@@ -18,6 +18,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/diskutil"
+	"github.com/J3vb/OwnCord/Server/metrics"
 	"github.com/J3vb/OwnCord/Server/netclass"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/plugin"
@@ -60,6 +61,11 @@ type Runtime struct {
 	// LogLevel backs the admin panel's runtime log-level card (SRE-07). Built
 	// by internal/app around the same *slog.LevelVar main's log sinks use.
 	LogLevel *admin.LogLevelController
+	// MetricsWindows is the sampled ring behind the metrics endpoint's
+	// "windows" block (WP 4.3a). StartRuntime builds it; the app starts its
+	// sampler (App.startHub) and stops it before the hub. Nil leaves the block
+	// out, which is what a hand-built Runtime in a test gets.
+	MetricsWindows *metrics.Windows
 }
 
 // warnOnServerConfig logs the settings that are legal but rarely what an
@@ -257,7 +263,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	r.With(RateLimitMiddleware(limiter, "ws_upgrade:", scaledAuthLimit(wsUpgradeRateLimitPerMinute), time.Minute, cfg.Server.TrustedProxies)).
 		Get("/api/v1/ws", ws.ServeWS(hub, cfg.Server.AllowedOrigins, cfg.Server.MaxWSConnections))
 
-	routerMetricsRoutes(r, cfg, database, svc, hub)
+	routerMetricsRoutes(r, cfg, database, svc, hub, rt.MetricsWindows)
 
 	// Admin panel: static files + REST API (Phase 6).
 	// Restrict /admin to configured CIDRs (default: private networks only).
@@ -549,7 +555,13 @@ func routerVoiceRoutes(r chi.Router, cfg *config.Config, limiter *auth.RateLimit
 
 // routerMetricsRoutes mounts the JSON metrics endpoint and, when an OTel
 // Prometheus exporter is wired, the Prometheus handler beside it.
-func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc *service.Services, hub *ws.Hub) {
+func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc *service.Services, hub *ws.Hub, windows *metrics.Windows) {
+	// A nil *Windows must not become a non-nil method value: the handler reads
+	// a nil func as "no windowed source".
+	var windowSnapshot func(time.Duration) (metrics.WindowSnapshot, bool)
+	if windows != nil {
+		windowSnapshot = windows.Snapshot
+	}
 	// Metrics endpoint — IP-restricted by metrics_allowed_cidrs (falls back to
 	// admin_allowed_cidrs) so a central scraper can be admitted without
 	// widening /admin. The shape is documented in docs/deployment.md — keep
@@ -580,6 +592,7 @@ func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc 
 			DiskMinFree:         cfg.Server.MinFreeDiskBytes(),
 			UploadBytes:         database.TotalAttachmentBytes,
 			PushCounters:        pushCountersSource(svc),
+			Windows:             windowSnapshot,
 		}))
 
 	// Phase B Step 8 — OpenTelemetry Prometheus exporter. Mounted alongside
