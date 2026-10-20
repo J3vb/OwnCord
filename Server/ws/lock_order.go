@@ -34,6 +34,14 @@
 // named field of another type says so in the "how" column. Line numbers were
 // read at origin/dev f4a359e8 and are cites, not contracts.
 //
+// The lock-inventory invariant (invariants/lock_inventory.go) reads this table.
+// Each row starts with a tab, then a rank (a number, or - for no rank), an
+// optional S, and the lock named Type.field (a package-level or function-local
+// lock is named by its identifier). A row ranked - must carry "unranked:
+// <reason>". Every syncutil or sync Mutex/RWMutex declared in a non-test file
+// of ws needs a row here, and a row naming a lock that no longer exists fails
+// too. Continuation lines are indented past the tab and are not read.
+//
 //	rank  lock                       declared                 taken under it
 //	1 S   userLockEntry.mu           voice_registry.go:45     DB, broadcasts, seqMu (replay.go:438-441); never a
 //	      (voiceRegistry.voiceMember) user_locks.go:40         LiveKit RPC
@@ -72,16 +80,22 @@
 //	8     PubSub.mu RW               pubsub.go:65             Client.mu (Subscribe -> isSendClosed, pubsub.go:94);
 //	                                                          the NSFW allow closure, a map lookup
 //	                                                          (hub_visibility.go:195)
-//	9     leaves, ranked together; nothing is taken under any of them:
-//	        Client.mu (client.go:81), voiceSlot.voiceMu (voice_registry.go:81),
-//	        voiceGraceState.mu (voice_grace.go:54), voiceReconcileState.mu (voice_reconcile.go:42),
-//	        voiceRejoinBlockState.mu (voice_rejoin_block.go:34), removedIdentities.mu (voice_removed_watch.go:35),
-//	        presenceRepairState.mu (hub_presence.go:92), queueDropState.mu (hub_stats.go:163),
-//	        EventRingBuffer.mu (ringbuffer.go:14), memberCache.mu (serve_ready_members_cache.go:33),
-//	        activityState.mu (channel_activity.go:95), restartNoticeGate.mu (restart_notice.go:16),
-//	        userLocks.mu (user_locks.go:30)
-//	-     LiveKitProcess.mu (livekit_process.go:37) and Hub.background (a syncutil.Group, hub.go:110): an
-//	      independent subsystem, not ranked
+//	9     Client.mu                  client.go:81             leaf: nothing is taken under it
+//	9     voiceSlot.voiceMu          voice_registry.go:78     leaf
+//	9     voiceGraceState.mu         voice_grace.go:54        leaf
+//	9     voiceReconcileState.mu     voice_reconcile.go:42    leaf
+//	9     voiceRejoinBlockState.mu   voice_rejoin_block.go:34 leaf
+//	9     removedIdentities.mu       voice_removed_watch.go:35 leaf
+//	9     presenceRepairState.mu     hub_presence.go:92       leaf
+//	9     queueDropState.mu          hub_stats.go:163         leaf
+//	9     EventRingBuffer.mu RW      ringbuffer.go:14         leaf
+//	9     memberCache.mu             serve_ready_members_cache.go:33  leaf
+//	9     activityState.mu           channel_activity.go:95   leaf
+//	9     restartNoticeGate.mu       restart_notice.go:16     leaf
+//	9     userLocks.mu               user_locks.go:30         leaf, but see userLocks.tryLock below
+//	-     LiveKitProcess.mu          livekit_process.go:37    unranked: independent subsystem
+//
+// Hub.background (hub.go:110) is a syncutil.Group, not a mutex, so it has no row.
 //
 // The two rank-3 pairs and the rank-4 and rank-6 pairs are not ordered
 // against each other; no path read takes one under the other except
