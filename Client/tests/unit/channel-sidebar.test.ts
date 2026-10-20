@@ -75,7 +75,14 @@ import { Permission, type ReadyChannel, type VoiceStatePayload } from "../../src
 import { computeKeyFingerprint } from "@lib/e2eeCrypto";
 import { noteJoinFailed, noteJoinSucceeded } from "../../src/features/voice/joinBackoff";
 import { expectConsole } from "../helpers/console";
-import { muteChannel, unmuteChannel, invalidateMuteCache } from "@lib/channel-mutes";
+import {
+  CHANNEL_MUTE_CHANGED,
+  getChannelMutesHost,
+  muteChannel,
+  unmuteChannel,
+  invalidateMuteCache,
+} from "@lib/channel-mutes";
+import { STORAGE_PREFIX } from "@lib/preferences";
 import { setHideMutedChannels } from "@lib/hide-muted-channels";
 
 function resetStores(): void {
@@ -4552,5 +4559,138 @@ describe("ChannelSidebar text rows and groups on models (5.4d-1)", () => {
     document.querySelector<HTMLElement>('[data-testid="ctx-edit-channel"]')!.click();
     expect(onEditChannel).toHaveBeenCalledTimes(1);
     expect(onEditChannel.mock.calls[0]![0]).toMatchObject({ id: 2, topic: "new topic" });
+  });
+});
+
+describe("ChannelSidebar on one select (5.4d-2)", () => {
+  let container: HTMLDivElement;
+  let sidebar: ReturnType<typeof createChannelSidebar>;
+
+  const text = (id: number, extra: Partial<ReadyChannel> = {}): ReadyChannel => ({
+    id,
+    name: `text-${id}`,
+    type: "text",
+    category: "Text Channels",
+    position: id,
+    unread_count: 0,
+    last_message_id: 1,
+    ...extra,
+  });
+  const rowIds = (): string[] =>
+    Array.from(container.querySelectorAll<HTMLElement>(".channel-item")).map(
+      (el) => el.dataset.channelId ?? "",
+    );
+  const row = (id: number): HTMLElement | null =>
+    container.querySelector<HTMLElement>(`.channel-item[data-channel-id="${id}"]`);
+
+  beforeEach(() => {
+    resetStores();
+    // Mutes persist across tests; start with none.
+    unmuteChannel(1);
+    unmuteChannel(2);
+    invalidateMuteCache();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn() });
+  });
+
+  afterEach(() => {
+    sidebar.destroy?.();
+    container.remove();
+    vi.restoreAllMocks();
+  });
+
+  it("a muted channel that gains a mention under a collapsed category shows with its badge, and keeps it when expanded", () => {
+    setChannels([text(1), text(2)]);
+    muteChannel(2);
+    uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set(["Text Channels"]) }));
+    sidebar.mount(container);
+    expect(rowIds()).toEqual([]);
+
+    channelsStore.setState((prev) => {
+      const channels = new Map(prev.channels);
+      channels.set(2, { ...channels.get(2)!, unreadCount: 1, mentionCount: 1 });
+      return { ...prev, channels };
+    });
+    channelsStore.flush();
+    expect(rowIds()).toEqual(["2"]);
+    expect(row(2)!.querySelector(".mention-badge")?.textContent).toBe("1");
+    const badgeText = row(2)!.textContent;
+
+    uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set<string>() }));
+    uiStore.flush();
+    expect(rowIds()).toEqual(["1", "2"]);
+    expect(row(2)!.textContent).toBe(badgeText);
+    expect(row(2)!.querySelector(".mention-badge")?.textContent).toBe("1");
+  });
+
+  it("mount subscribes only through select", () => {
+    const stores = [voiceStore, membersStore, authStore, channelsStore, uiStore, safetyStore];
+    const subscribe = stores.map((s) => vi.spyOn(s, "subscribe"));
+    const selector = stores.map((s) => vi.spyOn(s, "subscribeSelector"));
+    setChannels([text(1)]);
+
+    sidebar.mount(container);
+
+    for (const spy of selector) expect(spy).not.toHaveBeenCalled();
+    for (const spy of subscribe) expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("muting through muteChannel ends with the row muted", () => {
+    setChannels([text(1), text(2)]);
+    sidebar.mount(container);
+    expect(row(2)!.classList.contains("muted")).toBe(false);
+
+    muteChannel(2);
+
+    expect(row(2)!.classList.contains("muted")).toBe(true);
+  });
+
+  it("a mute pref-change alone does not redraw; the mute announcement does", () => {
+    setChannels([text(1), text(2)]);
+    sidebar.mount(container);
+    const before = row(2)!;
+    expect(before.classList.contains("muted")).toBe(false);
+
+    // Write the list the way writeMuted saves it (a bare id is a forever mute),
+    // then drop the cache the module's own pref-change listener would drop.
+    const key =
+      getChannelMutesHost() === null ? "mutedChannels" : `mutedChannels:${getChannelMutesHost()}`;
+    localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify([2]));
+    invalidateMuteCache();
+    window.dispatchEvent(new CustomEvent("owncord:pref-change", { detail: { key } }));
+
+    expect(row(2)).toBe(before);
+    expect(row(2)!.classList.contains("muted")).toBe(false);
+
+    window.dispatchEvent(new CustomEvent(CHANNEL_MUTE_CHANGED, { detail: { channelId: 2 } }));
+
+    expect(row(2)!.classList.contains("muted")).toBe(true);
+  });
+
+  it("destroy then a store change touches no row", () => {
+    setChannels([text(1), text(2)]);
+    sidebar.mount(container);
+    const first = row(1)!;
+    const second = row(2)!;
+    const observer = new MutationObserver(() => {});
+    observer.observe(first, { attributes: true, childList: true, subtree: true });
+    observer.observe(second, { attributes: true, childList: true, subtree: true });
+    const nameBefore = container.querySelector("h2");
+
+    sidebar.destroy?.();
+    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
+    channelsStore.flush();
+    setRoles([{ id: 9, name: "x", color: null, permissions: 0 }]);
+    channelsStore.flush();
+    authStore.setState((prev) => ({ ...prev, serverName: "Renamed" }));
+    authStore.flush();
+    window.dispatchEvent(new CustomEvent("owncord:channel-mute-changed"));
+    muteChannel(1);
+
+    expect(observer.takeRecords()).toEqual([]);
+    observer.disconnect();
+    expect(container.querySelector(".channel-sidebar")).toBeNull();
+    expect(nameBefore?.textContent).toBe("Test Server");
   });
 });
