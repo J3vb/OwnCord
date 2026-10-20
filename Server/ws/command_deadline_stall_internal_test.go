@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -92,6 +93,13 @@ type stallJoinStore struct {
 	VoiceStore
 	stallJoin  bool
 	commitThen bool // commit the row, then stall the read-back
+	// commitThenFail commits the insert, then reports the deadline as the error,
+	// as a driver does when its interrupt lands after the commit.
+	commitThenFail bool
+	// stallNthState stalls the nth State call (1-based) that carries a
+	// cancellable context until it ends; 0 stalls none.
+	stallNthState int
+	stateCalls    *int
 }
 
 func (s stallJoinStore) Join(ctx context.Context, userID, channelID int64, maxUsers int) error {
@@ -99,10 +107,24 @@ func (s stallJoinStore) Join(ctx context.Context, userID, channelID int64, maxUs
 		<-ctx.Done()
 		return ctx.Err()
 	}
+	if s.commitThenFail {
+		if err := s.VoiceStore.Join(context.WithoutCancel(ctx), userID, channelID, maxUsers); err != nil {
+			return err
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	return s.VoiceStore.Join(ctx, userID, channelID, maxUsers)
 }
 
 func (s stallJoinStore) State(ctx context.Context, userID int64) (*db.VoiceState, error) {
+	if s.stallNthState > 0 {
+		*s.stateCalls++
+		if *s.stateCalls == s.stallNthState {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+	}
 	if s.commitThen && ctx.Done() != nil {
 		// Stall only the frame-bound read-back: it ends at the deadline.
 		if st, err := s.VoiceStore.State(context.WithoutCancel(ctx), userID); err == nil && st != nil {
@@ -132,6 +154,7 @@ func TestHandleMessage_VoiceJoinTimesOutBeforeCommit(t *testing.T) {
 			h.readers.Dispatch = stallGetChannel{DispatchReader: h.readers.Dispatch}
 		}},
 		{"persist insert", func(h *Hub) { h.voice = stallJoinStore{VoiceStore: h.voice, stallJoin: true} }},
+		{"persist insert reported after commit", func(h *Hub) { h.voice = stallJoinStore{VoiceStore: h.voice, commitThenFail: true} }},
 		{"persist read-back after commit", func(h *Hub) { h.voice = stallJoinStore{VoiceStore: h.voice, commitThen: true} }},
 	}
 	for _, tc := range cases {
@@ -175,4 +198,80 @@ func TestHandleMessage_VoiceJoinTimesOutBeforeCommit(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A channel switch whose verify read hits the deadline after the old row was
+// deleted keeps the moderator mute: the flags read off the old row are stashed
+// again, so the user's next join is still server-muted.
+func TestHandleMessage_SwitchTimeoutKeepsModeratorMute(t *testing.T) {
+	h, database, c, chA := newVoiceTraceHub(t, "dl-switch")
+	chB := mustCreateVoiceChannel(t, database, "dl-switch-b")
+	joinVoiceForTrace(t, h, c, chA)
+	if _, err := database.ExecContext(context.Background(),
+		`UPDATE voice_states SET server_muted = 1 WHERE user_id = ?`, c.userID); err != nil {
+		t.Fatalf("server mute: %v", err)
+	}
+	drainFrames(c)
+
+	calls := 0
+	// State calls on a switch: 1 is the old row's flags, 2 the verify read.
+	h.voice = stallJoinStore{VoiceStore: h.voice, stallNthState: 2, stateCalls: &calls}
+	SetCommandDeadlineForTest(t, 100*time.Millisecond)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.handleMessage(c, voiceFrame(t, "voice_join", "req-switch", map[string]any{"channel_id": chB}))
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("switch did not return within 3s of a 100ms deadline")
+	}
+	if code, ok := errorCodeOf(c); !ok || code != ErrCodeRequestTimeout {
+		t.Errorf("error = %q (present=%v), want %s", code, ok, ErrCodeRequestTimeout)
+	}
+	if muted, _, _ := c.voice.takeModFlags(); !muted {
+		t.Error("the moderator mute was lost on a timed-out switch")
+	}
+}
+
+// channel_focus behind a stalled database read answers REQUEST_TIMEOUT.
+func TestHandleMessage_ChannelFocusTimesOutOnStalledRead(t *testing.T) {
+	st := &channelStallStore{}
+	f := newActivityFixtureStore(t, func(d *db.DB) service.Store { st.Store = d; return st }, true)
+	reader := f.user(t, "reader", permissions.MemberRoleID)
+	st.stall.Store(true)
+	SetCommandDeadlineForTest(t, 100*time.Millisecond)
+
+	c := NewTestClient(f.hub, reader.ID, make(chan []byte, 16))
+	c.user = reader
+	f.hub.clients[reader.ID] = c
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		f.hub.handleMessage(c, voiceFrame(t, "channel_focus", "req-focus", map[string]any{"channel_id": f.textID}))
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("channel_focus did not return within 3s of a 100ms deadline")
+	}
+	if code, ok := errorCodeOf(c); !ok || code != ErrCodeRequestTimeout {
+		t.Errorf("error = %q (present=%v), want %s", code, ok, ErrCodeRequestTimeout)
+	}
+}
+
+// channelStallStore blocks the channel lookup until the caller's context ends.
+type channelStallStore struct {
+	service.Store
+	stall atomic.Bool
+}
+
+func (s *channelStallStore) GetChannel(ctx context.Context, id int64) (*db.Channel, error) {
+	if s.stall.Load() {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	return s.Store.GetChannel(ctx, id)
 }

@@ -59,7 +59,7 @@ var voiceJoinPostTokenRaceHook func(*Client)
 // that produced it (SRE-M2). Empty when the frame carried none.
 // fctx is the frame deadline (WP 4.1b): it bounds the database
 // reads and the membership insert up to the commit point, and a failure caused
-// by it is answered REQUEST_TIMEOUT with nothing applied (voiceJoinFail). ctx
+// by it is answered REQUEST_TIMEOUT (voiceJoinFail). ctx
 // is the connection context for everything that must not be cut short: the
 // leave of a previous channel, the rollback, and the work after the commit
 // (token, broadcasts), so a late deadline never leaves a half-applied join.
@@ -75,6 +75,7 @@ func (h *Hub) handleVoiceJoinFrame(fctx, ctx context.Context, c *Client, payload
 
 	wasServerMuted, wasServerDeafened, wasServerMutedBy, ok := h.voiceJoinLeaveCurrent(fctx, ctx, txn, c, channelID, reqID)
 	if !ok {
+		h.restorePendingModFlags(c, wasServerMuted, wasServerDeafened, wasServerMutedBy) // a failed switch keeps the stash
 		return
 	}
 	leaveDone := time.Now()
@@ -303,7 +304,7 @@ func (h *Hub) voiceJoinLeaveCurrent(fctx, ctx context.Context, txn *voiceTxn, c 
 			slog.Warn("handleVoiceJoin: could not verify voice state cleared",
 				"user_id", c.userID, "err", err)
 			voiceJoinFail(fctx, c, reqID, err, ErrCodeInternal, "voice channel switch failed — please try again")
-			return false, false, nil, false
+			return wasServerMuted, wasServerDeafened, wasServerMutedBy, false
 		}
 		if vs != nil {
 			slog.Warn("handleVoiceJoin: stale voice state persists after leave, aborting switch",
@@ -323,7 +324,7 @@ func (h *Hub) voiceJoinLeaveCurrent(fctx, ctx context.Context, txn *voiceTxn, c 
 			// (re-broadcasting voice_leave, harmlessly) within one tick, and
 			// the user_id-PK upsert lets the user rejoin immediately.
 			c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "voice channel switch failed — please try again", reqID))
-			return false, false, nil, false
+			return wasServerMuted, wasServerDeafened, wasServerMutedBy, false
 		}
 	}
 
@@ -352,6 +353,7 @@ func (h *Hub) voiceJoinPersist(fctx, ctx context.Context, txn *voiceTxn, c *Clie
 		return nil, false
 	case err != nil:
 		slog.Error("ws handleVoiceJoin Join", "err", err, "user_id", c.userID)
+		h.voiceJoinAbandonOnDeadline(fctx, ctx, txn, c, channelID, err)
 		voiceJoinFail(fctx, c, reqID, err, ErrCodeInternal, "failed to join voice channel")
 		return nil, false
 	}
