@@ -64,6 +64,8 @@ export interface VideoModeController {
   openCall(): void;
   /** Whether video grid is currently visible. */
   isVideoMode(): boolean;
+  /** The grid is up in this window (open and not popped out). */
+  isGridInWindow(): boolean;
   /** Set focus on a specific video tile (focus mode). */
   setFocus(tileId: number): void;
   /** Get the currently focused tile ID, or null if none. */
@@ -436,6 +438,7 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     showVideoGrid,
     openCall,
     isVideoMode: isVideoModeActive,
+    isGridInWindow: () => videoMode && !poppedOut,
     setFocus,
     getFocusedTileId,
     setCallPoppedOut,

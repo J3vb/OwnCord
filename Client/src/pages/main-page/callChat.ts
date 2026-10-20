@@ -23,7 +23,10 @@ export interface CallChatState {
 }
 
 export interface CallChatOptions {
-  readonly videoModeCtrl: Pick<VideoModeController, "openCall" | "setChatBeside" | "isVideoMode">;
+  readonly videoModeCtrl: Pick<
+    VideoModeController,
+    "openCall" | "setChatBeside" | "isVideoMode" | "isGridInWindow"
+  >;
   /** Told whenever the capable/open pair changes (and once at creation). */
   readonly onStateChange?: (state: CallChatState) => void;
 }
@@ -78,7 +81,7 @@ export function createCallChat(opts: CallChatOptions): CallChat {
         return;
       }
     }
-    const capable = call !== null && active === call && opts.videoModeCtrl.isVideoMode();
+    const capable = call !== null && active === call && opts.videoModeCtrl.isGridInWindow();
     opts.videoModeCtrl.setChatBeside(call !== null && active === call && chatOpen);
     if (reported?.capable !== capable || reported.open !== chatOpen) {
       reported = { capable, open: chatOpen };

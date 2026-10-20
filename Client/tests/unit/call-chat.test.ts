@@ -29,14 +29,19 @@ function channel(id: number, type: "text" | "voice" | "dm") {
 
 function fakeCtrl() {
   let videoMode = false;
+  let poppedOut = false;
   return {
     openCall: vi.fn(() => {
       videoMode = true;
     }),
     setChatBeside: vi.fn<(on: boolean) => void>(),
     isVideoMode: () => videoMode,
+    isGridInWindow: () => videoMode && !poppedOut,
     close: () => {
       videoMode = false;
+    },
+    popOut: (out: boolean) => {
+      poppedOut = out;
     },
   };
 }
@@ -252,6 +257,26 @@ describe("callChat (WP 6.1b)", () => {
       ctrl.close();
       chat.refresh();
       expect(states.at(-1)).toEqual({ capable: false, open: true });
+    });
+
+    it("a popped-out call is not split-capable, so the toggle hides", () => {
+      const ctrl = fakeCtrl();
+      const states: CallChatState[] = [];
+      chat = createCallChat({ videoModeCtrl: ctrl, onStateChange: (s) => states.push(s) });
+      joinVoiceChannel(VOICE_A);
+      setActiveChannel(VOICE_A);
+      flush();
+      ctrl.openCall();
+      chat.refresh();
+      expect(states.at(-1)?.capable).toBe(true);
+
+      ctrl.popOut(true);
+      chat.refresh();
+      expect(states.at(-1)?.capable).toBe(false);
+
+      ctrl.popOut(false);
+      chat.refresh();
+      expect(states.at(-1)?.capable).toBe(true);
     });
 
     it("a DM call or an unjoined voice chat is never capable", () => {
