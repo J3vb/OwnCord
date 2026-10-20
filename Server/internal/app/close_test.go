@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -119,12 +120,17 @@ func TestAppClose_IsIdempotent(t *testing.T) {
 type fakeDispatchHub struct {
 	stopped chan struct{}
 	done    chan struct{}
+	joined  atomic.Int32 // JoinBackground calls
 }
 
 func (h *fakeDispatchHub) GracefulStopContext(context.Context, ws.RestartReason) {
 	close(h.stopped)
 }
 func (h *fakeDispatchHub) Done() <-chan struct{} { return h.done }
+func (h *fakeDispatchHub) JoinBackground(context.Context) int {
+	h.joined.Add(1)
+	return 0
+}
 
 // TestStopHub_WaitsForTheDispatchLoopToExit pins the join the hub close step
 // adds after GracefulStopContext. That call only signals the loop; without
@@ -322,5 +328,29 @@ func TestStartMetricsWindows_StepJoinsTheSampler(t *testing.T) {
 	// The step returned only once the goroutine exited, so none is left.
 	if err := goleak.Find(leakOpt); err != nil {
 		t.Fatalf("the sampler goroutine is still running after its close step: %v", err)
+	}
+}
+
+// TestStopHub_JoinsBackgroundJobsAfterDispatchExits pins the 4.5b step: the
+// hub's own cleanup jobs are joined once the dispatch loop is gone, and also
+// when the loop did not exit in time (the join is bounded by the same ctx).
+func TestStopHub_JoinsBackgroundJobsAfterDispatchExits(t *testing.T) {
+	hub := &fakeDispatchHub{stopped: make(chan struct{}), done: make(chan struct{})}
+	close(hub.done)
+	if err := stopHub(context.Background(), hub, ws.RestartReasonShutdown); err != nil {
+		t.Fatalf("stopHub = %v, want nil", err)
+	}
+	if got := hub.joined.Load(); got != 1 {
+		t.Errorf("JoinBackground calls = %d, want 1", got)
+	}
+
+	late := &fakeDispatchHub{stopped: make(chan struct{}), done: make(chan struct{})}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := stopHub(ctx, late, ws.RestartReasonShutdown); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("stopHub with a stuck loop = %v, want the deadline error", err)
+	}
+	if got := late.joined.Load(); got != 1 {
+		t.Errorf("JoinBackground calls after a stuck loop = %d, want 1", got)
 	}
 }

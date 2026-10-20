@@ -102,14 +102,13 @@ type Hub struct {
 	// on the struct-literal hubs internal tests build.
 	runDone chan struct{}
 
-	// life is cancelled when the hub stops (closeStop). Each background sweep
-	// derives its ctx from it, so Stop interrupts a sweep blocked on the DB or
-	// LiveKit, and sweeps counts the ones still running so Run's exit — and
-	// with it Done — waits for them. Made by NewHub.
-	life     context.Context
-	stopLife context.CancelFunc
-	sweeps   sync.WaitGroup
-	gates    contentGates // B5-7 gate reads parked off the dispatch goroutine (hub_content_gate.go)
+	// life is cancelled by closeStop; sweeps and background (ARCH-034: voice-leave
+	// cleanup, joined by JoinBackground, mutex a leaf) run under it. Made by NewHub.
+	life       context.Context
+	stopLife   context.CancelFunc
+	sweeps     sync.WaitGroup
+	background *syncutil.Group
+	gates      contentGates // B5-7 gate reads parked off the dispatch goroutine (hub_content_gate.go)
 
 	// fatalFn runs when the panic breaker trips (3 panics/60s). A hub that
 	// panicked three times in a minute has unknown state, so production exits

@@ -265,3 +265,44 @@ func TestRun_QueuedTouchAndDiscardAreFlushedAtClose(t *testing.T) {
 		t.Errorf("the queued expired-session discard was lost at shutdown: %d row(s) remain", rows)
 	}
 }
+
+// The shutdown signal closes before the first close step, so the update
+// countdown stops while the HTTP drain and the hub-notice wait are still
+// ahead of it; the background group is not stopped that early. The runtime
+// handed to the router carries both.
+func TestClose_ShutdownSignalClosesBeforeHTTPStep(t *testing.T) {
+	port := freePort(t)
+	a := bootTestApp(t, fmt.Sprint(port), "")
+	var atHTTP, atBackground, runtimeShutdown, appShutdown any
+	closed := func(ch <-chan struct{}) bool {
+		select {
+		case <-ch:
+			return true
+		default:
+			return false
+		}
+	}
+	a.onCloseStep = func(stage string) {
+		if stage == "http" {
+			atHTTP = closed(a.runtime.Shutdown)
+			atBackground = closed(a.background.Draining())
+		}
+	}
+	cancel, runErr := runUntilHealthy(t, a, port)
+	if closed(a.runtime.Shutdown) {
+		t.Fatal("shutdown signal closed while the server was running")
+	}
+	runtimeShutdown, appShutdown = a.runtime.Shutdown, (<-chan struct{})(a.shutdown)
+	cancel()
+	awaitRun(t, runErr)
+
+	if atHTTP != true {
+		t.Error("the shutdown signal was not closed when the http close step began")
+	}
+	if atBackground != false {
+		t.Error("the background group was already draining at the http step; it must stay open for handlers still running")
+	}
+	if runtimeShutdown != appShutdown || a.runtime.Background != a.background {
+		t.Error("api.Runtime does not carry the app's shutdown signal and background group")
+	}
+}

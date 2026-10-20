@@ -24,7 +24,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/service"
-	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // closeStepBudget bounds each close step on its own, except the HTTP drain —
@@ -324,27 +323,6 @@ func (a *App) startHub() error {
 	}
 	a.startBackgroundJobs(rt)
 	return nil
-}
-
-// dispatchHub is the slice of *ws.Hub the hub close step drives.
-type dispatchHub interface {
-	GracefulStopContext(ctx context.Context, reason ws.RestartReason)
-	Done() <-chan struct{}
-}
-
-// stopHub is the hub close step: GracefulStopContext, then wait for the
-// dispatch goroutine itself to exit. GracefulStopContext only signals the
-// loop, and on an early start failure the goroutine StartRuntime spawned may
-// not even have been scheduled yet — without the join, Run returned with the
-// loop still alive and Close went on to release what it reads.
-func stopHub(ctx context.Context, hub dispatchHub, reason ws.RestartReason) error {
-	hub.GracefulStopContext(ctx, reason)
-	select {
-	case <-hub.Done():
-		return nil
-	case <-ctx.Done():
-		return fmt.Errorf("hub dispatch did not exit: %w", ctx.Err())
-	}
 }
 
 // startRouter mounts the HTTP handler over the already-built collaborators.

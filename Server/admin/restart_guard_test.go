@@ -58,7 +58,7 @@ func TestApplyStagedUpdate_Success_SwapsWithoutAbortBroadcast(t *testing.T) {
 	exePath, newPath, stagedHash := stageFakeUpdate(t)
 
 	hub := &mockHub{}
-	if !admin.ApplyStagedUpdate(hub, exePath, newPath, stagedHash) {
+	if !admin.ApplyStagedUpdate(hub, exePath, newPath, stagedHash, nil) {
 		t.Fatal("ApplyStagedUpdate = false, want committed swap")
 	}
 
@@ -93,7 +93,7 @@ func TestApplyAndRestart_Success_RequestsRestartAndMarksPending(t *testing.T) {
 	defer admin.SetApplyRestartDelay(time.Millisecond)()
 
 	hub := &mockHub{}
-	admin.ApplyAndRestart(context.Background(), nil, 0, "v9.9.9", hub, exePath, newPath, stagedHash)
+	admin.ApplyAndRestart(context.Background(), nil, 0, "v9.9.9", hub, exePath, newPath, stagedHash, admin.NewStopSignal(nil, nil))
 
 	if len(hub.restartCalls) != 1 || hub.restartCalls[0].reason != "update" {
 		t.Fatalf("restartCalls = %+v, want exactly the update countdown", hub.restartCalls)
@@ -122,7 +122,7 @@ func TestApplyAndRestart_Abort_ReleasesGuard(t *testing.T) {
 
 	hub := &mockHub{}
 	admin.ApplyAndRestart(context.Background(), nil, 0, "v9.9.9", hub, exePath, newPath,
-		"0000000000000000000000000000000000000000000000000000000000000000")
+		"0000000000000000000000000000000000000000000000000000000000000000", admin.NewStopSignal(nil, nil))
 
 	if got := reasons(); len(got) != 0 {
 		t.Errorf("restart hook reasons = %v, want none on abort", got)

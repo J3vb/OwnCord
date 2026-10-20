@@ -228,3 +228,35 @@ func newAttention(cfg *config.Config, hub *ws.Hub, database *db.DB, settings *se
 		},
 	})
 }
+
+// dispatchHub is the slice of *ws.Hub the hub close step drives.
+type dispatchHub interface {
+	GracefulStopContext(ctx context.Context, reason ws.RestartReason)
+	Done() <-chan struct{}
+	JoinBackground(ctx context.Context) (stragglers int)
+}
+
+// stopHub is the hub close step: GracefulStopContext, then wait for the
+// dispatch goroutine itself to exit. GracefulStopContext only signals the
+// loop, and on an early start failure the goroutine StartRuntime spawned may
+// not even have been scheduled yet — without the join, Run returned with the
+// loop still alive and Close went on to release what it reads.
+func stopHub(ctx context.Context, hub dispatchHub, reason ws.RestartReason) error {
+	hub.GracefulStopContext(ctx, reason)
+	var err error
+	select {
+	case <-hub.Done():
+	case <-ctx.Done():
+		err = fmt.Errorf("hub dispatch did not exit: %w", ctx.Err())
+	}
+	// The hub's own background jobs (a voice leave's LiveKit removal and
+	// delete retries) get a short grace to finish, then are cancelled and
+	// joined, inside the step's budget and before the database closes
+	// (ARCH-034). Not in the dispatch goroutine's exit: a job may need a lock
+	// Run would be holding. After a dispatch timeout ctx is already spent, so
+	// the jobs are cancelled and counted, not waited for.
+	if n := hub.JoinBackground(ctx); n > 0 {
+		slog.Warn("hub background jobs still running at shutdown, abandoning them", "count", n)
+	}
+	return err
+}

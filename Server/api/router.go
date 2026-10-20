@@ -63,9 +63,9 @@ type Runtime struct {
 	LogLevel *admin.LogLevelController
 	// MetricsWindows is the sampled ring behind the metrics endpoint's
 	// "windows" block (WP 4.3a). StartRuntime builds it; the app starts its
-	// sampler (App.startHub) and stops it before the hub. Nil leaves the block
-	// out, which is what a hand-built Runtime in a test gets.
+	// sampler (App.startHub) and stops it before the hub. Nil leaves it out.
 	MetricsWindows *metrics.Windows
+	Lifecycle      // the app's job group and shutdown signal (setup_options.go)
 }
 
 // warnOnServerConfig logs the settings that are legal but rarely what an
@@ -269,7 +269,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Restrict /admin to configured CIDRs (default: private networks only).
 	u := updater.NewUpdater(ver, cfg.GitHub.Token, cfg.GitHub.Owner, cfg.GitHub.Repo)
 	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions, svc,
-		admin.SetupOptions{ConfigPath: config.DefaultPath, RunningCfg: cfg, SetupToken: rt.SetupToken, LogLevel: rt.LogLevel})
+		adminSetupOptions(cfg, rt))
 	// The client's member actions, reachable without the /admin prefix (see
 	// admin.NewMemberAPI). Deliberately outside the admin CIDR gate below: they
 	// accept only a session or API token issued by this server, plus the

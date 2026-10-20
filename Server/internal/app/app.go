@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
@@ -90,7 +91,14 @@ type App struct {
 	// its close step joins or abandons them before the database closes
 	// (ARCH-034).
 	background *syncutil.Group
-	markers    *db.MarkerStore
+	// shutdown is closed at the very start of Close, before the first close
+	// step. It tells work that must not complete during a shutdown (the update
+	// apply tail's countdown and binary swap) to stop, long before the
+	// background group is drained. The group is deliberately not stopped
+	// early: handlers still running during the HTTP drain keep spawning jobs.
+	shutdown     chan struct{}
+	shutdownOnce sync.Once // Close's closed flag is not atomic; a second caller must not double-close
+	markers      *db.MarkerStore
 	// bootMarker is the current run's handle on boot.json (SRE-08); prevBoot
 	// is what the previous run left there, folded into the attention panel at
 	// start-up.
@@ -146,7 +154,7 @@ func New(cfg *config.Config, deps Deps) (*App, error) {
 		return nil, errors.New("app: New needs a restart coordinator")
 	}
 
-	return &App{cfg: cfg, deps: deps, log: deps.Log}, nil
+	return &App{cfg: cfg, deps: deps, log: deps.Log, shutdown: make(chan struct{})}, nil
 }
 
 // onClose registers stage's teardown step. Order of registration is start
@@ -189,6 +197,9 @@ func (a *App) Close(ctx context.Context) error {
 		return nil
 	}
 	a.closed = true
+	if a.shutdown != nil {
+		a.shutdownOnce.Do(func() { close(a.shutdown) })
+	}
 
 	defaultBudget := a.closeStepBudget
 	if defaultBudget <= 0 {
