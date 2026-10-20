@@ -27,6 +27,7 @@ import {
 } from "../../src/components/message-list/attachments";
 import { renderGenericLinkPreview } from "../../src/components/message-list/embeds";
 import { renderInlineImage } from "../../src/components/message-list/media";
+import { getImageBox, setImageBox } from "../../src/components/message-list/image-sizes";
 import { discardMedia, observeMedia } from "../../src/lib/media-visibility";
 import {
   EXTERNAL_CONSENT_PREF,
@@ -126,16 +127,22 @@ async function flush(): Promise<void> {
   for (let i = 0; i < 8; i++) await Promise.resolve();
 }
 
-/** An element's `offsetHeight` is 0 in jsdom; the image-height cache needs a size. */
-function withOffsetHeight<T>(height: number, run: () => T): T {
+/** An element's `offsetWidth` and `offsetHeight` are 0 in jsdom; the image-size cache needs a size. */
+function withOffsetSize<T>(width: number, height: number, run: () => T): T {
   const proto = HTMLElement.prototype;
-  const saved = Object.getOwnPropertyDescriptor(proto, "offsetHeight");
+  const saved = {
+    offsetWidth: Object.getOwnPropertyDescriptor(proto, "offsetWidth"),
+    offsetHeight: Object.getOwnPropertyDescriptor(proto, "offsetHeight"),
+  };
+  Object.defineProperty(proto, "offsetWidth", { configurable: true, get: () => width });
   Object.defineProperty(proto, "offsetHeight", { configurable: true, get: () => height });
   try {
     return run();
   } finally {
-    if (saved !== undefined) Object.defineProperty(proto, "offsetHeight", saved);
-    else delete (proto as { offsetHeight?: number }).offsetHeight;
+    for (const [name, descriptor] of Object.entries(saved)) {
+      if (descriptor !== undefined) Object.defineProperty(proto, name, descriptor);
+      else delete (proto as unknown as Record<string, unknown>)[name];
+    }
   }
 }
 
@@ -319,13 +326,22 @@ const PROBES: readonly Probe[] = [
   {
     name: "media:caches",
     mutate: () => {
-      withOffsetHeight(333, () => {
+      withOffsetSize(400, 333, () => {
         const wrap = renderInlineImage(IMAGE_URL);
         wrap.querySelector("img")!.dispatchEvent(new Event("load"));
       });
-      expect(renderInlineImage(IMAGE_URL).style.minHeight).toBe("333px");
+      expect(renderInlineImage(IMAGE_URL).style.aspectRatio).toBe("400 / 333");
     },
     isInitial: () => renderInlineImage(IMAGE_URL).style.minHeight === "200px",
+  },
+  {
+    // The persisted per-URL image boxes go with the session too.
+    name: "message-list:image-sizes",
+    mutate: () => {
+      setImageBox("https://cdn.example/box-probe.png", { w: 40, h: 30 });
+      expect(getImageBox("https://cdn.example/box-probe.png")).toEqual({ w: 40, h: 30 });
+    },
+    isInitial: () => getImageBox("https://cdn.example/box-probe.png") === undefined,
   },
   {
     // A cached GIF still shows as an instant swap for the next row of that GIF.
