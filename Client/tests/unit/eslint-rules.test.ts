@@ -749,6 +749,8 @@ describe("eslint-rules", () => {
           filename: path.resolve(__dirname, "../helpers/fixture.ts"),
         },
         { code: `import { a } from "@stores/auth.store";`, filename: src("vite-env.d.ts") },
+        { code: `import "@lib/../../outside";`, filename: lib },
+        { code: "const m = import(`@pages/${name}`);", filename: lib },
         // A relative specifier that leaves src/ is not a layer.
         { code: `import { h } from "../../tests/helpers/x";`, filename: src("lib/fixture.ts") },
         // Listed edges are not reported, by alias or by relative path (same key).
@@ -877,6 +879,47 @@ describe("eslint-rules", () => {
           filename: lib,
           options: [{ baseline: { debt: { "lib/other.ts": { "stores/auth.store.ts": 1 } } } }],
           errors: [error("lib/fixture.ts", "stores/auth.store.ts", "lib", "stores")],
+        },
+        // main.ts is rank 6: its extensionless specifier counts, static or dynamic.
+        {
+          code: `import "../main";`,
+          filename: lib,
+          errors: [error("lib/fixture.ts", "main.ts", "lib", "main")],
+        },
+        {
+          code: `const m = import("../main");`,
+          filename: lib,
+          errors: [error("lib/fixture.ts", "main.ts", "lib", "main")],
+        },
+        // An alias that climbs out of its directory is judged by where it lands.
+        {
+          code: `import "@lib/../pages/MainPage";`,
+          filename: lib,
+          errors: [error("lib/fixture.ts", "pages/MainPage.ts", "lib", "pages")],
+        },
+        // A dynamic import of a plain template literal is a literal specifier.
+        {
+          code: "const m = import(`@pages/MainPage`);",
+          filename: lib,
+          errors: [error("lib/fixture.ts", "pages/MainPage.ts", "lib", "pages")],
+        },
+        // A Vite query suffix is not part of the module path.
+        {
+          code: `import "@stores/voice.store?raw";`,
+          filename: lib,
+          errors: [error("lib/fixture.ts", "stores/voice.store.ts", "lib", "stores")],
+        },
+        // A bare layer directory is still that layer (no index on disk: fixture fallback).
+        {
+          code: `import "../pages";`,
+          filename: lib,
+          errors: [error("lib/fixture.ts", "pages.ts", "lib", "pages")],
+        },
+        // A directory import resolves to its index.ts.
+        {
+          code: `import "../features/zoom";`,
+          filename: lib,
+          errors: [error("lib/fixture.ts", "features/zoom/index.ts", "lib", "features")],
         },
         // A relative filename resolves against Client/.
         {

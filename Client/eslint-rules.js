@@ -911,11 +911,17 @@ const LAYER_ALIASES = new Map([
 ]);
 
 const TEST_FILE = /\.test\.tsx?$/;
+const MAIN_MODULE = /^main(\.[jt]sx?)?$/;
 
 /** Layer name of a posix path relative to src/, or null when it has none. */
 function layerOfRel(rel) {
   const parts = rel.split("/");
-  if (parts.length === 1) return parts[0] === "main.ts" ? "main" : null;
+  if (parts.length === 1) {
+    // `main.ts`, or `main` as an extensionless import specifier; a bare layer
+    // name is a directory import (it resolves to that layer's index).
+    if (MAIN_MODULE.test(parts[0])) return "main";
+    return LAYER_RANK.has(parts[0]) ? parts[0] : null;
+  }
   return LAYER_RANK.has(parts[0]) ? parts[0] : null;
 }
 
@@ -958,13 +964,18 @@ function resolveTargetFile(relBase) {
 
 /** The target of `spec` as a posix path relative to src/ (extension and index
  *  not yet resolved), or null for a bare package or a path outside src/. */
-function targetBase(spec, importerRel) {
+function targetBase(rawSpec, importerRel) {
+  // A Vite suffix (`?raw`, `?url`, `#hash`) is not part of the module path.
+  const spec = rawSpec.replace(/[?#].*$/, "");
   if (spec.startsWith(".")) {
     return relToSrc(path.join(SRC_ROOT, path.posix.dirname(importerRel), spec));
   }
   for (const [alias, dir] of LAYER_ALIASES) {
-    if (spec === alias) return dir;
-    if (spec.startsWith(`${alias}/`)) return `${dir}/${spec.slice(alias.length + 1)}`;
+    if (spec.startsWith(`${alias}/`)) {
+      // Normalise so `@lib/../pages/x` is judged by where it lands.
+      const base = path.posix.normalize(`${dir}/${spec.slice(alias.length + 1)}`);
+      return base.startsWith("..") ? null : base.replace(/\/$/, "");
+    }
   }
   return null;
 }
@@ -1045,7 +1056,11 @@ const layerDirection = {
         check(node, node.source.value);
       },
       ImportExpression(node) {
-        if (node.source.type === "Literal") check(node, node.source.value);
+        const { source } = node;
+        if (source.type === "Literal") check(node, source.value);
+        else if (source.type === "TemplateLiteral" && source.expressions.length === 0) {
+          check(node, source.quasis[0].value.cooked);
+        }
       },
       "Program:exit"() {
         for (const [target, list] of sites) {
