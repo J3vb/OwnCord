@@ -108,6 +108,14 @@ type CreateDMResult struct {
 	AcceptedRequest *db.MessageRequest
 }
 
+// dmReachableUser reports whether u can be the other side of a new DM or a
+// group DM membership: the account exists, is active (not awaiting approval
+// and not denied), and is not effectively banned. A temporary ban that has
+// lapsed counts as not banned (auth.IsEffectivelyBanned).
+func dmReachableUser(u *db.User) bool {
+	return u != nil && u.RegistrationStatus == db.RegistrationActive && !auth.IsEffectivelyBanned(u)
+}
+
 // CreateDM creates or retrieves a DM channel between two users.
 // Validates that neither user has blocked the other.
 func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*CreateDMResult, error) {
@@ -128,14 +136,9 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 	if err != nil || recipient == nil {
 		return nil, fmt.Errorf("%w: recipient not found", ErrNotFound)
 	}
-	// GetUserByID has no banned filter (unlike the lookups that normally
-	// surface a user to a caller, e.g. ListMembers), and a hand-crafted
-	// recipient_id naming a deleted/banned account otherwise creates a
-	// dead-end DM channel plus participant rows for the tombstone user.
-	// Gated on IsEffectivelyBanned rather than the raw flag so a lapsed
-	// temporary ban — which login/WS already treat as not-banned — still
-	// permits the DM once it expires.
-	if auth.IsEffectivelyBanned(recipient) {
+	// Only active, not-banned accounts can be reached; anything else is the
+	// same "recipient not found" as an unknown id.
+	if !dmReachableUser(recipient) {
 		return nil, fmt.Errorf("%w: recipient not found", ErrNotFound)
 	}
 
@@ -330,8 +333,8 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 		return nil, err
 	}
 
-	// The same checks an add runs, so the two cannot drift: recipients exist
-	// and are not banned, and no pair in the room is blocked. Group DMs are
+	// The same checks an add runs, so the two cannot drift: recipients are
+	// dmReachableUser, and no pair in the room is blocked. Group DMs are
 	// exempt from the send-time block gate (RequireDMNotBlocked skips groups
 	// entirely) on the strength of this check, so two mutually-blocked
 	// recipients must not both end up in the same group even when neither of

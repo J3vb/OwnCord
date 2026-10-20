@@ -283,6 +283,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Messaging**
 
+- Direct messages and group DMs can only be started with active accounts.
 - A video in chat now takes the shape of the clip once played, like an image, instead of sitting in a wide black box. Small and portrait videos no longer have black bars beside them.
 - Losing permission to send in a channel also stopped you deleting your own messages there. You can now delete your own messages with read access alone.
 - An upload or send error under the message box now has a close button, so it can be dismissed without typing or sending something first.

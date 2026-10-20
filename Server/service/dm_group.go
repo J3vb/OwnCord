@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"slices"
 
-	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
@@ -95,7 +94,7 @@ func dedupeGroupRecipients(ids []int64, callerID int64) ([]int64, error) {
 }
 
 // validateGroupRecipients is the check create and add share. Every target must
-// exist and not be effectively banned (a missing or banned account is "not
+// be dmReachableUser (a missing, banned or non-active account is "not
 // found"), and no pair involving a target may be blocked in either direction,
 // against the other targets or against the people already in the room (others).
 // It returns the targets' users in order. A pair of people already in the room
@@ -108,9 +107,7 @@ func (s *DMService) validateGroupRecipients(ctx context.Context, targets, others
 		if err != nil || user == nil {
 			return nil, fmt.Errorf("%w: recipient not found", ErrNotFound)
 		}
-		// Gate on effective ban status, not the raw flag, so a lapsed temporary
-		// ban does not wrongly refuse the group.
-		if auth.IsEffectivelyBanned(user) {
+		if !dmReachableUser(user) {
 			return nil, fmt.Errorf("%w: recipient not found", ErrNotFound)
 		}
 		users = append(users, user)
