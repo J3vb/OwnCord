@@ -28,7 +28,11 @@ const (
 	// transitively through embedded interfaces declared in this package
 	// (CallLogStore, GroupDMStore). Methods promoted from the cross-package
 	// embeds in storeCrossPackageEmbeds are not counted here.
-	storeMethodBaseline = 306 // 293 written in Store itself plus 13 from the two same-package embeds
+	//
+	// The pin was 306 when this test was written. WP 4.1a (#2582) landed first
+	// and replaced EraseAccount with the embedded ErasureStageStore slice, a net
+	// three more methods; it is accepted as the starting point.
+	storeMethodBaseline = 309 // 292 written in Store itself plus 17 from the three same-package embeds (CallLogStore, GroupDMStore, ErasureStageStore)
 
 	// modelsJSONTagBaseline is the number of struct fields in db/models.go
 	// whose tag carries a json: key, json:"-" included.
@@ -39,10 +43,10 @@ const (
 	modelsJSONTagBaseline = 124
 
 	// storeFullSurfaceBaseline is the compiler's own method count for Store,
-	// promoted methods from the cross-package embeds included (306 plus the 9
+	// promoted methods from the cross-package embeds included (309 plus the 9
 	// of auth.SecondFactorPersister). It closes the gap the source count
 	// leaves for growth inside a cross-package embed.
-	storeFullSurfaceBaseline = 315
+	storeFullSurfaceBaseline = 318
 )
 
 // storeCrossPackageEmbeds names every interface embedded in Store that is
