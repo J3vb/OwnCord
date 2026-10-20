@@ -54,9 +54,10 @@ func TestRequestDeadline_WriterStallReturns503(t *testing.T) {
 		t.Fatalf("handler's Content-Length %q leaked into the rewritten response", cl)
 	}
 	var body struct {
-		Error string `json:"error"`
+		Error   string `json:"error"`
+		Message string `json:"message"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body.Error != "SERVICE_UNAVAILABLE" {
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body.Error != "SERVICE_UNAVAILABLE" || body.Message == "" {
 		t.Fatalf("body = %q (%v), want {\"error\":\"SERVICE_UNAVAILABLE\"}", rec.Body.String(), err)
 	}
 	if strings.Contains(rec.Body.String(), "database is busy") {
@@ -76,6 +77,8 @@ func TestRequestDeadline_SuccessAfterDeadlineNotRewritten(t *testing.T) {
 		{"201 after deadline", http.StatusCreated, true},
 		{"404 after deadline", http.StatusNotFound, true},
 		{"500 before deadline", http.StatusInternalServerError, false},
+		{"502 after deadline", http.StatusBadGateway, true},
+		{"507 after deadline", http.StatusInsufficientStorage, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -160,6 +163,7 @@ func TestRequestDeadline_ResponseControllerReachesConnection(t *testing.T) {
 // "METHOD /pattern" as chi.Walk reports them, or "* /prefix/*" for a mounted
 // handler that answers every method (postureKey).
 var deadlineBound = []string{
+	"DELETE /api/v1/uploads/{id}",
 	"DELETE /admin/api/backups/{name}",
 	"DELETE /admin/api/channels/{id}",
 	"DELETE /admin/api/channels/{id}/permissions/{roleId}",
@@ -272,8 +276,6 @@ var deadlineBound = []string{
 	"POST /admin/api/support-bundles/preview",
 	"POST /admin/api/tokens",
 	"POST /admin/api/users/{id}/recovery-credential",
-	"POST /api/v1/admin/plugins/{id}/disable",
-	"POST /api/v1/admin/plugins/{id}/enable",
 	"POST /api/v1/appeals/",
 	"POST /api/v1/appeals/{id}/withdraw",
 	"POST /api/v1/auth/login",
@@ -290,7 +292,6 @@ var deadlineBound = []string{
 	"POST /api/v1/dms/",
 	"POST /api/v1/dms/group",
 	"POST /api/v1/dms/{channelId}/members",
-	"POST /api/v1/emoji/",
 	"POST /api/v1/invites/",
 	"POST /api/v1/livekit/webhook",
 	"POST /api/v1/moderation/appeals/{id}/assign",
@@ -327,7 +328,9 @@ var deadlineExempt = map[string]string{
 	"GET /api/v1/ws":                                       "WebSocket upgrade; r.Context() is the socket's lifetime",
 	"* /livekit/*":                                         "LiveKit signalling proxy",
 	"POST /api/v1/uploads":                                 "file upload under the transfer deadline",
-	"DELETE /api/v1/uploads/{id}":                          "shares the /api/v1/uploads prefix exemption with the upload route",
+	"POST /api/v1/emoji/":                                  "custom emoji upload",
+	"POST /api/v1/admin/plugins/{id}/enable":               "plugin enable recompiles under the request context",
+	"POST /api/v1/admin/plugins/{id}/disable":              "plugin disable, for symmetry with enable",
 	"POST /api/v1/users/me/avatar":                         "avatar upload",
 	"POST /api/v1/dms/{channelId}/icon":                    "group icon upload",
 	"GET /api/v1/files/{id}":                               "file download",
@@ -473,6 +476,10 @@ func TestRequestDeadline_ExemptRoutesHaveNoDeadline(t *testing.T) {
 		{http.MethodGet, "/livekit/rtc", false},
 		{http.MethodGet, "/admin/api/logs/stream", false},
 		{http.MethodDelete, "/api/v1/auth/account", false},
+		{http.MethodPost, "/api/v1/emoji/", false},
+		{http.MethodPost, "/api/v1/admin/plugins/p1/enable", false},
+		{http.MethodPost, "/api/v1/admin/plugins/p1/disable", false},
+		{http.MethodDelete, "/api/v1/uploads/9", true},
 		{http.MethodGet, "/api/v1/channels/", true},
 		{http.MethodPost, "/api/v1/auth/login", true},
 		{http.MethodGet, "/api/v1/server-info", true},

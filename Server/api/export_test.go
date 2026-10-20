@@ -224,3 +224,12 @@ func RequestDeadlineExemptionsForTest() []RequestDeadlineExemption {
 	}
 	return out
 }
+
+// SetRestRequestDeadlineForTest sets the request deadline for the test and
+// restores it afterwards (WP 4.1c). Tests that use it must not run in parallel.
+func SetRestRequestDeadlineForTest(t testing.TB, d time.Duration) {
+	t.Helper()
+	old := restRequestDeadline
+	restRequestDeadline = d
+	t.Cleanup(func() { restRequestDeadline = old })
+}
