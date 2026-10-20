@@ -133,6 +133,14 @@ on:
         options:
           - spread
           - aligned
+      event_persistence:
+        description: "Measurement arm: on (default) keeps the events table, off boots with event_persistence.enabled=false (WP 4.6)"
+        required: false
+        type: choice
+        default: "on"
+        options:
+          - "on"
+          - "off"
       ceiling_max:
         description: "ceiling-search: highest connection count probed (and users to seed)"
         required: false
@@ -149,10 +157,6 @@ on:
         description: "scale: per active user send interval in the burst minute, ms (2000 = 100 msg/s at the defaults)"
         required: false
         default: "2000"
-      scale_herd_spread_s:
-        description: "scale: seconds over which every socket drops and redials (D3 says 15)"
-        required: false
-        default: "15"
 
 permissions:
   contents: read
@@ -194,8 +198,9 @@ jobs:
       CONNECTIONS: ${{ (inputs.profile || 'capacity') == 'scale' && (inputs.scale_connections || '2000') || inputs.connections || '100' }}
       SCALE_ACTIVE: ${{ inputs.scale_active || '0.1' }}
       SCALE_BURST_SEND_MS: ${{ inputs.scale_burst_send_ms || '2000' }}
-      SCALE_HERD_SPREAD_S: ${{ inputs.scale_herd_spread_s || '15' }}
+      SCALE_HERD_SPREAD_S: "15"
       VOICE: ${{ inputs.voice || '25' }}
+      EVENT_PERSISTENCE: ${{ inputs.event_persistence || 'on' }}
     strategy:
       fail-fast: false
       matrix:
@@ -450,6 +455,9 @@ jobs:
           if [ "$TLS_MODE" = "off" ]; then
             extra_env+=(-e OWNCORD_TLS_MODE=off)
           fi
+          if [ "$EVENT_PERSISTENCE" = "off" ]; then
+            extra_env+=(-e OWNCORD_EVENT_PERSISTENCE_ENABLED=false)
+          fi
 
           # Removed first so a re-run on the same runner is idempotent, and so
           # the restart drill's `docker start` finds the container it stopped.
@@ -487,6 +495,9 @@ jobs:
         if: matrix.leg == 'ceiling'
         run: |
           cd "$WORK"
+          if [ "$EVENT_PERSISTENCE" = "off" ]; then
+            export OWNCORD_EVENT_PERSISTENCE_ENABLED=false
+          fi
           OWNCORD_SECURITY_AUTH_RATE_LIMIT_MULTIPLIER=100 \
           OWNCORD_VOICE_LIVEKIT_API_KEY="$LIVEKIT_API_KEY" \
           OWNCORD_VOICE_LIVEKIT_API_SECRET="$LIVEKIT_API_SECRET" \
@@ -511,6 +522,7 @@ jobs:
           {
             echo "profile: $PROFILE"
             echo "tls_mode: $TLS_MODE"
+            echo "event_persistence: $EVENT_PERSISTENCE"
             echo "leg: ${MATRIX_LEG}"
             echo "host_nproc: $(nproc)"
             echo "host_mem_kb: $(awk '/MemTotal/{print $2}' /proc/meminfo)"
@@ -857,6 +869,27 @@ jobs:
       #
       # The scale profile is shaped the same way and gated the same way: a shed
       # frame means a window measured the limiter (OC-0447).
+      # WP 4.6: the A/B arm must be the one the dispatch asked for. The
+      # event_persister block exists only while a persister is attached, so
+      # its presence in the snapshot is what says the events table was on.
+      - name: Assert the event_persistence arm took effect
+        if: always() && (env.EVENT_PERSISTENCE == 'off' || env.PROFILE == 'ceiling-search')
+        run: |
+          if ! jq -e 'type == "object"' "$WORK/metrics-after.json" >/dev/null 2>&1; then
+            echo "::error::metrics-after.json is missing, so the event_persistence arm cannot be checked"
+            exit 1
+          fi
+          has=$(jq -r 'has("event_persister")' "$WORK/metrics-after.json")
+          if [ "$EVENT_PERSISTENCE" = "off" ] && [ "$has" != "false" ]; then
+            echo "::error::event_persistence=off was requested but the server still reports an event persister: the run measured the wrong arm"
+            exit 1
+          fi
+          if [ "$EVENT_PERSISTENCE" = "on" ] && ! jq -e '.event_persister.persisted > 0' "$WORK/metrics-after.json" >/dev/null 2>&1; then
+            echo "::error::event_persistence=on was requested but the server reports no event persister, or one that persisted nothing: the run measured the wrong arm"
+            exit 1
+          fi
+          echo "event_persistence=$EVENT_PERSISTENCE confirmed by the metrics snapshot"
+
       - name: Assert the run never hit the topic limiter
         if: always() && (env.PROFILE == 'ceiling-search' || env.PROFILE == 'scale') && matrix.leg == 'constrained'
         run: |
