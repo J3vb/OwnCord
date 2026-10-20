@@ -9,7 +9,7 @@ import {
   MOCK_PINNED_MESSAGES,
 } from "./helpers";
 
-// Chat scroll-up guard (chat-scroll-perf PR c). A channel of 600 messages is
+// Chat scroll-up guard (chat-scroll-perf PRs c and e). A channel of 600 messages is
 // served in 50-row pages, newest first, exactly as the server does; the spec
 // scrolls to the top with the mouse wheel and counts what the list did, not how
 // long it took: every history page must land without the window being rebuilt,
@@ -49,7 +49,7 @@ function pagedHistory(): void {
   const gifEvery = 12;
   const internals = (window as any).__TAURI_INTERNALS__;
   const orig = internals.invoke;
-  const scale = { pages: 0, rebuilds: 0, rows: 0 };
+  const scale = { pages: 0, rebuilds: 0, rows: 0, imageLoads: 0, imageLoadShifts: 0 };
   (window as any).__scale = scale;
   const mine: Record<number, Uint8Array | { status: number; headers: string[][]; url: string }> =
     {};
@@ -114,6 +114,27 @@ function pagedHistory(): void {
     return orig(cmd, args);
   };
 
+  // An image's box must already be its final size when the pixels arrive
+  // (chat-scroll-perf PR e): the wrapper's height just before `load` fires and
+  // a frame after it must match. `load` does not bubble, so listen in capture,
+  // which runs before the app's own handler for that image.
+  document.addEventListener(
+    "load",
+    (event) => {
+      const img = event.target;
+      const wrap = img instanceof HTMLImageElement ? img.closest(".msg-image") : null;
+      if (wrap === null) return;
+      const before = wrap.getBoundingClientRect().height;
+      scale.imageLoads++;
+      requestAnimationFrame(() => {
+        if (wrap.isConnected && Math.abs(wrap.getBoundingClientRect().height - before) > 0.5) {
+          scale.imageLoadShifts++;
+        }
+      });
+    },
+    true,
+  );
+
   // A rebuild replaces (nearly) every rendered row at once; a slide only the
   // few that left or entered.
   new MutationObserver((records) => {
@@ -164,6 +185,8 @@ async function seedSession(page: Page): Promise<void> {
 interface Scale {
   readonly pages: number;
   readonly rebuilds: number;
+  readonly imageLoads: number;
+  readonly imageLoadShifts: number;
 }
 
 function scale(page: Page): Promise<Scale> {
@@ -221,7 +244,7 @@ test.describe("Message list scrolling up through 600 messages", () => {
     );
     test.info().annotations.push({
       type: "message-list-scale",
-      description: `pages=${pages} rebuilds=${rebuilds} brokerImageCalls=${brokerCalls.length - brokerBefore} longTasksOver50ms=${longTasks.filter((d) => d > 50).length} (soft report)`,
+      description: `pages=${pages} rebuilds=${rebuilds} brokerImageCalls=${brokerCalls.length - brokerBefore} imageLoads=${done.imageLoads} imageLoadShifts=${done.imageLoadShifts} longTasksOver50ms=${longTasks.filter((d) => d > 50).length} (soft report)`,
     });
 
     expect(pages, "history pages that landed").toBeGreaterThanOrEqual(5);
@@ -229,5 +252,9 @@ test.describe("Message list scrolling up through 600 messages", () => {
     // Each distinct GIF is fetched through the broker at most once: a rebuilt
     // window would ask for the ones it had already drawn again.
     expect(brokerCalls.length, "broker image calls").toBeLessThanOrEqual(new Set(brokerCalls).size);
+    // Every image box is reserved from its header before the pixels arrive, so
+    // no load changes its row's height (chat-scroll-perf PR e).
+    expect(done.imageLoads, "images that loaded").toBeGreaterThan(0);
+    expect(done.imageLoadShifts, "image loads that changed their box's height").toBe(0);
   });
 });

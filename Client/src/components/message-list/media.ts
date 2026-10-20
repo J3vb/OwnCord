@@ -42,6 +42,14 @@ import {
   URL_REGEX,
 } from "./content-parser";
 import { registerSessionReset } from "@lib/sessionRegistry";
+import {
+  blobImageSize,
+  clearImageSizes,
+  fitImageBox,
+  getImageBox,
+  setImageBox,
+  type ImageBox,
+} from "./image-sizes";
 import { clearEmbedCaches, focusMessageLink, renderGenericLinkPreview } from "./embeds";
 import type { ExternalContentFailure } from "../../platform/contracts/externalContent";
 
@@ -89,24 +97,7 @@ window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>
   }
 }) as EventListener);
 
-/**
- * Cache of rendered image heights keyed by URL. When virtual scroll rebuilds
- * DOM elements, new images use the cached height as min-height instead of the
- * generic 200px estimate. This prevents height oscillation (200px → actual →
- * 200px → actual …) that causes infinite DOM rebuild loops.
- */
-const imageHeightCache = new Map<string, number>();
-const MAX_IMAGE_HEIGHT_CACHE = 500;
 let mediaCacheGeneration = 0;
-
-function cacheImageHeight(url: string, h: number): void {
-  if (imageHeightCache.size >= MAX_IMAGE_HEIGHT_CACHE) {
-    // Evict oldest entry (first inserted key)
-    const firstKey = imageHeightCache.keys().next().value;
-    if (firstKey !== undefined) imageHeightCache.delete(firstKey);
-  }
-  imageHeightCache.set(url, h);
-}
 
 /** Check if a URL originates from the Klipy CDN. */
 function isKlipyUrl(url: string): boolean {
@@ -180,7 +171,7 @@ const YT_TITLE_CACHE_MAX = 200;
 
 export function clearMediaCaches(): void {
   mediaCacheGeneration += 1;
-  imageHeightCache.clear();
+  clearImageSizes();
   ytTitleCache.clear();
 }
 void registerSessionReset("media:caches", clearMediaCaches, { phase: "cache" }); // app-lifetime
@@ -331,21 +322,27 @@ export function setInlineImageDecorator(fn: ((url: string) => HTMLElement | null
 
 /** Render a direct image/GIF URL as an inline image with lightbox. */
 export function renderInlineImage(url: string): HTMLDivElement {
-  // Use cached height from a previous render if available, otherwise 200px.
-  // This prevents height oscillation when virtual scroll rebuilds DOM.
-  const cachedH = imageHeightCache.get(url);
-  const minH = cachedH ?? 200;
+  // Reserve the box a previous render (this session or an earlier one) or a
+  // header sniff measured; otherwise 200px until the bytes say. Either way a
+  // virtual-scroll rebuild starts at the right height and nothing shifts on load.
   const host = displayHost(url);
 
-  const wrap = createElement("div", {
-    class: "msg-image",
-    style: `max-width: 400px; min-height: ${minH}px;`,
-  });
+  const wrap = createElement("div", { class: "msg-image" });
+  const reserveFallback = (): void => {
+    wrap.style.cssText = "max-width: 400px; min-height: 200px;";
+  };
+  const reserve = (box: ImageBox): void => {
+    wrap.style.cssText = `width: ${box.w}px; max-width: 100%; aspect-ratio: ${box.w} / ${box.h};`;
+  };
+  const cachedBox = getImageBox(url);
+  if (cachedBox !== undefined) reserve(cachedBox);
+  else reserveFallback();
 
   // No src yet: the bytes come from the external-content broker as a
   // same-origin blob: URL, never from the webview loading `url` itself.
   const img = createElement("img", {
     alt: contentText("image.alt", { host }),
+    decoding: "async",
     style: "max-width: 100%; max-height: 350px; border-radius: 4px; cursor: pointer;",
   });
   // Hidden until its bytes load: a loading or refused image is neither shown
@@ -383,7 +380,7 @@ export function renderInlineImage(url: string): HTMLDivElement {
   // holding a 200px empty reservation that can oscillate with virtual scroll.
   const showFailure = (kind: ExternalContentFailure): void => {
     log.error("Image failed to load", { url, failure: kind });
-    wrap.style.minHeight = "";
+    wrap.style.cssText = "max-width: 400px;";
     // A refusal (blocked destination, wrong type, oversized, expired) is kept
     // distinct from a loaded image; the failure line never reads as success.
     wrap.dataset.mediaState = "failed";
@@ -398,22 +395,32 @@ export function renderInlineImage(url: string): HTMLDivElement {
   // re-fetch, land in the same typed failed state.
   img.addEventListener("error", () => showFailure("unavailable"));
 
-  // On load: clear min-height reservation and cache the natural rendered
-  // height so future virtual-scroll rebuilds start at the correct size.
-  // Measure synchronously — deferring to rAF loses the race with
-  // ResizeObserver which can rebuild the DOM before the rAF fires.
-  // Once per load: a GIF freeze/unfreeze changes src and would re-run it (a
-  // forced layout each time). load() re-arms it for a retry.
+  // On load: the reserved box already holds the image, so nothing is measured
+  // (no forced layout) unless the file disagrees with it, which happens for a
+  // header the sniffer could not read or an EXIF-rotated JPEG; then the real
+  // size replaces the box. Once per load: a GIF freeze/unfreeze changes src and
+  // would re-run it. load() re-arms it for a retry.
   const onLoad = (): void => {
     log.debug("Image loaded", { url: url.slice(0, 80), naturalH: img.naturalHeight });
     // A retry that succeeds hands keyboard focus from the retry to the image.
     const refocus = failure.contains(document.activeElement);
-    wrap.style.minHeight = "";
     wrap.dataset.mediaState = "loaded";
     img.hidden = false;
     failure.hidden = true;
-    const h = wrap.offsetHeight;
-    if (h > 0) cacheImageHeight(url, h);
+    const actual = fitImageBox(img.naturalWidth, img.naturalHeight);
+    const reserved = getImageBox(url);
+    if (actual !== null) {
+      if (reserved === undefined || reserved.w !== actual.w || reserved.h !== actual.h) {
+        reserve(actual);
+        setImageBox(url, actual);
+      }
+    } else if (reserved === undefined) {
+      // No intrinsic size (a host that does not report one): measure the box.
+      wrap.style.minHeight = "";
+      const h = wrap.offsetHeight;
+      const w = wrap.offsetWidth;
+      if (h > 0 && w > 0) setImageBox(url, { w, h });
+    }
     if (refocus) img.focus();
   };
   img.addEventListener("load", onLoad, { once: true });
@@ -460,7 +467,9 @@ export function renderInlineImage(url: string): HTMLDivElement {
     // makes loadExternalImage refuse again with nothing fetched.
     // A visible retry stays mounted (and focused) while it re-asks.
     wrap.dataset.mediaState = "loading";
-    wrap.style.minHeight = `${cachedH ?? 200}px`;
+    const box = getImageBox(url);
+    if (box !== undefined) reserve(box);
+    else reserveFallback();
     retry.setAttribute("aria-disabled", "true");
     if (img.hasAttribute("src")) img.removeAttribute("src");
     img.addEventListener("load", onLoad, { once: true });
@@ -468,6 +477,13 @@ export function renderInlineImage(url: string): HTMLDivElement {
       if (!result.ok) {
         showFailure(result.failure);
         return;
+      }
+      // The sniffed size reserves the exact box before the first byte decodes.
+      const sniffed = blobImageSize(result.value);
+      const exact = sniffed === undefined ? null : fitImageBox(sniffed.width, sniffed.height);
+      if (exact !== null) {
+        reserve(exact);
+        setImageBox(url, exact);
       }
       img.src = result.value;
     });

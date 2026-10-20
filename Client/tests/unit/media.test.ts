@@ -350,13 +350,16 @@ describe("media.ts", () => {
       document.body.appendChild(wrap1);
       await awaitImgSrc(wrap1);
 
-      // Simulate offsetHeight by defining the property
+      // jsdom reports no intrinsic size: the measured box is what gets cached.
       Object.defineProperty(wrap1, "offsetHeight", { value: 150, configurable: true });
+      Object.defineProperty(wrap1, "offsetWidth", { value: 300, configurable: true });
       fireImgLoad(wrap1);
 
-      // Second render should use cached height
+      // Second render reserves that box, with no min-height guess.
       const wrap2 = renderInlineImage(url);
-      expect(wrap2.style.minHeight).toBe("150px");
+      expect(wrap2.style.aspectRatio).toBe("300 / 150");
+      expect(wrap2.style.width).toBe("300px");
+      expect(wrap2.style.minHeight).toBe("");
     });
 
     it("clears min-height on successful image load", async () => {
@@ -622,6 +625,158 @@ describe("media.ts", () => {
   });
 
   // =========================================================================
+  // Image boxes from known sizes
+  // =========================================================================
+
+  describe("image boxes from known sizes", () => {
+    /** A broker answer whose first bytes are a PNG header for `w` x `h`. */
+    function pngResponse(w: number, h: number) {
+      const be32 = (n: number): number[] => [
+        (n >>> 24) & 255,
+        (n >>> 16) & 255,
+        (n >>> 8) & 255,
+        n & 255,
+      ];
+      const header = Uint8Array.from([
+        0x89,
+        0x50,
+        0x4e,
+        0x47,
+        0x0d,
+        0x0a,
+        0x1a,
+        0x0a,
+        ...be32(13),
+        0x49,
+        0x48,
+        0x44,
+        0x52,
+        ...be32(w),
+        ...be32(h),
+        8,
+        6,
+        0,
+        0,
+        0,
+      ]);
+      const blob = {
+        size: header.length,
+        type: "image/png",
+        slice: () => ({ arrayBuffer: () => Promise.resolve(header.buffer.slice(0)) }),
+      };
+      return { ok: true, value: blob };
+    }
+
+    it("reserves the sniffed box before load fires, with an aspect ratio and no min-height", async () => {
+      imageMock.mockResolvedValue(pngResponse(1200, 800));
+      const wrap = renderInlineImage("https://example.com/sniffed.png");
+      expect(wrap.style.minHeight).toBe("200px"); // nothing known yet
+      document.body.appendChild(wrap);
+      await awaitImgSrc(wrap);
+
+      // load has not fired: the box is already the scaled 400 x 267.
+      expect(wrap.dataset.mediaState).toBe("loading");
+      expect(wrap.style.aspectRatio).toBe("400 / 267");
+      expect(wrap.style.width).toBe("400px");
+      expect(wrap.style.minHeight).toBe("");
+    });
+
+    it("keeps the box through load without measuring the row", async () => {
+      imageMock.mockResolvedValue(pngResponse(120, 90));
+      const wrap = renderInlineImage("https://example.com/small.png");
+      document.body.appendChild(wrap);
+      await awaitImgSrc(wrap);
+      const img = wrap.querySelector("img") as HTMLImageElement;
+      Object.defineProperty(img, "naturalWidth", { value: 120, configurable: true });
+      Object.defineProperty(img, "naturalHeight", { value: 90, configurable: true });
+      const read = vi.fn(() => 5);
+      Object.defineProperty(wrap, "offsetHeight", { get: read, configurable: true });
+
+      fireImgLoad(wrap);
+
+      expect(read).not.toHaveBeenCalled();
+      expect(wrap.style.aspectRatio).toBe("120 / 90");
+      expect(wrap.dataset.mediaState).toBe("loaded");
+    });
+
+    it("corrects the box when the file disagrees with its header", async () => {
+      imageMock.mockResolvedValue(pngResponse(800, 400));
+      const url = "https://example.com/rotated.png";
+      const wrap = renderInlineImage(url);
+      document.body.appendChild(wrap);
+      await awaitImgSrc(wrap);
+      const img = wrap.querySelector("img") as HTMLImageElement;
+      // e.g. an EXIF-rotated JPEG: the decoded image is portrait.
+      Object.defineProperty(img, "naturalWidth", { value: 400, configurable: true });
+      Object.defineProperty(img, "naturalHeight", { value: 800, configurable: true });
+
+      fireImgLoad(wrap);
+
+      expect(wrap.style.aspectRatio).toBe("175 / 350");
+      expect(renderInlineImage(url).style.aspectRatio).toBe("175 / 350");
+    });
+
+    it("a later render of the same URL reserves the sniffed box before the fetch", async () => {
+      imageMock.mockResolvedValue(pngResponse(600, 300));
+      const url = "https://example.com/again.png";
+      const first = renderInlineImage(url);
+      document.body.appendChild(first);
+      await awaitImgSrc(first);
+
+      const second = renderInlineImage(url);
+      expect(second.style.aspectRatio).toBe("400 / 200");
+      expect(second.style.minHeight).toBe("");
+    });
+
+    it("two rows of one URL loading together both reserve from the one read", async () => {
+      imageMock.mockResolvedValue(pngResponse(300, 300));
+      const url = "https://example.com/twin.png";
+      const a = renderInlineImage(url);
+      const b = renderInlineImage(url);
+      document.body.append(a, b);
+      await Promise.all([awaitImgSrc(a), awaitImgSrc(b)]);
+
+      expect(imageMock).toHaveBeenCalledTimes(1);
+      expect(a.style.aspectRatio).toBe("300 / 300");
+      expect(b.style.aspectRatio).toBe("300 / 300");
+    });
+
+    it("falls back to the 200px reservation for a zero-sized or unreadable header", async () => {
+      imageMock.mockResolvedValue(pngResponse(0, 0));
+      const wrap = renderInlineImage("https://example.com/zero.png");
+      document.body.appendChild(wrap);
+      await awaitImgSrc(wrap);
+      expect(wrap.style.minHeight).toBe("200px");
+      expect(wrap.style.aspectRatio).toBe("");
+
+      imageMock.mockResolvedValue(imageResponse("image/png")); // "x": no header
+      const other = renderInlineImage("https://example.com/junk.png");
+      document.body.appendChild(other);
+      await awaitImgSrc(other);
+      expect(other.style.minHeight).toBe("200px");
+    });
+
+    it("decodes off the main thread", () => {
+      const wrap = renderInlineImage("https://example.com/async.png");
+      expect(wrap.querySelector("img")!.getAttribute("decoding")).toBe("async");
+    });
+
+    it("drops the reserved box when the image fails", async () => {
+      imageMock.mockResolvedValue(pngResponse(600, 300));
+      const wrap = renderInlineImage("https://example.com/fail.png");
+      document.body.appendChild(wrap);
+      await awaitImgSrc(wrap);
+      expect(wrap.style.aspectRatio).not.toBe("");
+
+      fireImgError(wrap);
+
+      expect(wrap.style.aspectRatio).toBe("");
+      expect(wrap.style.width).toBe("");
+      expect(wrap.dataset.mediaState).toBe("failed");
+    });
+  });
+
+  // =========================================================================
   // Image height cache eviction
   // =========================================================================
 
@@ -638,16 +793,18 @@ describe("media.ts", () => {
       await Promise.all(wraps.map(awaitImgSrc));
       wraps.forEach((wrap, i) => {
         Object.defineProperty(wrap, "offsetHeight", { value: 100 + i, configurable: true });
+        Object.defineProperty(wrap, "offsetWidth", { value: 300, configurable: true });
         fireImgLoad(wrap);
       });
 
       // The first URL should have been evicted - renders with default 200px
       const wrap = renderInlineImage("https://example.com/img-0.jpg");
       expect(wrap.style.minHeight).toBe("200px");
+      expect(wrap.style.aspectRatio).toBe("");
 
       // The second URL should still be cached
       const wrap2 = renderInlineImage("https://example.com/img-1.jpg");
-      expect(wrap2.style.minHeight).toBe("101px");
+      expect(wrap2.style.aspectRatio).toBe("300 / 101");
     });
   });
 
@@ -1788,11 +1945,12 @@ describe("media.ts", () => {
       document.body.appendChild(wrap);
       await awaitImgSrc(wrap);
       Object.defineProperty(wrap, "offsetHeight", { value: 250, configurable: true });
+      Object.defineProperty(wrap, "offsetWidth", { value: 400, configurable: true });
       fireImgLoad(wrap);
 
       // Verify cached
       const wrap2 = renderInlineImage(url);
-      expect(wrap2.style.minHeight).toBe("250px");
+      expect(wrap2.style.aspectRatio).toBe("400 / 250");
 
       // Clear caches
       clearMediaCaches();

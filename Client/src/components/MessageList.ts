@@ -68,7 +68,13 @@ import {
   resolveAuthor,
   roleColorVar,
 } from "@lib/formatting";
-import { isAudioMime, isVideoAttachment } from "./message-list/attachments";
+import {
+  isAudioMime,
+  isVideoAttachment,
+  resolveServerUrl,
+  thumbnailUrl,
+} from "./message-list/attachments";
+import { fitImageBox, knownImageHeight } from "./message-list/image-sizes";
 import { FenwickTree } from "./message-list/fenwick";
 import { messagingText } from "../i18n/messaging";
 import {
@@ -214,17 +220,59 @@ interface VirtualItemBlockedRun {
   readonly expanded: boolean;
 }
 
-type VirtualItem =
+export type VirtualItem =
   VirtualItemMessage | VirtualItemDivider | VirtualItemNewDivider | VirtualItemBlockedRun;
 
 // -- Smart height estimation --------------------------------------------------
 
-function estimateItemHeight(item: VirtualItem): number {
+/** A message line: `.msg-text` is 1.45 x 15 px; the header line shares the
+ *  first row's 44 px minimum with it. */
+const TEXT_LINE_HEIGHT = 22;
+/** Average glyph width of the message font, in px (a proportional sans). */
+const AVERAGE_CHAR_WIDTH = 7.5;
+/** Width of `.messages-container` assumed before a real one is measured, and
+ *  what the row padding (`--message-content-left/right`) takes from it. */
+const DEFAULT_LIST_WIDTH = 900;
+const ROW_HORIZONTAL_PADDING = 120;
+/** Margin above an inline image or attachment box. */
+const MEDIA_MARGIN = 4;
+/** Global twin of IMAGE_URL_RE: every direct image URL in a message. */
+const IMAGE_URLS_RE = /https?:\/\/\S+?\.(?:png|jpe?g|gif|webp)(?:\?\S*)?(?=\s|$)/gi;
+
+/** Rows of text a message fills at `listWidth`: each source line wraps at the
+ *  characters that fit; an empty line still takes one. */
+function estimateTextLines(content: string, listWidth: number): number {
+  const perLine = Math.max(
+    8,
+    Math.floor(Math.max(listWidth - ROW_HORIZONTAL_PADDING, 0) / AVERAGE_CHAR_WIDTH),
+  );
+  let lines = 0;
+  for (const line of content.split("\n")) lines += Math.max(1, Math.ceil(line.length / perLine));
+  return lines;
+}
+
+/** Height of an image box the list already knows: the server's dimensions,
+ *  else the size remembered for its URL; undefined when neither exists. */
+function knownAttachmentHeight(att: Message["attachments"][number]): number | undefined {
+  if (att.width != null && att.height != null) {
+    const box = fitImageBox(att.width, att.height);
+    if (box !== null) return box.h;
+  }
+  return knownImageHeight(thumbnailUrl(resolveServerUrl(att.url), att.mime));
+}
+
+export function estimateItemHeight(
+  item: VirtualItem,
+  listWidth: number = DEFAULT_LIST_WIDTH,
+): number {
   if (item.kind !== "message") return 32;
 
   // Non-grouped: min-height 2.75rem (44px @16px root) + margin-top 17px = 61px
   // Grouped: min-height 1.375rem (22px @16px root) + margin-top 0px = 22px
+  // Both hold one line of text; each further wrapped line adds one line height.
   let height = item.isGrouped ? 22 : 61;
+  const { content } = item.message;
+  height += (estimateTextLines(content, listWidth) - 1) * TEXT_LINE_HEIGHT;
 
   // Media attachments. Video shares the image box, so it reserves the same
   // space; the audio player is a chip-height row.
@@ -234,17 +282,23 @@ function estimateItemHeight(item: VirtualItem): number {
     } else if (isAudioMime(att.mime)) {
       height += 96;
     } else if (att.mime.startsWith("image/")) {
-      height += 220;
+      const known = knownAttachmentHeight(att);
+      height += known === undefined ? 220 : known + MEDIA_MARGIN;
     }
   }
 
-  // Inline image URLs in content
-  if (IMAGE_URL_RE.test(item.message.content)) {
-    height += 220;
+  // Inline image URLs in content: the box measured for each URL, else 220.
+  if (IMAGE_URL_RE.test(content)) {
+    const urls = content.match(IMAGE_URLS_RE) ?? [];
+    if (urls.length === 0) height += 220;
+    for (const url of urls) {
+      const known = knownImageHeight(url);
+      height += known === undefined ? 220 : known + MEDIA_MARGIN;
+    }
   }
 
   // YouTube embeds
-  if (YOUTUBE_URL_RE.test(item.message.content)) {
+  if (YOUTUBE_URL_RE.test(content)) {
     height += 320;
   }
 
@@ -502,6 +556,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    *  `allMessages` (the rows drawn) leaves tombstones out. */
   let replyParents: readonly Message[] = [];
   const heightCache = new Map<string, number>(); // itemKey -> measured px
+  /** Width the unmeasured rows' text estimates wrap at; the real one once the
+   *  ResizeObserver has seen the list. */
+  let estimateWidth: number | undefined;
   let tree: FenwickTree | null = null;
   let topSpacer: HTMLDivElement | null = null;
   let bottomSpacer: HTMLDivElement | null = null;
@@ -724,7 +781,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function getItemHeight(index: number): number {
     const cached = heightCache.get(itemKey(index));
     if (cached !== undefined) return cached;
-    return estimateItemHeight(virtualItems[index]!);
+    return estimateItemHeight(virtualItems[index]!, estimateWidth);
   }
 
   function totalHeight(): number {
@@ -2258,6 +2315,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       resizeRafId = requestAnimationFrame(() => {
         resizeRafId = 0;
         if (root === null || contentContainer === null) return;
+        if (root.clientWidth > 0) estimateWidth = root.clientWidth;
 
         const jumpIdx =
           jumpTarget !== null && Date.now() < jumpTarget.until
