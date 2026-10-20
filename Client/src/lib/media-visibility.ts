@@ -274,6 +274,7 @@ function freezeImage(img: HTMLImageElement, entry: MediaEntry): void {
 
 function unfreezeImage(img: HTMLImageElement, entry: MediaEntry): void {
   cancelCapture(entry);
+  releaseStill(entry);
   if (img.src !== entry.originalSrc) {
     img.src = entry.originalSrc;
   }

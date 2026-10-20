@@ -503,6 +503,23 @@ describe("media-visibility still cache", () => {
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:still-1");
   });
 
+  it("a playing row does not pin its still", () => {
+    const playing = createFakeImg("https://example.com/playing.gif");
+    const wrap = createWrapper();
+    observeMedia(playing, "https://example.com/playing.gif", wrap, true);
+    flushCapture();
+    (wrap.querySelector(".gif-play-btn") as HTMLButtonElement).click();
+    expect(playing.src).toBe("https://example.com/playing.gif");
+    for (let i = 0; i < 205; i++) {
+      const url = `https://example.com/pin-${i}.gif`;
+      const img = createFakeImg(url);
+      observeMedia(img, url, createWrapper(), true);
+      flushCapture();
+      discardMedia(img);
+    }
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:still-1");
+  });
+
   it("never evicts a still a tracked row still shows", () => {
     const shown = createFakeImg("https://example.com/shown.gif");
     observeMedia(shown, "https://example.com/shown.gif", createWrapper(), true);
