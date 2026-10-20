@@ -66,6 +66,10 @@ type Runtime struct {
 	// sampler (App.startHub) and stops it before the hub. Nil leaves the block
 	// out, which is what a hand-built Runtime in a test gets.
 	MetricsWindows *metrics.Windows
+	// Background is the app's request-path job group (ARCH-034), handed on to
+	// admin.SetupOptions.Background. Set by internal/app once it exists; nil
+	// in tests that build a Runtime by hand.
+	Background *syncutil.Group
 }
 
 // warnOnServerConfig logs the settings that are legal but rarely what an
@@ -269,7 +273,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Restrict /admin to configured CIDRs (default: private networks only).
 	u := updater.NewUpdater(ver, cfg.GitHub.Token, cfg.GitHub.Owner, cfg.GitHub.Repo)
 	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions, svc,
-		admin.SetupOptions{ConfigPath: config.DefaultPath, RunningCfg: cfg, SetupToken: rt.SetupToken, LogLevel: rt.LogLevel})
+		admin.SetupOptions{ConfigPath: config.DefaultPath, RunningCfg: cfg, SetupToken: rt.SetupToken, LogLevel: rt.LogLevel, Background: rt.Background})
 	// The client's member actions, reachable without the /admin prefix (see
 	// admin.NewMemberAPI). Deliberately outside the admin CIDR gate below: they
 	// accept only a session or API token issued by this server, plus the

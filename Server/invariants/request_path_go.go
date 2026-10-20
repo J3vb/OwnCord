@@ -26,10 +26,6 @@ type GoEntry struct {
 // belongs on syncutil.Group.Go, which the lifecycle owner joins before the
 // database closes.
 var GoAllow = map[string]GoEntry{
-	// Interim: WP 4.5b moves these two onto a hub-owned group and the update
-	// hand-off onto the app group, dropping both rows.
-	"ws/voice_leave.go":                  {2, "LiveKit RemoveParticipant and the voice-state delete retries; 4.5b runs them on a hub-owned Group"},
-	"admin/update_handlers.go":           {1, "applyAndRestart countdown, swap and audit; 4.5b runs it on the app Group"},
 	"admin/handlers_backup.go":           {3, "restart hand-off: requestRestart only cancels a context, and joining it is circular because it starts the Close that would join it"},
 	"admin/handlers_config_overrides.go": {1, "restart hand-off, as in handlers_backup.go"},
 	"admin/setup_handler.go":             {1, "restart hand-off, as in handlers_backup.go"},

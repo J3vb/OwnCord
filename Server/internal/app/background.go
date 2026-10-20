@@ -27,6 +27,9 @@ func (a *App) startBackgroundJobs(rt api.Runtime) {
 	if rt.Services != nil && rt.Services.Messages != nil {
 		rt.Services.Messages.SetBackground(a.background)
 	}
+	// Handed to the router (and from there to the update apply tail) through
+	// the runtime, which startRouter reads after this step.
+	a.runtime.Background = a.background
 	a.onClose("background-jobs", func(ctx context.Context) error {
 		if n := a.background.Stop(ctx, backgroundJobsGrace); n > 0 {
 			// Not an error: failing the step would make a restarting process

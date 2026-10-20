@@ -130,24 +130,32 @@ func (h *Hub) finishVoiceLeave(ctx context.Context, txn *voiceTxn, c *Client, ol
 // The identity carries the join token, so a removal still in flight can never
 // hit the session a quick rejoin creates. The removal must complete even if
 // the connection drops, so it detaches from cancellation (values kept);
-// shutdown is handled via h.stop and the call is bounded by lkTimeout.
+// shutdown cancels and joins it through the hub's background group, and the
+// call is bounded by lkTimeout.
 func (h *Hub) removeLiveKitParticipantAsync(ctx context.Context, channelID, userID int64, joinToken, caller string) {
 	if h.livekit == nil {
 		return
 	}
-	lkCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), lkTimeout)
-	go func() {
-		defer cancel()
+	// Runs on the hub's group so StopHub joins it: a removal still in flight
+	// when the hub stops is cancelled with the hub and waited for, and one
+	// requested after the group closed is refused (ARCH-034).
+	admitted := h.background.Go(ctx, func(jobCtx context.Context) {
 		select {
 		case <-h.stop:
 			return
 		default:
 		}
+		lkCtx, cancel := context.WithTimeout(jobCtx, lkTimeout)
+		defer cancel()
 		if err := h.livekit.RemoveParticipant(lkCtx, channelID, userID, joinToken); err != nil {
 			slog.Warn("RemoveParticipant failed (may already be gone)",
 				"caller", caller, "err", err, "user_id", userID, "channel_id", channelID)
 		}
-	}()
+	})
+	if !admitted {
+		slog.Info("RemoveParticipant skipped, hub is stopping",
+			"caller", caller, "user_id", userID, "channel_id", channelID)
+	}
 }
 
 // voiceLeaveRetryTimeout bounds each background retry of the voice-state
@@ -189,14 +197,21 @@ func leaveVoiceChannelWithRetry(ctx context.Context, txn *voiceTxn, channelID in
 		// either would kill retry 2 before it ever ran, leaving a ghost
 		// voice_states row holding a capacity slot until the 60s sweep.
 		attemptTimeout := voiceLeaveRetryTimeout
-		go func() {
-			retryCtx := context.WithoutCancel(ctx)
+		// The retries run on the hub's group: StopHub cancels and joins them,
+		// and a leave that fails after the group closed gets no retry (the
+		// sweep clears the row). Go only takes the group's leaf mutex and
+		// returns; the job holds h and userID, never txn or any lock.
+		admitted := h.background.Go(ctx, func(retryCtx context.Context) {
 			const maxRetries = 3
 			delay := 200 * time.Millisecond
 
 			for attempt := 2; attempt <= maxRetries; attempt++ {
 				select {
 				case <-h.stop:
+					slog.Info("LeaveVoiceChannelIfMatch retry cancelled (hub stop)",
+						"user_id", userID, "channel_id", channelID, "attempt", attempt)
+					return
+				case <-retryCtx.Done():
 					slog.Info("LeaveVoiceChannelIfMatch retry cancelled (hub stop)",
 						"user_id", userID, "channel_id", channelID, "attempt", attempt)
 					return
@@ -221,7 +236,11 @@ func leaveVoiceChannelWithRetry(ctx context.Context, txn *voiceTxn, channelID in
 					return
 				}
 			}
-		}()
+		})
+		if !admitted {
+			slog.Info("LeaveVoiceChannelIfMatch retries skipped, hub is stopping",
+				"user_id", userID, "channel_id", channelID)
+		}
 
 		return err
 	}

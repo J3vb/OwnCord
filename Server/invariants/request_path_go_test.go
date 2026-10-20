@@ -28,16 +28,17 @@ func TestRequestPathGo_OutsideScopeIsNotChecked(t *testing.T) {
 }
 
 func TestRequestPathGo_AllowlistCounts(t *testing.T) {
-	two := "package ws\nfunc a() { go func() {}() }\nfunc b() { go func() {}() }\n"
-	three := two + "func c() { go func() {}() }\n"
-	one := "package ws\nfunc a() { go func() {}() }\n"
-	if got := requestPathViolations(t, "ws/voice_leave.go", two); len(got) != 0 {
+	const listed = "api/router.go" // GoAllow count 1
+	none := "package api\nfunc a() {}\n"
+	one := "package api\nfunc a() { go func() {}() }\n"
+	two := one + "func b() { go func() {}() }\n"
+	if got := requestPathViolations(t, listed, one); len(got) != 0 {
 		t.Errorf("listed file at its count: %v, want none", got)
 	}
-	if got := requestPathViolations(t, "ws/voice_leave.go", three); len(got) != 1 {
+	if got := requestPathViolations(t, listed, two); len(got) != 1 {
 		t.Errorf("listed file one over its count: %v, want one violation", got)
 	}
-	got := requestPathViolations(t, "ws/voice_leave.go", one)
+	got := requestPathViolations(t, listed, none)
 	if len(got) != 1 {
 		t.Fatalf("listed file under its count: %v, want one stale violation", got)
 	}
