@@ -16,6 +16,8 @@ Work in this order:
 3. Check Acceptance item by item. Each one is met, not met, or not checkable from the diff.
 4. Check the repo rules: root `CLAUDE.md`, `Client/CLAUDE.md` or `Server/CLAUDE.md` for the touched side. In particular: stores are written only through `lib/dispatcher.ts`; `@tauri-apps` imports only under `src/platform/`; UI text only in `src/i18n/` catalogs; no import cycles; no hand edits to generated files (`Server/db/dbgen/`, `Server/ws/message_types.go`, `Client/src/lib/protocolTypes.ts`, `gendocs` blocks); no DB I/O under hub locks; no weakened or deleted assertions.
 5. Look for real bugs the change introduces: wrong state on error paths, missed teardown, listeners not removed, races between async steps, off-by-one in timers, behaviour on reconnect, behaviour on the Linux native voice path when the WP touches voice.
+   - Derived UI or cached state that goes stale when a setting, permission or connection state changes later.
+   - A superseded attempt, race, or non-atomic multi-step update where a newer attempt or a reconnect can interleave.
 6. Check scope: anything outside the WP's file list needs a reason.
 7. Check that no commit message, PR text or code comment describes a security weakness.
 
