@@ -90,7 +90,7 @@ func TestReconnect_ReplaysOwnVoiceRoomOutsideReadableChannels(t *testing.T) {
 	// session across the resume (registerNow transfers it when lastSeq > 0).
 	oldClient := NewTestClient(hub, userID, make(chan []byte, 64))
 	oldClient.user = user
-	oldClient.setVoiceState(vcID, vs.JoinedAt)
+	oldClient.voice.setState(vcID, vs.JoinedAt)
 	hub.mu.Lock()
 	hub.clients[userID] = oldClient
 	hub.mu.Unlock()

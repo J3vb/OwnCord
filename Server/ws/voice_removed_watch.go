@@ -171,6 +171,6 @@ func (h *Hub) holdsVoiceJoin(userID, channelID int64, token string) bool {
 	if c == nil {
 		return false
 	}
-	chID, joinToken := c.getVoiceState()
+	chID, joinToken := c.voice.state()
 	return chID == channelID && joinToken == token
 }

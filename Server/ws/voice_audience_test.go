@@ -24,11 +24,11 @@ func TestBroadcastVoiceEvent_VoiceParticipantsAlwaysInAudience(t *testing.T) {
 
 	participant := NewTestClient(h, 1, make(chan []byte, 8))
 	h.clients[1] = participant
-	participant.setVoiceState(5, "join-token-1")
+	participant.voice.setState(5, "join-token-1")
 
 	otherRoom := NewTestClient(h, 2, make(chan []byte, 8))
 	h.clients[2] = otherRoom
-	otherRoom.setVoiceState(6, "join-token-2")
+	otherRoom.voice.setState(6, "join-token-2")
 
 	outsider := NewTestClient(h, 3, make(chan []byte, 8))
 	h.clients[3] = outsider
@@ -54,7 +54,7 @@ func TestBroadcastVoiceEvent_VoiceParticipantsAlwaysInAudience(t *testing.T) {
 // TestFinishVoiceLeave_EvictedUserAlwaysInAudience locks the fix for v021:
 // by the time finishVoiceLeave runs, the caller has already cleared the
 // evicted client's own voice state, so broadcastVoiceEvent's participant
-// union (which checks c.getVoiceChID() == channelID) can no longer find
+// union (which checks c.voice.channel() == channelID) can no longer find
 // them — and voice membership can outlive READ_MESSAGES (a mid-call
 // revocation, or a closed DM), so a participant without READ_MESSAGES is a supported state that would
 // otherwise never receive its own voice_leave teardown signal (the client's
@@ -80,17 +80,17 @@ func TestFinishVoiceLeave_EvictedUserAlwaysInAudience(t *testing.T) {
 	// E2EE key holder for the channel.
 	staying := NewTestClient(h, 3, make(chan []byte, 8))
 	h.clients[3] = staying
-	staying.setVoiceState(5, "join-token-3")
+	staying.voice.setState(5, "join-token-3")
 
 	otherRoom := NewTestClient(h, 4, make(chan []byte, 8))
 	h.clients[4] = otherRoom
-	otherRoom.setVoiceState(6, "join-token-4")
+	otherRoom.voice.setState(6, "join-token-4")
 
 	// Empty join token skips the DB delete (leaveVoiceChannelWithRetry treats
 	// "" as "nothing to remove") — this bare hub has no DB, matching the
 	// bare-hub fail-closed (empty) READ audience the sibling test above
 	// exercises for broadcastVoiceEvent.
-	h.finishVoiceLeave(context.Background(), evicted, 5, "", voiceLeaveReasonModerator)
+	h.finishVoiceLeaveTest(context.Background(), evicted, 5, "", voiceLeaveReasonModerator)
 
 	select {
 	case bm := <-h.broadcast:

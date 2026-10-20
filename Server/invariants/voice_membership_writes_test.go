@@ -49,9 +49,9 @@ func TestVoiceMembershipWritesOnlyInRegistry(t *testing.T) {
 			want: 2,
 		},
 		{
-			name: "a promoted-through-embedding write is the same field",
+			name: "a write through the named voice field is the same field",
 			path: "ws/client.go",
-			src:  "package ws\nfunc f(c *Client) { c.voiceSlot.pendingModServerMuted = true }\n",
+			src:  "package ws\nfunc f(c *Client) { c.voice.pendingModServerMuted = true }\n",
 			want: 1,
 		},
 		{
@@ -97,9 +97,9 @@ func TestVoiceMembershipWritesOnlyInRegistry(t *testing.T) {
 			want: 0,
 		},
 		{
-			name: "a delegator call outside the registry is flagged",
+			name: "a slot state call outside the registry is flagged",
 			path: "ws/livekit_webhook.go",
-			src:  "package ws\nfunc f(c *Client) { c.clearVoiceState(); c.setVoiceState(1, \"t\") }\n",
+			src:  "package ws\nfunc f(c *Client) { c.voice.clearState(); c.voice.setState(1, \"t\") }\n",
 			want: 2,
 		},
 		{
@@ -121,15 +121,21 @@ func TestVoiceMembershipWritesOnlyInRegistry(t *testing.T) {
 			want: 1,
 		},
 		{
+			name: "the Register event's heldTxn is allow-listed",
+			path: "ws/hub_registry.go",
+			src:  "package ws\nfunc f(h *Hub) { _ = h.heldTxn(1) }\n",
+			want: 0,
+		},
+		{
 			name: "an allow-listed site at its exact count is clean",
-			path: "ws/voice_leave.go",
-			src:  "package ws\nfunc f(h *Hub) { _ = h.heldTxn(1); _ = h.heldTxn(1); _ = h.heldTxn(1) }\n",
+			path: "ws/voice_e2ee_announce.go",
+			src:  "package ws\nfunc f(c *Client) { c.voice.setE2EE(e2eeAnnounce{}) }\n",
 			want: 0,
 		},
 		{
 			name: "one call more than the allow-list row is flagged",
-			path: "ws/voice_leave.go",
-			src:  "package ws\nfunc f(h *Hub) { _ = h.heldTxn(1); _ = h.heldTxn(1); _ = h.heldTxn(1); _ = h.heldTxn(1) }\n",
+			path: "ws/voice_e2ee_announce.go",
+			src:  "package ws\nfunc f(c *Client) { c.voice.setE2EE(e2eeAnnounce{}); c.voice.setE2EE(e2eeAnnounce{}) }\n",
 			want: 1,
 		},
 		{

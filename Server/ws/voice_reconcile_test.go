@@ -22,7 +22,7 @@ import (
 // channel. RemoveParticipant is the fake's, not the hub's.
 func (h *vmHarness) severSFU(m *vmMember) {
 	h.t.Helper()
-	ch, token := m.c.getVoiceState()
+	ch, token := m.c.voice.state()
 	if ch == 0 {
 		h.failf("%s: severSFU with no voice membership", m.name)
 	}
@@ -63,7 +63,7 @@ func TestVoiceReconcile_ReapsGhostAfterTwoTicks(t *testing.T) {
 	if !h.join(alice, chID) {
 		t.Fatal("setup join did not complete")
 	}
-	_, token := alice.c.getVoiceState()
+	_, token := alice.c.voice.state()
 
 	h.severSFU(alice)
 
@@ -73,7 +73,7 @@ func TestVoiceReconcile_ReapsGhostAfterTwoTicks(t *testing.T) {
 	if row := h.rowOf(alice); row == nil || row.ChannelID != chID {
 		t.Fatalf("ghost reaped on the first tick, before the two-tick grace: row=%v", row)
 	}
-	if got := alice.c.getVoiceChID(); got != chID {
+	if got := alice.c.voice.channel(); got != chID {
 		t.Fatalf("ghost's client cleared on the first tick: ch%d, want %d", got, chID)
 	}
 
@@ -82,7 +82,7 @@ func TestVoiceReconcile_ReapsGhostAfterTwoTicks(t *testing.T) {
 	if row := h.rowOf(alice); row != nil {
 		t.Fatalf("ghost survived two reconcile ticks: row=%v", row)
 	}
-	if got := alice.c.getVoiceChID(); got != 0 {
+	if got := alice.c.voice.channel(); got != 0 {
 		t.Fatalf("reaped ghost's client still in voice: ch%d, want 0", got)
 	}
 	if h.hub.SubscribedToVoiceTopicForTest(alice.c, chID) {
@@ -180,7 +180,7 @@ func TestVoiceReconcile_HealthyMembershipUntouched(t *testing.T) {
 	if row := h.rowOf(alice); row == nil || row.ChannelID != chID {
 		t.Fatalf("reconciler reaped a healthy member: row=%v", row)
 	}
-	if got := alice.c.getVoiceChID(); got != chID {
+	if got := alice.c.voice.channel(); got != chID {
 		t.Fatalf("reconciler cleared a healthy member: ch%d, want %d", got, chID)
 	}
 	if !h.sfu.has(RoomName(chID), participantIdentity(alice.userID, rowOfToken(t, h, alice))) {

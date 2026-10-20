@@ -24,7 +24,7 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 	h.mu.RLock()
 	inVoice := make([]*Client, 0, len(h.clients))
 	for _, c := range h.clients {
-		if c.getVoiceChID() != 0 {
+		if c.voice.channel() != 0 {
 			inVoice = append(inVoice, c)
 		}
 	}
@@ -33,7 +33,7 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		chID := c.getVoiceChID()
+		chID := c.voice.channel()
 		if chID == 0 {
 			continue
 		}
@@ -53,7 +53,7 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 		if allowed {
 			h.clearRevokedVoiceMedia(ctx, c, chID)
 			if h.livekit != nil && mediaCtx.Err() == nil {
-				curChID, joinToken := c.getVoiceState()
+				curChID, joinToken := c.voice.state()
 				if curChID == chID && joinToken != "" {
 					if syncErr := h.trySyncVoiceParticipantPermissions(mediaCtx, c.userID, chID, joinToken); syncErr != nil && !liveKitParticipantMissing(syncErr) {
 						slog.Warn("voice permission reconciliation deferred", "user_id", c.userID, "channel_id", chID, "err", syncErr)
@@ -70,7 +70,7 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 		// another membership change cannot spend it.
 		txn := h.begin(c.userID)
 		tailCtx, cancelTail := h.sweepTailCtx(ctx)
-		evicted := h.handleVoiceLeaveIfStillIn(tailCtx, c, chID, voiceLeaveReasonRevoked)
+		evicted := h.handleVoiceLeaveIfStillIn(tailCtx, txn, c, chID, voiceLeaveReasonRevoked)
 		txn.end()
 		cancelTail()
 		if !evicted {

@@ -67,7 +67,7 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 	txn := h.begin(c.userID)
 	defer txn.end()
 
-	wasServerMuted, wasServerDeafened, wasServerMutedBy, ok := h.voiceJoinLeaveCurrent(ctx, c, channelID, reqID)
+	wasServerMuted, wasServerDeafened, wasServerMutedBy, ok := h.voiceJoinLeaveCurrent(ctx, txn, c, channelID, reqID)
 	if !ok {
 		return
 	}
@@ -87,7 +87,7 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 	state = h.voiceJoinRestoreModFlags(ctx, c, channelID, state, wasServerMuted, wasServerDeafened, wasServerMutedBy)
 	persistDone := time.Now()
 
-	if !h.voiceJoinGrantToken(ctx, c, channelID, state, reqID) {
+	if !h.voiceJoinGrantToken(ctx, txn, c, channelID, state, reqID) {
 		// OC-0420: voiceJoinRestoreModFlags above just wrote these flags into
 		// the row voiceJoinGrantToken's own failure path is about to roll
 		// back (rollbackVoiceJoin deletes it) — re-stash for the same reason
@@ -112,7 +112,7 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 // must not overwrite an unrelated moderator action's stash with false/false/nil.
 func (h *Hub) restorePendingModFlags(c *Client, wasServerMuted, wasServerDeafened bool, wasServerMutedBy *int64) {
 	if wasServerMuted || wasServerDeafened {
-		c.setPendingModFlags(wasServerMuted, wasServerDeafened, wasServerMutedBy)
+		c.voice.stashModFlags(wasServerMuted, wasServerDeafened, wasServerMutedBy)
 	}
 }
 
@@ -242,8 +242,8 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 // and verifies the old row is really gone. The two booleans are the
 // snapshotted flags for voiceJoinRestoreModFlags; false in the third position
 // means the join must not proceed (the error frame has already been sent).
-func (h *Hub) voiceJoinLeaveCurrent(ctx context.Context, c *Client, channelID int64, reqID string) (wasServerMuted, wasServerDeafened bool, wasServerMutedBy *int64, ok bool) {
-	currentChID := c.getVoiceChID()
+func (h *Hub) voiceJoinLeaveCurrent(ctx context.Context, txn *voiceTxn, c *Client, channelID int64, reqID string) (wasServerMuted, wasServerDeafened bool, wasServerMutedBy *int64, ok bool) {
+	currentChID := c.voice.channel()
 
 	// If user is already in the same voice channel, no-op.
 	if currentChID == channelID {
@@ -274,12 +274,12 @@ func (h *Hub) voiceJoinLeaveCurrent(ctx context.Context, c *Client, channelID in
 			wasServerMutedBy = prevState.ServerMutedBy
 		}
 	} else {
-		wasServerMuted, wasServerDeafened, wasServerMutedBy = c.takePendingModFlags()
+		wasServerMuted, wasServerDeafened, wasServerMutedBy = c.voice.takeModFlags()
 	}
 
 	// If user is already in a different voice channel, leave it first.
 	if currentChID > 0 {
-		h.handleVoiceLeave(ctx, c, voiceLeaveReasonSwitch)
+		h.handleVoiceLeave(ctx, txn, c, voiceLeaveReasonSwitch)
 
 		// BUG-088: Verify old voice state is actually cleared before joining
 		// the new channel. If the DB delete failed (retry still running in
@@ -302,7 +302,7 @@ func (h *Hub) voiceJoinLeaveCurrent(ctx context.Context, c *Client, channelID in
 			// since finishVoiceLeave always adds the leaver to the audience —
 			// so every client, this user's own session included, has already
 			// torn the old membership down (dispatcher.ts runs leaveVoice on a
-			// self voice_leave). Restoring c.voiceChID/the topic subscription
+			// self voice_leave). Restoring c.voice.voiceChID/the topic subscription
 			// would resurrect a session nobody else believes exists anymore,
 			// while the stale DB row (this branch's trigger) stays orphaned.
 			// Leaving the client cleared keeps it consistent with the
@@ -335,7 +335,7 @@ func (h *Hub) voiceJoinPersist(ctx context.Context, txn *voiceTxn, c *Client, ca
 		return nil, false
 	case errors.Is(err, errVoiceJoinReadBack):
 		slog.Error("ws handleVoiceJoin State", "err", err, "user_id", c.userID)
-		h.rollbackVoiceJoin(ctx, c, channelID, "", false)
+		h.rollbackVoiceJoin(ctx, txn, c, channelID, "", false)
 		c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "failed to join voice channel", reqID))
 		return nil, false
 	case err != nil:
@@ -404,7 +404,7 @@ func (h *Hub) voiceJoinPublishPerms(ctx context.Context, userID, channelID int64
 // voiceJoinGrantToken mints the LiveKit credential and delivers it, withholding
 // it if the join was superseded in the meantime. Returns false once the join
 // has been abandoned (rolled back, or superseded) and must not complete.
-func (h *Hub) voiceJoinGrantToken(ctx context.Context, c *Client, channelID int64, state *db.VoiceState, reqID string) bool {
+func (h *Hub) voiceJoinGrantToken(ctx context.Context, txn *voiceTxn, c *Client, channelID int64, state *db.VoiceState, reqID string) bool {
 	// Generate LiveKit token if LiveKit client is available.
 	// Token generation failure is fatal — without a token the client cannot
 	// connect to the SFU, so we must roll back the DB join.
@@ -421,7 +421,7 @@ func (h *Hub) voiceJoinGrantToken(ctx context.Context, c *Client, channelID int6
 		token, tokenErr := h.livekit.GenerateToken(c.userID, c.user.Username, channelID, state.JoinedAt, canPublish, canVideo, canScreenShare)
 		if tokenErr != nil {
 			slog.Error("ws handleVoiceJoin GenerateToken", "err", tokenErr, "user_id", c.userID)
-			h.rollbackVoiceJoin(ctx, c, channelID, state.JoinedAt, false)
+			h.rollbackVoiceJoin(ctx, txn, c, channelID, state.JoinedAt, false)
 			c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "failed to generate voice token", reqID))
 			return false
 		}
@@ -442,7 +442,7 @@ func (h *Hub) voiceJoinGrantToken(ctx context.Context, c *Client, channelID int6
 		// does not exist, and connects to the SFU with it regardless of what
 		// happens after. Re-check here, immediately before the credential
 		// leaves the process, and withhold it if superseded.
-		if curChID, curToken := c.getVoiceState(); curChID != channelID || curToken != state.JoinedAt {
+		if curChID, curToken := c.voice.state(); curChID != channelID || curToken != state.JoinedAt {
 			slog.Info("ws handleVoiceJoin: join superseded before token delivery",
 				"user_id", c.userID, "channel_id", channelID, "current_channel_id", curChID)
 			// Best-effort defense in depth: this join has not reached the SFU
@@ -501,7 +501,7 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, txn *voiceTxn, c *Client, c
 	// itself as an eviction and abandon the join while its voice_states row
 	// stays behind for nothing to reap.
 	if !txn.markCompleted(c, channelID, state.JoinedAt) {
-		curChID, _ := c.getVoiceState()
+		curChID, _ := c.voice.state()
 		slog.Info("ws handleVoiceJoin: join superseded before completion",
 			"user_id", c.userID, "channel_id", channelID, "current_channel_id", curChID)
 		return false
@@ -537,7 +537,7 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, txn *voiceTxn, c *Client, c
 	existing, err := h.voice.ChannelStates(ctx, channelID)
 	if err != nil {
 		slog.Error("ws handleVoiceJoin ChannelStates", "err", err)
-		h.rollbackVoiceJoin(ctx, c, channelID, state.JoinedAt, true)
+		h.rollbackVoiceJoin(ctx, txn, c, channelID, state.JoinedAt, true)
 		c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "failed to join voice channel", reqID))
 		return false
 	}
@@ -695,14 +695,13 @@ func voiceMicrophoneAllowed(canSpeak bool, state *db.VoiceState) bool {
 // instead of the failed one. When joinedAt is empty (the caller never read
 // the row back far enough to learn it), the row is re-read here and the
 // delete is skipped unless it still names channelID.
-// The caller holds Hub.begin(c.userID).
-func (h *Hub) rollbackVoiceJoin(ctx context.Context, c *Client, channelID int64, joinedAt string, broadcast bool) {
+// txn is the caller's Hub.begin(c.userID) handle.
+func (h *Hub) rollbackVoiceJoin(ctx context.Context, txn *voiceTxn, c *Client, channelID int64, joinedAt string, broadcast bool) {
 	// OC-0219: the rollback must clear via voiceTxn.clear, not merely drop
 	// the in-memory voiceChID: a join that already reached markCompleted's
 	// Subscribe would otherwise keep its VoiceTopic subscription alive.
 	// Unsubscribe is a documented no-op when the client was never subscribed
 	// to that topic (pubsub.go), as when this fires before markCompleted.
-	txn := h.heldTxn(c.userID)
 	txn.clear(c)
 	// The client's voice state is now set before token generation (BUG-088),
 	// so a concurrent join/leave in the same channel can have elected this

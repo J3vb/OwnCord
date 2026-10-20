@@ -506,8 +506,11 @@ Five locks on `Hub`, all `syncutil` (so the `-tags deadlock` pass sees them):
 | `keyHolderMu` | `ws/hub.go:130` | the voice E2EE key-holder map                                           |
 | `presenceMu`  | `ws/hub.go:135` | presence coalescing state                                               |
 
-**The lock order is not written down anywhere** — not in `Server/CLAUDE.md`,
-`docs/architecture/websocket.md`, or `hub.go`. It is proven only by the
+**The voice lock order is written down** in the header comment of
+`Server/ws/voice_registry.go` (summarised in
+[websocket.md](websocket.md#voice-membership)). **The order for the five locks
+above is not.** It is not in `Server/CLAUDE.md`, `docs/architecture/websocket.md`
+or `hub.go`. It is proven only by the
 `-tags deadlock -count=10 ./ws/` pass. B3-5 records the order in `hub.go`'s
 package comment before it moves a single function, so every pure-move commit
 has something to be checked against.

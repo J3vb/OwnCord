@@ -59,7 +59,7 @@ func TestReadPump_ReconnectDuringVoiceCleanup_DoesNotMarkUserOffline(t *testing.
 
 	c := NewTestClient(h, uid, make(chan []byte, 8))
 	c.user = &db.User{ID: uid, Status: "online"}
-	c.setVoiceState(chID, "tok-race")
+	c.voice.setState(chID, "tok-race")
 	h.clients[uid] = c
 
 	// Real server-side *websocket.Conn, closed immediately so readPump's
@@ -113,7 +113,9 @@ func TestReadPump_ReconnectDuringVoiceCleanup_DoesNotMarkUserOffline(t *testing.
 	// user, exactly as registerNow does for a real reconnect.
 	newClient := NewTestClient(h, uid, make(chan []byte, 8))
 	newClient.user = &db.User{ID: uid, Status: "online"}
-	h.registerNow(newClient, map[int64]bool{})
+	// The old teardown holds the member lock for the whole window, so this
+	// registration borrows a lock-free handle to model the overlap.
+	h.registerNow(newClient, map[int64]bool{}, h.heldTxn(uid))
 
 	// Let handleVoiceLeave's DB delete complete so the old defer resumes.
 	close(proceed)

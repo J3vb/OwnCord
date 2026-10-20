@@ -40,7 +40,7 @@ func TestLeaveVoiceChannelWithRetry_RetryAttemptsAreBounded(t *testing.T) {
 	voice := &wedgedLeaveVoiceStore{VoiceService: service.NewVoiceService(database), ended: make(chan error, 2)}
 	h := newTestHubWith(t, HubOptions{DB: database, Voice: voice})
 
-	if err := leaveVoiceChannelWithRetry(context.Background(), h, 1, 2, "tok"); err == nil {
+	if err := h.leaveVoiceChannelWithRetryTest(context.Background(), 1, 2, "tok"); err == nil {
 		t.Fatal("leaveVoiceChannelWithRetry = nil, want the first attempt's error")
 	}
 

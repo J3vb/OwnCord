@@ -70,7 +70,7 @@ func presenceBatchHub(t *testing.T) (*Hub, *db.DB, func(name string, seen bool) 
 			t.Fatalf("GetUserByID: %v", err)
 		}
 		c := herdClient(ctx, h, u)
-		h.registerNow(c, nil)
+		h.registerNowTest(c, nil)
 		c.user.Status = db.StatusOnline
 		c.setLivePresence(db.StatusOnline, nil, "")
 		return c
@@ -173,7 +173,7 @@ func TestFreshConnect_FailedFirstHandshakeStillAnnouncesOnNextConnect(t *testing
 			t.Fatalf("GetUserByID = %+v, %v; want last_seen stamped", u, err)
 		}
 		c := herdClient(ctx, h, u)
-		h.registerNow(c, nil)
+		h.registerNowTest(c, nil)
 		h.applyConnectStatus(ctx, c)
 		h.announceFreshConnect(c)
 		return c
@@ -248,7 +248,7 @@ func TestPresenceBatch_LostAtEnqueueRepairsBySnapshot(t *testing.T) {
 		t.Fatalf("GetUserByID: %v", err)
 	}
 	watcher := herdClient(ctx, h, u)
-	h.registerNow(watcher, nil)
+	h.registerNowTest(watcher, nil)
 	watcher.setLivePresence(db.StatusOnline, nil, "")
 
 	for len(h.broadcast) < cap(h.broadcast) {

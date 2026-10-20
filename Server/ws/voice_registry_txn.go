@@ -33,29 +33,26 @@ var errVoiceJoinReadBack = errors.New("voice join: read back the committed row")
 type voiceTxn struct {
 	h      *Hub
 	userID int64
-	unlock func() // nil for a borrowed handle (Hub.heldTxn)
+	unlock func() // nil once end has run, and for Hub.heldTxn
 }
 
 // begin takes userID's voice membership lock and returns the handle that
 // proves it. Release it with end, normally `defer txn.end()`. Callers hold none
 // of the locks to the right of voiceMember in the order (voice_registry.go).
 func (h *Hub) begin(userID int64) *voiceTxn {
-	return &voiceTxn{h: h, userID: userID, unlock: h.voiceMember.lock(userID)}
+	return &voiceTxn{h: h, userID: userID, unlock: h.voiceReg.voiceMember.lock(userID)}
 }
 
-// heldTxn returns a borrowed handle for a helper whose caller already holds
-// userID's lock through begin; end on it does nothing. Callers: registerNow
-// (hub_registry.go), handleVoiceLeave, handleVoiceLeaveIfStillIn and
-// leaveVoiceChannelWithRetry (voice_leave.go), rollbackVoiceJoin
-// (voice_join.go) and freshConnectCleanStaleVoice (serve_ready.go). Tests drive
-// them directly under pinned signatures, so they cannot take the caller's txn;
-// the retry goroutine's delete is scoped to one join instance and needs no
-// lock. WP 5.3d retires it (VoiceMutatorAllow in invariants lists its callers).
+// heldTxn returns a lock-free handle. Its only caller is onClientEvent
+// (hub_registry.go): the hub dispatch goroutine must never take the voice
+// member lock (voice_registry.go), and the test-only Register event it applies
+// has no concurrent voice path to exclude. Every other path passes the handle
+// from begin. VoiceMutatorAllow lists the one call.
 func (h *Hub) heldTxn(userID int64) *voiceTxn {
 	return &voiceTxn{h: h, userID: userID}
 }
 
-// end releases the lock. Calling it again, or on a borrowed handle, does
+// end releases the lock. Calling it again, or on a lock-free handle, does
 // nothing.
 func (t *voiceTxn) end() {
 	if t.unlock == nil {
@@ -93,7 +90,7 @@ func (t *voiceTxn) persistJoin(ctx context.Context, c *Client, chID int64, capac
 	if voiceJoinPostCommitRaceHook != nil {
 		voiceJoinPostCommitRaceHook(c)
 	}
-	c.setState(chID, state.JoinedAt)
+	c.voice.setState(chID, state.JoinedAt)
 	return state, nil
 }
 
@@ -103,7 +100,7 @@ func (t *voiceTxn) persistJoin(ctx context.Context, c *Client, chID int64, capac
 // returns false, and subscribes nothing, when the slot has moved on. Every
 // clear below unsubscribes again, so the OC-0219 pairing cannot be forgotten.
 func (t *voiceTxn) markCompleted(c *Client, chID int64, token string) bool {
-	if !c.markCompletedIfMatch(chID, token) {
+	if !c.voice.markCompletedIfMatch(chID, token) {
 		return false
 	}
 	t.h.pubsub.Subscribe(c, VoiceTopic(chID))
@@ -117,7 +114,7 @@ func (t *voiceTxn) markCompleted(c *Client, chID int64, token string) bool {
 // voice_e2ee_announce relays (which carry no channel_id to filter on) for the
 // connection's lifetime.
 func (t *voiceTxn) clear(c *Client) slotSnap {
-	snap := c.clearSnap()
+	snap := c.voice.clearSnap()
 	if snap.chID != 0 {
 		t.h.pubsub.Unsubscribe(c, VoiceTopic(snap.chID))
 	}
@@ -128,7 +125,7 @@ func (t *voiceTxn) clear(c *Client) slotSnap {
 // whether it cleared. Delayed evictions decided against a snapshotted channel
 // use it so a membership committed after the snapshot survives.
 func (t *voiceTxn) clearIfChannel(c *Client, chID int64) (slotSnap, bool) {
-	snap, ok := c.clearSnapIfChannel(chID)
+	snap, ok := c.voice.clearSnapIfChannel(chID)
 	if !ok {
 		return slotSnap{}, false
 	}
@@ -146,7 +143,7 @@ func (t *voiceTxn) clearExact(c *Client, chID int64, token string) bool {
 	if token == "" {
 		return false
 	}
-	if !c.clearExact(chID, token) {
+	if !c.voice.clearExact(chID, token) {
 		return false
 	}
 	t.h.pubsub.Unsubscribe(c, VoiceTopic(chID))
@@ -177,7 +174,7 @@ func (t *voiceTxn) deleteRow(ctx context.Context, chID int64, joinedAt string) (
 // resuming socket's inherit and the expiry teardown from both running
 // (expireVoiceGrace's takeForExpiry).
 func (t *voiceTxn) takeParked(chID int64, token string) *voiceGraceEntry {
-	return t.h.voiceGrace.takeJoin(t.userID, chID, token)
+	return t.h.voiceReg.voiceGrace.takeJoin(t.userID, chID, token)
 }
 
 // dropParked drops userID's grace entry for chID whatever its join token, for
@@ -206,12 +203,12 @@ func (t *voiceTxn) dropParked(chID int64) {
 // subscribes c to the channel it now holds. TestVoiceRegistry_TransferCarriesEveryField
 // fails when a voiceSlot field is neither moved nor reset here.
 func (t *voiceTxn) transfer(old, c *Client, resume bool) int64 {
-	snap, flags := old.drainAll()
+	snap, flags := old.voice.drainAll()
 	if flags.muted || flags.deafened {
-		c.stashModFlags(flags.muted, flags.deafened, flags.mutedBy)
+		c.voice.stashModFlags(flags.muted, flags.deafened, flags.mutedBy)
 	}
 	if resume && snap.completed {
-		c.adopt(snap)
+		c.voice.adopt(snap)
 	}
 	return snap.chID
 }
@@ -221,13 +218,13 @@ func (t *voiceTxn) transfer(old, c *Client, resume bool) int64 {
 // (EvictForModeratorMove), so a channel switch of the target's own cannot take
 // the stash between the two.
 func (t *voiceTxn) stashModFlags(c *Client, serverMuted, serverDeafened bool, serverMutedBy *int64) {
-	c.stashModFlags(serverMuted, serverDeafened, serverMutedBy)
+	c.voice.stashModFlags(serverMuted, serverDeafened, serverMutedBy)
 }
 
 // adoptParked installs a parked grace snapshot as c's membership, reporting
 // whether c took it (it refuses when c is already in a channel).
 func (t *voiceTxn) adoptParked(c *Client, snap slotSnap) bool {
-	return c.adopt(snap)
+	return c.voice.adopt(snap)
 }
 
 // setJoinToken adopts tok as c's join token, which the token refresh does when
@@ -235,5 +232,5 @@ func (t *voiceTxn) adoptParked(c *Client, snap slotSnap) bool {
 // with an empty token, and leaves the completed flag and the rest of the slot
 // alone; a cached token is never overwritten.
 func (t *voiceTxn) setJoinToken(c *Client, tok string) {
-	c.adoptJoinToken(tok)
+	c.voice.adoptJoinToken(tok)
 }

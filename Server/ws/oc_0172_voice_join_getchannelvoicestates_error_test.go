@@ -114,7 +114,7 @@ func TestVoiceJoin_GetChannelVoiceStatesError_RollsBackAndNotifiesClient(t *test
 
 	// The client's in-memory voice state must be cleared, not left pointing
 	// at a join the server gave up on partway through.
-	if gotCh := c.getVoiceChID(); gotCh != 0 {
+	if gotCh := c.voice.channel(); gotCh != 0 {
 		t.Errorf("client voiceChID = %d after GetChannelVoiceStates failed mid-join, want 0 (rolled back)", gotCh)
 	}
 

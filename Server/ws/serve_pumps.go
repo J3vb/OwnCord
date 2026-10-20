@@ -260,7 +260,7 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 		// a reconnect's transfer (voiceTxn.inherit) runs wholly before or
 		// after this teardown (WP 1D-10).
 		txn := hub.begin(c.userID)
-		voiceChID := c.getVoiceChID()
+		voiceChID := c.voice.channel()
 		replaced := hub.unregisterNow(c)
 		// Clean up voice state only when this was the user's final
 		// connection. A replacement connection owns the (transferred)

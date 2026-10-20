@@ -276,7 +276,7 @@ func TestServerRestart_SpreadScalesWithConnectedCount(t *testing.T) {
 		}
 		u, _ := database.GetUserByID(ctx, id)
 		c := herdClient(ctx, h, u)
-		h.registerNow(c, nil)
+		h.registerNowTest(c, nil)
 		clients = append(clients, c)
 	}
 	h.BroadcastServerRestart(RestartReasonUpdate, 5)

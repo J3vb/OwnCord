@@ -154,6 +154,40 @@ called without throttling on a channel switch and on disconnect. A call that
 ended is first held for 15 s so a resuming socket can take it over
 (`voice_grace.go`).
 
+### Voice membership
+
+`voiceRegistry` owns voice membership in memory. It is the field `Hub.voiceReg`.
+It holds the per-user membership lock and the 15 s reconnect grace window. Each
+connection keeps its own slot in `Client.voice` (channel, join token, completed
+flag, E2EE announce and any moderator mute stash). The durable half is the
+`voice_states` row.
+
+Writes go only through the `voiceTxn` handle. A path takes it once with
+`h.begin(uid)`, which locks that user's voice membership, and releases it with
+`txn.end()`. Helpers it calls take the handle as a parameter and never lock
+again. The handle's operations are:
+
+- `persistJoin`: insert the row under capacity, read it back, set the slot.
+- `markCompleted`: flag the join as complete and subscribe to the voice topic.
+- `clear`, `clearIfChannel`, `clearExact`: empty the slot and unsubscribe.
+- `deleteRow`: remove the `voice_states` row for one join instance.
+- `transfer`: move the whole slot from a replaced connection to its successor.
+- `park`, `inherit`, `takeParked`: hold, claim or drop the grace entry.
+- `stashModFlags`, `setJoinToken`: keep a moderator mute across a move, and
+  set the join token.
+
+At shutdown the hub calls `voiceReg.close()`. It stops every grace timer and
+leaves the rows for the next boot to wipe. Reads need no handle:
+`c.voice.channel()` and `c.voice.state()` take only the slot's own mutex.
+
+Lock order, outermost first: `voiceMember(uid)`, `voiceMod(uid)`, `seqMu`,
+`keyHolderMu`, `h.mu`, `ps.mu`, then the leaf locks (`c.mu`, the slot mutex,
+`voiceGrace.mu`, `voiceReconcile.mu`). A goroutine holds at most one user's
+member lock. The hub dispatch goroutine never takes it. The full rules are in
+the header comment of `Server/ws/voice_registry.go`. The `voice-membership-writes`
+invariant fails CI if code outside `ws/voice_registry*.go` writes the slot or a
+membership row.
+
 ### What else the Hub owns
 
 | Job                           | Schedule and detail                                                                                                                                                                  |

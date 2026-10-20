@@ -15,7 +15,7 @@ func joinedIdentity(t *testing.T, h *vmHarness, m *vmMember, name string) (int64
 	if !h.join(m, chID) {
 		t.Fatal("setup join did not complete")
 	}
-	_, token := m.c.getVoiceState()
+	_, token := m.c.voice.state()
 	return chID, participantIdentity(m.userID, token)
 }
 
@@ -67,7 +67,7 @@ func TestVoiceRemovedWatch_LeavesFreshJoinAlone(t *testing.T) {
 	if !h.join(alice, chID) {
 		t.Fatal("rejoin did not complete")
 	}
-	_, token := alice.c.getVoiceState()
+	_, token := alice.c.voice.state()
 	newIdentity := participantIdentity(alice.userID, token)
 	if newIdentity == oldIdentity {
 		t.Fatal("rejoin reused the old identity")
@@ -168,7 +168,7 @@ func TestVoiceRemovedWatch_KeepsLiveMembership(t *testing.T) {
 	h := newVMHarness(t, 1)
 	alice := h.members[0]
 	chID, identity := joinedIdentity(t, h, alice, "watch-live")
-	_, token := alice.c.getVoiceState()
+	_, token := alice.c.voice.state()
 
 	h.hub.livekit.removed.record(chID, alice.userID, token)
 	h.watchTick()
@@ -208,9 +208,9 @@ func TestVoiceRemovedWatch_StoredRowAloneDoesNotKeepIdentity(t *testing.T) {
 	h := newVMHarness(t, 1)
 	alice := h.members[0]
 	chID, identity := joinedIdentity(t, h, alice, "watch-stored-row")
-	_, token := alice.c.getVoiceState()
+	_, token := alice.c.voice.state()
 
-	alice.c.setVoiceState(0, "")
+	alice.c.voice.setState(0, "")
 	h.hub.livekit.removed.record(chID, alice.userID, token)
 	h.watchTick()
 	if h.sfu.has(RoomName(chID), identity) {

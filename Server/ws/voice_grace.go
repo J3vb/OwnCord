@@ -187,7 +187,7 @@ func (h *Hub) disconnectVoice(ctx context.Context, txn *voiceTxn, c *Client, rea
 	if handled {
 		return
 	}
-	h.finishVoiceLeave(ctx, c, snap.chID, snap.joinToken, reason)
+	h.finishVoiceLeave(ctx, txn, c, snap.chID, snap.joinToken, reason)
 }
 
 // park clears c's slot and parks a COMPLETED membership in the grace window,
@@ -207,7 +207,7 @@ func (t *voiceTxn) park(c *Client) (slotSnap, bool) {
 		return snap, true
 	}
 	h := t.h
-	if h.voiceGrace.isClosed() {
+	if h.voiceReg.voiceGrace.isClosed() {
 		slog.Debug("voice leave dropped: hub is stopping",
 			"user_id", c.userID, "channel_id", snap.chID)
 		return snap, true
@@ -216,7 +216,7 @@ func (t *voiceTxn) park(c *Client) (slotSnap, bool) {
 		return snap, false
 	}
 	entry := &voiceGraceEntry{client: c, snap: snap}
-	if !h.voiceGrace.put(c.userID, entry, func() { //nolint:contextcheck // the timer outlives the disconnect ctx; expiry uses its own.
+	if !h.voiceReg.voiceGrace.put(c.userID, entry, func() { //nolint:contextcheck // the timer outlives the disconnect ctx; expiry uses its own.
 		h.expireVoiceGrace(c.userID, entry)
 	}) {
 		return snap, true // closed between the check above and the put
@@ -236,21 +236,21 @@ func (t *voiceTxn) park(c *Client) (slotSnap, bool) {
 func (h *Hub) expireVoiceGrace(userID int64, entry *voiceGraceEntry) {
 	txn := h.begin(userID)
 	defer txn.end()
-	if !h.voiceGrace.takeForExpiry(userID, entry) {
+	if !h.voiceReg.voiceGrace.takeForExpiry(userID, entry) {
 		return
 	}
-	defer h.voiceGrace.expiring.Done()
-	h.leaveParkedVoice(context.Background(), entry, voiceLeaveReasonGraceExpired)
+	defer h.voiceReg.voiceGrace.expiring.Done()
+	h.leaveParkedVoice(context.Background(), txn, entry, voiceLeaveReasonGraceExpired)
 }
 
 // leaveParkedVoice runs the full voice teardown for a parked membership
 // already taken from the grace window, reporting false for a nil entry.
 // The caller holds Hub.begin for the entry's user.
-func (h *Hub) leaveParkedVoice(ctx context.Context, e *voiceGraceEntry, reason string) bool {
+func (h *Hub) leaveParkedVoice(ctx context.Context, txn *voiceTxn, e *voiceGraceEntry, reason string) bool {
 	if e == nil {
 		return false
 	}
-	h.finishVoiceLeave(ctx, e.client, e.snap.chID, e.snap.joinToken, reason)
+	h.finishVoiceLeave(ctx, txn, e.client, e.snap.chID, e.snap.joinToken, reason)
 	return true
 }
 
@@ -258,7 +258,7 @@ func (h *Hub) leaveParkedVoice(ctx context.Context, e *voiceGraceEntry, reason s
 // voice_states row (channel and joined_at) is gone, so a resume never
 // inherits a membership with no row. A failed read keeps the entry.
 func (h *Hub) dropOrphanVoiceGrace(ctx context.Context, userID int64) {
-	e := h.voiceGrace.get(userID)
+	e := h.voiceReg.voiceGrace.get(userID)
 	if e == nil {
 		return
 	}
@@ -266,7 +266,7 @@ func (h *Hub) dropOrphanVoiceGrace(ctx context.Context, userID int64) {
 	if err != nil || (row != nil && row.ChannelID == e.snap.chID && row.JoinedAt == e.snap.joinToken) {
 		return
 	}
-	if h.voiceGrace.takeIfSame(userID, e) {
+	if h.voiceReg.voiceGrace.takeIfSame(userID, e) {
 		slog.Info("voice grace dropped: its voice state row is gone",
 			"user_id", userID, "channel_id", e.snap.chID)
 	}
@@ -291,7 +291,7 @@ func (t *voiceTxn) inherit(c *Client) int64 {
 		t.takeParked(0, "")
 		return 0
 	}
-	if c.getVoiceChID() != 0 {
+	if c.voice.channel() != 0 {
 		return 0
 	}
 	e := t.takeParked(0, "")

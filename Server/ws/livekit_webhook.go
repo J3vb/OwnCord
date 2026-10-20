@@ -293,7 +293,7 @@ func (h *Hub) webhookLeftCleanupClient(ctx context.Context, txn *voiceTxn, c *Cl
 	matched := txn.clearExact(c, channelID, joinToken)
 
 	if matched {
-		h.webhookLeftFinishLeave(ctx, userID, channelID, joinToken)
+		h.webhookLeftFinishLeave(ctx, txn, userID, channelID, joinToken)
 	} else if h.voice != nil {
 		// Client has voiceChID=0 or moved to a different channel (e.g.
 		// after F5 reload), or this webhook is for an older join instance.
@@ -313,9 +313,9 @@ func (h *Hub) webhookLeftCleanupClient(ctx context.Context, txn *voiceTxn, c *Cl
 // reached once the client's voice fields matched this join instance and were
 // cleared (and unsubscribed from the voice topic): clear the DB row, move the
 // E2EE key holder on, and broadcast the leave.
-func (h *Hub) webhookLeftFinishLeave(ctx context.Context, userID, channelID int64, joinToken string) {
+func (h *Hub) webhookLeftFinishLeave(ctx context.Context, txn *voiceTxn, userID, channelID int64, joinToken string) {
 	if h.voice != nil {
-		if err := leaveVoiceChannelWithRetry(ctx, h, userID, channelID, joinToken); err != nil {
+		if err := leaveVoiceChannelWithRetry(ctx, txn, channelID, joinToken); err != nil {
 			slog.Error("livekit webhook: LeaveVoiceChannel exhausted retries",
 				"error", err, "user_id", userID, "channel_id", channelID)
 		}

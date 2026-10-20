@@ -95,7 +95,7 @@ func TestHandleVoiceLeaveV2_RateLimited(t *testing.T) {
 // error path (handlers.go:109) runs the hub's handleVoiceLeave and reconciles
 // server-side voice membership with a client that already tore its local
 // voice session down before sending the frame. Without this, a throttled
-// leave leaves c.voiceChID and the voice_states row pointing at the old
+// leave leaves c.voice.voiceChID and the voice_states row pointing at the old
 // channel forever, and a later voice_join for that same channel is refused
 // with ALREADY_JOINED. handleVoiceLeave is a documented no-op when the
 // client is not in voice, so this is safe even when the throttled attempt

@@ -551,7 +551,7 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	// U4: an atomic re-check under h.mu. A device connecting between the check
 	// above and here would otherwise be displaced; refuse instead.
 	txn := h.begin(c.userID)
-	refused := h.registerNow(c, allowedChannelIDs)
+	refused := h.registerNow(c, allowedChannelIDs, txn)
 	txn.end()
 	if refused {
 		refuseWake(ctx, conn, c)
@@ -632,14 +632,14 @@ func (h *Hub) freshConnectSettleVoice(ctx context.Context, c *Client) {
 	// session must be removed so the ready payload doesn't include it and
 	// other clients see a voice_leave broadcast.
 	if vs, err := h.voice.State(ctx, c.userID); err == nil && vs != nil {
-		h.freshConnectCleanStaleVoice(ctx, c, vs)
+		h.freshConnectCleanStaleVoice(ctx, txn, c, vs)
 	}
 }
 
 // freshConnectCleanStaleVoice removes the voice state left behind by this
 // user's previous session, unless that session is the still-registered
 // connection this one is about to inherit from.
-func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, c *Client, vs *db.VoiceState) {
+func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, txn *voiceTxn, c *Client, vs *db.VoiceState) {
 	// Replay-failure fallback (lastSeq > 0): registerNow below transfers
 	// the still-registered old connection's live voice state into this
 	// client. Deleting the DB row here — and the LiveKit participant,
@@ -649,7 +649,7 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, c *Client, vs *db
 	// memory-without-row. Keep the row so ready stays consistent. If the
 	// old client unregisters before registerNow runs, the transfer is
 	// skipped and the next sweep reaps the then-truly-stale row.
-	if old := h.GetClient(c.userID); c.lastSeq > 0 && old != nil && old.getVoiceChID() == vs.ChannelID {
+	if old := h.GetClient(c.userID); c.lastSeq > 0 && old != nil && old.voice.channel() == vs.ChannelID {
 		slog.Info("ws fresh connect: keeping voice state for replay-failure fallback",
 			"user_id", c.userID, "channel_id", vs.ChannelID)
 		return
@@ -660,12 +660,11 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, c *Client, vs *db
 	// OC-0270 closes for the still-registered case). Any other fresh connect or
 	// mismatched grace entry means the call is over: stop the window so its
 	// timer cannot later re-run finishVoiceLeave over a cleaned row.
-	if c.lastSeq > 0 && h.voiceGrace.has(c.userID, vs.ChannelID) {
+	if c.lastSeq > 0 && h.voiceReg.voiceGrace.has(c.userID, vs.ChannelID) {
 		slog.Info("ws fresh connect: keeping graced voice state",
 			"user_id", c.userID, "channel_id", vs.ChannelID)
 		return
 	}
-	txn := h.heldTxn(c.userID)
 	txn.takeParked(0, "")
 	slog.Info("ws fresh connect: cleaning stale voice state",
 		"user_id", c.userID, "channel_id", vs.ChannelID)

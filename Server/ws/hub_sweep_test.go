@@ -123,7 +123,7 @@ func TestSweepStaleVoiceStates_TransientPermissionErrorDoesNotEvict(t *testing.T
 
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := NewTestClient(h, uid, make(chan []byte, 8))
-	c.setVoiceState(chID, "tok")
+	c.voice.setState(chID, "tok")
 	h.clients[uid] = c
 
 	// Fault-inject exactly the permission read: harvestVoiceRoleID grants
@@ -136,7 +136,7 @@ func TestSweepStaleVoiceStates_TransientPermissionErrorDoesNotEvict(t *testing.T
 
 	h.sweepStaleVoiceStates(context.Background())
 
-	if got := c.getVoiceChID(); got != chID {
+	if got := c.voice.channel(); got != chID {
 		t.Fatalf("client voice channel = %d after a transient permission-read error, want it to stay at %d (not evicted)", got, chID)
 	}
 	vs, err := database.GetVoiceState(ctx, uid)
@@ -177,7 +177,7 @@ func TestSweepStaleVoiceStates_GhostRemovalReelectsKeyHolder(t *testing.T) {
 
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	survivor := NewTestClient(h, survivorUID, make(chan []byte, 8))
-	survivor.setVoiceState(chID, "tok-survivor")
+	survivor.voice.setState(chID, "tok-survivor")
 	h.clients[survivorUID] = survivor
 
 	// Simulate the stale-holder precondition from the finding: the ghost is
@@ -233,7 +233,7 @@ func TestCleanupVoiceForChannel_ConcurrentJoinNotClobbered(t *testing.T) {
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := NewTestClient(h, uid, make(chan []byte, 8))
 	h.clients[uid] = c
-	c.setVoiceState(chA, "tok-a")
+	c.voice.setState(chA, "tok-a")
 	h.pubsub.Subscribe(c, VoiceTopic(chA))
 
 	// Simulate handleVoiceJoin's state-setting step (voice_join.go's
@@ -241,14 +241,14 @@ func TestCleanupVoiceForChannel_ConcurrentJoinNotClobbered(t *testing.T) {
 	// CleanupVoiceForChannel's read of the client's current voice channel and
 	// its clear of that state.
 	cleanupVoiceRaceClearHook = func(client *Client) {
-		client.setVoiceState(chB, "tok-b")
+		client.voice.setState(chB, "tok-b")
 		h.pubsub.Subscribe(client, VoiceTopic(chB))
 	}
 	defer func() { cleanupVoiceRaceClearHook = nil }()
 
 	h.CleanupVoiceForChannel(chA)
 
-	if got := c.getVoiceChID(); got != chB {
+	if got := c.voice.channel(); got != chB {
 		t.Fatalf("client voiceChID = %d after a voice_join raced CleanupVoiceForChannel's read-then-clear window, want %d — the newer join must survive, not be silently wiped", got, chB)
 	}
 	if !h.SubscribedToVoiceTopicForTest(c, chB) {
@@ -281,7 +281,7 @@ func TestSweepStaleVoiceStates_CommittedGhostDeleteStillBroadcastsAfterCancel(t 
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	send := make(chan []byte, 8)
 	survivor := NewTestClient(h, survivorUID, send)
-	survivor.setVoiceState(chID, "tok-survivor")
+	survivor.voice.setState(chID, "tok-survivor")
 	h.clients[survivorUID] = survivor
 	h.pubsub.Subscribe(survivor, VoiceTopic(chID))
 

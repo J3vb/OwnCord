@@ -413,7 +413,7 @@ func TestChannelActivity_ReconnectInWindow(t *testing.T) {
 	reader := f.user(t, "reader", permissions.MemberRoleID)
 	oldSend := make(chan []byte, 8)
 	old := NewTestClientWithUser(f.hub, reader, 0, oldSend)
-	f.hub.registerNow(old, nil)
+	f.hub.registerNowTest(old, nil)
 
 	startActivityHub(t, f.hub)
 	// Two filler broadcasts first: the ring answers only for seqs after its oldest.
@@ -436,7 +436,7 @@ func TestChannelActivity_ReconnectInWindow(t *testing.T) {
 
 	newSend := make(chan []byte, 8)
 	fresh := NewTestClientWithUser(f.hub, reader, 0, newSend)
-	f.hub.registerNow(fresh, nil)
+	f.hub.registerNowTest(fresh, nil)
 	seq := atomic.LoadUint64(&f.hub.seq)
 
 	f.flush()

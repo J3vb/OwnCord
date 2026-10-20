@@ -59,7 +59,7 @@ func TestRegisterNow_ReplacementNeverLosesAConcurrentGlobalBroadcast(t *testing.
 			// h.seqMu, the same lock deliverBroadcast holds for its whole
 			// critical section, so the two can never interleave.
 			h.seqMu.Lock()
-			h.registerNow(replacement, nil)
+			h.registerNowTest(replacement, nil)
 			h.seqMu.Unlock()
 			close(done)
 		}()
