@@ -8,8 +8,8 @@ import (
 )
 
 // sweepStaleVoiceEvictRevoked is sweepStaleVoiceStates' permission stage: it
-// re-runs the voice join gate (permissions.CanJoinVoice) for every client
-// currently in voice, evicts the ones it now refuses, and reconciles active
+// re-runs the voice stay gate (permissions.CanStayInVoice: the join gate
+// minus the timeout) for every client currently in voice, evicts the ones it now refuses, and reconciles active
 // media source permissions and flags.
 func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 	// The whole SFU reconciliation pass shares a budget. An unavailable

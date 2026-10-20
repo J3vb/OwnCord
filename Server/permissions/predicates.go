@@ -243,8 +243,9 @@ func CanPinMessage(s Subject) error {
 // channel that has a room, for a DM membership plus no block, and no archive
 // for either kind — the admin
 // PATCH accepts `archived` for any channel type, and an evicted participant
-// must not rejoin the archived room. Applies at join, at token refresh, to
-// the target of a moderator move, and in the stale-voice sweep.
+// must not rejoin the archived room. Applies at join and to the target
+// of a moderator move; a member already in the room (token refresh, the
+// stale-voice sweep) is held to CanStayInVoice, which ignores the timeout.
 func CanJoinVoice(s Subject) error {
 	if s.TimedOut {
 		return ErrTimedOut
@@ -271,6 +272,19 @@ func CanJoinVoice(s Subject) error {
 		return ErrArchived
 	}
 	return nil
+}
+
+// CanStayInVoice is CanJoinVoice for a member already in the room: every
+// rule of the join gate except the timeout. A timeout's voice half is a
+// server-mute applied only when the moderator could moderate voice
+// (service.ModerationService.Timeout), so a timed-out member who is already
+// in a room is not evicted — they cannot JOIN one (CanJoinVoice), but the
+// session they hold ends only for a reason that would refuse it on its own:
+// a lost CONNECT_VOICE or READ_MESSAGES, a ban or block, an archived or
+// deleted channel. Used by the stale-voice sweep and the token refresh.
+func CanStayInVoice(s Subject) error {
+	s.TimedOut = false
+	return CanJoinVoice(s)
 }
 
 // CanModerate is the report queue and B5-9's moderator-action gate:

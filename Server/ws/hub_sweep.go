@@ -344,9 +344,9 @@ func (h *Hub) sweepStaleVoiceEntry(ctx context.Context, userID, channelID int64,
 var sweepStaleVoiceJoinRaceHook func(userID, channelID int64, joinedAt string)
 
 // voiceStillAllowed is the sweep's error-aware re-run of the join gate: it
-// distinguishes a genuine refusal (permissions.CanJoinVoice over the live
-// subject — the bit revoked, the channel archived or deleted, DM membership
-// or block state changed) from a DB read failure. sweepStaleVoiceStates
+// distinguishes a genuine refusal (permissions.CanStayInVoice over the live
+// subject — the join gate minus the timeout: the bit revoked, the channel
+// archived or deleted, DM membership or block state changed) from a DB read failure. sweepStaleVoiceStates
 // needs that distinction: unlike a handler answering one client's request,
 // it evicts a live voice session on "denied", so a transient read failure
 // must not be treated as a revocation. Deliberately read live, never through
@@ -365,7 +365,7 @@ func (h *Hub) voiceStillAllowed(ctx context.Context, userID, channelID int64) (a
 	if err != nil {
 		return false, err
 	}
-	return permissions.CanJoinVoice(sub) == nil, nil
+	return permissions.CanStayInVoice(sub) == nil, nil
 }
 
 // cleanupVoiceRaceClearHook, when non-nil, runs immediately before

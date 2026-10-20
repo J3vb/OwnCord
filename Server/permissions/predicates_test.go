@@ -204,6 +204,16 @@ func TestTimedOutSubject(t *testing.T) {
 	})
 }
 
+func TestCanStayInVoice(t *testing.T) {
+	runPredicate(t, "CanStayInVoice", CanStayInVoice, []predicateCase{
+		{"timed out member keeps the seat", Subject{RolePerms: ConnectVoice | ReadMessages, Channel: voice(false), TimedOut: true}, nil},
+		{"timed out dm call keeps the seat", Subject{RolePerms: ConnectVoice, Channel: dm(), DMParticipant: true, TimedOut: true}, nil},
+		{"timed out without CONNECT_VOICE is still refused", Subject{RolePerms: ReadMessages, Channel: voice(false), TimedOut: true}, ErrPermissionDenied},
+		{"timed out in an archived channel is still refused", Subject{RolePerms: ConnectVoice | ReadMessages, Channel: voice(true), TimedOut: true}, ErrArchived},
+		{"timed out and blocked is still refused", Subject{RolePerms: ConnectVoice, Channel: dm(), DMParticipant: true, DMBlocked: true, TimedOut: true}, ErrBlocked},
+	})
+}
+
 func TestCanReadContent(t *testing.T) {
 	runPredicate(t, "CanReadContent", CanReadContent, []predicateCase{
 		{"unlabelled channel needs no ack", Subject{RolePerms: memberBits, Channel: text(false)}, nil},

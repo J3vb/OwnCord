@@ -273,6 +273,7 @@ and only when it changes something a contributor or fork holder must do
 - On Linux, a ringing call's notification now goes away when the ring ends, clicking a notification opens its message however many have piled up, notifications no longer play the desktop's sound on top of OwnCord's, and the AppImage's notifications show the OwnCord icon.
 - Linux: screen-share audio now reaches viewers in stereo instead of mono.
 - Voice signaling through the server's built-in proxy dropped the call connection when a single message passed 32 KiB, which could happen in a busy room. Messages up to 256 KiB now pass through.
+- Timing out someone who was in a voice channel kicked them out of it within a minute, even when the moderator could not mute them. They now stay in the call (muted if the moderator could mute members), and the mute lifts the moment the timeout ends instead of up to 15 minutes later. They still cannot join a voice channel while timed out.
 
 ## v2.3.0-beta.1
 
