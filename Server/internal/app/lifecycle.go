@@ -177,7 +177,11 @@ func (a *App) startDatabase() error {
 
 // startMigrate runs the migrations and clears state left by a previous run.
 func (a *App) startMigrate() error {
-	return initDatabase(a.log, a.cfg, a.database, a.deps.Restart)
+	if err := initDatabase(a.log, a.cfg, a.database, a.deps.Restart); err != nil {
+		return err
+	}
+	a.restoreOutcome = recordRestoreResult(a.log, a.cfg.Database.Path, a.database)
+	return nil
 }
 
 // startErasureMarkers opens the deletion-marker file and replays it against

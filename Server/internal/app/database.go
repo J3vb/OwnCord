@@ -12,6 +12,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // openDatabase validates the configured backend and opens the database.
@@ -173,4 +174,36 @@ func changedSince(dbPath string, t time.Time) bool {
 	}
 	wal, err := os.Stat(dbPath + "-wal")
 	return err == nil && wal.Size() > 0 && wal.ModTime().After(t)
+}
+
+// recordRestoreResult reports the staged backup restore the boot-time apply
+// (db.ApplyStagedRestore, run by db.Open) handled: it consumes the result
+// file, writes one audit row into the now-open database and returns the
+// outcome for the attention panel. With no restore pending it returns the zero
+// outcome. The file is removed only after the audit row, so a crash between
+// the two repeats the row rather than losing the report.
+func recordRestoreResult(log *slog.Logger, dbPath string, database *db.DB) service.RestoreOutcome {
+	res, found, err := db.TakeRestoreResult(dbPath)
+	if err != nil {
+		log.Error("staged restore result is unreadable", "error", err)
+		return service.RestoreOutcome{}
+	}
+	if !found {
+		return service.RestoreOutcome{}
+	}
+	action, detail := "backup_restore_applied", "restored backup "+res.Backup
+	switch res.Status {
+	case db.RestoreStatusApplied:
+		log.Warn("staged restore applied", "backup", res.Backup)
+	case db.RestoreStatusRolledBack:
+		action, detail = "backup_restore_rolled_back", "restore of "+res.Backup+" failed, previous database kept: "+res.Error
+		log.Error("staged restore rolled back", "backup", res.Backup, "reason", res.Error)
+	default:
+		action, detail = "backup_restore_refused", "restore of "+res.Backup+" refused, previous database kept: "+res.Error
+		log.Error("staged restore refused", "backup", res.Backup, "reason", res.Error)
+	}
+	if err := database.LogAudit(context.Background(), res.ActorID, action, "server", 0, detail); err != nil {
+		log.Error("staged restore audit write failed", "action", action, "error", err)
+	}
+	return service.RestoreOutcome{Recorded: true, Status: res.Status, Backup: res.Backup, At: res.AppliedAt, Reason: res.Error}
 }

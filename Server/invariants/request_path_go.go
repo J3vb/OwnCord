@@ -26,7 +26,7 @@ type GoEntry struct {
 // belongs on syncutil.Group.Go, which the lifecycle owner joins before the
 // database closes.
 var GoAllow = map[string]GoEntry{
-	"admin/handlers_backup.go":           {3, "restart hand-off: requestRestart only cancels a context, and joining it is circular because it starts the Close that would join it"},
+	"admin/handlers_backup.go":           {1, "restart hand-off: requestRestart only cancels a context, and joining it is circular because it starts the Close that would join it"},
 	"admin/handlers_config_overrides.go": {1, "restart hand-off, as in handlers_backup.go"},
 	"admin/setup_handler.go":             {1, "restart hand-off, as in handlers_backup.go"},
 	"api/livekit_proxy.go":               {2, "proxy copy pair, joined inside the handler"},

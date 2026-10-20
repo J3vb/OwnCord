@@ -2,7 +2,6 @@ package admin
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -10,7 +9,6 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -73,52 +71,6 @@ func SetCreateChannelPostCommitHook(h func()) (restore func()) {
 	createChannelPostCommitHook = h
 	return func() { createChannelPostCommitHook = prev }
 }
-
-// StubCopyBackup swaps the restore path's file-copy hook so tests can inject
-// mid-copy failures that pass the pre-copy integrity gate. CopyBackupForTest
-// is the real implementation, for stubs that only want to fail once.
-func StubCopyBackup(fn func(src, dst string) error) (restore func()) {
-	prev := copyBackupFile
-	copyBackupFile = fn
-	return func() { copyBackupFile = prev }
-}
-
-// CopyBackupForTest exposes the real copy for StubCopyBackup delegates.
-var CopyBackupForTest = db.CopyDatabaseFile
-
-// StubCloseError makes the next handleRestoreBackup call's database.Close()
-// return err instead of actually closing the pools, so tests can exercise the
-// Close-failure branch without a genuine driver-level close error (see
-// dbCloser's doc comment for why that's not otherwise reachable in a test).
-func StubCloseError(msg string) (restore func()) {
-	closeMu.Lock()
-	prev := dbCloser
-	dbCloser = func(*db.DB) error { return errors.New(msg) }
-	closeMu.Unlock()
-	return func() {
-		closeMu.Lock()
-		dbCloser = prev
-		closeMu.Unlock()
-	}
-}
-
-// StubCloser swaps the restore path's database-close hook for fn, so a test
-// can act on the files between the pools closing and the backup being copied
-// in. CloseDatabaseForTest is the real close, for stubs that wrap it.
-func StubCloser(fn func(*db.DB) error) (restore func()) {
-	closeMu.Lock()
-	prev := dbCloser
-	dbCloser = fn
-	closeMu.Unlock()
-	return func() {
-		closeMu.Lock()
-		dbCloser = prev
-		closeMu.Unlock()
-	}
-}
-
-// CloseDatabaseForTest is the real close behind dbCloser.
-func CloseDatabaseForTest(database *db.DB) error { return database.Close() }
 
 // ApplyStagedUpdate exposes applyStagedUpdate (the on-disk swap behind
 // POST /updates/apply's background goroutine) so tests can drive it directly

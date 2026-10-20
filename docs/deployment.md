@@ -1218,8 +1218,22 @@ What happens, in order:
 2. It writes a `backup_restore` audit entry.
 3. It takes a `pre_restore_<time>.db` safety copy. If that fails, it stops
    before changing anything.
-4. It tells connected clients to reconnect.
-5. It replaces the database and restarts.
+4. It copies the backup next to the database as `<database>.restore-staged`,
+   checks the copy, and writes `<database>.restore-pending.json` last. If the
+   copy cannot be written (the volume is full, say) it stops and the server
+   keeps running unchanged.
+5. It restarts through the normal shutdown, which tells connected clients to
+   reconnect. The running database is not written to.
+6. On the next start, before the database opens, the server moves the old
+   database aside, puts the staged copy in its place and checks it. If the
+   check fails, it puts the old database back and carries on with it. Either
+   way the Dashboard's attention panel shows the outcome and the audit log
+   records it. A power
+   cut or crash in the middle of the swap is finished at the next start.
+
+If the restart never comes (the server is stopped by hand, or no supervisor
+restarts it), the staged restore waits and is applied at the next start. To
+cancel it before then, delete `<database>.restore-pending.json`.
 
 How it restarts depends on `server.restart_mode`. With `supervised`, which
 `auto` chooses under systemd, NSSM and containers, the server exits cleanly
