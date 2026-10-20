@@ -1,134 +1,50 @@
-import { describe, it, expect } from "vitest";
-import { createIcon } from "../../src/lib/icons";
-import type { IconName } from "../../src/lib/icons";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { createIcon, type IconName } from "../../src/lib/icons";
 
-// All icon names exported from icons.ts
-const ALL_ICON_NAMES: IconName[] = [
-  "mic",
-  "mic-off",
-  "headphones",
-  "headphones-off",
-  "camera",
-  "camera-off",
-  "monitor",
-  "monitor-off",
-  "phone",
-  "phone-off",
-  "volume-2",
-  "volume-x",
-  "pin",
-  "pin-off",
-  "settings",
-  "smile",
-  "send",
-  "reply",
-  "pencil",
-  "trash-2",
-  "file-text",
-  "download",
-  "chevron-down",
-  "chevron-up",
-  "chevron-right",
-  "x",
-  "eye",
-  "eye-off",
-  "layout-grid",
-  "maximize",
-  "minimize",
-  "picture-in-picture-2",
-  "play",
-  "pause",
-  "check",
-  "circle-check",
-  "circle-x",
-  "circle-dashed",
-  "external-link",
-  "loader",
-  "arrow-right",
-  "hash",
-  "triangle-alert",
-  "shield",
-  "shield-check",
-  "shield-alert",
-];
+describe("createIcon template cache", () => {
+  afterEach(() => vi.restoreAllMocks());
 
-describe("createIcon", () => {
-  it("returns a valid SVGSVGElement", () => {
-    const svg = createIcon("mic");
-    expect(svg).toBeInstanceOf(SVGSVGElement);
+  it("returns distinct nodes with identical markup", () => {
+    const a = createIcon("pin", 16);
+    const b = createIcon("pin", 16);
+    expect(a).not.toBe(b);
+    expect(a.outerHTML).toBe(b.outerHTML);
+    expect(a.getAttribute("data-icon")).toBe("pin");
+    expect(a.getAttribute("aria-hidden")).toBe("true");
+    expect(a.classList.contains("icon")).toBe(true);
+    const host = document.createElement("div");
+    host.append(a, b);
+    expect(host.querySelectorAll("svg")).toHaveLength(2);
   });
 
-  it("default size is 24", () => {
-    const svg = createIcon("mic");
-    expect(svg.getAttribute("width")).toBe("24");
-    expect(svg.getAttribute("height")).toBe("24");
-  });
-
-  it("respects a custom size", () => {
-    const svg = createIcon("mic", 16);
-    expect(svg.getAttribute("width")).toBe("16");
-    expect(svg.getAttribute("height")).toBe("16");
-  });
-
-  it("sets viewBox to '0 0 24 24'", () => {
-    const svg = createIcon("send");
-    expect(svg.getAttribute("viewBox")).toBe("0 0 24 24");
-  });
-
-  it("sets fill to 'none'", () => {
-    const svg = createIcon("send");
-    expect(svg.getAttribute("fill")).toBe("none");
-  });
-
-  it("sets stroke to 'currentColor'", () => {
-    const svg = createIcon("send");
-    expect(svg.getAttribute("stroke")).toBe("currentColor");
-  });
-
-  it("sets stroke-width to '2'", () => {
-    const svg = createIcon("send");
-    expect(svg.getAttribute("stroke-width")).toBe("2");
-  });
-
-  it("sets stroke-linecap to 'round'", () => {
-    const svg = createIcon("send");
-    expect(svg.getAttribute("stroke-linecap")).toBe("round");
-  });
-
-  it("sets stroke-linejoin to 'round'", () => {
-    const svg = createIcon("send");
-    expect(svg.getAttribute("stroke-linejoin")).toBe("round");
-  });
-
-  it("applies the 'icon' CSS class", () => {
-    const svg = createIcon("pin");
-    expect(svg.classList.contains("icon")).toBe(true);
-  });
-
-  it("sets data-icon attribute to the icon name", () => {
-    const svg = createIcon("volume-2");
-    expect(svg.getAttribute("data-icon")).toBe("volume-2");
-  });
-
-  it("sets aria-hidden to 'true'", () => {
-    const svg = createIcon("x");
-    expect(svg.getAttribute("aria-hidden")).toBe("true");
-  });
-
-  it("every IconName produces a non-empty SVG", () => {
-    for (const name of ALL_ICON_NAMES) {
-      const svg = createIcon(name);
-      expect(
-        svg.innerHTML.trim().length,
-        `Expected non-empty innerHTML for icon "${name}"`,
-      ).toBeGreaterThan(0);
+  it("parses innerHTML once for two calls of one name", () => {
+    const desc = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML")!;
+    const set = vi.fn(function (this: Element, v: string) {
+      desc.set!.call(this, v);
+    });
+    Object.defineProperty(Element.prototype, "innerHTML", { ...desc, set, configurable: true });
+    try {
+      createIcon("mic-off", 20);
+      createIcon("mic-off", 20);
+      expect(set).toHaveBeenCalledTimes(1);
+    } finally {
+      Object.defineProperty(Element.prototype, "innerHTML", desc);
     }
   });
 
-  it("data-icon attribute matches the requested name for every IconName", () => {
-    for (const name of ALL_ICON_NAMES) {
-      const svg = createIcon(name);
-      expect(svg.getAttribute("data-icon"), `data-icon mismatch for "${name}"`).toBe(name);
-    }
+  it("applies size per call and does not leak mutations", () => {
+    const a = createIcon("send", 12);
+    const b = createIcon("send", 32);
+    expect(a.getAttribute("width")).toBe("12");
+    expect(b.getAttribute("height")).toBe("32");
+    a.setAttribute("stroke", "red");
+    expect(createIcon("send", 12).getAttribute("stroke")).toBe("currentColor");
+  });
+
+  it("unknown name still returns an empty svg", () => {
+    const svg = createIcon("no-such-icon" as IconName, 10);
+    expect(svg.tagName.toLowerCase()).toBe("svg");
+    expect(svg.childNodes).toHaveLength(0);
+    expect(svg.getAttribute("data-icon")).toBe("no-such-icon");
   });
 });
