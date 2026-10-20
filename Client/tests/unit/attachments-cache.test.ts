@@ -367,7 +367,7 @@ describe("attachment cache clearing", () => {
     expect(brokerImageMock.mock.calls.length).toBe(calls + 1);
   });
 
-  it("re-requests an on-screen image whose blob: URL the FIFO cap evicted", async () => {
+  it("re-requests an on-screen image whose blob: URL the LRU cap evicted", async () => {
     clearExternalImageCache();
     brokerImageMock.mockReset();
     brokerImageMock.mockResolvedValue({ ok: true, value: new Blob(["x"]) });
@@ -425,7 +425,7 @@ describe("attachment cache clearing", () => {
     await vi.waitFor(() => expect(img.src).toBe("blob:clear-2"));
   });
 
-  it("re-requests an external avatar whose blob: URL the FIFO cap evicted", async () => {
+  it("re-requests an external avatar whose blob: URL the LRU cap evicted", async () => {
     clearExternalImageCache();
     brokerImageMock.mockReset();
     brokerImageMock.mockResolvedValue({ ok: true, value: new Blob(["x"]) });
@@ -573,6 +573,15 @@ describe("attachment cache clearing", () => {
 
       b.remove();
       await fetchExternalImage({ url: url(EXTERNAL_IMAGE_CACHE_MAX + 2) });
+      expect(revoke).toHaveBeenCalledWith(first);
+    });
+
+    it("does not pin a URL shown only by a hidden (failed) image", async () => {
+      const first = (await fetchExternalImage({ url: url(1) }))!;
+      mount(first).hidden = true;
+      for (let i = 2; i <= EXTERNAL_IMAGE_CACHE_MAX + 1; i++) {
+        await fetchExternalImage({ url: url(i) });
+      }
       expect(revoke).toHaveBeenCalledWith(first);
     });
 

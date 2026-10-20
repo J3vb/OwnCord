@@ -219,8 +219,8 @@ function revokeObjectUrl(objectUrl: string): void {
   URL.revokeObjectURL(objectUrl);
 }
 
-/** The blob: URLs a mounted element still depends on: every connected `<img>`
- *  showing one, and every connected tracked GIF's animated source
+/** The blob: URLs a mounted element still depends on: every connected visible
+ *  `<img>` showing one, and every connected tracked GIF's animated source
  *  (`data-media-src`: its `<img>` shows the frozen still, but unfreezing needs
  *  the original). Read only when a
  *  cache is over its cap, so the scan costs nothing on a hit. */
@@ -228,6 +228,8 @@ function liveBlobUrls(): Set<string> {
   const live = new Set<string>();
   if (typeof document === "undefined") return live;
   for (const img of document.querySelectorAll("img")) {
+    // A hidden image (a failed or refused load) shows nothing, so it pins nothing.
+    if (img.hidden) continue;
     for (const src of [img.getAttribute("src"), img.dataset["mediaSrc"]]) {
       if (src !== undefined && src !== null && src.startsWith("blob:")) live.add(src);
     }
@@ -1429,7 +1431,7 @@ function renderAttachmentContent(att: Attachment, gallery?: LightboxGallery): HT
         "load",
         () => {
           clearReservation();
-          if (isGif) observeMedia(img, objectUrl, wrap, !animateGifsPref);
+          if (isGif) observeMedia(img, img.src, wrap, !animateGifsPref);
         },
         { once: true },
       );
