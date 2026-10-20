@@ -27,6 +27,7 @@ import {
 } from "../../src/components/message-list/attachments";
 import { renderGenericLinkPreview } from "../../src/components/message-list/embeds";
 import { renderInlineImage } from "../../src/components/message-list/media";
+import { discardMedia, observeMedia } from "../../src/lib/media-visibility";
 import {
   EXTERNAL_CONSENT_PREF,
   admitDerived,
@@ -327,6 +328,36 @@ const PROBES: readonly Probe[] = [
     isInitial: () => renderInlineImage(IMAGE_URL).style.minHeight === "200px",
   },
   {
+    // A cached GIF still shows as an instant swap for the next row of that GIF.
+    name: "media-visibility:stills",
+    mutate: () => {
+      URL.createObjectURL = vi.fn(() => "blob:probe-still");
+      URL.revokeObjectURL = vi.fn();
+      const restores = [
+        vi
+          .spyOn(HTMLCanvasElement.prototype, "getContext")
+          .mockReturnValue({ drawImage: vi.fn() } as unknown as CanvasRenderingContext2D),
+        vi
+          .spyOn(HTMLCanvasElement.prototype, "toBlob")
+          .mockImplementation((cb) => cb(new Blob(["x"], { type: "image/png" }))),
+      ];
+      const img = document.createElement("img");
+      img.src = STILL_GIF_URL;
+      observeMedia(img, STILL_GIF_URL, document.createElement("div"), true);
+      vi.advanceTimersByTime(1);
+      expect(img.src).toBe("blob:probe-still");
+      for (const restore of restores) restore.mockRestore();
+    },
+    isInitial: () => {
+      const img = document.createElement("img");
+      img.src = STILL_GIF_URL;
+      observeMedia(img, STILL_GIF_URL, document.createElement("div"), true);
+      const cached = img.src !== STILL_GIF_URL;
+      discardMedia(img);
+      return !cached;
+    },
+  },
+  {
     // A mention alert is a pending timer keyed by this server's channel id.
     name: "channels:activity",
     mutate: () => {
@@ -477,6 +508,7 @@ beforeEach(() => {
   vi.useFakeTimers();
 });
 
+const STILL_GIF_URL = "https://gifs.example/probe.gif";
 const { createObjectURL, revokeObjectURL } = URL;
 
 afterEach(() => {
