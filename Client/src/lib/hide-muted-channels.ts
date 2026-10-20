@@ -46,6 +46,28 @@ export function hiddenByMute(
   voiceOccupied: (channelId: number) => boolean = () => false,
 ): boolean {
   if (!isHideMutedChannels() || !isChannelMuted(channel.id)) return false;
+  return mutedRowHidden(
+    channel,
+    activeChannelId,
+    true,
+    true,
+    channel.type === "voice" && voiceOccupied(channel.id),
+  );
+}
+
+/**
+ * `hiddenByMute` over values the caller already holds (the preference, the
+ * mute, whether the voice channel has people), so a builder fed by a snapshot
+ * reads nothing itself. `voiceOccupied` only matters for a voice channel.
+ */
+export function mutedRowHidden(
+  channel: Channel,
+  activeChannelId: number | null,
+  hide: boolean,
+  muted: boolean,
+  voiceOccupied: boolean,
+): boolean {
+  if (!hide || !muted) return false;
   if (channel.id === activeChannelId || channel.mentionCount > 0) return false;
-  return !(channel.type === "voice" && voiceOccupied(channel.id));
+  return !(channel.type === "voice" && voiceOccupied);
 }

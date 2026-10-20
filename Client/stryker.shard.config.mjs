@@ -135,7 +135,9 @@ export const shards = {
     "src/lib/channel-mute-expiry.ts",
     "src/lib/gifProvider.ts",
     "src/features/updates/UpdateCheckRow.ts",
-  ], // timed out at 90 min on run 38926807609 while it still held icons.ts
+    "src/features/channels/channelRow.view.ts",
+    "src/features/channels/channelRowModel.ts",
+  ], // timed out at 90 min on run 38926807609 while it still held icons.ts; the 5.4d channel row view and builders (about 525 non-comment lines) joined once icons.ts left
   "lib-rest-7": [
     "src/lib/markdown.ts",
     "src/features/updates/availableUpdate.ts",

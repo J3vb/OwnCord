@@ -53,6 +53,7 @@ import { createChannelSidebar, type ChannelReorderData } from "../../src/compone
 import {
   addChannel,
   channelsStore,
+  incrementUnread,
   setChannels,
   setActiveChannel,
   setRoles,
@@ -4301,5 +4302,255 @@ describe("ChannelSidebar voice rows on models (5.4c-2)", () => {
     const title = userRow(11)!.querySelector(".vu-verify")!.getAttribute("title") ?? "";
     expect(title).toContain("CCCC 3333");
     expect(title).not.toContain("BBBB 2222");
+  });
+});
+
+// ── Text rows and groups drawn from row models (5.4d-1) ──
+//
+// The text rows and category groups reconcile from models, so a row's node is
+// kept unless something it draws changed. The row's handlers are bound from
+// the model too (`access`, `orderIds`), so a role edit rebinds them.
+describe("ChannelSidebar text rows and groups on models (5.4d-1)", () => {
+  let container: HTMLDivElement;
+  let sidebar: ReturnType<typeof createChannelSidebar>;
+  const VOICE_CH = 3; // "voice-lobby" in testChannels
+
+  function row(channelId: number): HTMLElement | null {
+    return container.querySelector<HTMLElement>(`.channel-item[data-channel-id="${channelId}"]`);
+  }
+
+  function ctxMenuFor(channelId: number): HTMLElement | null {
+    document.querySelectorAll(".channel-ctx-menu").forEach((el) => el.remove());
+    row(channelId)!.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }),
+    );
+    return document.querySelector<HTMLElement>('[data-testid="channel-context-menu"]');
+  }
+
+  beforeEach(() => {
+    resetStores();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    sidebar.destroy?.();
+    container.remove();
+    document.querySelectorAll(".context-menu").forEach((el) => el.remove());
+  });
+
+  it("an unread count change keeps the focused row's node", () => {
+    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn() });
+    setChannels(testChannels); // channel 1 starts with 2 unread
+    sidebar.mount(container);
+    const focused = row(1)!;
+    focused.focus();
+    expect(document.activeElement).toBe(focused);
+    expect(focused.classList.contains("unread")).toBe(true);
+
+    incrementUnread(1);
+    channelsStore.flush();
+
+    // 2 -> 3: the row looks the same, so the node, its focus and its roving
+    // tab stop are untouched (it used to be rebuilt and refocused by key).
+    expect(channelsStore.getState().channels.get(1)!.unreadCount).toBe(3);
+    expect(row(1)).toBe(focused);
+    expect(document.activeElement).toBe(focused);
+    expect(focused.getAttribute("tabindex")).toBe("0");
+  });
+
+  it("a change that flips how the row looks rebuilds it and focus follows", () => {
+    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn() });
+    setChannels(testChannels); // channel 2 starts read
+    sidebar.mount(container);
+    const before = row(2)!;
+    before.focus();
+    expect(before.classList.contains("unread")).toBe(false);
+
+    incrementUnread(2);
+    channelsStore.flush();
+
+    const after = row(2)!;
+    expect(after).not.toBe(before);
+    expect(after.classList.contains("unread")).toBe(true);
+    expect(document.activeElement).toBe(after);
+  });
+
+  it("a MANAGE_MESSAGES-only role edit rebinds every text row's menu and keeps voice focus", () => {
+    const onPurgeChannel = vi.fn<(channel: Channel, count: number) => Promise<void>>(
+      async () => {},
+    );
+    setRoles([{ id: 3, name: "Moderator", color: null, permissions: 0 }]);
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 3, username: "Mod", avatar: null, role: "moderator" },
+      serverName: "Test Server",
+      motd: null,
+      isAuthenticated: true,
+    }));
+    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn(), onPurgeChannel });
+    setChannels(testChannels);
+    addVoiceUser(VOICE_CH, 10, "alice");
+    addVoiceUser(VOICE_CH, 11, "bob");
+    sidebar.mount(container);
+
+    const textIds = [1, 2, 4];
+    for (const id of textIds) {
+      expect(ctxMenuFor(id), `menu ${id}`).not.toBeNull();
+      expect(document.querySelector('[data-testid="ctx-purge-messages"]')).toBeNull();
+    }
+    const voiceWrapper = row(VOICE_CH)!.parentElement;
+    const participant = container.querySelector<HTMLElement>(
+      '.voice-user-item[data-voice-uid="11"]',
+    )!;
+    participant.focus();
+    expect(document.activeElement).toBe(participant);
+
+    // Only the permission mask changes: no channel, voice or role-name event.
+    setRoles([{ id: 3, name: "Moderator", color: null, permissions: Permission.MANAGE_MESSAGES }]);
+    channelsStore.flush();
+
+    for (const id of textIds) {
+      expect(ctxMenuFor(id), `menu ${id}`).not.toBeNull();
+      expect(
+        document.querySelector('[data-testid="ctx-purge-messages"]'),
+        `Purge on ${id}`,
+      ).not.toBeNull();
+    }
+    // The voice wrapper rebound too (a rebuild), and focus followed the key.
+    expect(row(VOICE_CH)!.parentElement).not.toBe(voiceWrapper);
+    expect(document.activeElement).toBe(
+      container.querySelector('.voice-user-item[data-voice-uid="11"]'),
+    );
+  });
+
+  function setModeratorMask(permissions: number): void {
+    setRoles([{ id: 3, name: "Moderator", color: null, permissions }]);
+    channelsStore.flush();
+  }
+
+  function useModerator(): void {
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 3, username: "Mod", avatar: null, role: "moderator" },
+      serverName: "Test Server",
+      motd: null,
+      isAuthenticated: true,
+    }));
+  }
+
+  it("a MANAGE_INVITES-only role edit grants and revokes Invite People on text and voice rows", () => {
+    setRoles([{ id: 3, name: "Moderator", color: null, permissions: 0 }]);
+    useModerator();
+    sidebar = createChannelSidebar({
+      onVoiceJoin: vi.fn(),
+      onOpenCall: vi.fn(),
+      onInviteFromChannel: vi.fn(),
+    });
+    setChannels(testChannels);
+    sidebar.mount(container);
+    const invite = (): Element | null =>
+      document.querySelector('[data-testid="ctx-invite-people"]');
+
+    for (const id of [1, VOICE_CH]) {
+      ctxMenuFor(id);
+      expect(invite(), `no invite on ${id}`).toBeNull();
+    }
+
+    // Only the permission mask changes: no channel, voice or role-name event.
+    setModeratorMask(Permission.MANAGE_INVITES);
+    for (const id of [1, VOICE_CH]) {
+      expect(ctxMenuFor(id), `menu ${id}`).not.toBeNull();
+      expect(invite(), `invite on ${id}`).not.toBeNull();
+    }
+
+    setModeratorMask(0);
+    for (const id of [1, VOICE_CH]) {
+      ctxMenuFor(id);
+      expect(invite(), `invite gone on ${id}`).toBeNull();
+    }
+  });
+
+  it("losing MANAGE_CHANNELS while mounted strips drag and the Edit, Delete and Move entries", () => {
+    setRoles([{ id: 3, name: "Moderator", color: null, permissions: Permission.MANAGE_CHANNELS }]);
+    useModerator();
+    sidebar = createChannelSidebar({
+      onVoiceJoin: vi.fn(),
+      onOpenCall: vi.fn(),
+      onReorderChannel: vi.fn(),
+      onEditChannel: vi.fn(),
+      onDeleteChannel: vi.fn(),
+    });
+    setChannels(testChannels);
+    sidebar.mount(container);
+    const ids = [1, 2, VOICE_CH];
+    const testIds = [
+      "ctx-edit-channel",
+      "ctx-delete-channel",
+      "ctx-move-up",
+      "ctx-move-down",
+    ] as const;
+
+    for (const id of ids) {
+      if (id !== VOICE_CH) {
+        expect(row(id)!.classList.contains("channel-draggable"), `draggable ${id}`).toBe(true);
+        expect(row(id)!.hasAttribute("data-drag-channel-id"), `drag id ${id}`).toBe(true);
+      }
+      expect(ctxMenuFor(id), `menu ${id}`).not.toBeNull();
+      for (const t of testIds) {
+        expect(document.querySelector(`[data-testid="${t}"]`), `${t} on ${id}`).not.toBeNull();
+      }
+    }
+
+    // Only the permission mask changes: no channel, voice or role-name event.
+    setModeratorMask(0);
+
+    expect(container.querySelector(".channel-draggable")).toBeNull();
+    expect(container.querySelector("[data-drag-channel-id]")).toBeNull();
+    for (const id of ids) {
+      ctxMenuFor(id);
+      for (const t of testIds) {
+        expect(document.querySelector(`[data-testid="${t}"]`), `${t} gone on ${id}`).toBeNull();
+      }
+    }
+  });
+
+  it("a voice capacity edit patches the label and keeps the wrapper", () => {
+    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn() });
+    const withMax = (max: number): ReadyChannel[] =>
+      testChannels.map((c) => (c.id === VOICE_CH ? { ...c, voice_max_users: max } : c));
+    setChannels(withMax(5));
+    addVoiceUser(VOICE_CH, 10, "alice");
+    sidebar.mount(container);
+    const wrapper = row(VOICE_CH)!.parentElement;
+    const label = (): string | null | undefined =>
+      container.querySelector(`[data-testid="channel-capacity-${VOICE_CH}"]`)?.textContent;
+    expect(label()).toBe("1/5");
+
+    setChannels(withMax(8));
+    channelsStore.flush();
+
+    expect(label()).toBe("1/8");
+    expect(row(VOICE_CH)!.parentElement).toBe(wrapper);
+  });
+
+  it("an edit action acts on the live channel, not the one the row was built for", () => {
+    const onEditChannel = vi.fn<(channel: Channel) => void>();
+    setAdminUser();
+    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn(), onEditChannel });
+    setChannels(testChannels);
+    sidebar.mount(container);
+    const before = row(2)!;
+
+    // A topic edit is not drawn, so the row is kept; its Edit must still
+    // hand over the current channel.
+    updateChannel({ id: 2, topic: "new topic" });
+    channelsStore.flush();
+    expect(row(2)).toBe(before);
+
+    expect(ctxMenuFor(2)).not.toBeNull();
+    document.querySelector<HTMLElement>('[data-testid="ctx-edit-channel"]')!.click();
+    expect(onEditChannel).toHaveBeenCalledTimes(1);
+    expect(onEditChannel.mock.calls[0]![0]).toMatchObject({ id: 2, topic: "new topic" });
   });
 });

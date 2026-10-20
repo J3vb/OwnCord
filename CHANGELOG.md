@@ -245,6 +245,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Accounts & admin**
 
+- Downloading a backup from the admin panel stopped partway through when it took longer than 30 seconds, leaving a failed download and a spent link. It now keeps going while data is flowing, and ends only if the browser stops receiving it.
 - "Update now" on a server whose install folder the service cannot write to failed with a vague download error after the download. The Updates page now says the server cannot replace its own program file and to install the release by hand, and nothing is downloaded or restarted.
 - Deleting an account with a long history held up every other message, login and reaction on the server until it finished (about 3 seconds at 100,000 messages, far longer on a slow disk). The history is now removed in short steps that let others through, the account is signed out and locked at the start, and a restart or the server's housekeeping finishes the job if it is interrupted. Whoever deletes an account still sees success; for a few seconds the account can show with part of its history gone. The last-administrator check also counts deletions already under way.
 

@@ -6,19 +6,13 @@ import "@styles/login.css";
 import "@styles/app.css";
 import "@styles/theme-neon-glow.css";
 
-import {
-  installGlobalErrorHandlers,
-  renderFallback,
-  safeMount,
-  type RenderRecovery,
-} from "@lib/safe-render";
+import { installGlobalErrorHandlers } from "@lib/safe-render";
 import { createApiClient } from "@lib/api";
 import { Disposable } from "@lib/disposable";
 import { installGlobalGuards } from "./app/globalGuards";
-import type { PageId } from "./app/context";
 
 import { deactivatePendingMessages } from "@lib/pendingMessages";
-import { openMessageTarget, openNotificationTarget } from "@lib/notifications";
+import { openNotificationTarget } from "@lib/notifications";
 import { settleNotificationLevelDefault } from "@lib/notificationLevel";
 import { createWsClient } from "@lib/ws";
 import { wireConnectionStatus } from "@lib/dispatcher";
@@ -26,31 +20,24 @@ import { markActiveChannelReadOnUnload } from "@lib/read-state";
 import { registerSessionReset } from "@lib/sessionRegistry";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { setTransientError } from "@stores/ui.store";
-import { voiceStore, leaveVoiceChannel } from "@stores/voice.store";
+import { voiceStore } from "@stores/voice.store";
 import { applyStoredAppearance } from "@lib/appearance";
 import { startZoom } from "./features/zoom/zoomKeys";
 import { migrateAutoInputSensitivity, migrateInputMode } from "@lib/inputMode";
-import {
-  abandonInFlight,
-  configureSession,
-  installLogoutTeardown,
-  sessionInFlight,
-  voiceSessionLeave,
-} from "./app/session";
+import { configureSession, installLogoutTeardown, voiceSessionLeave } from "./app/session";
 import { createLogger, applyStoredLogLevel } from "@lib/logger";
 import { initLogPersistence, flushLogs } from "@lib/logPersistence";
 import { initWindowState } from "@lib/window-state";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
-import { retentionNotice } from "@lib/types";
 import { saveUserStatus } from "@lib/userStatus";
 import { getActivePresenceSender } from "@lib/presence";
-import { setInviteJoinHandler } from "@lib/invite-navigation";
 
 import { desktop } from "./platform/desktop";
 import { connectText } from "./i18n/connect";
 import { installCertPrompts } from "./app/certPrompts";
-import { configureServerHealth, serverInfoFor } from "./app/serverHealth";
-import { renderConnect } from "./app/connectRoute";
+import { configureServerHealth } from "./app/serverHealth";
+import { configureRouter, activePageId, navigate, renderActive, rerunHealth } from "./app/router";
+import { installDeepLinks } from "./app/deepLinks";
 
 // First, while storage still holds only what earlier sessions wrote: that is
 // how an install from before the notification level is told from a new one.
@@ -91,17 +78,6 @@ void desktop.pushToTalk.init();
 const appEl = document.getElementById("app");
 if (!appEl) {
   throw new Error("Missing #app element"); // i18n-exempt: developer error, index.html always ships #app
-}
-
-// The active page. `currentPage` further down holds the mounted page
-// *component*, so the page id needs its own name.
-let activePage: PageId = "connect";
-
-/** Switch pages, re-rendering only when the page actually changed. */
-function navigate(page: PageId): void {
-  if (page === activePage) return;
-  activePage = page;
-  void renderPage(page);
 }
 
 // Create core services
@@ -153,23 +129,11 @@ void registerSessionReset(
 // transition (the connected overlay below) stays on ws.onStateChange.
 wireConnectionStatus(ws);
 const profileManager = createProfileManager(createTauriBackend());
-configureSession(api, ws, appEl, () => activePage, navigate);
+configureRouter(api, ws, appEl, profileManager, handleUnauthorized);
+configureSession(api, ws, appEl, activePageId, navigate);
 configureServerHealth(api);
-// Re-run the connect page's health checks (set while the connect page is
-// mounted, cleared otherwise) — refreshes a server's status after its
-// certificate is trusted for the first time.
-let rerunConnectHealth: (() => void) | null = null;
-// Set while the connect page is mounted so an owncord:// deep link can pre-fill
-// its register form; the pending value covers links that arrive before it mounts.
-let applyInviteToConnectPage: ((code: string, host?: string) => void) | null = null;
-let pendingInviteLink: { code: string; host?: string } | null = null;
 
-installCertPrompts(
-  ws,
-  () => activePage,
-  navigate,
-  () => rerunConnectHealth?.(),
-);
+installCertPrompts(ws, activePageId, navigate, rerunHealth);
 
 // Route the tray's Status submenu (Online/Idle/Do Not Disturb/Offline) into
 // the same path the in-app StatusPicker uses (UserBar.ts): persist through
@@ -198,119 +162,6 @@ desktop.trayStatus.onStatusChange((status) => {
   }
 });
 
-// Current page component reference for cleanup
-let currentPage: { destroy?(): void } | null = null;
-
-// Guards the async MainPage mount below against the destroy-before-mount race:
-// a stale mount is discarded when a newer navigation supersedes it.
-let navGeneration = 0;
-
-/** Longest Reload waits for the voice leave before reloading regardless. */
-const RELOAD_VOICE_LEAVE_TIMEOUT_MS = 2000;
-
-// The two ways out of a page that failed to render (the fallback's buttons).
-// F5 and Ctrl+R are blocked, so without these a failed render is a dead end.
-// One reload at a time: a second click while the voice leave is pending must
-// wait for it too, not reload straight away.
-let reloadInFlight: Promise<void> | null = null;
-
-async function reloadAfterVoiceLeave(): Promise<void> {
-  // Leave a call first, the way a logout does, so other members don't see a
-  // ghost in the channel and no native call stays live behind the reloaded
-  // page. The leave is awaited (the native room's disconnect finishes in the
-  // host) but bounded: a hung or failed leave must not strand the user on
-  // the fallback.
-  if (voiceStore.getState().currentChannelId !== null) {
-    ws.send({ type: "voice_leave", payload: {} });
-    leaveVoiceChannel();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await Promise.race([
-        import("@lib/livekitSession").then(({ leaveVoice }) => leaveVoice(false)),
-        new Promise<void>((resolve) => {
-          timer = setTimeout(resolve, RELOAD_VOICE_LEAVE_TIMEOUT_MS);
-        }),
-      ]);
-    } catch (err) {
-      log.warn("Failed to leave voice before reload", err);
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  window.location.reload();
-}
-
-const renderRecovery: RenderRecovery = {
-  reload: () => {
-    reloadInFlight ??= reloadAfterVoiceLeave().finally(() => {
-      reloadInFlight = null;
-    });
-    return reloadInFlight;
-  },
-  signOut: () => {
-    const wasSignedIn = authStore.getState().isAuthenticated;
-    clearAuth();
-    // A signed-in logout is navigated by the authStore subscriber (it needs
-    // the router still on "main"); only a session that never authenticated
-    // has to be sent back here.
-    if (wasSignedIn) return;
-    if (activePage === "connect") void renderPage("connect");
-    else navigate("connect");
-  },
-};
-
-// Render the appropriate page based on router state
-async function renderPage(pageId: PageId): Promise<void> {
-  const thisNavigation = ++navGeneration;
-  const isCurrentNavigation = (): boolean => thisNavigation === navGeneration;
-  log.info("Navigating to page", { pageId });
-  // Destroy previous page
-  currentPage?.destroy?.();
-  currentPage = null;
-  appEl!.textContent = "";
-  // Only valid while the connect page is mounted (re-set in its render branch).
-  rerunConnectHealth = null;
-  applyInviteToConnectPage = null;
-
-  if (pageId === "connect") {
-    [currentPage, rerunConnectHealth, applyInviteToConnectPage] = renderConnect(
-      api,
-      profileManager,
-      appEl!,
-      renderRecovery,
-      handleUnauthorized,
-      () => {
-        const pending = pendingInviteLink;
-        pendingInviteLink = null;
-        return pending;
-      },
-    );
-  } else {
-    // MainPage (and the LiveKit voice stack it statically imports) loads
-    // lazily so it stays out of the startup path. The chunk is pre-warmed as
-    // soon as the WS connect succeeds, so this normally resolves from the
-    // module cache.
-    try {
-      const { createMainPage } = await import("@pages/MainPage");
-      // A newer navigation may have superseded this one while the chunk loaded;
-      // mounting now would fight the page that navigation rendered.
-      if (!isCurrentNavigation()) return;
-      const mainPage = createMainPage({
-        ws,
-        api,
-        getRetentionNotice: () => retentionNotice(serverInfoFor(api.getConfig().host ?? "")),
-      });
-      safeMount(mainPage, appEl!, renderRecovery);
-      currentPage = mainPage;
-    } catch (err) {
-      // A rejected chunk import (or a page factory that throws) would leave
-      // the cleared window blank. Show the same fallback a failed mount does.
-      log.error("Main page failed to load", err);
-      if (isCurrentNavigation()) renderFallback(appEl!, err, renderRecovery);
-    }
-  }
-}
-
 installLogoutTeardown();
 
 // Send voice_leave on window close (best-effort — server readPump defer is the safety net)
@@ -332,111 +183,14 @@ window.addEventListener("beforeunload", () => {
 // Initial render (fire-and-forget — the initial page is "connect", whose
 // render branch is synchronous), then tell the native host's startup watchdog
 // the window came up.
-void renderPage(activePage).then(() =>
+void renderActive().then(() =>
   desktop.appProcess.reportReady().catch((err) => log.warn("Failed to report frontend ready", err)),
 );
 
 // Initialize window state persistence (fire-and-forget)
 void initWindowState();
 
-// Route owncord:// invite deep links into the register form. OwnCord invites
-// are registration invites, so a link can only pre-fill + open the register
-// form — it can't complete a join by itself.
-function handleInviteDeepLink(code: string, host?: string): void {
-  pendingInviteLink = { code, host };
-  if (activePage === "main") {
-    // Let the logout path do the teardown instead of navigating behind a
-    // live session: clearAuth() fires while the router is still on "main",
-    // so the authStore subscriber above runs its full teardown (voice leave,
-    // dispatcher/session cleanup, ws.disconnect) and navigates to "connect"
-    // itself — whose render branch consumes pendingInviteLink below.
-    //
-    // "server_switch", not the default "user": the invite is not a logout, so
-    // the current server's credential must survive (the user may return to A
-    // later) — the same reason the quick-switch path uses it (F7).
-    clearAuth("server_switch");
-    return;
-  }
-  deactivatePendingMessages();
-  api.endSession();
-  if (sessionInFlight()) {
-    // startSession already ran — a login/auto-login/register is connecting,
-    // or reached auth_ok (isAuthenticated flipped true) but the connected
-    // overlay's ready hand-off hasn't called navigate("main") yet, so
-    // the branch above never triggered. The authStore subscriber only tears
-    // down once the active page IS "main", so it won't fire for this window
-    // either: left alone, the overlay's timer fires navigate("main")
-    // regardless, mounting MainPage on top of whatever this handler does to
-    // authStore below. Tear the in-flight session down directly, the same
-    // way onAutoLoginCancel does, before applying the invite below.
-    abandonInFlight();
-    if (authStore.getState().isAuthenticated) {
-      clearAuth();
-    }
-  }
-  navigate("connect");
-  // If the connect page was already mounted, navigate() may not re-render it —
-  // apply directly. Otherwise the connect render branch consumes the pending link.
-  if (pendingInviteLink !== null && applyInviteToConnectPage !== null) {
-    applyInviteToConnectPage(code, host);
-    pendingInviteLink = null;
-  }
-}
-// Route owncord://message/<channelId>/<messageId> permalinks, and a call
-// toast's owncord://channel/<channelId> (no message id), to the main
-// page's jumper. Before the main page mounts (or when the channel isn't
-// visible to this user) the jump is a logged no-op — a link into a server the
-// user is not signed into has nothing to open. A link that named a server (a
-// Windows toast's launch URI) is ignored when another server is signed in now,
-// the same guard a clicked notification goes through.
-function handleMessageDeepLink(
-  channelId: number,
-  messageId: number | undefined,
-  host?: string,
-): void {
-  openMessageTarget(channelId, messageId, host);
-}
-// An invite link from outside the app (the OS, a browser, another program)
-// would otherwise end the signed-in session the moment it arrives. While
-// signed in (or signing in), ask first; Cancel leaves everything as it is and the
-// link is dropped. Elsewhere (connect page) nothing is lost, so it runs as
-// before. A second link while the dialog is open replaces the first.
-function handleExternalInviteLink(code: string, host?: string): void {
-  // Signed in, or signing in (the connect call is in flight, or the connected
-  // overlay is still up before the main page mounts): taking the link ends
-  // that session, so ask. Otherwise nothing is lost and it runs as before.
-  if (activePage !== "main" && !authStore.getState().isAuthenticated && !sessionInFlight()) {
-    handleInviteDeepLink(code, host);
-    return;
-  }
-  const inVoice = voiceStore.getState().currentChannelId !== null;
-  const currentName = authStore.getState().serverName ?? api.getConfig().host;
-  // On demand, like the in-chat chip: keeps the modal and its catalog out of
-  // the startup chunk.
-  void Promise.all([import("@components/InviteJoinConfirm"), import("./i18n/messaging")])
-    .then(([{ confirmInviteJoin }, { messagingText }]) => {
-      const current =
-        currentName === undefined || currentName === ""
-          ? messagingText("invite.thisServer")
-          : currentName;
-      confirmInviteJoin(
-        messagingText(inVoice ? "invite.openBodyInVoice" : "invite.openBody", { current }),
-        () => handleInviteDeepLink(code, host),
-        {
-          title:
-            host === undefined
-              ? messagingText("invite.openTitleNoHost")
-              : messagingText("invite.openTitle", { target: host }),
-          confirmLabel: messagingText("invite.openButton"),
-        },
-      );
-    })
-    .catch((err: unknown) => log.warn("Invite confirmation failed to open", err));
-}
-// An invite chip clicked in chat already asked ("Leave X to join Y?") through
-// the same dialog before it reached this handler, so it goes straight in.
-setInviteJoinHandler(handleInviteDeepLink);
-void desktop.deepLinks.init(handleExternalInviteLink, handleMessageDeepLink);
+installDeepLinks(api);
 
 // A clicked message notification opens the message it was for (U1d). The native
 // host emits `notification-click` with the target; routing it through the same

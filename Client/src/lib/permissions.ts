@@ -1,6 +1,6 @@
 import { Permission } from "./types";
 import { authStore } from "@stores/auth.store";
-import { channelsStore } from "@stores/channels.store";
+import { channelsStore, type ChannelsState } from "@stores/channels.store";
 
 /**
  * Returns true if `userPerms` includes the given permission bit.
@@ -20,9 +20,17 @@ export function hasPermission(userPerms: number, perm: Permission): boolean {
  * from "role with no bits" and fall back instead of hiding everything.
  */
 export function permissionsForRole(roleName: string): number | null {
+  return permissionsForRoleIn(channelsStore.getState().roles, roleName);
+}
+
+/** `permissionsForRole` over a role list the caller already holds, so a
+ *  builder fed by a snapshot reads no store. */
+export function permissionsForRoleIn(
+  roles: ChannelsState["roles"],
+  roleName: string,
+): number | null {
   const name = roleName.toLowerCase();
-  const role = channelsStore.getState().roles.find((r) => r.name.toLowerCase() === name);
-  return role?.permissions ?? null;
+  return roles.find((r) => r.name.toLowerCase() === name)?.permissions ?? null;
 }
 
 /**
@@ -48,7 +56,16 @@ export function isLegacyAdminRole(roleName: string): boolean {
  * only — the server is still the authority on every action and on rank.
  */
 export function roleHasPermission(roleName: string, perm: Permission): boolean {
-  const perms = permissionsForRole(roleName);
+  return roleHasPermissionIn(channelsStore.getState().roles, roleName, perm);
+}
+
+/** `roleHasPermission` over a role list the caller already holds. */
+export function roleHasPermissionIn(
+  roles: ChannelsState["roles"],
+  roleName: string,
+  perm: Permission,
+): boolean {
+  const perms = permissionsForRoleIn(roles, roleName);
   if (perms === null) return isLegacyAdminRole(roleName);
   return hasPermission(perms, perm);
 }

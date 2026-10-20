@@ -11,6 +11,7 @@ import {
   setActiveChannel,
   getActiveChannel,
   getChannelsByCategory,
+  groupChannelsByCategory,
   getKnownCategories,
   displayCategoryOf,
   UNCATEGORIZED_VOICE_CATEGORY,
@@ -446,6 +447,18 @@ describe("channels store", () => {
   });
 
   describe("getChannelsByCategory", () => {
+    it("groupChannelsByCategory equals getChannelsByCategory for the store's map", () => {
+      setChannels([
+        ...readyChannels,
+        { id: 9, name: "loose", type: "text", category: null, position: 4 },
+        { id: 10, name: "lounge", type: "voice", category: null, position: 3 },
+      ]);
+      const viaStore = getChannelsByCategory();
+      const pure = groupChannelsByCategory(channelsStore.getState().channels);
+      expect(Array.from(pure.keys())).toEqual(Array.from(viaStore.keys()));
+      expect(Array.from(pure.values())).toEqual(Array.from(viaStore.values()));
+    });
+
     it("groups channels by category and sorts by position", () => {
       setChannels(readyChannels);
 

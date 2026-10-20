@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   hiddenByMute,
   isHideMutedChannels,
+  mutedRowHidden,
   setHideMutedChannels,
 } from "../../src/lib/hide-muted-channels";
 import { invalidateMuteCache, muteChannel } from "../../src/lib/channel-mutes";
@@ -77,5 +78,32 @@ describe("hide-muted-channels", () => {
     expect(hiddenByMute(voice, null, (id) => id === 1)).toBe(false);
     // The occupancy check is for voice rows only.
     expect(hiddenByMute(ch(), null, () => true)).toBe(true);
+  });
+});
+
+describe("mutedRowHidden", () => {
+  it("agrees with hiddenByMute over preference, mute, active, mention and occupancy", () => {
+    for (const hide of [false, true]) {
+      for (const muted of [false, true]) {
+        for (const active of [false, true]) {
+          for (const mention of [0, 2]) {
+            for (const type of ["text", "voice"] as const) {
+              for (const occupied of [false, true]) {
+                localStorage.clear();
+                invalidateMuteCache();
+                if (muted) muteChannel(1);
+                setHideMutedChannels(hide);
+                const channel = ch({ type, mentionCount: mention });
+                const label = `${hide}/${muted}/${active}/${mention}/${type}/${occupied}`;
+                expect(
+                  mutedRowHidden(channel, active ? 1 : null, hide, muted, occupied),
+                  label,
+                ).toBe(hiddenByMute(channel, active ? 1 : null, () => occupied));
+              }
+            }
+          }
+        }
+      }
+    }
   });
 });
