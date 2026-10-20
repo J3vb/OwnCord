@@ -102,6 +102,7 @@ describe("createVideoModeController", () => {
     const slots = makeSlots();
     const ctrl = createVideoModeController({
       slots,
+      chatColumn: document.createElement("div"),
       videoGrid: makeVideoGrid(),
       getCurrentUserId: () => 1,
     });
@@ -111,6 +112,7 @@ describe("createVideoModeController", () => {
   it("stays in chat mode when no voice channel", () => {
     const ctrl = createVideoModeController({
       slots: makeSlots(),
+      chatColumn: document.createElement("div"),
       videoGrid: makeVideoGrid(),
       getCurrentUserId: () => 1,
     });
@@ -127,6 +129,7 @@ describe("createVideoModeController", () => {
     const slots = makeSlots();
     const ctrl = createVideoModeController({
       slots,
+      chatColumn: document.createElement("div"),
       videoGrid: makeVideoGrid(),
       getCurrentUserId: () => 1,
     });
@@ -145,6 +148,7 @@ describe("createVideoModeController", () => {
     const slots = makeSlots();
     const ctrl = createVideoModeController({
       slots,
+      chatColumn: document.createElement("div"),
       videoGrid: makeVideoGrid(),
       getCurrentUserId: () => 1,
     });
@@ -172,6 +176,7 @@ describe("createVideoModeController", () => {
 
     const ctrl = createVideoModeController({
       slots: makeSlots(),
+      chatColumn: document.createElement("div"),
       videoGrid: makeVideoGrid(),
       getCurrentUserId: () => 1,
     });
@@ -194,6 +199,7 @@ describe("createVideoModeController", () => {
     const vg = makeVideoGrid();
     const ctrl = createVideoModeController({
       slots: makeSlots(),
+      chatColumn: document.createElement("div"),
       videoGrid: vg,
       getCurrentUserId: () => 1,
     });
@@ -219,6 +225,7 @@ describe("createVideoModeController", () => {
     const vg = makeVideoGrid();
     const ctrl = createVideoModeController({
       slots: makeSlots(),
+      chatColumn: document.createElement("div"),
       videoGrid: vg,
       getCurrentUserId: () => 1,
     });
@@ -242,6 +249,7 @@ describe("createVideoModeController", () => {
     const vg = makeVideoGrid();
     const ctrl = createVideoModeController({
       slots: makeSlots(),
+      chatColumn: document.createElement("div"),
       videoGrid: vg,
       getCurrentUserId: () => 1,
     });
@@ -256,6 +264,7 @@ describe("createVideoModeController", () => {
     const slots = makeSlots();
     const ctrl = createVideoModeController({
       slots,
+      chatColumn: document.createElement("div"),
       videoGrid: makeVideoGrid(),
       getCurrentUserId: () => 1,
     });
@@ -272,6 +281,7 @@ describe("createVideoModeController", () => {
       const grid = makeVideoGrid();
       const ctrl = createVideoModeController({
         slots: makeSlots(),
+        chatColumn: document.createElement("div"),
         videoGrid: grid,
         getCurrentUserId: () => 1,
       });
@@ -290,6 +300,7 @@ describe("createVideoModeController", () => {
       const grid = makeVideoGrid();
       const ctrl = createVideoModeController({
         slots: makeSlots(),
+        chatColumn: document.createElement("div"),
         videoGrid: grid,
         getCurrentUserId: () => 1,
       });
@@ -305,6 +316,7 @@ describe("createVideoModeController", () => {
       const grid = makeVideoGrid();
       const ctrl = createVideoModeController({
         slots: makeSlots(),
+        chatColumn: document.createElement("div"),
         videoGrid: grid,
         getCurrentUserId: () => 1,
       });
@@ -324,6 +336,7 @@ describe("createVideoModeController", () => {
       const grid = makeVideoGrid();
       const ctrl = createVideoModeController({
         slots: makeSlots(),
+        chatColumn: document.createElement("div"),
         videoGrid: grid,
         getCurrentUserId: () => 1,
       });
@@ -339,6 +352,7 @@ describe("createVideoModeController", () => {
       const grid = makeVideoGrid();
       const ctrl = createVideoModeController({
         slots: makeSlots(),
+        chatColumn: document.createElement("div"),
         videoGrid: grid,
         getCurrentUserId: () => 1,
       });
@@ -349,10 +363,90 @@ describe("createVideoModeController", () => {
     });
   });
 
+  describe("chat beside the grid (WP 6.1b)", () => {
+    function setup() {
+      const slots = makeSlots();
+      const chatColumn = document.createElement("div");
+      const ctrl = createVideoModeController({
+        slots,
+        chatColumn,
+        videoGrid: makeVideoGrid(),
+        getCurrentUserId: () => 1,
+      });
+      return { slots, chatColumn, ctrl };
+    }
+
+    it("chatBeside keeps the chat slots visible with the grid", () => {
+      const { slots, chatColumn, ctrl } = setup();
+      ctrl.setChatBeside(true);
+      ctrl.showVideoGrid();
+
+      expect(ctrl.isVideoMode()).toBe(true);
+      expect(slots.videoGridSlot.style.display).toBe("block");
+      expect(slots.messagesSlot.style.display).toBe("");
+      expect(slots.typingSlot.style.display).toBe("");
+      expect(slots.inputSlot.style.display).toBe("");
+      expect(chatColumn.classList.contains("chat-area--call-chat")).toBe(true);
+    });
+
+    it("without chatBeside the grid still covers the chat", () => {
+      const { slots, chatColumn, ctrl } = setup();
+      ctrl.showVideoGrid();
+
+      expect(slots.messagesSlot.style.display).toBe("none");
+      expect(chatColumn.classList.contains("chat-area--call-chat")).toBe(false);
+    });
+
+    it("turning chatBeside on or off while the grid is up re-lays it out", () => {
+      const { slots, chatColumn, ctrl } = setup();
+      ctrl.showVideoGrid();
+      ctrl.setChatBeside(true);
+      expect(slots.inputSlot.style.display).toBe("");
+      expect(chatColumn.classList.contains("chat-area--call-chat")).toBe(true);
+
+      ctrl.setChatBeside(false);
+      expect(slots.inputSlot.style.display).toBe("none");
+      expect(chatColumn.classList.contains("chat-area--call-chat")).toBe(false);
+    });
+
+    it("closing the grid clears the split", () => {
+      const { slots, chatColumn, ctrl } = setup();
+      ctrl.setChatBeside(true);
+      ctrl.showVideoGrid();
+      ctrl.showChat();
+
+      expect(chatColumn.classList.contains("chat-area--call-chat")).toBe(false);
+      expect(slots.videoGridSlot.style.display).toBe("none");
+      expect(slots.messagesSlot.style.display).toBe("");
+    });
+
+    it("popping the call out clears the split, and restoring brings it back", () => {
+      const { chatColumn, ctrl } = setup();
+      ctrl.setChatBeside(true);
+      ctrl.showVideoGrid();
+
+      ctrl.setCallPoppedOut(true, false);
+      expect(chatColumn.classList.contains("chat-area--call-chat")).toBe(false);
+
+      ctrl.setCallPoppedOut(false, true);
+      expect(chatColumn.classList.contains("chat-area--call-chat")).toBe(true);
+    });
+
+    it("destroy clears the split", () => {
+      const { chatColumn, ctrl } = setup();
+      ctrl.setChatBeside(true);
+      ctrl.showVideoGrid();
+      ctrl.destroy();
+
+      expect(chatColumn.classList.contains("chat-area--call-chat")).toBe(false);
+    });
+  });
+
   it("destroy resets video mode state and restores DOM", () => {
     const slots = makeSlots();
     const ctrl = createVideoModeController({
       slots,
+      chatColumn: document.createElement("div"),
       videoGrid: makeVideoGrid(),
       getCurrentUserId: () => 1,
     });
@@ -380,6 +474,7 @@ describe("createVideoModeController", () => {
     const slots = makeSlots();
     const ctrl = createVideoModeController({
       slots,
+      chatColumn: document.createElement("div"),
       videoGrid: makeVideoGrid(),
       getCurrentUserId: () => 1,
     });
@@ -405,6 +500,7 @@ describe("createVideoModeController", () => {
     const vg = makeVideoGrid();
     const ctrl = createVideoModeController({
       slots: makeSlots(),
+      chatColumn: document.createElement("div"),
       videoGrid: vg,
       getCurrentUserId: () => 1,
     });
@@ -434,6 +530,7 @@ describe("createVideoModeController", () => {
     const vg = makeVideoGrid();
     const ctrl = createVideoModeController({
       slots: makeSlots(),
+      chatColumn: document.createElement("div"),
       videoGrid: vg,
       getCurrentUserId: () => 1,
     });
@@ -474,6 +571,7 @@ describe("createVideoModeController", () => {
     const vg = makeVideoGrid();
     const ctrl = createVideoModeController({
       slots: makeSlots(),
+      chatColumn: document.createElement("div"),
       videoGrid: vg,
       getCurrentUserId: () => 1,
     });
@@ -508,6 +606,7 @@ describe("createVideoModeController", () => {
 
     const ctrl = createVideoModeController({
       slots: makeSlots(),
+      chatColumn: document.createElement("div"),
       videoGrid: makeVideoGrid(),
       getCurrentUserId: () => 1,
     });
@@ -536,6 +635,7 @@ describe("createVideoModeController", () => {
     const vg = makeVideoGrid();
     const ctrl = createVideoModeController({
       slots: makeSlots(),
+      chatColumn: document.createElement("div"),
       videoGrid: vg,
       getCurrentUserId: () => 5,
     });
@@ -565,6 +665,7 @@ describe("createVideoModeController", () => {
     const vg = makeVideoGrid();
     const ctrl = createVideoModeController({
       slots: makeSlots(),
+      chatColumn: document.createElement("div"),
       videoGrid: vg,
       getCurrentUserId: () => 5,
     });
@@ -592,6 +693,7 @@ describe("createVideoModeController", () => {
     const vg = makeVideoGrid();
     const ctrl = createVideoModeController({
       slots: makeSlots(),
+      chatColumn: document.createElement("div"),
       videoGrid: vg,
       getCurrentUserId: () => 1,
     });
@@ -602,6 +704,7 @@ describe("createVideoModeController", () => {
   it("getFocusedTileId returns null initially", () => {
     const ctrl = createVideoModeController({
       slots: makeSlots(),
+      chatColumn: document.createElement("div"),
       videoGrid: makeVideoGrid(),
       getCurrentUserId: () => 1,
     });
@@ -611,6 +714,7 @@ describe("createVideoModeController", () => {
   it("getFocusedTileId returns set value", () => {
     const ctrl = createVideoModeController({
       slots: makeSlots(),
+      chatColumn: document.createElement("div"),
       videoGrid: makeVideoGrid(),
       getCurrentUserId: () => 1,
     });
@@ -621,6 +725,7 @@ describe("createVideoModeController", () => {
   it("showChat resets focusedTileId", () => {
     const ctrl = createVideoModeController({
       slots: makeSlots(),
+      chatColumn: document.createElement("div"),
       videoGrid: makeVideoGrid(),
       getCurrentUserId: () => 1,
     });
@@ -643,7 +748,12 @@ describe("createVideoModeController", () => {
       mockVoiceStoreGetState.mockReturnValue(state);
       const slots = makeSlots();
       const videoGrid = makeVideoGrid();
-      const ctrl = createVideoModeController({ slots, videoGrid, getCurrentUserId: () => 1 });
+      const ctrl = createVideoModeController({
+        slots,
+        chatColumn: document.createElement("div"),
+        videoGrid,
+        getCurrentUserId: () => 1,
+      });
       ctrl.checkVideoMode();
 
       mockVoiceStoreGetState.mockReturnValue({ ...state, localCamera: true });
@@ -670,6 +780,7 @@ describe("createVideoModeController", () => {
       const videoGrid = makeVideoGrid();
       const ctrl = createVideoModeController({
         slots: makeSlots(),
+        chatColumn: document.createElement("div"),
         videoGrid,
         getCurrentUserId: () => 1,
       });
@@ -701,6 +812,7 @@ describe("createVideoModeController", () => {
       const slots = makeSlots();
       const ctrl = createVideoModeController({
         slots,
+        chatColumn: document.createElement("div"),
         videoGrid: makeVideoGrid(),
         getCurrentUserId: () => 1,
       });
@@ -733,6 +845,7 @@ describe("createVideoModeController", () => {
       mockVoiceStoreGetState.mockReturnValue(inChannel);
       const ctrl = createVideoModeController({
         slots: makeSlots(),
+        chatColumn: document.createElement("div"),
         videoGrid: makeVideoGrid(),
         getCurrentUserId: () => 1,
       });
@@ -769,6 +882,7 @@ describe("createVideoModeController", () => {
       const vg = makeVideoGrid();
       const ctrl = createVideoModeController({
         slots: makeSlots(),
+        chatColumn: document.createElement("div"),
         videoGrid: vg,
         getCurrentUserId: () => 1,
       });
@@ -798,6 +912,7 @@ describe("createVideoModeController", () => {
       const vg = makeVideoGrid();
       const ctrl = createVideoModeController({
         slots: makeSlots(),
+        chatColumn: document.createElement("div"),
         videoGrid: vg,
         getCurrentUserId: () => 1,
       });
@@ -822,6 +937,7 @@ describe("createVideoModeController", () => {
       const vg = makeVideoGrid();
       const ctrl = createVideoModeController({
         slots: makeSlots(),
+        chatColumn: document.createElement("div"),
         videoGrid: vg,
         getCurrentUserId: () => 1,
       });
@@ -853,6 +969,7 @@ describe("createVideoModeController", () => {
       const vg = makeVideoGrid();
       const ctrl = createVideoModeController({
         slots: makeSlots(),
+        chatColumn: document.createElement("div"),
         videoGrid: vg,
         getCurrentUserId: () => 1,
       });
@@ -868,6 +985,7 @@ describe("createVideoModeController", () => {
       const vg = makeVideoGrid();
       const ctrl = createVideoModeController({
         slots: makeSlots(),
+        chatColumn: document.createElement("div"),
         videoGrid: vg,
         getCurrentUserId: () => 1,
       });
@@ -929,6 +1047,7 @@ describe("createVideoModeController", () => {
       const { host, state } = panelHost();
       const ctrl = createVideoModeController({
         slots,
+        chatColumn: document.createElement("div"),
         videoGrid: makeVideoGrid(),
         getCurrentUserId: () => 1,
         panelHost: () => host,
@@ -953,6 +1072,7 @@ describe("createVideoModeController", () => {
       const vg = makeVideoGrid();
       const ctrl = createVideoModeController({
         slots,
+        chatColumn: document.createElement("div"),
         videoGrid: vg,
         getCurrentUserId: () => 1,
         panelHost: () => host,
@@ -976,6 +1096,7 @@ describe("createVideoModeController", () => {
       const { host } = panelHost({ element: null });
       const ctrl = createVideoModeController({
         slots,
+        chatColumn: document.createElement("div"),
         videoGrid: makeVideoGrid(),
         getCurrentUserId: () => 1,
         panelHost: () => host,
@@ -996,6 +1117,7 @@ describe("createVideoModeController", () => {
       const { host } = panelHost();
       const ctrl = createVideoModeController({
         slots,
+        chatColumn: document.createElement("div"),
         videoGrid: makeVideoGrid(),
         getCurrentUserId: () => 1,
         panelHost: () => host,
@@ -1013,6 +1135,7 @@ describe("createVideoModeController", () => {
       const { host, state } = panelHost();
       const ctrl = createVideoModeController({
         slots,
+        chatColumn: document.createElement("div"),
         videoGrid: makeVideoGrid(),
         getCurrentUserId: () => 1,
         panelHost: () => host,
@@ -1036,6 +1159,7 @@ describe("createVideoModeController", () => {
       const { host } = panelHost();
       const ctrl = createVideoModeController({
         slots,
+        chatColumn: document.createElement("div"),
         videoGrid: makeVideoGrid(),
         getCurrentUserId: () => 1,
         panelHost: () => host,
@@ -1068,7 +1192,12 @@ describe("createVideoModeController", () => {
       );
     }
     function makeCtrl() {
-      return createVideoModeController({ slots, videoGrid: grid, getCurrentUserId: () => 1 });
+      return createVideoModeController({
+        slots,
+        chatColumn: document.createElement("div"),
+        videoGrid: grid,
+        getCurrentUserId: () => 1,
+      });
     }
     const avatarTiles = () => [...container.querySelectorAll<HTMLElement>(".video-cell--avatar")];
     const tileIds = () => avatarTiles().map((t) => t.dataset.personId);
@@ -1247,6 +1376,7 @@ describe("createVideoModeController", () => {
       };
       const ctrl = createVideoModeController({
         slots,
+        chatColumn: document.createElement("div"),
         videoGrid: vg,
         getCurrentUserId: () => 1,
         panelHost: () => host,
@@ -1293,6 +1423,7 @@ describe("createVideoModeController", () => {
     function openPoppedCall() {
       const ctrl = createVideoModeController({
         slots,
+        chatColumn: document.createElement("div"),
         videoGrid: grid,
         getCurrentUserId: () => 1,
       });

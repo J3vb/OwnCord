@@ -14,6 +14,28 @@
 }
 
 @media (max-width: 800px) {
+  /* The call view's chat stacks under the grid instead of beside it. */
+  .chat-area--call-chat {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 45vh minmax(0, 1fr) auto auto;
+  }
+  .chat-area--call-chat > .video-grid-slot {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .chat-area--call-chat > .messages-slot {
+    grid-column: 1;
+    grid-row: 3;
+  }
+  .chat-area--call-chat > .typing-slot {
+    grid-column: 1;
+    grid-row: 4;
+  }
+  .chat-area--call-chat > .input-slot {
+    grid-column: 1;
+    grid-row: 5;
+  }
+
   .unified-sidebar {
     width: 0;
     overflow: hidden;

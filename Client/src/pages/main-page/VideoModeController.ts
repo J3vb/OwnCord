@@ -40,6 +40,8 @@ export interface VideoPanelHost {
 
 export interface VideoModeControllerOptions {
   readonly slots: VideoModeSlots;
+  /** The chat column holding the slots; it takes the split-layout class. */
+  readonly chatColumn: HTMLElement;
   readonly videoGrid: VideoGridComponent;
   readonly getCurrentUserId: () => number;
   /** The DM call panel, once it has loaded (it is a lazy chunk). */
@@ -67,6 +69,9 @@ export interface VideoModeController {
   /** The grid's call pop-out opened (`out`) or closed; `restore` brings the
    *  call view back into this window. */
   setCallPoppedOut(out: boolean, restore: boolean): void;
+  /** Show the grid beside the chat (the active channel is the joined voice
+   *  channel) instead of over it. Cleared by closing the grid or a pop-out. */
+  setChatBeside(on: boolean): void;
   /** Reset state on teardown. */
   destroy(): void;
 }
@@ -105,6 +110,8 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
   /** This controller gave the grid its people (the DM call panel gives them
    *  while it hosts the grid), so it takes them back. */
   let peopleGiven = false;
+  /** The grid shows beside the chat, not over it. */
+  let chatBeside = false;
   const avatarCache: CallAvatarCache = new Map();
 
   function clearPeople(): void {
@@ -146,11 +153,18 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
 
   /** The chat column shows the grid or the chat. */
   function showSlots(grid: boolean): void {
-    const chat = grid ? "none" : "";
+    const chat = grid && !chatBeside ? "none" : "";
+    opts.chatColumn.classList.toggle("chat-area--call-chat", grid && chatBeside);
     slots.messagesSlot.style.display = chat;
     slots.typingSlot.style.display = chat;
     slots.inputSlot.style.display = chat;
     slots.videoGridSlot.style.display = grid ? "block" : "none";
+  }
+
+  function setChatBeside(on: boolean): void {
+    if (chatBeside === on) return;
+    chatBeside = on;
+    if (videoMode && !poppedOut) showSlots(true);
   }
 
   function showVideoGrid(): void {
@@ -398,6 +412,7 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     setFocus,
     getFocusedTileId,
     setCallPoppedOut,
+    setChatBeside,
     destroy,
   };
 }
