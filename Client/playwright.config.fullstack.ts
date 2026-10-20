@@ -15,7 +15,10 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   failOnFlakyTests: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  globalTimeout: 20 * 60 * 1000,
+  // A clean run takes about 18 minutes on CI; the soak's one retry adds about
+  // 3, which a 20-minute ceiling could not hold. ci.yml's job timeout sits
+  // above this so the reporters still write.
+  globalTimeout: 26 * 60 * 1000,
   reporter: [
     ["list"],
     ["html", { open: "never", outputFolder: "playwright-report/fullstack" }],
@@ -33,6 +36,10 @@ export default defineConfig({
         "--use-fake-device-for-media-stream",
         "--use-fake-ui-for-media-stream",
         "--autoplay-policy=no-user-gesture-required",
+        // V8 drops compiled code it has not run lately, a few hundred KB at a
+        // time, and the soak's heap bar reads that as growth or shrinkage.
+        // Keeping code resident leaves app data as the only thing it measures.
+        "--js-flags=--no-flush-bytecode --no-flush-baseline-code",
       ],
     },
     trace: "retain-on-failure",
