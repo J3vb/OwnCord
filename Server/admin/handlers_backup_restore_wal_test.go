@@ -309,3 +309,30 @@ func TestHandleRestoreBackup_CopiesOnlyAfterEveryConnectionCloses(t *testing.T) 
 		t.Error("restore did not request a restart")
 	}
 }
+
+// TestHandleRestoreBackup_CarriesTheLiveSeqFloor: the live settings.ws_seq_floor
+// reaches the sidecar before the backup replaces the database (the backup was
+// taken before the floor was set).
+func TestHandleRestoreBackup_CarriesTheLiveSeqFloor(t *testing.T) {
+	f := newFileRestoreFixture(t)
+	if err := f.database.SetSetting(context.Background(), db.WSSeqFloorSettingKey, "5000000000"); err != nil {
+		t.Fatal(err)
+	}
+	_, restoreHook := admin.StubRestart()
+	defer restoreHook()
+
+	w := doRequest(t, f.handler, http.MethodPost, "/backups/"+f.backupName+"/restore", f.token, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; body: %s", w.Code, w.Body.String())
+	}
+	read := func() string {
+		b, err := os.ReadFile(f.dbPath + ".ws-seq-floor")
+		if err != nil {
+			t.Fatalf("sidecar: %v", err)
+		}
+		return string(b)
+	}
+	if got := read(); got != "5000000000\n" {
+		t.Fatalf("sidecar = %q, want the live floor", got)
+	}
+}

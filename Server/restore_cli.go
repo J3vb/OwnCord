@@ -114,6 +114,13 @@ func replaceLiveDatabase(source, dbPath, backupDir string) int {
 		return 1
 	}
 
+	// Carry the live event sequence floor across the replacement as well, so
+	// the next boot reserves above what the old database handed out. A
+	// missing or unreadable live database only warns; the restore goes on.
+	if err := db.CarryWSSeqFloorForRestore(context.Background(), dbPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintf(os.Stderr, "warning: could not carry the live event sequence floor across the restore (%v)\n", err)
+	}
+
 	// A dead server's -wal would be replayed onto the restored file on the next
 	// boot, so no sidecar may stay beside it. With a safety copy they hold
 	// nothing it did not capture. Without one, the unreadable database and its

@@ -423,6 +423,18 @@ func closeForRestore(ctx context.Context, w http.ResponseWriter, database *db.DB
 			"database connections did not close — database untouched, server restarting", "backup_restore_conns_open")
 	}
 
+	// Carry the live event sequence floor across the replacement too, so the
+	// next boot reserves its block above everything this server handed out.
+	// Best-effort: the restore goes on without it, as the sidecar a previous
+	// boot wrote still protects it.
+	// A client disconnect must not skip the fold, so it gets its own bounded context.
+	carryCtx, carryCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	err = db.CarryWSSeqFloorForRestore(carryCtx, dbPath)
+	carryCancel()
+	if err != nil {
+		slog.Warn("restore: could not carry the live ws seq floor across the restore", "err", err)
+	}
+
 	// The close drained every accepted send. Preserve the greatest possible
 	// pre-restore logical id outside the database before restoring a snapshot
 	// that may have lost its receipt. A failed cutoff write must not copy.

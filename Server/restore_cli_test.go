@@ -466,3 +466,62 @@ func TestRestoreCLI_PruneFailureStillExitsZero(t *testing.T) {
 		t.Fatalf("stderr = %q, want the prune warning", buf.String())
 	}
 }
+
+// sidecarFloor reads the ws seq floor sidecar beside dbPath.
+func sidecarFloor(t *testing.T, dbPath string) (uint64, bool) {
+	t.Helper()
+	database, err := db.OpenShared(dbPath)
+	if err != nil {
+		t.Fatalf("OpenShared: %v", err)
+	}
+	defer database.Close() //nolint:errcheck
+	floor, ok, err := database.WSSeqFloorSidecar()
+	if err != nil {
+		t.Fatalf("WSSeqFloorSidecar: %v", err)
+	}
+	return floor, ok
+}
+
+// TestRestoreCLI_CarriesTheLiveSeqFloorAcrossTheRestore: the live database's
+// settings.ws_seq_floor is recorded in the sidecar before the file is
+// replaced, even on an install that never wrote one; a larger sidecar
+// already beside the database survives.
+func TestRestoreCLI_CarriesTheLiveSeqFloorAcrossTheRestore(t *testing.T) {
+	cfgPath, dbPath, backupDir := restoreCLIFixture(t)
+	live, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := live.SetSetting(context.Background(), db.WSSeqFloorSettingKey, "5000000000"); err != nil {
+		t.Fatal(err)
+	}
+	if err := live.Close(); err != nil {
+		t.Fatal(err)
+	}
+	backup := makeBackup(t, t.TempDir(), "backup.db", "restored-user")
+	if code := runRestoreCLI(cfgPath, []string{"--force", backup}); code != 0 {
+		t.Fatalf("restore exited %d", code)
+	}
+	if got, ok := sidecarFloor(t, dbPath); !ok || got != 5_000_000_000 {
+		t.Fatalf("sidecar = %d ok=%v, want 5000000000", got, ok)
+	}
+
+	// A larger planted sidecar survives a second restore of the same backup.
+	if err := os.WriteFile(dbPath+".ws-seq-floor", []byte("7000000000\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Safety copies are named to the second; clear the first run's.
+	if err := os.RemoveAll(backupDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(backupDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	backup = makeBackup(t, t.TempDir(), "backup2.db", "restored-user")
+	if code := runRestoreCLI(cfgPath, []string{"--force", backup}); code != 0 {
+		t.Fatalf("second restore exited %d", code)
+	}
+	if got, ok := sidecarFloor(t, dbPath); !ok || got != 7_000_000_000 {
+		t.Fatalf("sidecar = %d ok=%v, want 7000000000", got, ok)
+	}
+}

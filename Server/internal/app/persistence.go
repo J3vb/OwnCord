@@ -94,7 +94,7 @@ func stopAuditWriter(ctx context.Context, auditWriter *db.AuditWriter) {
 
 // wsSeqFloorSettingKey is the generic settings-table key (see db.GetSetting /
 // db.SetSetting) seedHubSeqFloor persists its reserved floor under.
-const wsSeqFloorSettingKey = "ws_seq_floor"
+const wsSeqFloorSettingKey = db.WSSeqFloorSettingKey
 
 // wsSeqFloorReserve is the block seedHubSeqFloor reserves above the persisted
 // floor on every single boot (OC-0210). It only has to exceed the number of
@@ -102,7 +102,7 @@ const wsSeqFloorSettingKey = "ws_seq_floor"
 // next restart — comfortably true at 1e9 for a self-hosted chat server — so
 // this leaves an enormous safety margin while uint64's range still allows
 // billions of restarts before the floor could ever wrap.
-const wsSeqFloorReserve = 1_000_000_000
+const wsSeqFloorReserve = db.WSSeqFloorReserve
 
 // seedHubReplayState seeds the hub's monotonic seq counter at startup from
 // two independent, composable sources — both go through hub.SeedSeq, which
@@ -178,6 +178,10 @@ func seedHubSeqFloor(ctx context.Context, hub *ws.Hub, database *db.DB, log *slo
 			log.Warn("event persistence: stored ws seq floor is not a valid uint64, resetting to 0", "value", raw, "error", perr)
 			break
 		}
+		if parsed > db.MaxWSSeqFloor {
+			log.Warn("event persistence: stored ws seq floor is out of range, resetting to 0", "value", raw)
+			break
+		}
 		floor = parsed
 	case errors.Is(err, db.ErrNotFound):
 		// No prior boot has ever reserved a floor — start from 0.
@@ -186,7 +190,26 @@ func seedHubSeqFloor(ctx context.Context, hub *ws.Hub, database *db.DB, log *slo
 		return
 	}
 
+	// The sidecar beside the database survives a backup restore, which
+	// rewinds the settings copy to the backup's older value. Taking the max
+	// keeps this boot's block above everything the pre-restore server could
+	// hand out, so a pre-restore last_seq falls below the ring buffer and
+	// forces a full resync. A missing or damaged sidecar is not fatal: the
+	// settings value then seeds the block on its own.
+	sidecar, ok, serr := database.WSSeqFloorSidecar()
+	if serr != nil {
+		log.Warn("event persistence: ws seq floor sidecar unreadable; using the settings value", "error", serr)
+	}
+	if ok {
+		floor = max(floor, sidecar)
+	}
+
 	newFloor := floor + wsSeqFloorReserve
+	// Sidecar first: if the settings write then fails, the next boot still
+	// sees this block as taken.
+	if err := database.StoreWSSeqFloorSidecar(newFloor); err != nil {
+		log.Warn("event persistence: failed to persist ws seq floor sidecar", "error", err)
+	}
 	if err := database.SetSetting(ctx, wsSeqFloorSettingKey, strconv.FormatUint(newFloor, 10)); err != nil {
 		log.Warn("event persistence: failed to persist advanced ws seq floor; hub seq not advanced this boot", "error", err)
 		return
