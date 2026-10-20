@@ -39,6 +39,8 @@ import { shellText } from "../i18n/shell";
 import { voiceText } from "../i18n/voice";
 import { joinRetryInMs } from "../features/voice/joinBackoff";
 import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup";
+// Shared with the voice row view until 5.4d moves the text rows onto models.
+import { nsfwIndicator, privateIndicator } from "../features/channels/voiceRow.view";
 
 // The per-user volume menu loads on its first open (O-6b).
 const volumeMenuScreen = createLazyScreen(
@@ -95,43 +97,6 @@ export interface ChannelSidebarOptions {
   readonly onInviteFromChannel?: (channel: Channel) => void;
   /** Called when the user clicks a voice user row to watch their stream. */
   readonly onWatchStream?: (userId: number) => void;
-}
-
-/**
- * The marker on an age-restricted channel row.
- *
- * A glyph plus a title rather than a coloured name: the flag is information
- * about the channel, and recolouring the name would collide with the unread
- * and mention states the row already encodes that way.
- */
-function nsfwIndicator(channelId: number): HTMLSpanElement {
-  const badge = createElement("span", {
-    class: "ch-nsfw",
-    "data-testid": `channel-nsfw-${channelId}`,
-    "aria-label": shellText("channel.ageRestricted"),
-  });
-  badge.title = shellText("channel.ageRestrictedTitle");
-  badge.appendChild(createIcon("shield-alert", 13));
-  return badge;
-}
-
-/**
- * The lock over the bottom-right of a private channel's type glyph, as Discord
- * marks one. A sibling of the glyph rather than a child: the glyph span is
- * aria-hidden, and the lock must stay announced. Positioned by CSS against the
- * row, so it sits alongside the nsfw marker and the capacity badge.
- */
-function privateIndicator(channelId: number): HTMLSpanElement {
-  const label = shellText("channel.private");
-  const badge = createElement("span", {
-    class: "ch-lock",
-    "data-testid": `channel-private-${channelId}`,
-    role: "img",
-    "aria-label": label,
-  });
-  badge.title = label;
-  badge.appendChild(createIcon("lock", 9));
-  return badge;
 }
 
 /**

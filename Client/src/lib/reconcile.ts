@@ -71,6 +71,13 @@ function longestIncreasingRun(values: readonly number[]): Set<number> {
  * when it is only moved, and moves to the same control in its replacement when
  * it is rebuilt, so an async update never drops the user mid-list. "The same control" is the first element in the new row with
  * the focused one's tag, first class and `data-testid`.
+ *
+ * Rows nested inside a row (a reconciled list inside a reconciled row) are
+ * followed by key: focus on an inner row, or a control in one, lands on the
+ * inner row with the same key in the replacement, then on the same control
+ * inside it. For that, the replacement's nested rows must exist when this
+ * pass ends, so an outer `create` builds its nested rows itself (running the
+ * inner reconcile) rather than leaving them to a later pass.
  */
 export function reconcileChildren<T>(
   container: Element,
@@ -123,6 +130,15 @@ function reconcileKeyed<T>(
   let holder = active;
   while (holder !== null && holder.parentElement !== container) holder = holder.parentElement;
   const focusedKey = holder === null ? undefined : META.get(holder)?.key;
+  // The keys of the nested rows between the focused element and its row,
+  // outermost first, read from META now: a stored path would go stale when a
+  // nested row moves to another parent.
+  const innerPath: string[] = [];
+  for (let n = holder === null ? null : active; n !== null && n !== holder; n = n.parentElement) {
+    const k = META.get(n)?.key;
+    if (k !== undefined) innerPath.unshift(k);
+  }
+  const activeIsRow = active !== null && active !== holder && META.has(active);
 
   const wanted: Element[] = [];
   let built = 0;
@@ -166,10 +182,37 @@ function reconcileKeyed<T>(
       el.classList[0] === active.classList[0] &&
       el.getAttribute("data-testid") === active.getAttribute("data-testid");
     if (next !== undefined) {
-      ([next, ...next.querySelectorAll("*")].find(same) as HTMLElement | undefined)?.focus();
+      // Follow the nested keys as deep as they still match.
+      let base: Element = next;
+      let matched = 0;
+      for (const k of innerPath) {
+        const inner = nestedRow(base, k);
+        if (inner === undefined) break;
+        base = inner;
+        matched++;
+      }
+      const target =
+        matched === innerPath.length && activeIsRow
+          ? base
+          : [base, ...base.querySelectorAll("*")].find(same);
+      (target as HTMLElement | undefined)?.focus();
     }
   }
   return built;
+}
+
+/**
+ * The first row below `base` with `key` whose nearest row ancestor is `base`
+ * itself, so a key never matches a row one level deeper.
+ */
+function nestedRow(base: Element, key: string): Element | undefined {
+  for (const el of base.querySelectorAll("*")) {
+    if (META.get(el)?.key !== key) continue;
+    let up = el.parentElement;
+    while (up !== null && up !== base && !META.has(up)) up = up.parentElement;
+    if (up === base) return el;
+  }
+  return undefined;
 }
 
 /** Plain data a row model may hold: no `undefined`, functions, Maps or Elements,
