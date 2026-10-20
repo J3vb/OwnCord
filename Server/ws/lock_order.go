@@ -97,6 +97,9 @@
 //     (hub_registry.go:100), Client.mu on overflow (client.go:195,303), and
 //     Hub.seqMu in expireReplayTombstones and dropsForTombstones
 //     (hub_tombstones.go:169,188,192).
+//   - userLocks.mu is a leaf except in userLocks.tryLock (user_locks.go:69-81),
+//     which locks a new userLockEntry.mu while holding it. The entry is private
+//     until it is inserted, so that acquisition cannot block.
 //   - Hub.persistEvent under Hub.seqMu (hub_events.go:305) is a non-blocking
 //     channel send with a default (event_persister.go), so it is not I/O.
 //
