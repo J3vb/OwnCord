@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -662,8 +663,19 @@ func postApplyProto(t *testing.T, srv *httptest.Server, token string) (int, int,
 		t.Fatalf("NewRequest: %v", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	client := srv.Client()
-	defer client.CloseIdleConnections()
+	// A dedicated transport per request: the shared httptest client keeps its
+	// HTTP/2 connection (and its read-loop goroutine) alive after the server
+	// aborts mid-stream, which goleak reports at TestMain end. DisableKeepAlives
+	// makes the transport close the connection once the response is done, and
+	// the deferred CloseIdleConnections covers any early exit.
+	tr, ok := srv.Client().Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("httptest client transport is %T, want *http.Transport", srv.Client().Transport)
+	}
+	tr = tr.Clone()
+	tr.DisableKeepAlives = true
+	defer tr.CloseIdleConnections()
+	client := &http.Client{Transport: tr}
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
@@ -671,6 +683,7 @@ func postApplyProto(t *testing.T, srv *httptest.Server, token string) (int, int,
 	defer resp.Body.Close() //nolint:errcheck
 	var body map[string]string
 	_ = json.NewDecoder(resp.Body).Decode(&body)
+	_, _ = io.Copy(io.Discard, resp.Body) // drain so the stream ends cleanly
 	return resp.StatusCode, resp.ProtoMajor, body["error"]
 }
 
