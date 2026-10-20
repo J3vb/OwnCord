@@ -9,7 +9,7 @@ import {
   MOCK_PINNED_MESSAGES,
 } from "./helpers";
 
-// Chat scroll-up guard (chat-scroll-perf PRs c and e). A channel of 600 messages is
+// Chat scroll-up guard (chat-scroll-perf PRs c, e and f). A channel of 600 messages is
 // served in 50-row pages, newest first, exactly as the server does; the spec
 // scrolls to the top with the mouse wheel and counts what the list did, not how
 // long it took: every history page must land without the window being rebuilt,
@@ -60,8 +60,51 @@ function pagedHistory(): void {
     firstMountShifts: 0,
     revisitLoads: 0,
     revisitMountShifts: 0,
+    slides: 0,
+    overBudgetSlides: 0,
+    maxExtraReads: 0,
   };
   (window as any).__scale = scale;
+  // `offsetHeight` reads made while the list slides (chat-scroll-perf PR f).
+  // The ResizeObserver pass re-measures the whole window in a frame it
+  // schedules from the observer callback, by design, so reads inside such a
+  // frame are not counted.
+  let heightReads = 0;
+  let skipReads = false;
+  let inObserver = false;
+  const heightDesc = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight")!;
+  Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+    configurable: true,
+    get() {
+      if (!skipReads) heightReads++;
+      return heightDesc.get!.call(this);
+    },
+  });
+  const ResizeObserverOrig = window.ResizeObserver;
+  window.ResizeObserver = class extends ResizeObserverOrig {
+    constructor(cb: ResizeObserverCallback) {
+      super((entries, observer) => {
+        inObserver = true;
+        try {
+          cb(entries, observer);
+        } finally {
+          inObserver = false;
+        }
+      });
+    }
+  };
+  const rafOrig = window.requestAnimationFrame.bind(window);
+  window.requestAnimationFrame = (cb: FrameRequestCallback): number => {
+    const fromObserver = inObserver;
+    return rafOrig((t) => {
+      skipReads = fromObserver;
+      try {
+        cb(t);
+      } finally {
+        skipReads = false;
+      }
+    });
+  };
   const mine: Record<number, Uint8Array | { status: number; headers: string[][]; url: string }> =
     {};
   const pendingUrl: Record<number, string> = {};
@@ -175,6 +218,8 @@ function pagedHistory(): void {
   // A rebuild replaces (nearly) every rendered row at once; a slide only the
   // few that left or entered.
   new MutationObserver((records) => {
+    const reads = heightReads;
+    heightReads = 0;
     const rows = records.filter(
       (r) =>
         (r.target as HTMLElement).classList !== undefined &&
@@ -192,6 +237,12 @@ function pagedHistory(): void {
     }
     const size = container.children.length + removed - added;
     if (removed >= 10 && removed >= size * 0.8) scale.rebuilds++;
+    else if (added > 0) {
+      // A slide: only the rows that entered may be measured (+2 slack).
+      scale.slides++;
+      scale.maxExtraReads = Math.max(scale.maxExtraReads, reads - added);
+      if (reads - added > 2) scale.overBudgetSlides++;
+    }
   }).observe(document, { childList: true, subtree: true });
   /* eslint-enable @typescript-eslint/no-explicit-any */
 }
@@ -228,6 +279,9 @@ interface Scale {
   readonly firstMountShifts: number;
   readonly revisitLoads: number;
   readonly revisitMountShifts: number;
+  readonly slides: number;
+  readonly overBudgetSlides: number;
+  readonly maxExtraReads: number;
 }
 
 function scale(page: Page): Promise<Scale> {
@@ -285,11 +339,21 @@ test.describe("Message list scrolling up through 600 messages", () => {
     );
     test.info().annotations.push({
       type: "message-list-scale",
-      description: `pages=${pages} rebuilds=${rebuilds} brokerImageCalls=${brokerCalls.length - brokerBefore} imageLoads=${done.imageLoads} imageLoadShifts=${done.imageLoadShifts} firstSightingMountShifts=${done.firstMountShifts}/${done.firstLoads} longTasksOver50ms=${longTasks.filter((d) => d > 50).length} (soft report)`,
+      description: `pages=${pages} rebuilds=${rebuilds} slides=${done.slides} overBudgetSlides=${done.overBudgetSlides} maxExtraHeightReads=${done.maxExtraReads} brokerImageCalls=${brokerCalls.length - brokerBefore} imageLoads=${done.imageLoads} imageLoadShifts=${done.imageLoadShifts} firstSightingMountShifts=${done.firstMountShifts}/${done.firstLoads} longTasksOver50ms=${longTasks.filter((d) => d > 50).length} (soft report)`,
     });
 
     expect(pages, "history pages that landed").toBeGreaterThanOrEqual(5);
     expect(rebuilds, "full window rebuilds while pages landed").toBe(0);
+    // A scroll slide measures the rows that entered and nothing else
+    // (chat-scroll-perf PR f): offsetHeight reads <= rows entered + 2. A
+    // history page landing is the one other slide, and it re-records the whole
+    // window once (by design), so at most one over-budget slide per page.
+    expect(done.slides, "window slides").toBeGreaterThan(done.pages);
+    expect(
+      done.overBudgetSlides - first.overBudgetSlides,
+      "slides that read offsetHeight beyond rows entered + 2, other than page landings",
+    ).toBeLessThanOrEqual(pages);
+
     // Each distinct GIF is fetched through the broker at most once: a rebuilt
     // window would ask for the ones it had already drawn again.
     expect(brokerCalls.length, "broker image calls").toBeLessThanOrEqual(new Set(brokerCalls).size);

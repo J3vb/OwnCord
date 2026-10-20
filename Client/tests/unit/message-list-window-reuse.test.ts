@@ -212,4 +212,51 @@ describe("MessageList incremental window shift", () => {
     const beforeSet = new Set(before);
     expect(after.some((el) => beforeSet.has(el))).toBe(false);
   });
+
+  /** Count `offsetHeight` reads while `run` executes. */
+  async function countHeightReads(run: () => Promise<void>): Promise<number> {
+    const desc = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+    let reads = 0;
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get() {
+        reads++;
+        return ROW_H;
+      },
+    });
+    try {
+      await run();
+    } finally {
+      if (desc === undefined)
+        delete (HTMLElement.prototype as { offsetHeight?: number }).offsetHeight;
+      else Object.defineProperty(HTMLElement.prototype, "offsetHeight", desc);
+    }
+    return reads;
+  }
+
+  it("measures only the rows that entered when the window slides", async () => {
+    await scrollTo(ROW_H * 150);
+    const before = new Set(content.children);
+    // Synchronous slide: no ResizeObserver frame in the counted section.
+    const reads = await countHeightReads(async () => {
+      root.scrollTop = ROW_H * 151;
+      root.dispatchEvent(new Event("scroll"));
+      await Promise.resolve();
+    });
+    // The scroll handler runs on a frame; wait for it, counting its reads.
+    const readsAfterFrame = await countHeightReads(async () => {
+      await nextFrame();
+    });
+    const entered = [...content.children].filter((el) => !before.has(el)).length;
+    expect(entered).toBeGreaterThan(0);
+    expect(reads + readsAfterFrame).toBeLessThanOrEqual(entered + 2);
+  });
+
+  it("measures every rendered row on a full rebuild", async () => {
+    await scrollTo(ROW_H * 150);
+    const reads = await countHeightReads(async () => {
+      await scrollTo(0);
+    });
+    expect(reads).toBeGreaterThanOrEqual(content.children.length);
+  });
 });
