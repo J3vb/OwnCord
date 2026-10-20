@@ -126,8 +126,7 @@ type Hub struct {
 	connRejects atomic.Uint64 // upgrades refused by the max_ws_connections guardrail (ServeWS)
 	readyGate   chan struct{} // one slot per concurrent fresh-connect ready build (admitReady)
 
-	// coldReplayLimit caps persisted-event replay per reconnect. 0 = the
-	// compiled-in default (maxColdReplay). HubOptions.ReplayColdLimit (B3-4).
+	// coldReplayLimit caps persisted-event replay per reconnect; 0 = maxColdReplay (HubOptions.ReplayColdLimit, B3-4).
 	coldReplayLimit int
 
 	// In-flight guards for the DB-heavy sweeps Run kicks off in their own
@@ -146,6 +145,7 @@ type Hub struct {
 	reconnectTierBuf  atomic.Uint64
 	reconnectTierDB   atomic.Uint64
 	reconnectTierFull atomic.Uint64
+	reconnectRingMiss atomic.Uint64 // WP 4.6a: resumes behind the ring (see noteRingMiss); usually ends in db or full
 
 	// Sequence watermark of the last channel-visibility change or content shed
 	// (SRV-03): neither reaches a client via replay, so one resuming from a seq

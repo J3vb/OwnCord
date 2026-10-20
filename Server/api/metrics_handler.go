@@ -63,6 +63,10 @@ type ServerMetrics struct {
 	ReconnectTierBuffer uint64 `json:"reconnect_tier_buffer"`
 	ReconnectTierDB     uint64 `json:"reconnect_tier_db"`
 	ReconnectTierFull   uint64 `json:"reconnect_tier_full"`
+	// ReconnectRingMisses counts resumes that passed the resync checks but fell
+	// behind the in-memory replay ring: the only ones the events table can
+	// serve. Usually ends in db or full; not a tier. Hit rate = db / this.
+	ReconnectRingMisses uint64 `json:"reconnect_ring_misses"`
 
 	// Per-client send-queue backpressure totals.
 	BackpressureQueueDisconnects uint64 `json:"backpressure_queue_disconnects"`
@@ -151,6 +155,7 @@ type WindowMetrics struct {
 	ReconnectTierBuffer          uint64  `json:"reconnect_tier_buffer"`
 	ReconnectTierDB              uint64  `json:"reconnect_tier_db"`
 	ReconnectTierFull            uint64  `json:"reconnect_tier_full"`
+	ReconnectRingMisses          uint64  `json:"reconnect_ring_misses"`
 	BackpressureQueueDisconnects uint64  `json:"backpressure_queue_disconnects"`
 	BackpressureHighFallbacks    uint64  `json:"backpressure_high_fallbacks"`
 	BackpressureLowDrops         uint64  `json:"backpressure_low_drops"`
@@ -194,6 +199,7 @@ func NewWindowMetrics(s metrics.WindowSnapshot) *WindowMetrics {
 		ReconnectTierBuffer:          s.Counters["reconnect_tier_buffer"],
 		ReconnectTierDB:              s.Counters["reconnect_tier_db"],
 		ReconnectTierFull:            s.Counters["reconnect_tier_full"],
+		ReconnectRingMisses:          s.Counters["reconnect_ring_misses"],
 		BackpressureQueueDisconnects: s.Counters["backpressure_queue_disconnects"],
 		BackpressureHighFallbacks:    s.Counters["backpressure_high_fallbacks"],
 		BackpressureLowDrops:         s.Counters["backpressure_low_drops"],
@@ -258,6 +264,7 @@ type MetricsSources struct {
 	SeqMuMaxHoldMs      func() float64
 	LiveKitHealth       func(context.Context) (bool, error)
 	ReconnectTiers      func() (buffer, db, full uint64)
+	ReconnectRingMisses func() uint64
 	Backpressure        func() (queueDisconnects, highFallbacks, lowDrops uint64)
 	PresenceDrops       func() uint64
 	LossMarks           func() uint64
@@ -387,6 +394,9 @@ func collectMetrics(ctx context.Context, src MetricsSources) ServerMetrics {
 func fillDelivery(metrics *ServerMetrics, src MetricsSources) {
 	if src.ReconnectTiers != nil {
 		metrics.ReconnectTierBuffer, metrics.ReconnectTierDB, metrics.ReconnectTierFull = src.ReconnectTiers()
+	}
+	if src.ReconnectRingMisses != nil {
+		metrics.ReconnectRingMisses = src.ReconnectRingMisses()
 	}
 	if src.Backpressure != nil {
 		metrics.BackpressureQueueDisconnects, metrics.BackpressureHighFallbacks, metrics.BackpressureLowDrops = src.Backpressure()

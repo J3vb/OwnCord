@@ -321,7 +321,8 @@ var wantFamilies = map[string]string{
 	"owncord_ws_dispatch_lag_seconds": "histogram", "owncord_chat_send_ack_seconds": "histogram",
 	"owncord_voice_join_seconds": "histogram", "owncord_latency_max_seconds": "gauge",
 	"owncord_hub_broadcast_queue_depth": "gauge", "owncord_reconnect_tier_total": "counter",
-	"owncord_backpressure_total": "counter", "owncord_db_wait_total": "counter",
+	"owncord_reconnect_ring_misses_total": "counter",
+	"owncord_backpressure_total":          "counter", "owncord_db_wait_total": "counter",
 	"owncord_db_wait_seconds_total": "counter", "owncord_perm_cache_lookups_total": "counter",
 	"owncord_push_total": "counter", "owncord_event_persister_total": "counter",
 	"owncord_livekit_healthy": "gauge", "owncord_disk_free_bytes": "gauge",
@@ -618,6 +619,7 @@ func promFieldMap() map[string]metricsPathSel {
 		"reconnect_tier_buffer":           sel("owncord_reconnect_tier_total", "tier", "buffer"),
 		"reconnect_tier_db":               sel("owncord_reconnect_tier_total", "tier", "db"),
 		"reconnect_tier_full":             sel("owncord_reconnect_tier_total", "tier", "full"),
+		"reconnect_ring_misses":           sel("owncord_reconnect_ring_misses_total"),
 		"backpressure_queue_disconnects":  sel("owncord_backpressure_total", "kind", "queue_disconnect"),
 		"backpressure_high_fallbacks":     sel("owncord_backpressure_total", "kind", "high_fallback"),
 		"backpressure_low_drops":          sel("owncord_backpressure_total", "kind", "low_drop"),
@@ -668,7 +670,7 @@ var promExclusions = []struct{ pattern, reason string }{
 	{`\.(p50|p95|p99)$`, "a bucket-bound quantile estimate; histogram_quantile() over the exported buckets is the Prometheus way"},
 	{`^windows\.\*\.(seconds|as_of)$`, "window metadata; Prometheus windows itself with rate() and increase()"},
 	{`^windows\.\*\.(ws_broadcast_ms|ws_dispatch_lag_ms|chat_send_ack_ms|voice_join_ms\.[a-z]+)\.count$`, "a windowed count; increase() over the histogram covers it"},
-	{`^windows\.\*\.(broadcast_drops|topic_sheds_total|reconnect_tier_[a-z]+|backpressure_[a-z_]+|delivery_loss_marks|ws_conn_rejects|db_[a-z_]+)$`, "a windowed counter delta; rate() and increase() over the cumulative counter cover it"},
+	{`^windows\.\*\.(broadcast_drops|topic_sheds_total|reconnect_tier_[a-z]+|reconnect_ring_misses|backpressure_[a-z_]+|delivery_loss_marks|ws_conn_rejects|db_[a-z_]+)$`, "a windowed counter delta; rate() and increase() over the cumulative counter cover it"},
 }
 
 // jsonLeafPaths lists the JSON leaf paths of t. A map contributes "*" for its

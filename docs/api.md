@@ -3486,6 +3486,7 @@ Runtime server metrics. IP-restricted (not token-based): allowed CIDRs come from
   "reconnect_tier_buffer": 120,
   "reconnect_tier_db": 4,
   "reconnect_tier_full": 1,
+  "reconnect_ring_misses": 3,
   "backpressure_queue_disconnects": 0,
   "backpressure_high_fallbacks": 0,
   "backpressure_low_drops": 17,
@@ -3533,7 +3534,12 @@ it reached their queue: each such client sees a gap in `cseq` and its next
 resume takes the full-ready path. `reconnect_tier_*` counts resume
 attempts served from the in-memory ring buffer, the persisted event log, and
 full-resync fallback; a rising `full` share means the replay budget is too
-small for observed disconnect gaps. `db_writer_wait_count`/`_seconds`
+small for observed disconnect gaps. `reconnect_ring_misses` counts the resumes
+that passed the resync checks but fell behind the in-memory ring, the only ones
+the persisted event log can serve; it is not a tier, and a miss normally ends in `db` or
+`full` (a refused or revoked resume ends in neither). The log's hit rate is `reconnect_tier_db / reconnect_ring_misses`. A
+resume forced to a full ready by a visibility, content or presence change, a
+client already ahead of the ring and an empty ring are not counted. `db_writer_wait_count`/`_seconds`
 accumulate time requests spent queueing for SQLite's single write connection —
 the most direct saturation signal for the write path. `db_reader_wait_count`/
 `_seconds` are the same pair for the reader pool (`max_readers` connections);
@@ -3597,6 +3603,7 @@ that take their own deltas.
       "reconnect_tier_buffer": 2,
       "reconnect_tier_db": 0,
       "reconnect_tier_full": 0,
+      "reconnect_ring_misses": 0,
       "backpressure_queue_disconnects": 0,
       "backpressure_high_fallbacks": 0,
       "backpressure_low_drops": 3,
@@ -3624,7 +3631,7 @@ that take their own deltas.
   edge.
 - **`hub_seqmu_max_hold_ms`** is the longest hold inside the window.
 - **Counters** (`broadcast_drops`, `topic_sheds_total`, the `reconnect_tier_*`
-  and `backpressure_*` counts, `delivery_loss_marks`, `ws_conn_rejects` and the
+  and `backpressure_*` counts, `reconnect_ring_misses`, `delivery_loss_marks`, `ws_conn_rejects` and the
   `db_*_wait_*` pairs) are how much each grew during the window. They are never
   negative: a counter that was reset counts as no change.
 - **`seconds`** is the time the window really covers. A server that started 40
@@ -3686,6 +3693,7 @@ Prometheus parses.
 | `owncord_latency_max_seconds`                                                                                                      | gauge     | `metric`: `ws_broadcast`, `ws_dispatch_lag`, `chat_send_ack`, `hub_seqmu_hold`, `voice_join_<phase>`; `window`: `1m`, `15m`, `lifetime` | the `max` fields, `hub_seqmu_max_hold_ms`, and the same under `windows`          |
 | `owncord_hub_broadcast_queue_depth`                                                                                                | gauge     |                                                                                                                                         | `hub_broadcast_queue_depth`                                                      |
 | `owncord_reconnect_tier_total`                                                                                                     | counter   | `tier`: `buffer`, `db`, `full`                                                                                                          | `reconnect_tier_*`                                                               |
+| `owncord_reconnect_ring_misses_total`                                                                                              | counter   |                                                                                                                                         | `reconnect_ring_misses`                                                          |
 | `owncord_backpressure_total`                                                                                                       | counter   | `kind`: `queue_disconnect`, `high_fallback`, `low_drop`, `presence_drop`                                                                | `backpressure_*`                                                                 |
 | `owncord_db_wait_total`, `owncord_db_wait_seconds_total`                                                                           | counter   | `pool`: `writer`, `reader`                                                                                                              | `db_writer_wait_*`, `db_reader_wait_*`                                           |
 | `owncord_perm_cache_lookups_total`                                                                                                 | counter   | `result`: `hit`, `miss`                                                                                                                 | `perm_cache_hits`, `perm_cache_misses`                                           |

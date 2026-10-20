@@ -30,6 +30,7 @@ func fullMetricsSources() api.MetricsSources {
 		SeqMuMaxHoldMs:      func() float64 { return 210 },
 		LiveKitHealth:       func(context.Context) (bool, error) { return true, nil },
 		ReconnectTiers:      func() (uint64, uint64, uint64) { return 7, 3, 1 },
+		ReconnectRingMisses: func() uint64 { return 4 },
 		Backpressure:        func() (uint64, uint64, uint64) { return 4, 9, 11 },
 		PresenceDrops:       func() uint64 { return 5 },
 		LossMarks:           func() uint64 { return 6 },
@@ -83,6 +84,7 @@ func windowFixture(d time.Duration) (metrics.WindowSnapshot, bool) {
 			"broadcast_drops":                scale,
 			"topic_sheds_total":              2,
 			"reconnect_tier_buffer":          2,
+			"reconnect_ring_misses":          3,
 			"db_writer_wait_count":           4,
 			"db_writer_wait_nanos":           2_500_000_000,
 			"db_reader_wait_nanos":           500_000_000,
@@ -117,6 +119,9 @@ func TestHandleMetrics_WindowsBlock(t *testing.T) {
 	}
 	if bm := w15["ws_broadcast_ms"].(map[string]any); bm["count"] != 780.0 {
 		t.Errorf("15m ws_broadcast_ms count = %v, want 780", bm["count"])
+	}
+	if w1["reconnect_ring_misses"] != 3.0 || resp["reconnect_ring_misses"] != 4.0 {
+		t.Errorf("reconnect_ring_misses window/lifetime = %v/%v, want 3/4", w1["reconnect_ring_misses"], resp["reconnect_ring_misses"])
 	}
 	if w1["hub_seqmu_max_hold_ms"] != 3.1 {
 		t.Errorf("hub_seqmu_max_hold_ms = %v", w1["hub_seqmu_max_hold_ms"])
@@ -181,6 +186,7 @@ func TestHandleMetrics_LegacyKeysUnchanged(t *testing.T) {
 		"ws_broadcast_ms": obj, "ws_dispatch_lag_ms": obj, "chat_send_ack_ms": obj, "voice_join_ms": obj,
 		"hub_broadcast_queue_depth": num, "hub_seqmu_max_hold_ms": num,
 		"reconnect_tier_buffer": num, "reconnect_tier_db": num, "reconnect_tier_full": num,
+		"reconnect_ring_misses":          num,
 		"backpressure_queue_disconnects": num, "backpressure_high_fallbacks": num,
 		"backpressure_low_drops": num, "backpressure_presence_drops": num,
 		"delivery_loss_marks": num, "ws_conn_rejects": num,

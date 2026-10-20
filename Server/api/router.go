@@ -563,9 +563,8 @@ func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc 
 		windowSnapshot = windows.Snapshot
 	}
 	// Metrics endpoint — IP-restricted by metrics_allowed_cidrs (falls back to
-	// admin_allowed_cidrs) so a central scraper can be admitted without
-	// widening /admin. The shape is documented in docs/deployment.md — keep
-	// the two in sync.
+	// admin_allowed_cidrs) so a central scraper can be admitted without widening
+	// /admin. The shape is documented in docs/deployment.md — keep the two in sync.
 	src := MetricsSources{
 		ConnectedUsers:      hub.ClientCount,
 		VoiceSessions:       hub.VoiceSessionCount,
@@ -579,6 +578,7 @@ func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc 
 		SeqMuMaxHoldMs:      hub.SeqMuMaxHoldMs,
 		LiveKitHealth:       hub.LiveKitHealthCheck,
 		ReconnectTiers:      hub.ReconnectTierStats,
+		ReconnectRingMisses: hub.ReconnectRingMissCount,
 		Backpressure:        hub.BackpressureStats,
 		PresenceDrops:       hub.PresenceDropCount,
 		LossMarks:           hub.LossMarkCount,

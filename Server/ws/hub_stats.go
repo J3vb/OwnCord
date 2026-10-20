@@ -297,6 +297,7 @@ func (h *Hub) WindowSources() ([]metrics.NamedHistogram, []metrics.NamedMaxGauge
 		{Name: "reconnect_tier_buffer", Read: h.reconnectTierBuf.Load},
 		{Name: "reconnect_tier_db", Read: h.reconnectTierDB.Load},
 		{Name: "reconnect_tier_full", Read: h.reconnectTierFull.Load},
+		{Name: "reconnect_ring_misses", Read: h.reconnectRingMiss.Load},
 		{Name: "backpressure_queue_disconnects", Read: h.bpQueueDisconnects.Load},
 		{Name: "backpressure_high_fallbacks", Read: h.bpHighFallbacks.Load},
 		{Name: "backpressure_low_drops", Read: h.bpLowDrops.Load},

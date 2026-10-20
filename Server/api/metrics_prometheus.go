@@ -99,6 +99,7 @@ func encodePrometheus(m *ServerMetrics, counts ws.LatencyCounts) []byte {
 		{"db", float64(m.ReconnectTierDB)},
 		{"full", float64(m.ReconnectTierFull)},
 	})
+	e.scalar("owncord_reconnect_ring_misses_total", counter, "Resumes that passed the resync checks but fell behind the in-memory replay ring; the events table can serve only these.", float64(m.ReconnectRingMisses))
 	e.counters("owncord_backpressure_total", "Per-client send-queue backpressure events by kind.", "kind", []promSample{
 		{"queue_disconnect", float64(m.BackpressureQueueDisconnects)},
 		{"high_fallback", float64(m.BackpressureHighFallbacks)},

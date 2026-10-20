@@ -298,8 +298,8 @@ func (h *Hub) reconnectSelectReplay(
 		events = buf
 		return events, replaySource, persistedTail, maxPersistedSeq
 	}
-	// Phase B Step 7 — try cold-tier replay from the EventStore before
-	// giving up and forcing a full ready re-sync.
+	h.noteRingMiss(lastSeq)
+	// Phase B Step 7 — try cold-tier replay from the EventStore before forcing a full ready.
 	if esp := h.eventStore.Load(); esp != nil {
 		es := *esp
 		channelIDs := make([]int64, 0, len(allowedChannelIDs))
