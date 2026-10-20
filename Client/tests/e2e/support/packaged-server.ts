@@ -102,11 +102,11 @@ export async function preparePackagedServer() {
       replacements[path] = destination;
     };
     const updater = await readFile(updaterPath, "utf8");
-    if (!updater.includes("Transport: transport,"))
+    if (!updater.includes("Transport: sharedTransport.Load(),"))
       throw new Error("Updater constructor changed: review test transport overlay");
     await overlay(
       updaterPath,
-      updater.replace("Transport: transport,", "Transport: e2eReleaseTransport{},") +
+      updater.replace("Transport: sharedTransport.Load(),", "Transport: e2eReleaseTransport{},") +
         `
 // Upstream fixture transport, compiled only by this test's Go overlay.
 type e2eReleaseTransport struct{}

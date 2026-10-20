@@ -165,9 +165,8 @@ func NewUpdater(currentVersion, githubToken, repoOwner, repoName string) *Update
 		transport.ResponseHeaderTimeout = responseHeaderTimeout
 		sharedTransport.Store(transport)
 	})
-	transport := sharedTransport.Load()
 	u.httpClient = &http.Client{
-		Transport: transport,
+		Transport: sharedTransport.Load(),
 		Timeout:   metadataClientTimeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
