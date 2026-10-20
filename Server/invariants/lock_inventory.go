@@ -111,7 +111,6 @@ func checkLockInventory(files map[string][]byte) []Violation {
 		if p == lockOrderFile {
 			sawTable = true
 			rows = lockTableRows(f, fset)
-			continue
 		}
 		decls = append(decls, lockDecls(f, fset, p)...)
 	}
@@ -256,7 +255,7 @@ func (s *lockScan) valueIsLock(e ast.Expr) bool {
 	}
 	switch v := e.(type) {
 	case *ast.CompositeLit:
-		return v.Type != nil && s.isMutexSel(v.Type)
+		return v.Type != nil && s.holdsLock(v.Type)
 	case *ast.CallExpr:
 		id, ok := v.Fun.(*ast.Ident)
 		return ok && id.Name == "new" && len(v.Args) == 1 && s.isMutexSel(v.Args[0])

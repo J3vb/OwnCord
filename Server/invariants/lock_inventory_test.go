@@ -140,6 +140,20 @@ func use(m *syncutil.Mutex) {}
 `,
 		},
 		{
+			name:  "an inferred container of locks is a declaration",
+			table: lockInventoryTable,
+			src: `package ws
+` + util + `
+type Hub struct{ mu syncutil.RWMutex }
+type activityState struct{ mu syncutil.Mutex }
+type Proc struct{ mu syncutil.Mutex }
+func serve() { var admissionMu syncutil.Mutex; _ = &admissionMu }
+var pool = map[string]*syncutil.Mutex{}
+func f() { rows := []syncutil.Mutex{}; _ = rows }
+`,
+			want: []string{"lock pool is not", "lock rows is not"},
+		},
+		{
 			name:  "a missing table fails",
 			table: "",
 			src:   "package ws\n" + util + "type Hub struct{ mu syncutil.Mutex }\n",
