@@ -175,11 +175,11 @@ var afkNow = time.Now
 // entry to idle, and leaves it zero for every other status.
 func nextLivePresence(prev *livePresence, status string, customStatus *string, expiresAt string, now time.Time) *livePresence {
 	next := &livePresence{status: status, customStatus: customStatus, customStatusExpiresAt: expiresAt}
-	if status != db.StatusIdle {
+	if !isIdleStatus(status) {
 		return next
 	}
 	next.idleSince = now
-	if prev != nil && prev.status == db.StatusIdle && !prev.idleSince.IsZero() {
+	if prev != nil && isIdleStatus(prev.status) && !prev.idleSince.IsZero() {
 		next.idleSince = prev.idleSince
 	}
 	return next

@@ -37,6 +37,10 @@ var afkSweepSnapshotHook func()
 // in which the member's connection drops.
 var afkAfterEvictHook func()
 
+// isIdleStatus reports whether a presence status is "idle". It lives here, not
+// in client.go, so client.go keeps using db for its type only.
+func isIdleStatus(status string) bool { return status == db.StatusIdle }
+
 // afkCandidate is one idle voice member the sweep may move: the connection it
 // saw, the channel it saw it in, and the idle stamp it judged by.
 type afkCandidate struct {
