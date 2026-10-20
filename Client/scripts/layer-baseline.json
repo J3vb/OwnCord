@@ -1,0 +1,166 @@
+{
+  "sanctioned": {
+    "lib/dispatcher.ts": {
+      "features/channels/wsHandlers.ts": 1,
+      "features/connection/dispatchContext.ts": 1,
+      "features/connection/wsHandlers.ts": 1,
+      "features/direct-messages/wsHandlers.ts": 1,
+      "features/message-requests/wsHandlers.ts": 1,
+      "features/messaging/wsHandlers.ts": 1,
+      "features/moderation/wsHandlers.ts": 1,
+      "features/safety/wsHandlers.ts": 1,
+      "features/voice/wsHandlers.ts": 1
+    },
+    "stores/messages.store.ts": {
+      "features/messaging/historyWindows.ts": 1,
+      "features/messaging/liveMessages.ts": 1,
+      "features/messaging/messageEdits.ts": 1,
+      "features/messaging/messageModel.ts": 1,
+      "features/messaging/reactionState.ts": 1
+    }
+  },
+  "debt": {
+    "i18n/safety.ts": {
+      "features/safety/store.ts": 1
+    },
+    "lib/api.ts": {
+      "features/content-consent/nsfw.ts": 1,
+      "stores/channels.store.ts": 1
+    },
+    "lib/audioElements.ts": {
+      "features/voice/mediaEncryption.ts": 1,
+      "features/voice/releaseRoom.ts": 1,
+      "features/voice/sessionState.ts": 1,
+      "stores/voice.store.ts": 1
+    },
+    "lib/channel-navigation.ts": {
+      "stores/channels.store.ts": 1,
+      "stores/dm.store.ts": 1,
+      "stores/ui.store.ts": 1
+    },
+    "lib/connectionDiagnostics.ts": {
+      "features/voice/native/devices.ts": 1,
+      "features/voice/native/micProbe.ts": 1,
+      "features/voice/native/platform.ts": 1
+    },
+    "lib/credentials.ts": {
+      "stores/auth.store.ts": 1
+    },
+    "lib/deviceManager.ts": {
+      "features/voice/native/devices.ts": 1,
+      "stores/voice.store.ts": 1
+    },
+    "lib/dispatcher.ts": {
+      "stores/channels.store.ts": 1,
+      "stores/ui.store.ts": 1
+    },
+    "lib/formatting.ts": {
+      "stores/channels.store.ts": 1,
+      "stores/members.store.ts": 1
+    },
+    "lib/identity.ts": {
+      "stores/auth.store.ts": 1
+    },
+    "lib/last-channel.ts": {
+      "stores/channels.store.ts": 1
+    },
+    "lib/livekitDiagnostics.ts": {
+      "features/voice/releaseRoom.ts": 1,
+      "features/voice/sessionState.ts": 1
+    },
+    "lib/livekitE2EE.ts": {
+      "features/voice/e2eeEpoch.ts": 1,
+      "features/voice/e2eeIdentity.ts": 1,
+      "features/voice/e2eeOffer.ts": 1,
+      "features/voice/e2eePeerState.ts": 1,
+      "features/voice/e2eeWorker.ts": 1,
+      "stores/auth.store.ts": 1,
+      "stores/voice.store.ts": 1
+    },
+    "lib/livekitReconnect.ts": {
+      "features/voice/releaseRoom.ts": 1,
+      "features/voice/sessionState.ts": 1,
+      "stores/voice.store.ts": 1
+    },
+    "lib/livekitSession.ts": {
+      "features/direct-messages/keptCallDms.ts": 1,
+      "features/voice/joinOrchestration.ts": 1,
+      "features/voice/joinRequest.ts": 1,
+      "features/voice/mediaControl.ts": 1,
+      "features/voice/mediaLostNotice.ts": 1,
+      "features/voice/native/counters.ts": 1,
+      "features/voice/native/platform.ts": 1,
+      "features/voice/native/screenPicker.ts": 1,
+      "features/voice/remoteTracks.ts": 1,
+      "features/voice/roomLifecycle.ts": 1,
+      "features/voice/sessionState.ts": 1,
+      "stores/auth.store.ts": 1,
+      "stores/channels.store.ts": 1,
+      "stores/dm.store.ts": 1,
+      "stores/voice.store.ts": 2
+    },
+    "lib/logout.ts": {
+      "stores/auth.store.ts": 1
+    },
+    "lib/markdown.ts": {
+      "features/messaging/discordTimestamp.ts": 1
+    },
+    "lib/mentions.ts": {
+      "stores/auth.store.ts": 1,
+      "stores/members.store.ts": 1
+    },
+    "lib/notifications.ts": {
+      "stores/auth.store.ts": 1,
+      "stores/blocks.store.ts": 1,
+      "stores/channels.store.ts": 1,
+      "stores/dm.store.ts": 1,
+      "stores/members.store.ts": 1,
+      "stores/messages.store.ts": 1
+    },
+    "lib/notificationSound.ts": {
+      "features/voice/native/platform.ts": 1
+    },
+    "lib/pendingMessages.ts": {
+      "stores/messages.store.ts": 1
+    },
+    "lib/permissions.ts": {
+      "stores/auth.store.ts": 1,
+      "stores/channels.store.ts": 1
+    },
+    "lib/presence.ts": {
+      "stores/auth.store.ts": 1,
+      "stores/members.store.ts": 1
+    },
+    "lib/read-state.ts": {
+      "stores/channels.store.ts": 1,
+      "stores/dm.store.ts": 1,
+      "stores/messages.store.ts": 1,
+      "stores/ui.store.ts": 1
+    },
+    "lib/roomEventHandlers.ts": {
+      "features/voice/mediaEncryption.ts": 1,
+      "features/voice/releaseRoom.ts": 1,
+      "features/voice/sessionState.ts": 1,
+      "stores/voice.store.ts": 1
+    },
+    "lib/screenShare.ts": {
+      "features/voice/native/devices.ts": 1,
+      "features/voice/native/platform.ts": 1,
+      "features/voice/native/screenPickerSlot.ts": 1,
+      "features/voice/peerDecode.ts": 1,
+      "features/voice/shareSenderStats.ts": 1,
+      "features/voice/videoCodec.ts": 1,
+      "stores/voice.store.ts": 1
+    },
+    "lib/statusTimer.ts": {
+      "stores/auth.store.ts": 1,
+      "stores/members.store.ts": 1
+    },
+    "platform/desktop/pushToTalkService.ts": {
+      "stores/voice.store.ts": 1
+    },
+    "stores/voice.store.ts": {
+      "features/voice/joinBackoff.ts": 1
+    }
+  }
+}
