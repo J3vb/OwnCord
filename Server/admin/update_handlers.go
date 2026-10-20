@@ -69,6 +69,33 @@ func handleCheckUpdate(u *updater.Updater) http.HandlerFunc {
 // shrink it; the broadcast countdown below stays 5 to match this value.
 var applyRestartDelay = 5 * time.Second
 
+// applyBudget bounds one POST /updates/apply: the release check, the asset
+// download and verification. It matches the transfer lifetime in api
+// (transferMaxLifetime). The same value bounds the request context and the
+// connection deadlines (see extendApplyDeadlines).
+const applyBudget = 10 * time.Minute
+
+// applyDeadlineMargin is added to applyBudget for the connection deadlines so
+// the handler's own context expires first and its error response can still be
+// written.
+const applyDeadlineMargin = 30 * time.Second
+
+// extendApplyDeadlines pushes the connection's read and write deadlines out to
+// cover applyBudget. The server's WriteTimeout is far shorter than a slow
+// download; without this the stream is reset (HTTP/2) or the late response is
+// never delivered (HTTP/1.1) while the update carries on. The read deadline
+// moves too because on HTTP/1.1 an expired read deadline cancels the request
+// context. Errors are ignored: http.ErrNotSupported means the writer has no
+// connection (a test recorder), so there is no deadline to extend. The
+// ResponseController reaches the connection through any wrapper that exposes
+// Unwrap.
+func extendApplyDeadlines(w http.ResponseWriter) {
+	deadline := time.Now().Add(applyBudget + applyDeadlineMargin)
+	ctl := http.NewResponseController(w)
+	_ = ctl.SetReadDeadline(deadline)
+	_ = ctl.SetWriteDeadline(deadline)
+}
+
 // handleApplyUpdate downloads and applies a server update.
 //
 // It is audited, which is why it takes a database handle it otherwise has no
@@ -132,6 +159,9 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 			}
 		}()
 
+		// The download below can outlast the server's WriteTimeout.
+		extendApplyDeadlines(w)
+
 		// Check for available update.
 		info, err := u.CheckForUpdate(r.Context())
 		if err != nil {
@@ -162,7 +192,7 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 		newPath := exePath + ".new"
 
 		// Download and verify.
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+		ctx, cancel := context.WithTimeout(r.Context(), applyBudget)
 		defer cancel()
 
 		// DownloadAndVerify stages the binary and returns its trusted hash

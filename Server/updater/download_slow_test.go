@@ -97,8 +97,8 @@ func TestDownloadFile_CallerDeadlineStillBounds(t *testing.T) {
 	defer cancel()
 
 	err := u.downloadFile(ctx, srv.URL+"/asset", filepath.Join(t.TempDir(), "asset"))
-	if err == nil || errors.Is(err, errDownloadStalled) {
-		t.Fatalf("err = %v, want a context deadline error", err)
+	if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errDownloadStalled) {
+		t.Fatalf("err = %v, want context.DeadlineExceeded", err)
 	}
 }
 
@@ -119,5 +119,39 @@ func TestDownloadHTTPClient_OnlyDropsWholeExchangeTimeout(t *testing.T) {
 	tr, ok := d.Transport.(*http.Transport)
 	if !ok || tr.ResponseHeaderTimeout != responseHeaderTimeout {
 		t.Errorf("download transport lacks ResponseHeaderTimeout")
+	}
+}
+
+// A server that accepts the request and never sends headers is abandoned by
+// the transport's response-header timeout.
+func TestDownloadFile_NoHeadersIsAbandoned(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer srv.Close()
+	defer close(release)
+
+	u := newTestUpdater(srv.URL, "1.0.0")
+	tr, ok := NewUpdater("1.0.0", "", "J3vb", "OwnCord").httpClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatal("updater transport is not an *http.Transport")
+	}
+	tr.ResponseHeaderTimeout = 100 * time.Millisecond
+	u.httpClient = &http.Client{Transport: tr, Timeout: metadataClientTimeout}
+
+	dest := filepath.Join(t.TempDir(), "asset")
+	start := time.Now()
+	if err := u.downloadFile(context.Background(), srv.URL+"/asset", dest); err == nil {
+		t.Fatal("downloadFile succeeded against a server that sent no headers")
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("took %v to abandon, want about 100ms", elapsed)
+	}
+	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
+		t.Errorf("dest file exists: %v", statErr)
 	}
 }

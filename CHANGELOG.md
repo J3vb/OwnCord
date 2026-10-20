@@ -247,6 +247,7 @@ and only when it changes something a contributor or fork holder must do
 
 - Downloading a backup from the admin panel stopped partway through when it took longer than 30 seconds, leaving a failed download and a spent link. It now keeps going while data is flowing, and ends only if the browser stops receiving it.
 - "Update now" on a server whose install folder the service cannot write to failed with a vague download error after the download. The Updates page now says the server cannot replace its own program file and to install the release by hand, and nothing is downloaded or restarted.
+- **Update now** on the Updates page no longer fails on a slow connection: the download is not cut off after 30 seconds, and the page still gets the result when the update takes longer than the server's 30-second response limit. The server gives up if no data arrives for 60 seconds or the whole update takes more than 10 minutes.
 
 **Login & connection**
 
@@ -276,10 +277,6 @@ and only when it changes something a contributor or fork holder must do
 - Linux: screen-share audio now reaches viewers in stereo instead of mono.
 - Voice signaling through the server's built-in proxy dropped the call connection when a single message passed 32 KiB, which could happen in a busy room. Messages up to 256 KiB now pass through.
 - Timing out someone who was in a voice channel kicked them out of it within a minute, even when the moderator could not mute them. They now stay in the call (muted if the moderator could mute members), and the mute lifts the moment the timeout ends instead of up to 15 minutes later. They still cannot join a voice channel while timed out.
-
-**Server (operators)**
-
-- Updating the server from the admin panel no longer fails on a slow connection: the download is no longer cut off after 30 seconds. It still gives up if no data arrives for 60 seconds or the whole update takes more than 5 minutes.
 
 ## v2.3.0-beta.1
 

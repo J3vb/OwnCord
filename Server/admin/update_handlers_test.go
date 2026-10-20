@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -613,5 +614,51 @@ func TestApplyUpdate_ReadOnlyInstallRefusedBeforeDownload(t *testing.T) {
 	}
 	if len(hub.restartCalls) != 0 {
 		t.Errorf("restart broadcasts = %d, want 0", len(hub.restartCalls))
+	}
+}
+
+// A slow release lookup that outlasts the server's WriteTimeout must still
+// reach an HTTP/2 client: the handler extends the connection deadlines. The
+// slow stage stands in for the download, which sits under the same deadlines.
+func TestAdminAPI_ApplyUpdate_OutlastsServerWriteTimeout(t *testing.T) {
+	const writeTimeout = 400 * time.Millisecond
+	mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(3 * writeTimeout)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"tag_name": "v1.0.0",
+			"html_url": "https://github.com/J3vb/OwnCord/releases/tag/v1.0.0",
+			"assets":   []map[string]any{},
+		})
+	}))
+	defer mockGH.Close()
+
+	u := updater.NewUpdater("1.0.0", "", "J3vb", "OwnCord")
+	u.SetBaseURL(mockGH.URL)
+
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestServices(database))
+	token := createAdminUser(t, database)
+
+	srv := httptest.NewUnstartedServer(handler)
+	srv.EnableHTTP2 = true
+	srv.Config.WriteTimeout = writeTimeout
+	srv.StartTLS()
+	defer srv.Close()
+
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/updates/apply", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("request failed (stream reset by WriteTimeout?): %v", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.ProtoMajor != 2 {
+		t.Fatalf("protocol = %s, want HTTP/2", resp.Proto)
+	}
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("status = %d, want 409 NO_UPDATE", resp.StatusCode)
 	}
 }

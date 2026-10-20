@@ -124,7 +124,20 @@ func NewUpdater(currentVersion, githubToken, repoOwner, repoName string) *Update
 		signingKeyText: defaultServerSignaturePublicKey,
 	}
 	// Each redirect hop passes the same host check as the first request.
-	transport := http.DefaultTransport.(*http.Transport).Clone()
+	// Clone the default transport, or build an equivalent one if the global
+	// default was replaced with another RoundTripper. Built here, in the
+	// inventoried egress site (invariants.EgressAllow), not in a helper.
+	var transport *http.Transport
+	if base, ok := http.DefaultTransport.(*http.Transport); ok {
+		transport = base.Clone()
+	} else {
+		transport = &http.Transport{
+			Proxy:               http.ProxyFromEnvironment,
+			ForceAttemptHTTP2:   true,
+			TLSHandshakeTimeout: 10 * time.Second,
+			IdleConnTimeout:     90 * time.Second,
+		}
+	}
 	transport.ResponseHeaderTimeout = responseHeaderTimeout
 	u.httpClient = &http.Client{
 		Transport: transport,
