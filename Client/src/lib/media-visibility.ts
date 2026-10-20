@@ -438,6 +438,9 @@ export function observeMedia(
   };
   tracked.set(img, entry);
   allTracked.add(ref);
+  // A frozen GIF shows its still; this names the animated source the image
+  // cache must keep loadable while the row is mounted (`liveBlobUrls`).
+  img.dataset["mediaSrc"] = originalSrc;
 
   // Wire button click
   button.addEventListener("click", (e) => {

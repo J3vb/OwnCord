@@ -100,6 +100,12 @@ describe("media-visibility", () => {
     expect(observeMock).toHaveBeenCalledWith(img);
   });
 
+  it("names the animated source on the image so an image cache keeps it while mounted", () => {
+    const img = createFakeImg("https://example.com/cat.gif");
+    observeMedia(img, "https://example.com/cat.gif", createWrapper());
+    expect(img.dataset["mediaSrc"]).toBe("https://example.com/cat.gif");
+  });
+
   it("adds play/pause button to wrapper", () => {
     const img = createFakeImg("https://example.com/cat.gif");
     const wrap = createWrapper();

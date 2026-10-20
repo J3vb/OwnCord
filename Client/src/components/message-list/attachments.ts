@@ -219,10 +219,30 @@ function revokeObjectUrl(objectUrl: string): void {
   URL.revokeObjectURL(objectUrl);
 }
 
+/** The blob: URLs a mounted element still depends on: every connected visible
+ *  `<img>` showing one, and every connected tracked GIF's animated source
+ *  (`data-media-src`: its `<img>` shows the frozen still, but unfreezing needs
+ *  the original). Read only when a
+ *  cache is over its cap, so the scan costs nothing on a hit. */
+function liveBlobUrls(): Set<string> {
+  const live = new Set<string>();
+  if (typeof document === "undefined") return live;
+  for (const img of document.querySelectorAll("img")) {
+    // A hidden image (a failed or refused load) shows nothing, so it pins nothing.
+    if (img.hidden) continue;
+    for (const src of [img.getAttribute("src"), img.dataset["mediaSrc"]]) {
+      if (src !== undefined && src !== null && src.startsWith("blob:")) live.add(src);
+    }
+  }
+  return live;
+}
+
 /** blob: URLs by source URL, least recently used first, bounded by the bytes
  *  their Blobs pin (and optionally by count). An evicted URL is revoked; an
  *  image still showing it recovers through `recoverEvictedImage`. One entry
- *  larger than the budget stays until the next arrives. */
+ *  larger than the budget stays until the next arrives. With `keepMounted`, a
+ *  URL a mounted `<img>` still shows is never evicted (the cap then bounds the
+ *  unreferenced part), so a window wider than the cache is not re-fetched. */
 class ObjectUrlCache {
   private readonly entries = new Map<string, { objectUrl: string; bytes: number }>();
   private bytes = 0;
@@ -230,6 +250,7 @@ class ObjectUrlCache {
   constructor(
     private readonly maxBytes: number,
     private readonly maxEntries = Number.POSITIVE_INFINITY,
+    private readonly keepMounted = false,
   ) {}
 
   get(key: string): string | undefined {
@@ -252,14 +273,21 @@ class ObjectUrlCache {
     this.drop(key);
     this.entries.set(key, { objectUrl, bytes });
     this.bytes += bytes;
-    while (
-      this.entries.size > 1 &&
-      (this.bytes > this.maxBytes || this.entries.size > this.maxEntries)
-    ) {
-      const oldest = this.entries.keys().next().value;
-      if (oldest === undefined) break;
-      this.drop(oldest);
+    if (!this.overCap()) return;
+    const live = this.keepMounted ? liveBlobUrls() : null;
+    for (const [oldKey, entry] of this.entries) {
+      if (!this.overCap()) break;
+      // The entry just added stays even when it alone is over.
+      if (oldKey === key) continue;
+      if (live?.has(entry.objectUrl) === true) continue;
+      this.drop(oldKey);
     }
+  }
+
+  private overCap(): boolean {
+    return (
+      this.entries.size > 1 && (this.bytes > this.maxBytes || this.entries.size > this.maxEntries)
+    );
   }
 
   clear(): void {
@@ -280,7 +308,7 @@ export const IMAGE_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 /** What the durable image store may hold, so it persists across restarts
  *  without growing forever. */
 export const IMAGE_DB_MAX_BYTES = 256 * 1024 * 1024;
-const imageCache = new ObjectUrlCache(IMAGE_CACHE_MAX_BYTES);
+const imageCache = new ObjectUrlCache(IMAGE_CACHE_MAX_BYTES, Number.POSITIVE_INFINITY, true);
 /** Server images the server definitely refused (missing, gone, forbidden).
  *  Asking again on every mount only repeated the answer — each one was
  *  fetched twice in the audit's channel-switch run (DP-56). Retry and a cache
@@ -852,7 +880,7 @@ let externalBytes = 0;
  *  freeze/play control. */
 const externalGifUrls = new Set<string>();
 const externalInFlight = new Map<string, Promise<ExternalContentResult<string>>>();
-/** FIFO cap: these copies live in the webview, outside the broker's byte
+/** LRU cap (URLs a mounted image shows are exempt): these copies live in the webview, outside the broker's byte
  *  budget, so nothing else bounds them. Mirrors MEDIA_CACHE_MAX; higher
  *  because an image is far smaller than a clip. */
 export const EXTERNAL_IMAGE_CACHE_MAX = 100;
@@ -860,6 +888,14 @@ export const EXTERNAL_IMAGE_CACHE_MAX = 100;
  *  count cap alone allows ~1.6 GB of blob memory. Mirrors the server-image
  *  cache's budget. */
 export const EXTERNAL_IMAGE_CACHE_MAX_BYTES = 64 * 1024 * 1024;
+
+function externalOverCap(): boolean {
+  return (
+    externalObjectUrls.size > 1 &&
+    (externalObjectUrls.size > EXTERNAL_IMAGE_CACHE_MAX ||
+      externalBytes > EXTERNAL_IMAGE_CACHE_MAX_BYTES)
+  );
+}
 
 /** Drop every broker-fetched image and move to a fresh broker partition.
  *  Run with the session reset and from the manual "clear cache" action. */
@@ -966,7 +1002,12 @@ export function loadExternalImage(
   // B9-8: nothing is fetched for an item the viewer has not consented to.
   if (!externalAllowed(key)) return Promise.resolve({ ok: false, failure: "unavailable" });
   const cached = externalObjectUrls.get(key);
-  if (cached !== undefined) return Promise.resolve({ ok: true, value: cached.url });
+  if (cached !== undefined) {
+    // Recency order is Map order: a hit moves the entry to the back.
+    externalObjectUrls.delete(key);
+    externalObjectUrls.set(key, cached);
+    return Promise.resolve({ ok: true, value: cached.url });
+  }
   const existing = externalInFlight.get(key);
   if (existing !== undefined) return existing;
 
@@ -985,17 +1026,19 @@ export function loadExternalImage(
     }
     externalObjectUrls.set(key, { url: objectUrl, bytes: result.value.size });
     externalBytes += result.value.size;
-    // Oldest first; the entry just added stays even when it alone is over.
-    while (
-      externalObjectUrls.size > 1 &&
-      (externalObjectUrls.size > EXTERNAL_IMAGE_CACHE_MAX ||
-        externalBytes > EXTERNAL_IMAGE_CACHE_MAX_BYTES)
-    ) {
-      const [oldKey, evicted] = externalObjectUrls.entries().next().value!;
-      externalObjectUrls.delete(oldKey);
-      externalBytes -= evicted.bytes;
-      externalGifUrls.delete(evicted.url);
-      revokeObjectUrl(evicted.url);
+    // Least recently used first. The entry just added stays even when it
+    // alone is over, and so does any URL a mounted image still shows: the
+    // caps bound the unreferenced part.
+    if (externalOverCap()) {
+      const live = liveBlobUrls();
+      for (const [oldKey, evicted] of externalObjectUrls) {
+        if (!externalOverCap()) break;
+        if (oldKey === key || live.has(evicted.url)) continue;
+        externalObjectUrls.delete(oldKey);
+        externalBytes -= evicted.bytes;
+        externalGifUrls.delete(evicted.url);
+        revokeObjectUrl(evicted.url);
+      }
     }
     if (result.value.type === "image/gif") externalGifUrls.add(objectUrl);
     return { ok: true, value: objectUrl };
@@ -1388,7 +1431,7 @@ function renderAttachmentContent(att: Attachment, gallery?: LightboxGallery): HT
         "load",
         () => {
           clearReservation();
-          if (isGif) observeMedia(img, objectUrl, wrap, !animateGifsPref);
+          if (isGif) observeMedia(img, img.src, wrap, !animateGifsPref);
         },
         { once: true },
       );
