@@ -16,11 +16,12 @@ package db
 // Marker M, staged S, rollback R, live D:
 //
 //	!M, S          crash before commit: delete S
-//	!M, !D, R      the marker was removed mid-swap by hand: put R back
-//	!M, D, R       the last apply finished: delete the stale R
+//	!M, R          the marker was removed by hand (cancel): put R back,
+//	               discarding any D; a finished apply deletes R first
 //	M, S, !R, *    not started: verify, move D (and sidecars) to R, S -> D
 //	M, S, R, !D    crash between aside and swap: S -> D, then verify
-//	M, !S, R, D    swapped: integrity check; ok keeps D, otherwise R -> D
+//	M, !S, R, D    swapped: D must hash to the marker's checksum and pass
+//	               integrity_check; ok keeps D, otherwise R -> D
 //	M, !S, R, !D   crash mid-rollback: R -> D
 //	M, !S, !R, D   swapped with no prior database: integrity check
 //	M, S, R, D     inconsistent: touch nothing, return ErrRestoreInconsistent
@@ -216,7 +217,6 @@ func ApplyStagedRestore(dbPath string) (RestoreResult, error) {
 	if err != nil {
 		return RestoreResult{}, fmt.Errorf("applying staged restore: %w", err)
 	}
-	// Boot-time work with no caller context; bounded so a stuck check cannot hold the boot forever.
 	// Boot-time work with no caller context; bounded so a stuck check cannot hold the boot forever.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
@@ -419,6 +419,12 @@ func resumeSwap(ctx context.Context, p restorePaths, m StagedRestoreMarker) (Res
 // verifySwapped checks the database now in place. A failure rolls back to the
 // moved-aside file when there is one.
 func verifySwapped(ctx context.Context, p restorePaths, m StagedRestoreMarker) (RestoreResult, error) {
+	// Only the staged copy may be reported as applied (and the replaced
+	// database deleted). A different file here, say an empty database some
+	// tool created while the restore was interrupted, leaves everything alone.
+	if sum, err := fileSHA256(p.db); err != nil || sum != m.SHA256 {
+		return RestoreResult{}, fmt.Errorf("applying staged restore: %w: the live database is not the staged copy", ErrRestoreInconsistent)
+	}
 	if err := checkSwapped(ctx, p.db); err != nil {
 		slog.Error("restored database failed its integrity check", "err", err)
 		return rollBack(p, m, "the restored database failed its integrity check; the previous database was kept")

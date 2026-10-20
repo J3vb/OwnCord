@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 )
 
@@ -51,33 +50,38 @@ func ClearRestoreResult(dbPath string) error {
 	return nil
 }
 
-// TakeRestoreResult reads and then clears the result, for callers that have
-// nothing to do between the two.
-func TakeRestoreResult(dbPath string) (res RestoreResult, found bool, err error) {
-	res, found, err = ReadRestoreResult(dbPath)
-	if cerr := ClearRestoreResult(dbPath); cerr != nil {
-		slog.Warn("could not remove the restore result file", "path", dbPath, "error", cerr)
-	}
-	return res, found, err
-}
-
-// applyOnOpen is ApplyStagedRestore, called through a variable: the apply
-// owns its own bounded context because Open has none to hand down, and a
-// direct call would make every Open look like a context-dropping call chain.
+// applyOnOpen is ApplyStagedRestore behind a variable that nothing assigns
+// after init. The apply owns its own bounded context because Open has none to
+// hand down; a direct call (even with a nolint at the call site, which cannot
+// reach the reports in Open's callers) makes contextcheck flag every Open.
 var applyOnOpen = ApplyStagedRestore
 
-// prepareOpen applies any staged restore (only for a caller that holds the
-// process lock: short-lived tooling never applies one) and then reads the
-// message retry cutoff, so the cutoff read sees a value the apply advanced.
-func prepareOpen(path string, takeLock bool) (int64, error) {
-	if takeLock {
+// ErrRestoreInProgress means a staged restore has not finished, so only the
+// server (which finishes it at start-up) may open the database.
+var ErrRestoreInProgress = errors.New("a staged restore is in progress: start the server to finish it before using this database")
+
+// prepareOpen applies any staged restore and then reads the message retry
+// cutoff, so the cutoff read sees a value the apply advanced. The apply needs
+// the process lock; a caller without it (short-lived tooling, or a lock the
+// platform could not take) must not open the database while a restore is
+// pending or half done, because opening would create a live database where
+// the apply expects none.
+func prepareOpen(path string, locked bool) (int64, error) {
+	if locked {
 		if _, err := applyOnOpen(path); err != nil {
 			return 0, fmt.Errorf("applying staged restore: %w", err)
 		}
+	} else if restoreInProgress(path) {
+		return 0, ErrRestoreInProgress
 	}
 	floor, err := readMessageDeliveryFloor(path)
 	if err != nil {
 		return 0, fmt.Errorf("loading message retry cutoff: %w", err)
 	}
 	return floor, nil
+}
+
+func restoreInProgress(path string) bool {
+	p, err := newRestorePaths(path)
+	return err == nil && (fileExists(p.marker) || fileExists(p.rollback))
 }

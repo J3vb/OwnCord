@@ -1235,6 +1235,10 @@ If the restart never comes (the server is stopped by hand, or no supervisor
 restarts it), the staged restore waits and is applied at the next start. To
 cancel it before then, delete `<database>.restore-pending.json`.
 
+While a staged restore is pending, command-line tools that open the database
+(`chatserver token`, `chatserver restore`) refuse to run and tell you to start
+the server so it can finish the restore.
+
 The check at the swap covers the file's integrity only. If the restored database
 then fails to migrate, the server does not start, and the way back is the
 `pre_restore_<time>.db` safety copy in the backups folder, not the automatic

@@ -221,7 +221,7 @@ func TestHandleRestoreBackup_StagesInsteadOfOverwriting(t *testing.T) {
 	if n := countRestoreRows(t, reopened); n != restoreFixtureRows {
 		t.Errorf("rows after the boot-time apply = %d, want the backup's %d", n, restoreFixtureRows)
 	}
-	res, found, err := db.TakeRestoreResult(f.dbPath)
+	res, found, err := db.ReadRestoreResult(f.dbPath)
 	if err != nil || !found || res.Status != db.RestoreStatusApplied || res.Backup != f.backupName {
 		t.Errorf("restore result = %+v, %v, %v", res, found, err)
 	}

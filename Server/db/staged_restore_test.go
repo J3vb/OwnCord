@@ -624,3 +624,50 @@ func TestOpen_InconsistentRestoreErrorIsNamed(t *testing.T) {
 		t.Fatalf("Open err = %v", err)
 	}
 }
+
+// An empty database created while a restore was interrupted (a tool opening a
+// missing live file) must not be mistaken for the restored one: the replaced
+// database stays, and nothing is reported as applied.
+func TestApplyStagedRestore_UnrelatedLiveDatabaseKeepsRollback(t *testing.T) {
+	f := newStagedFixture(t)
+	f.stage(t)
+	p, _ := newRestorePaths(f.live)
+	crashAt(t, "aside")
+	if _, err := ApplyStagedRestore(f.live); err == nil {
+		t.Fatal("expected the simulated crash")
+	}
+	// Marker, rollback and staged exist, no live file; a tool creates one and
+	// the staged copy is gone, as if the swap had finished.
+	writeTestDB(t, f.live, "created by a tool")
+	if err := os.Remove(p.staged); err != nil {
+		t.Fatal(err)
+	}
+	noCrash(t)
+	res, err := ApplyStagedRestore(f.live)
+	if !errors.Is(err, ErrRestoreInconsistent) || res.Status == RestoreStatusApplied {
+		t.Fatalf("apply = %+v, %v; want ErrRestoreInconsistent", res, err)
+	}
+	if !fileExists(p.rollback) || !fileExists(p.marker) {
+		t.Fatal("the replaced database or marker was removed")
+	}
+	assertRows(t, p.rollback, "live")
+}
+
+func TestOpenShared_RefusesWhileRestoreIsInProgress(t *testing.T) {
+	f := newStagedFixture(t)
+	f.stage(t)
+	if _, err := OpenShared(f.live); !errors.Is(err, ErrRestoreInProgress) {
+		t.Fatalf("OpenShared with a marker = %v, want ErrRestoreInProgress", err)
+	}
+	p, _ := newRestorePaths(f.live)
+	if err := os.Remove(p.marker); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p.rollback, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenShared(f.live); !errors.Is(err, ErrRestoreInProgress) {
+		t.Fatalf("OpenShared with a rollback file = %v, want ErrRestoreInProgress", err)
+	}
+	assertGone(t, f.live+"-wal")
+}
