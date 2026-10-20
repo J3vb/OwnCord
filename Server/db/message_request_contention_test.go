@@ -316,6 +316,75 @@ func TestGetOrCreateDMChannelGated_RecipientWithPendingRequestAccepts(t *testing
 	}
 }
 
+// TestGetOrCreateDMChannelGated_SenderReopenDoesNotAcceptOwnRequest: the
+// open-time acceptance is the recipient's decision only. When the ORIGINAL
+// SENDER reopens the DM toward the recipient, the request is not accepted,
+// the recipient gains no trust of the sender, the sender's trust of the
+// recipient is unchanged, and the request's state is unchanged.
+func TestGetOrCreateDMChannelGated_SenderReopenDoesNotAcceptOwnRequest(t *testing.T) {
+	for _, preState := range []string{"pending", "ignored", "deleted"} {
+		t.Run(preState, func(t *testing.T) {
+			database := contentionOpenMigrated(t)
+			ctx := context.Background()
+			alice := contentionSeedUser(t, database, "gated-reopen-alice-"+preState)
+			bob := contentionSeedUser(t, database, "gated-reopen-bob-"+preState)
+
+			ch, _, _, _, err := database.GetOrCreateDMChannelGated(ctx, alice, bob)
+			if err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			msgID, err := database.CreateMessage(ctx, ch.ID, alice, "hi", nil)
+			if err != nil {
+				t.Fatalf("CreateMessage: %v", err)
+			}
+			if _, err := database.CreateMessageRequest(ctx, alice, bob, ch.ID, msgID); err != nil {
+				t.Fatalf("CreateMessageRequest: %v", err)
+			}
+			req, err := database.GetMessageRequestByPair(ctx, alice, bob)
+			if err != nil {
+				t.Fatalf("GetMessageRequestByPair: %v", err)
+			}
+			if preState != "pending" {
+				if _, err := database.TransitionMessageRequest(ctx, req.ID, bob, preState); err != nil {
+					t.Fatalf("Transition: %v", err)
+				}
+			}
+
+			// CreateMessageRequest already wrote alice's reply-trust of bob
+			// ("sent_first"); snapshot it so the reopen is shown to change nothing.
+			aliceTrustsBobBefore, err := database.IsTrustedSender(ctx, alice, bob)
+			if err != nil {
+				t.Fatalf("IsTrustedSender: %v", err)
+			}
+
+			// Alice, the original sender, reopens the conversation.
+			ch2, created, _, accepted, err := database.GetOrCreateDMChannelGated(ctx, alice, bob)
+			if err != nil {
+				t.Fatalf("GetOrCreateDMChannelGated: %v", err)
+			}
+			if created || ch2.ID != ch.ID {
+				t.Fatalf("created=%v channel=%d, want existing channel %d", created, ch2.ID, ch.ID)
+			}
+			if accepted != nil {
+				t.Errorf("accepted = %+v, want nil", accepted)
+			}
+			if ok, _ := database.IsTrustedSender(ctx, bob, alice); ok {
+				t.Error("bob trusts alice after alice reopened, want no trust written")
+			}
+			if ok, _ := database.IsTrustedSender(ctx, alice, bob); ok != aliceTrustsBobBefore {
+				t.Errorf("alice trusts bob = %v after reopen, want unchanged %v", ok, aliceTrustsBobBefore)
+			}
+			got, err := database.GetMessageRequestByPair(ctx, alice, bob)
+			if err != nil {
+				t.Fatalf("GetMessageRequestByPair: %v", err)
+			}
+			if got.State != preState {
+				t.Errorf("request state = %q, want unchanged %q", got.State, preState)
+			}
+		})
+	}
+}
+
 // TestGetOrCreateDMChannelGated_OpenDoesNotAcceptBlockedOrAbsentRequest: the
 // open-time acceptance covers only pending, ignored and deleted requests. A
 // blocked request stays blocked with no trust written, and opening a DM with
