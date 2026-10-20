@@ -662,7 +662,9 @@ func postApplyProto(t *testing.T, srv *httptest.Server, token string) (int, int,
 		t.Fatalf("NewRequest: %v", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := srv.Client().Do(req)
+	client := srv.Client()
+	defer client.CloseIdleConnections()
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
