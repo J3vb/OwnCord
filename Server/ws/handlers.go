@@ -106,6 +106,16 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 	if exempt {
 		dispatchCtx = c.ctx
 	}
+	// A frame whose deadline was spent before dispatch (a slow session recheck)
+	// is refused without running its handler, which would only fail on the
+	// expired context. voice_leave is the exception: it must still release the
+	// user's voice slot.
+	if !exempt && env.Type != MsgTypeVoiceLeave && commandDeadlineExceeded(fctx, errDeadlineSpent) {
+		slog.Warn("ws command deadline exceeded",
+			"user_id", c.userID, "msg_type", msgType, "req_id", reqID, "stage", "before_dispatch")
+		c.sendMsg(buildErrorMsgWithID(ErrCodeRequestTimeout, "the server is busy, try again", env.ID))
+		return
+	}
 	result, dispatched := h.registry.DispatchV2(dispatchCtx, cmd, info)
 	if !dispatched {
 		// A registered constructor with no V2 handler is a wiring bug — the
@@ -129,7 +139,11 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 // handleMessageError answers a failed command: REQUEST_TIMEOUT when the
 // per-frame deadline fctx cut it short, otherwise the handler's own error.
 func (h *Hub) handleMessageError(fctx context.Context, c *Client, env envelope, msgType, reqID string, result Result, exempt bool) {
-	if !exempt && commandDeadlineExceeded(fctx, result.Error) {
+	// A client voice_leave (including one refused by its rate limit) still
+	// releases the user's slot, so a spent deadline never turns it into a
+	// timeout that drops the leave.
+	clientLeave := result.LeaveVoice && result.LeaveVoiceReason == voiceLeaveReasonClient
+	if !exempt && !clientLeave && commandDeadlineExceeded(fctx, result.Error) {
 		// REQUEST_TIMEOUT means "not applied": a transaction whose context
 		// ends before Commit rolls back, and post-commit work is detached.
 		slog.Warn("ws command deadline exceeded",

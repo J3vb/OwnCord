@@ -237,7 +237,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Messages & files**
 
-- A message command that waits on a stalled database for more than 10 seconds now fails with "The server is busy — retry in a moment" and a Retry button, instead of holding the connection until it drops. Nothing was sent when this appears, so Retry never double-posts. Voice moderation and slash commands are not affected.
+- A command that waits on a stalled database for more than 10 seconds now fails with "The server is busy — retry in a moment" (a Retry button on a message) instead of waiting indefinitely. Nothing was applied when this appears, so Retry never double-posts. Voice moderation and slash commands are not affected.
 
 **Desktop UI**
 

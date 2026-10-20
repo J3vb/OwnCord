@@ -12,6 +12,7 @@ import {
 } from "../features/content-consent/nsfw";
 import { setNsfwAcknowledged } from "../stores/channels.store";
 import { connectText } from "../i18n/connect";
+import { messagingText } from "../i18n/messaging";
 import type {
   AuthResponse,
   AdminUser,
@@ -232,6 +233,9 @@ export function serverErrorCopy(code: string, message: string): string | null {
       return PERMISSION_REFUSAL.test(message) ? connectText("error.forbidden") : null;
     case "NOT_FOUND":
       return connectText("error.notFound");
+    // The server's per-frame deadline (WP 4.1b); nothing was applied.
+    case "REQUEST_TIMEOUT":
+      return messagingText("send.requestTimeout");
     case "BANNED":
       return connectText("error.banned");
     case "SERVICE_UNAVAILABLE":

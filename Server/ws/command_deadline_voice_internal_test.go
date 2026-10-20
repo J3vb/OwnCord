@@ -156,3 +156,44 @@ func TestHandleMessage_DeadlineDoesNotEvictFromVoice(t *testing.T) {
 		t.Errorf("voice channel after timed-out refresh = %d, want %d (still joined)", got, chID)
 	}
 }
+
+// A frame whose deadline was spent before dispatch is refused without running
+// its handler, but a client voice_leave still releases the slot, including one
+// the rate limiter refused.
+func TestHandleMessage_SpentDeadlineStillHonoursVoiceLeave(t *testing.T) {
+	h, _, c, chID := newVoiceTraceHub(t, "dl-leave")
+	joinVoiceForTrace(t, h, c, chID)
+	drainFrames(c)
+
+	called := false
+	h.ReplaceHandlerForTest("ping", func(context.Context) Result { called = true; return Result{} })
+	SetCommandDeadlineForTest(t, time.Nanosecond)
+	time.Sleep(time.Millisecond)
+
+	h.handleMessage(c, voiceFrame(t, "ping", "req-ping", map[string]any{}))
+	if called {
+		t.Error("a bound handler ran after its frame deadline was already spent")
+	}
+	var code any
+	for _, f := range drainFrames(c) {
+		if f["type"] == "error" {
+			p, _ := f["payload"].(map[string]any)
+			code = p["code"]
+		}
+	}
+	if code != ErrCodeRequestTimeout {
+		t.Errorf("spent-deadline error code = %v, want %s", code, ErrCodeRequestTimeout)
+	}
+
+	h.ReplaceHandlerForTest("voice_leave", func(context.Context) Result {
+		return Result{
+			Error:            ClientError{Code: ErrCodeRateLimited, Message: "too many voice leave attempts"},
+			LeaveVoice:       true,
+			LeaveVoiceReason: voiceLeaveReasonClient,
+		}
+	})
+	h.handleMessage(c, voiceFrame(t, "voice_leave", "req-leave", map[string]any{}))
+	if got := c.getVoiceChID(); got != 0 {
+		t.Errorf("voice channel after a spent-deadline voice_leave = %d, want 0 (left)", got)
+	}
+}

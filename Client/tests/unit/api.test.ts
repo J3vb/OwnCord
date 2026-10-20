@@ -24,6 +24,7 @@ import {
   ApiClientError,
   TransportError,
   errorText,
+  serverErrorText,
   type OnUnauthorized,
 } from "../../src/lib/api";
 import { expectConsole } from "../helpers/console";
@@ -1597,6 +1598,12 @@ describe("errorText (B9-20, Q7)", () => {
     const err = new ApiClientError(429, "RATE_LIMITED", "rate limit exceeded");
     expect(errorText(err, "Failed to change password.")).toBe(
       "Too many requests. Try again later.",
+    );
+  });
+
+  it("shows catalog text for a REQUEST_TIMEOUT, not the server's English (WP 4.1b)", () => {
+    expect(serverErrorText("REQUEST_TIMEOUT", "the server is busy, try again", "Fallback")).toBe(
+      "The server is busy — retry in a moment",
     );
   });
 

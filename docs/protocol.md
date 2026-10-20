@@ -2690,11 +2690,22 @@ is safe: `chat_send` dedupes on `client_message_id`, an edit is idempotent, a
 delete answers `ALREADY_DELETED`, a reaction answers `CONFLICT` and `mark_read`
 is idempotent. `voice_mod_mute`, `voice_mod_deafen`, `voice_mod_move`,
 `voice_mod_kick` and `chat_command` are exempt: they pair a database write with
-a LiveKit call or a plugin budget of their own. `channel_focus`, `mark_read` and `typing_start` answer nothing on a timeout: they
-already swallow every error that is not a refusal, so the client sees no frame
-and keeps its state. A `voice_token_refresh` that times out answers
-`REQUEST_TIMEOUT` and leaves the user in voice; only a real refusal evicts. A client that predates the code
-treats it as an unknown error string.
+a LiveKit call or a plugin budget of their own. The retry answers differ by
+command: a retried `reaction_add` answers `CONFLICT` and a retried
+`reaction_remove` answers `BAD_REQUEST`. A timed-out send in a slow-mode channel,
+or a timed-out `voice_token_refresh`, has already spent its rate budget, so the
+retry may answer `SLOW_MODE` or `RATE_LIMITED` until the window passes.
+`channel_focus`, `mark_read` and `typing_start` usually answer nothing on a
+timeout, because they swallow every error that is not a refusal; a timed-out
+access check in `channel_focus` or `mark_read` is read as a refusal and answers
+`REQUEST_TIMEOUT`. A `voice_token_refresh` that times out answers
+`REQUEST_TIMEOUT` and leaves the user in voice; only a real refusal evicts, and
+a client `voice_leave` always releases the user's slot. One exception to the
+bound: `chat_delete` flushes the message's pending mention counts on a detached
+context before it deletes, so that step is not limited by the deadline. The
+deadline bounds each command, not each connection: commands queued behind a
+stalled writer each wait their own deadline in turn. A client that predates the
+code treats it as an unknown error string.
 
 ---
 

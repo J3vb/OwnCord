@@ -122,7 +122,16 @@ func TestHandleMessage_DeadlineSendsRequestTimeout(t *testing.T) {
 
 	release := pinWriter(t, database)
 	cmid := deadlineClientMessageID()
-	hub.HandleMessageForTest(c, deadlineChatSend(chID, "stalled", cmid, "req-stalled"))
+	handled := make(chan struct{})
+	go func() {
+		defer close(handled)
+		hub.HandleMessageForTest(c, deadlineChatSend(chID, "stalled", cmid, "req-stalled"))
+	}()
+	select {
+	case <-handled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handleMessage did not return within 2s of a 50ms deadline: the frame deadline is not bounding the stalled writer")
+	}
 
 	errFrame := nextFrameOfType(send, "error", time.Second)
 	if errFrame == nil {
@@ -267,5 +276,56 @@ func TestHandleMessage_ExemptTypesHaveNoDeadline(t *testing.T) {
 		if gotDeadline != wantDeadline {
 			t.Errorf("%s: ctx has deadline = %v, want %v", typ, gotDeadline, wantDeadline)
 		}
+	}
+}
+
+// editThenStallStore sleeps past the deadline right after an edit commits.
+type editThenStallStore struct {
+	service.Store
+	stall time.Duration
+}
+
+func (s editThenStallStore) EditMessage(ctx context.Context, id, userID int64, content string) (*db.Message, error) {
+	msg, err := s.Store.EditMessage(ctx, id, userID, content)
+	time.Sleep(s.stall)
+	return msg, err
+}
+
+// A deadline that expires after an edit commits must not wipe the edited
+// message's mentions: they are resolved after the commit, so they run detached.
+func TestHandleMessage_EditDeadlineAfterCommitKeepsMentions(t *testing.T) {
+	ws.SetCommandDeadlineForTest(t, 50*time.Millisecond)
+	database := openFileDeadlineDB(t)
+	limiter := auth.NewRateLimiter()
+	st := editThenStallStore{Store: database, stall: 150 * time.Millisecond}
+	hub := newTestHubDeps(t, database, limiter, service.New(st, limiter))
+	go hub.Run()
+	t.Cleanup(hub.Stop)
+
+	author := seedOwnerUser(t, database, "edit-dl-author")
+	target := seedMemberUser(t, database, "edit-dl-bob")
+	chID := seedTestChannel(t, database, "edit-dl-chan")
+	msgID := seedMessage(t, database, chID, author.ID, "before")
+	send := make(chan []byte, 32)
+	c := ws.NewTestClientWithUser(hub, author, chID, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	hub.HandleMessageForTest(c, chatEditMsg(msgID, "hello @edit-dl-bob"))
+
+	edited := nextFrameOfType(send, "chat_edited", time.Second)
+	if edited == nil {
+		t.Fatal("expected chat_edited after a post-commit deadline, got none")
+	}
+	payload, _ := edited["payload"].(map[string]any)
+	mentions, _ := payload["mentions"].([]any)
+	if len(mentions) != 1 || int64(mentions[0].(float64)) != target.ID {
+		t.Errorf("broadcast mentions = %v, want [%d]", mentions, target.ID)
+	}
+	var stored int
+	row := database.QueryRowContext(context.Background(),
+		"SELECT COUNT(*) FROM message_mentions WHERE message_id = ? AND mentioned_user_id = ?", msgID, target.ID)
+	if err := row.Scan(&stored); err != nil || stored != 1 {
+		t.Errorf("stored mention rows = %d (err %v), want 1", stored, err)
 	}
 }

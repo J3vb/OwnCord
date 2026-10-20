@@ -51,3 +51,7 @@ func isCommandDeadlineExempt(msgType string) bool {
 func commandDeadlineExceeded(fctx context.Context, resultErr error) bool {
 	return resultErr != nil && errors.Is(fctx.Err(), context.DeadlineExceeded)
 }
+
+// errDeadlineSpent stands in for a handler error when only the frame's own
+// expiry is being asked about, before any handler has run.
+var errDeadlineSpent = errors.New("frame deadline spent before dispatch")
