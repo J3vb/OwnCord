@@ -10,6 +10,7 @@ import { buildOffsets, rangeFor } from "@lib/virtualRange";
 import { registerSessionReset } from "@lib/sessionRegistry";
 import type { MountableComponent } from "@lib/safe-render";
 import { Disposable } from "@lib/disposable";
+import { resolveDisplayName } from "@lib/avatar";
 import {
   membersStore,
   memberDisplayName,
@@ -22,6 +23,7 @@ import { channelsStore, type ChannelsState } from "@stores/channels.store";
 import { voiceStore, type VoiceUser } from "@stores/voice.store";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import { withMemberMenu } from "./member-menu-loader";
+import { createAvatarElement, pickAvatarColor } from "./message-list/avatar";
 import { assignableRoleNames, outranksPosition } from "../features/moderation/roleAssignment";
 import { memberTimeoutsStore } from "../features/moderation/store";
 import { canMention, mentionInComposer } from "../features/messaging/activeComposer";
@@ -34,7 +36,7 @@ import {
   drawMemberItem,
   patchMemberItem,
   type MemberItemModel,
-} from "./member-list/memberRow.view";
+} from "../features/members/memberRow.view";
 import { shellText } from "../i18n/shell";
 import {
   buildModel,
@@ -260,8 +262,8 @@ function itemModel(item: ListItem): MemberItemModel {
     kind: "row",
     id: member.id,
     name: memberDisplayName(member),
-    avatarUser: member.username,
-    avatarDisplayName: member.displayName ?? null,
+    avatarName: resolveDisplayName({ username: member.username, displayName: member.displayName }),
+    avatarColor: pickAvatarColor(member.username),
     avatarUrl: member.avatar,
     customStatus: typeof custom === "string" && custom.length > 0 ? custom : null,
     colorVar: item.colorVar,
@@ -671,7 +673,7 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
       // status or role colour changing does this).
       patch: { fields: MEMBER_PATCH_FIELDS, apply: patchMemberItem },
       create: (drawn, atEvent) => {
-        const el = drawMemberItem(drawn);
+        const el = drawMemberItem(drawn, createAvatarElement);
         if (drawn.kind === "row") {
           const owner = new Disposable();
           createMemberItem(el, atEvent, opts, hooks, owner.signal);

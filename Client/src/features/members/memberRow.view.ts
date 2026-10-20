@@ -8,21 +8,24 @@
  * `MemberList.ts` resolves the store values into the model.
  */
 
-import { createElement, appendChildren, setText } from "@lib/dom";
-import { readableRoleColor } from "@lib/themes";
-import type { UserStatus } from "@lib/types";
+import { createElement, appendChildren, setText } from "../../lib/dom";
+import { readableRoleColor } from "../../lib/themes";
+import type { UserStatus } from "../../lib/types";
 import { statusLabel } from "../../i18n/shell";
-import { createAvatarElement, pickAvatarColor } from "../message-list/avatar";
+import type { createAvatarElement } from "../../components/message-list/avatar";
+
+/** The avatar drawer, injected: a feature reaches the UI layer only lazily. */
+export type CreateAvatar = typeof createAvatarElement;
 
 export type MemberRowModel = {
   readonly kind: "row";
   readonly id: number;
   /** The name shown: the display name, else the username. */
   readonly name: string;
-  /** Username: the avatar's colour. */
-  readonly avatarUser: string;
-  /** Nickname as the avatar sees it: its initial and alt text. */
-  readonly avatarDisplayName: string | null;
+  /** The name the avatar shows: its initial and alt text. */
+  readonly avatarName: string;
+  /** The letter avatar's background, from the username. */
+  readonly avatarColor: string;
   readonly avatarUrl: string | null;
   /** The line under the name; null when there is none. */
   readonly customStatus: string | null;
@@ -62,7 +65,7 @@ export function statusColor(status: UserStatus): string {
   }
 }
 
-function drawRow(model: MemberRowModel): HTMLDivElement {
+function drawRow(model: MemberRowModel, createAvatar: CreateAvatar): HTMLDivElement {
   const item = createElement("div", {
     class: model.away ? "member-item offline" : "member-item",
     "data-testid": `member-${model.id}`,
@@ -74,11 +77,11 @@ function drawRow(model: MemberRowModel): HTMLDivElement {
   const statusId = `mi-status-${model.id}`;
   const customId = `mi-custom-status-${model.id}`;
 
-  const avatar = createAvatarElement(
-    { username: model.avatarUser, displayName: model.avatarDisplayName, avatar: model.avatarUrl },
+  const avatar = createAvatar(
+    { username: model.avatarName, avatar: model.avatarUrl },
     {
       className: "mi-avatar",
-      background: pickAvatarColor(model.avatarUser),
+      background: model.avatarColor,
       deferUntilVisible: true,
     },
   );
@@ -121,10 +124,10 @@ function drawRow(model: MemberRowModel): HTMLDivElement {
 }
 
 /** Draw a member-list child from its model. A row comes back without handlers. */
-export function drawMemberItem(model: MemberItemModel): HTMLElement {
+export function drawMemberItem(model: MemberItemModel, createAvatar: CreateAvatar): HTMLElement {
   switch (model.kind) {
     case "row":
-      return drawRow(model);
+      return drawRow(model, createAvatar);
     case "header":
       return createElement(
         "div",

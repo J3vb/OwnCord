@@ -31,11 +31,14 @@ import {
   statusColor,
   type MemberEmptyModel,
   type MemberHeaderModel,
+  type MemberItemModel,
   type MemberRowModel,
-} from "../../src/components/member-list/memberRow.view";
-import { pickAvatarColor } from "../../src/components/message-list/avatar";
+} from "../../src/features/members/memberRow.view";
+import { createAvatarElement } from "../../src/components/message-list/avatar";
 import { assertEveryFieldDraws } from "../helpers/rowModelProperty";
 import type { UserStatus } from "../../src/lib/types";
+
+const draw = (model: MemberItemModel): HTMLElement => drawMemberItem(model, createAvatarElement);
 
 const STATUSES: readonly UserStatus[] = ["online", "idle", "dnd", "invisible", "offline"];
 
@@ -50,29 +53,16 @@ const rowModel: fc.Arbitrary<MemberRowModel> = fc
   .record({
     id: fc.integer({ min: 1, max: 100000 }),
     name: text,
-    avatarUser: text,
-    avatarDisplayName: fc.option(text, { nil: null }),
-    avatarUrl: fc.option(
-      text.map((t) => `/api/v1/files/${t}`),
-      { nil: null },
-    ),
+    avatarName: text,
+    avatarColor: fc.constantFrom("#5865f2", "#3ba55c", "#faa61a"),
     customStatus: fc.option(text, { nil: null }),
     colorVar: fc.constantFrom("var(--green)", "#ff0000", "#3366cc", "var(--text-micro)"),
     status: fc.constantFrom(...STATUSES),
     away: fc.boolean(),
   })
-  // With a picture loaded the letter and its colour are gone and the alt text
-  // is the display name, so the username is drawn only through the alt fallback.
-  .map((r) => ({
-    kind: "row" as const,
-    ...r,
-    avatarUrl: r.avatarDisplayName === null ? r.avatarUrl : null,
-  }));
-
-function otherLetter(model: MemberRowModel): string {
-  const shown = (model.avatarDisplayName ?? model.avatarUser).charAt(0).toUpperCase();
-  return shown === "Q" ? "R" : "Q";
-}
+  // A loaded picture hides the letter and its colour, so the base has none
+  // and the mutation of avatarUrl adds one.
+  .map((r) => ({ kind: "row" as const, ...r, avatarUrl: null }));
 
 function mutateRow(model: MemberRowModel, field: string): MemberRowModel {
   switch (field) {
@@ -80,21 +70,10 @@ function mutateRow(model: MemberRowModel, field: string): MemberRowModel {
       return { ...model, id: model.id + 1 };
     case "name":
       return { ...model, name: `${model.name}x` };
-    case "avatarUser": {
-      // Without a nickname the username sets the letter and alt text; with one
-      // it shows only through the letter's colour, so the colour must differ.
-      for (let i = 0; ; i++) {
-        const avatarUser = `${otherLetter(model)}${i}`;
-        const sameColor = pickAvatarColor(avatarUser) === pickAvatarColor(model.avatarUser);
-        if (model.avatarDisplayName === null || !sameColor) return { ...model, avatarUser };
-      }
-    }
-    case "avatarDisplayName":
-      return {
-        ...model,
-        avatarDisplayName:
-          model.avatarDisplayName === null ? otherLetter(model) : `${otherLetter(model)}z`,
-      };
+    case "avatarName":
+      return { ...model, avatarName: model.avatarName.toUpperCase().startsWith("Q") ? "R" : "Q" };
+    case "avatarColor":
+      return { ...model, avatarColor: model.avatarColor === "#123456" ? "#654321" : "#123456" };
     case "avatarUrl":
       return {
         ...model,
@@ -119,7 +98,7 @@ function mutateRow(model: MemberRowModel, field: string): MemberRowModel {
 
 describe("member row view", () => {
   it("every row model field changes the row's DOM", async () => {
-    await assertEveryFieldDraws(rowModel, drawMemberItem, mutateRow, {
+    await assertEveryFieldDraws(rowModel, draw, mutateRow, {
       patch: { fields: ["status", "away"], apply: patchMemberItem },
       bindingOnly: { kind: "discriminant: a different kind is a different model type" },
       settle,
@@ -134,7 +113,7 @@ describe("member row view", () => {
     });
     await assertEveryFieldDraws(
       header,
-      drawMemberItem,
+      draw,
       (m, field) =>
         field === "text" ? { ...m, text: `${m.text}x` } : { ...m, offline: !m.offline },
       {
@@ -149,7 +128,7 @@ describe("member row view", () => {
       kind: fc.constant("empty" as const),
       text,
     });
-    await assertEveryFieldDraws(empty, drawMemberItem, (m) => ({ ...m, text: `${m.text}x` }), {
+    await assertEveryFieldDraws(empty, draw, (m) => ({ ...m, text: `${m.text}x` }), {
       patch: { fields: ["text"], apply: patchMemberItem },
       bindingOnly: { kind: "discriminant" },
     });
