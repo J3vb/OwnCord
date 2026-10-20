@@ -290,7 +290,7 @@ func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.C
 		// over one subject, asked only in affordancesFor. The server remains
 		// the authority; these only pre-disable controls.
 		readyAffordances(role, overrides[visibleChannels[i].ID], &visibleChannels[i], timedOut).spreadInto(entry)
-		if visibleChannels[i].Type == "text" || visibleChannels[i].Type == "announcement" {
+		if carriesChatState(visibleChannels[i].Type) {
 			if u, ok := unreadMap[visibleChannels[i].ID]; ok {
 				entry["unread_count"] = u.UnreadCount
 				entry["last_message_id"] = u.LastMessageID
