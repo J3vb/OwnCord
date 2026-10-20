@@ -3981,6 +3981,26 @@ describe("ChannelSidebar voice rows on models (5.4c-2)", () => {
     voiceStore.flush();
   }
 
+  it("a peer whose status flips to mismatch after mount gets a working badge click", async () => {
+    setChannels(testChannels);
+    addVoiceUser(VOICE_CH, 10, "Alice");
+    setPeerVerif(10, "verified", "AB12 CD34 EF56 7890");
+    sidebar.mount(container);
+    const before = userRow(10)!;
+    expect(before.querySelector(".vu-verify.verified")).not.toBeNull();
+
+    setPeerVerif(10, "mismatch", null);
+    voiceStore.flush();
+
+    const after = userRow(10)!;
+    expect(after).not.toBe(before);
+    expect(after.querySelector(".vu-verify.verified")).toBeNull();
+    (after.querySelector(".vu-verify.mismatch") as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(document.body.querySelector(".modal-overlay")).not.toBeNull();
+    });
+  });
+
   beforeEach(() => {
     resetStores();
     container = document.createElement("div");

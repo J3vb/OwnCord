@@ -695,10 +695,9 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
   function createVoiceRow(channel: Channel, signal: AbortSignal): HTMLDivElement {
     // voiceSel exists from mount() on, before the first render.
     const inputs = voiceSel?.get();
-    const wrapper =
-      inputs === undefined
-        ? createElement("div", {})
-        : drawVoiceChannelChrome(voiceChannelChrome(channel, inputs));
+    // i18n-exempt: developer-facing invariant error, never shown to a user
+    if (inputs === undefined) throw new Error("voice row built before the sidebar mounted");
+    const wrapper = drawVoiceChannelChrome(voiceChannelChrome(channel, inputs));
     if (onVoiceModerate !== undefined) markVoiceDropTarget(wrapper, channel.id);
     wrapper.querySelector(":scope > .channel-item")?.addEventListener(
       "click",

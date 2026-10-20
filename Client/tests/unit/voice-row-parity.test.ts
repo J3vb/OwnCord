@@ -1,19 +1,17 @@
 /**
- * The voice row view draws the DOM the sidebar's renderer draws today (5.4c-1).
+ * The sidebar's voice wrapper is exactly the view's draw of the projected
+ * inputs (5.4c-1, kept by 5.4c-2).
  *
- * 5.4c-2 swaps `renderVoiceChannelItem` for the view and the builders, and the
- * sidebar suite, sidebar.css and the voice e2e specs select on that DOM. So
- * for representative states this mounts today's sidebar, builds the models
- * from the same stores (the projection 5.4c-2 gives its `select`), draws them
- * with the view, and compares the voice wrapper's outerHTML.
+ * 5.4c-1 pinned the view byte for byte against the old renderer. Since 5.4c-2
+ * the sidebar draws with the view, so this no longer compares against an
+ * independent renderer: it checks that the sidebar's projection of the stores
+ * agrees with the models built here, and that the sidebar wiring adds nothing
+ * to the wrapper beyond the drop target and list placement. The view's own DOM
+ * is pinned by the property tests and by the sidebar and e2e selectors.
  *
- * Two normalisations, both of state the renderer does not own:
- *  - the `.channel-item` tabindex is set by the roving navigation after
- *    every render, so the sidebar copy is put back to the drawn "-1";
- *  - with a row both draggable and speaking, the view draws `speaking` last
- *    (5.4c-1: the patch's toggle then equals a fresh draw), where the old
- *    renderer added `voice-user-draggable` after it. Only that case compares
- *    class tokens unordered; every other case compares byte for byte.
+ * One normalisation, of state the view does not own: the `.channel-item`
+ * tabindex is set by the roving navigation after every render, so the sidebar
+ * copy is put back to the drawn "-1".
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -160,13 +158,6 @@ async function settle(): Promise<void> {
 }
 
 /** Sort each element's class tokens, for the one case the order differs by design. */
-function unorderedClasses(el: Element): string {
-  const copy = el.cloneNode(true) as Element;
-  for (const node of [copy, ...copy.querySelectorAll("[class]")]) {
-    node.setAttribute("class", Array.from(node.classList).toSorted().join(" "));
-  }
-  return copy.outerHTML;
-}
 
 describe("voice row view matches today's renderVoiceChannelItem", () => {
   let container: HTMLDivElement;
@@ -205,7 +196,7 @@ describe("voice row view matches today's renderVoiceChannelItem", () => {
     holder.remove();
   });
 
-  async function compare(moderation: boolean, ordered = true): Promise<void> {
+  async function compare(moderation: boolean): Promise<void> {
     sidebar = createChannelSidebar({
       onVoiceJoin: vi.fn(),
       onOpenCall: vi.fn(),
@@ -229,11 +220,7 @@ describe("voice row view matches today's renderVoiceChannelItem", () => {
     const actual = live.cloneNode(true) as HTMLElement;
     actual.querySelector(".channel-item")!.setAttribute("tabindex", "-1");
 
-    if (ordered) {
-      expect(expected.outerHTML).toBe(actual.outerHTML);
-    } else {
-      expect(unorderedClasses(expected)).toBe(unorderedClasses(actual));
-    }
+    expect(expected.outerHTML).toBe(actual.outerHTML);
   }
 
   it("an empty channel", async () => {
@@ -335,9 +322,9 @@ describe("voice row view matches today's renderVoiceChannelItem", () => {
     await compare(true);
   });
 
-  it("a speaking, draggable row (class order differs by design)", async () => {
+  it("a speaking, draggable row", async () => {
     setChannels([voiceChannel({ can_moderate_voice: true })]);
     setVoice([vu(SELF), vu(2, { speaking: true })]);
-    await compare(true, false);
+    await compare(true);
   });
 });
