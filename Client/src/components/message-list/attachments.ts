@@ -32,6 +32,7 @@ import { clearStillCache } from "../../features/messaging/emojiStill";
 import { registerSessionReset } from "@lib/sessionRegistry";
 import { sniffImageBlob } from "@lib/imageHeader";
 import {
+  ATTACHMENT_BOX_MAX_H,
   blobImageSize,
   fitImageBox,
   getImageBox,
@@ -1402,7 +1403,9 @@ function renderAttachmentContent(att: Attachment, gallery?: LightboxGallery): HT
     // An old attachment has none: it takes the box remembered for its URL, or
     // the size its header declares once the bytes arrive, or 200px until then.
     const serverBox =
-      att.width != null && att.height != null ? fitImageBox(att.width, att.height) : null;
+      att.width != null && att.height != null
+        ? fitImageBox(att.width, att.height, ATTACHMENT_BOX_MAX_H)
+        : null;
     const reserve = (box: ImageBox): void => {
       wrap.style.minHeight = "";
       wrap.style.width = `${box.w}px`;
@@ -1440,7 +1443,7 @@ function renderAttachmentContent(att: Attachment, gallery?: LightboxGallery): HT
     // known (a header the sniffer could not read) so a rebuild starts there.
     const clearReservation = (img: HTMLImageElement): void => {
       if (serverBox !== null) return;
-      const actual = fitImageBox(img.naturalWidth, img.naturalHeight);
+      const actual = fitImageBox(img.naturalWidth, img.naturalHeight, ATTACHMENT_BOX_MAX_H);
       const reserved = getImageBox(inlineUrl);
       if (actual !== null) {
         // Decoded and oriented by the browser: the measured box beats a sniffed one.
@@ -1505,7 +1508,10 @@ function renderAttachmentContent(att: Attachment, gallery?: LightboxGallery): HT
         void fetchImageAsObjectUrl(inlineUrl, { sniff: serverBox === null }).then((objectUrl) => {
           if (objectUrl !== null) {
             const sniffed = serverBox === null ? blobImageSize(objectUrl) : undefined;
-            const exact = sniffed === undefined ? null : fitImageBox(sniffed.width, sniffed.height);
+            const exact =
+              sniffed === undefined
+                ? null
+                : fitImageBox(sniffed.width, sniffed.height, ATTACHMENT_BOX_MAX_H);
             if (exact !== null) {
               // A measured box from an earlier load wins over the header's reading.
               const held = setImageBox(inlineUrl, exact, generation);

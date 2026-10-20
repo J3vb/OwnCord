@@ -47,13 +47,21 @@ function withinCeiling(w: number, h: number): boolean {
   );
 }
 
+/** A server attachment's picture is capped at 300 px tall (`.msg-image img`
+ *  in messages.css), under the 350 px an inline URL image may reach. */
+export const ATTACHMENT_BOX_MAX_H = 300;
+
 /** Scale an intrinsic size to fit the inline ceiling, keeping the ratio.
  *  Null for a size that is zero, negative or not finite. */
-export function fitImageBox(width: number, height: number): ImageBox | null {
+export function fitImageBox(
+  width: number,
+  height: number,
+  maxHeight: number = BOX_MAX_H,
+): ImageBox | null {
   if (!(width > 0) || !(height > 0) || !Number.isFinite(width) || !Number.isFinite(height)) {
     return null;
   }
-  const scale = Math.min(1, BOX_MAX_W / width, BOX_MAX_H / height);
+  const scale = Math.min(1, BOX_MAX_W / width, maxHeight / height);
   return { w: Math.max(1, Math.round(width * scale)), h: Math.max(1, Math.round(height * scale)) };
 }
 

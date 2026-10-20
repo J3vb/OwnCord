@@ -75,7 +75,13 @@ import {
   resolveServerUrl,
   thumbnailUrl,
 } from "./message-list/attachments";
-import { fitImageBox, knownImageHeight } from "./message-list/image-sizes";
+import {
+  ATTACHMENT_BOX_MAX_H,
+  fitImageBox,
+  getImageBox,
+  knownImageHeight,
+} from "./message-list/image-sizes";
+import { extractUrls, isDirectImageUrl } from "./message-list/media";
 import { FenwickTree } from "./message-list/fenwick";
 import { messagingText } from "../i18n/messaging";
 import {
@@ -237,8 +243,6 @@ const DEFAULT_LIST_WIDTH = 900;
 const ROW_HORIZONTAL_PADDING = 120;
 /** Margin above an inline image or attachment box. */
 const MEDIA_MARGIN = 4;
-/** Global twin of IMAGE_URL_RE: every direct image URL in a message. */
-const IMAGE_URLS_RE = /https?:\/\/\S+?\.(?:png|jpe?g|gif|webp)(?:\?\S*)?(?=\s|$)/gi;
 
 /** Rows of text a message fills at `listWidth`: each source line wraps at the
  *  characters that fit; an empty line still takes one. */
@@ -256,7 +260,7 @@ function estimateTextLines(content: string, listWidth: number): number {
  *  else the size remembered for its URL; undefined when neither exists. */
 function knownAttachmentHeight(att: Message["attachments"][number]): number | undefined {
   if (att.width != null && att.height != null) {
-    const box = fitImageBox(att.width, att.height);
+    const box = fitImageBox(att.width, att.height, ATTACHMENT_BOX_MAX_H);
     if (box !== null) return box.h;
   }
   return knownImageHeight(thumbnailUrl(resolveServerUrl(att.url), att.mime));
@@ -309,12 +313,14 @@ export function estimateItemHeight(
 
   // Inline image URLs in content: the box measured for each URL, else 220.
   if (IMAGE_URL_RE.test(content)) {
-    // One embed per distinct URL, as renderUrlEmbeds draws them.
-    const urls = new Set(content.match(IMAGE_URLS_RE) ?? []);
-    if (urls.size === 0) height += 220;
-    for (const url of urls) {
-      const known = knownImageHeight(url);
-      height += known === undefined ? 220 : known + MEDIA_MARGIN;
+    // The URLs renderUrlEmbeds draws (none inside code, masked links,
+    // spoilers or angle brackets), one embed per distinct URL.
+    const rowWidth = Math.max(listWidth - ROW_HORIZONTAL_PADDING, 1);
+    for (const url of new Set(extractUrls(content).filter(isDirectImageUrl))) {
+      const box = getImageBox(url);
+      // The box shrinks with the row (max-width 100%), keeping its ratio.
+      height +=
+        box === undefined ? 220 : Math.round(box.h * Math.min(1, rowWidth / box.w)) + MEDIA_MARGIN;
     }
   }
 

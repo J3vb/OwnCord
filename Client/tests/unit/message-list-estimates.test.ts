@@ -88,6 +88,31 @@ describe("estimateItemHeight", () => {
     expect(estimateItemHeight(item("https://img.test/cat.png"))).toBe(61 + 267 + 4);
   });
 
+  it("ignores image URLs the renderer does not embed", () => {
+    expect(estimateItemHeight(item("```\nhttps://img.test/a.png\n```"))).toBe(
+      61 + 2 * LINE, // three source lines of text, no image box
+    );
+    expect(estimateItemHeight(item("`https://img.test/a.png`"))).toBe(61);
+    expect(estimateItemHeight(item("[pic](https://img.test/a.png)"))).toBe(61);
+    expect(estimateItemHeight(item("<https://img.test/a.png>"))).toBe(61);
+    expect(estimateItemHeight(item("||https://img.test/a.png||"))).toBe(61);
+  });
+
+  it("shrinks a cached inline box to a narrow row, keeping its ratio", () => {
+    setImageBox("https://img.test/wide.png", { w: 400, h: 200 });
+    // 300 px list: 180 px of row after padding, so 0.45 of the box.
+    expect(estimateItemHeight(item("https://img.test/wide.png"), 300)).toBe(
+      61 + LINE + 90 + 4, // the 25-character URL wraps to two lines at 24 a line
+    );
+    // A wide row never enlarges it.
+    expect(estimateItemHeight(item("https://img.test/wide.png"), 2000)).toBe(61 + 200 + 4);
+  });
+
+  it("caps a server attachment's box at 300 px tall", () => {
+    const tall = attachment({ width: 1000, height: 1000 });
+    expect(estimateItemHeight(item("", { attachments: [tall] }))).toBe(61 + 300 + 4);
+  });
+
   it("sums one box per image URL in the message", () => {
     setImageBox("https://img.test/a.png", { w: 400, h: 100 });
     expect(estimateItemHeight(item("https://img.test/a.png\nhttps://img.test/b.gif"))).toBe(
