@@ -81,6 +81,8 @@ import { setScreenSourcePicker } from "../features/voice/native/screenPickerSlot
 import { createQuickSwitcherManager } from "./main-page/OverlayManagers";
 import { attachGlobalKeybinds } from "./main-page/GlobalKeybinds";
 import { createVoiceWidgetCallbacks } from "./main-page/VoiceCallbacks";
+import { setChatHeaderCallChat } from "./main-page/ChatHeader";
+import { createCallChat, type CallChat } from "./main-page/callChat";
 import { createMessageController } from "./main-page/MessageController";
 import type { MessageController } from "./main-page/MessageController";
 import { createReactionController } from "./main-page/ReactionController";
@@ -314,6 +316,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   let msgCtrl: MessageController | null = null;
   let reactionCtrl: ReactionController | null = null;
   let videoModeCtrl: VideoModeController | null = null;
+  let callChat: CallChat | null = null;
   let channelCtrl: ChannelController | null = null;
   /** Inactivity watcher that flips the status to idle after ten quiet
    *  minutes. Started once the socket is up, torn down with the page. */
@@ -963,7 +966,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         videoModeCtrl.setFocus(userId);
         videoGrid?.watch(userId);
       },
-      onOpenCall: () => videoModeCtrl?.openCall(),
+      onOpenCall: () => callChat?.openVoiceCall(),
       destinations: NAVIGATION_DESTINATIONS,
       onOpenView: (id, opener) => contentNav?.open(id, opener),
       // The member list's profile popup Call action opens the DM then starts
@@ -1024,7 +1027,16 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       getCurrentUserId,
       // The DM call panel hosts the video of its own call (chat stays up).
       panelHost: () => callPanelHost,
+      chatColumn: chatAreaResult.chatArea,
+      onGridChange: () => callChat?.refresh(),
     });
+    // Opening the call view selects the voice channel; its chat sits beside the grid.
+    const callChatBtn = chatAreaResult.chatHeaderRefs.callChatBtn;
+    callChat = createCallChat({
+      videoModeCtrl,
+      onStateChange: (state) => setChatHeaderCallChat(chatAreaResult.chatHeaderRefs, state),
+    });
+    callChatBtn.addEventListener("click", () => callChat?.toggleChat());
 
     // The composer of the channel on screen, else the header's menu button
     // (shown only at narrow width, where the closed sidebar is inert), else
@@ -1301,8 +1313,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     const qsManager = createQuickSwitcherManager(
       () => root,
       () => uiStore.getState().settingsOpen,
-      // A voice row in the switcher joins voice (matching the sidebar row)
-      // instead of mounting chat for an unjoined voice channel (F8).
+      // A voice row in the switcher joins voice (matching the sidebar row): a
+      // pick joins, as a click on the row does. The call view's own chat
+      // reaches the voice channel through navigateToChannel (callChat).
       (channelId: number) => createSidebarVoiceCallbacks(ws).onVoiceJoin(channelId),
       () => sidebar.rememberChannel(),
       () => sidebar.forgetChannel(),
@@ -2133,6 +2146,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         reactionCtrl?.destroy();
         reactionCtrl = null;
         msgCtrl = null;
+      });
+      step("callChat", () => {
+        callChat?.destroy();
+        callChat = null;
       });
       step("videoModeCtrl", () => {
         videoModeCtrl?.destroy();

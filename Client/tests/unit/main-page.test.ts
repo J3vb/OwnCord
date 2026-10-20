@@ -319,6 +319,7 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
         callBtn: document.createElement("button"),
         profileBtn,
         memberListBtn: document.createElement("button"),
+        callChatBtn: document.createElement("button"),
         sidebarToggle: document.createElement("button"),
       },
       sidebarToggle: document.createElement("button"),
@@ -595,6 +596,42 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     channelsStore.flush();
 
     expect(capturedChatAreaRef.current!.slots.messagesSlot.style.display).toBe("");
+  });
+
+  it("opening the call view of a voice channel selects it and keeps its chat beside the grid (WP 6.1b)", () => {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(1, textChannel(1, "general"));
+      ch.set(9, { ...textChannel(9, "lounge", 1), type: "voice" as const });
+      return { ...prev, channels: ch, activeChannelId: 1 };
+    });
+
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 9,
+      voiceUsers: new Map([[9, new Map()]]),
+    }));
+    voiceStore.flush();
+    (mockCreateSidebarArea.mock.calls.at(-1)![0] as { onOpenCall: () => void }).onOpenCall();
+
+    const { chatArea, slots } = capturedChatAreaRef.current!;
+    expect(channelsStore.getState().activeChannelId).toBe(9);
+    expect(slots.videoGridSlot.style.display).toBe("block");
+    expect(slots.messagesSlot.style.display).toBe("");
+    expect(slots.inputSlot.style.display).toBe("");
+    expect(chatArea.classList.contains("chat-area--call-chat")).toBe(true);
+
+    // Leaving the call closes the grid; the voice chat stays, full width.
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: null, voiceUsers: new Map() }));
+    voiceStore.flush();
+    channelsStore.flush();
+    expect(channelsStore.getState().activeChannelId).toBe(9);
+    expect(slots.videoGridSlot.style.display).toBe("none");
+    expect(slots.messagesSlot.style.display).toBe("");
+    expect(chatArea.classList.contains("chat-area--call-chat")).toBe(false);
   });
 
   it("does not clear a just-added remote video tile when a voice-channel switch left the camera/screenshare signature unchanged (OC-0207)", () => {

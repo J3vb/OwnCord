@@ -4473,6 +4473,47 @@ describe("WS Dispatcher", () => {
     }
   });
 
+  it("rolls back the optimistic presence status on a REQUEST_TIMEOUT refusal (WP 4.1b)", () => {
+    const presenceSender = createPresenceSender(mock.ws, createPresenceLimiter());
+    setActivePresenceSender(presenceSender);
+    try {
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: 1, username: "alice", avatar: null, role: "member" },
+      }));
+      membersStore.setState((prev) => ({
+        ...prev,
+        members: new Map([
+          [
+            1,
+            {
+              id: 1,
+              username: "alice",
+              avatar: null,
+              role: "member",
+              status: "online",
+              customStatus: "old text",
+            } as never,
+          ],
+        ]),
+      }));
+      saveCustomStatus("old text");
+      saveCustomStatus("new text");
+      presenceSender.send("dnd", "new text");
+      const id = (mock.ws.send as ReturnType<typeof vi.fn>).mock.results.at(-1)!.value as string;
+
+      mock.dispatch("error", { code: "REQUEST_TIMEOUT", message: "the server is busy" }, id);
+      expectConsole("error", /\[dispatcher\] Server error/);
+
+      expect(membersStore.getState().members.get(1)?.status).toBe("online");
+      expect(membersStore.getState().members.get(1)?.customStatus).toBe("old text");
+      expect(loadCustomStatus()).toBe("old text");
+    } finally {
+      setActivePresenceSender(null);
+      presenceSender.destroy();
+    }
+  });
+
   // WP 3C-9: a custom status the server's character or length rules refuse
   // comes back BAD_REQUEST; the optimistic value must not stay on screen, and
   // the toast carries the server's own text.

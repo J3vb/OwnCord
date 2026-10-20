@@ -372,7 +372,13 @@ export function wireDispatcher(
       // A BAD_REQUEST (a custom status the server's character or length rules
       // refuse, WP 3C-9) leaves the same unaccepted optimistic value behind, so
       // it takes the same rollback; the toast below carries the server's text.
-      if (payload.code === "TIMED_OUT" || payload.code === "BAD_REQUEST") {
+      // A REQUEST_TIMEOUT (the server's per-frame deadline, WP 4.1b) means the
+      // frame was not applied, which leaves the same unaccepted value behind.
+      if (
+        payload.code === "TIMED_OUT" ||
+        payload.code === "BAD_REQUEST" ||
+        payload.code === "REQUEST_TIMEOUT"
+      ) {
         getActivePresenceSender()?.rollbackRefused(id);
       }
       // Never consumes the frame: the refused send/reaction/join still rolls back below.

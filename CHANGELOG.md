@@ -52,6 +52,7 @@ and only when it changes something a contributor or fork holder must do
 **Accounts & admin**
 
 - A server can now name one voice channel as its AFK channel (`PUT /admin/api/afk-channel`, Manage Server) and set how long a member must be idle first (the `afk_timeout_seconds` setting: 1, 5, 15, 30 or 60 minutes, 5 by default). Nobody is moved yet and the admin panel has no card for it; this release only adds the setting, the channel flag everyone's client receives, and the rule that the AFK channel is listen-only, with no microphone, camera or screen sharing.
+- The server can now keep a private note about any member and sync it between your devices. A note is yours alone: nobody else, including admins and moderators, can read it through OwnCord, and it is capped at 256 characters. The notes are stored in the server database, not end-to-end encrypted, so the server operator can read them there, as with direct messages. Deleting an account removes the notes that account kept and the notes others kept about it. Clients start using this in a later release; until then the notes you keep in the DM side panel stay on your device.
 
 **Messages & files**
 
@@ -59,6 +60,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Desktop UI**
 
+- Opening a voice call now opens the voice channel's text chat beside the video grid (stacked under it in a narrow window); leaving the call keeps the chat, and moving to another voice channel follows to its chat. A **Hide chat** / **Show chat** button in the header (shown during a call on that channel) keeps the grid full width, and a voice channel now shows a speaker in its header instead of `#`.
 - Images and videos can now be sent as spoilers. A **Mark as spoiler** button on each pending attachment renames the file to `SPOILER_<name>` and uploads it again (press it again to undo), and a file you already named `SPOILER_...` shows as marked. In the chat a spoiler image or video, alone or inside an image grid, is blurred under a **Spoiler** cover that opens with a click, Enter or Space; until then it cannot be opened in the viewer, saved or copied, and it stays out of the viewer's previous/next sequence. It is covered again whenever the message is redrawn.
 - The member list now sits on the right; Appearance > Member list position puts it back under the channels.
 - A group DM now has a member list on the right (a **Show Member List** button in the header toggles it) showing everyone with a crown on the owner. Anyone can add people with **Add People** while the group has fewer than 10, and the owner can **Remove From Group** or **Make Group Owner** from a member's right-click or ⋯ menu, each after a confirm. Added, removed, left, renamed and icon-changed events show as quiet lines in the chat that make no sound, and the leave confirm now says someone can add you back. These need a server with 3B-10 group DM support; on an older server the list shows but the add and owner actions stay hidden.
@@ -245,6 +247,10 @@ and only when it changes something a contributor or fork holder must do
 - The server now keeps only the newest 3 pre-restore and 3 pre-migration safety copies, so repeated upgrades and restores no longer fill the backup disk. Copy any older one you want to keep before upgrading.
 
 ### Fixed
+
+**Messages & files**
+
+- A command that waits on a stalled database for more than 10 seconds now fails with "The server is busy — retry in a moment" (a Retry button on a message) instead of waiting indefinitely. Nothing was applied when this appears, so Retry never double-posts. Voice moderation and slash commands are not affected.
 
 **Desktop UI**
 

@@ -103,8 +103,9 @@ export function findChannelByName(name: string): { id: number; name: string } | 
  * step never leaves the DMs for a server channel. Otherwise it is
  * the grouped channel list (categories as headers, rows by position), with
  * collapsed categories' hidden rows skipped. Voice channels are skipped too:
- * opening one means joining the call, which a keyboard step must never do,
- * and a bare setActiveChannel would mount its chat unjoined (F8). Muted
+ * a pick on a voice row joins the call, which a keyboard step must never do.
+ * (The call view reaches a voice channel's chat through navigateToChannel,
+ * which has no such guard.) Muted
  * channels the sidebar hides (Hide Muted Channels) are skipped as well; the
  * Quick Switcher still lists them.
  *

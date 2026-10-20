@@ -230,7 +230,11 @@ var errTimeoutMirrorUnloaded = errors.New("timeout mirror not loaded")
 func (s *PermissionService) timedOut(ctx context.Context, userID int64) (bool, error) {
 	m := s.timeouts.Load()
 	if m == nil {
-		s.timeoutsReload.Lock()
+		// The wait honours ctx: the holder may be reloading on a longer-lived
+		// context than this caller's deadline.
+		if err := syncutil.LockContext(ctx, &s.timeoutsReload); err != nil {
+			return false, fmt.Errorf("load timeouts: %w", err)
+		}
 		// Another caller may have loaded it while this one waited.
 		if m = s.timeouts.Load(); m == nil {
 			if err := s.reloadTimeoutsLocked(ctx); err != nil {

@@ -5,6 +5,7 @@ package ws
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -746,4 +747,44 @@ func (h *Hub) leaveVoiceChannelWithRetryTest(ctx context.Context, userID, channe
 	txn := h.begin(userID)
 	defer txn.end()
 	return leaveVoiceChannelWithRetry(ctx, txn, channelID, joinToken)
+}
+
+// ─── per-frame command deadline (WP 4.1b) ──────────────────────────────────
+
+// SetCommandDeadlineForTest overrides the per-frame deadline for the test's
+// duration.
+func SetCommandDeadlineForTest(t interface{ Cleanup(func()) }, d time.Duration) {
+	prev := wsCommandDeadline.Swap(int64(d))
+	t.Cleanup(func() { wsCommandDeadline.Store(prev) })
+}
+
+// CommandDeadlineExemptTypesForTest returns the exempt set's message types.
+func CommandDeadlineExemptTypesForTest() []string {
+	out := make([]string, 0, len(commandDeadlineExempt))
+	for typ := range commandDeadlineExempt {
+		out = append(out, typ)
+	}
+	return out
+}
+
+// RegisteredTypesForTest returns every V2-registered message type.
+func (h *Hub) RegisteredTypesForTest() []string {
+	return h.registry.RegisteredV2Types()
+}
+
+// ReplaceHandlerForTest swaps typ's registered V2 handler for fn, keeping the
+// deps. The type must already be registered.
+func (h *Hub) ReplaceHandlerForTest(typ string, fn func(ctx context.Context) Result) {
+	entry, ok := h.registry.handlersV2[typ]
+	if !ok {
+		panic("ReplaceHandlerForTest: type not registered: " + typ)
+	}
+	entry.handler = func(ctx context.Context, _ Command, _ ClientInfo, _ any) Result { return fn(ctx) }
+	h.registry.handlersV2[typ] = entry
+}
+
+// handleVoiceJoin runs a voice join with ctx as both the frame and connection
+// context.
+func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMessage, reqID string) {
+	h.handleVoiceJoinFrame(ctx, ctx, c, payload, reqID)
 }

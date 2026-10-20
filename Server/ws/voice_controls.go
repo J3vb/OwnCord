@@ -59,7 +59,7 @@ func voiceSelfToggleV2(ctx context.Context, d VoiceDeps, info ClientInfo, on boo
 	}
 	slog.Debug(t.changedLog, "user_id", userID, t.stateKey, on, "channel_id", info.VoiceChannelID)
 
-	return voiceStateBroadcast(ctx, d, userID)
+	return voiceStateBroadcast(context.WithoutCancel(ctx), d, userID)
 }
 
 // handleVoiceMuteV2 processes a voice_mute command.
@@ -168,7 +168,7 @@ func voiceStreamToggleV2(ctx context.Context, d VoiceDeps, info ClientInfo, enab
 	}
 	slog.Debug(t.changedLog, "user_id", userID, "enabled", enabled, "channel_id", voiceChID)
 
-	return voiceStateBroadcast(ctx, d, userID)
+	return voiceStateBroadcast(context.WithoutCancel(ctx), d, userID)
 }
 
 // handleVoiceCameraV2 processes a voice_camera command.

@@ -496,12 +496,21 @@ type User struct {
 	CustomStatus          *string `json:"customStatus"`
 	RegistrationStatus    string  `json:"registrationStatus"`
 	CustomStatusExpiresAt *string `json:"customStatusExpiresAt"`
+	BannerID              *string `json:"bannerId"`
+	BannerColor           *string `json:"bannerColor"`
 }
 
 type UserBlock struct {
 	BlockerID int64  `json:"blockerId"`
 	BlockedID int64  `json:"blockedId"`
 	CreatedAt string `json:"createdAt"`
+}
+
+type UserNote struct {
+	OwnerID   int64  `json:"ownerId"`
+	TargetID  int64  `json:"targetId"`
+	Note      string `json:"note"`
+	UpdatedAt string `json:"updatedAt"`
 }
 
 type UserRole struct {
