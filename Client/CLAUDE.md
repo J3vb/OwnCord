@@ -15,6 +15,11 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   reducers and message model — the store stays the facade, so import its
   mutators from `@stores/messages.store`, never from the reducer modules; new
   or extracted code uses `src/features/`, relative imports
+- `src/app/` is the composition layer above `pages/` (`main.ts`'s siblings, the
+  only code besides `main.ts` that may import `pages/`; enforced from 7.4b:
+  `local/layer-direction`): modules export functions or types, with no
+  top-level side effects, and `main.ts` calls the `install*`/`create*`
+  functions at its boot-order position. Relative imports, no `@app` alias
 - `src/styles/app.css` is an `@import` manifest over `src/styles/app/*.css`;
   its import order is the cascade, so add rules to the owning fragment and
   never reorder imports or move rules between fragments in a visual PR.

@@ -15,9 +15,10 @@ import {
 import { createApiClient, ApiClientError, errorText, TLS_CERT_CODE } from "@lib/api";
 import { SessionScope } from "@lib/sessionScope";
 import { prefetchMainPage } from "@pages/mainPagePrefetch";
-import { setOwnedTimeout, wantsNativeMenu } from "@lib/dom";
+import { setOwnedTimeout } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
-import { installFileDropGuard } from "./features/messaging/fileDropGuard";
+import { installGlobalGuards } from "./app/globalGuards";
+import type { PageId } from "./app/context";
 
 import { deactivatePendingMessages } from "@lib/pendingMessages";
 import { openMessageTarget, openNotificationTarget } from "@lib/notifications";
@@ -79,7 +80,6 @@ import { setInviteJoinHandler } from "@lib/invite-navigation";
 
 import { desktop } from "./platform/desktop";
 import { connectText } from "./i18n/connect";
-import { showToast } from "@lib/toast";
 
 // First, while storage still holds only what earlier sessions wrote: that is
 // how an install from before the notification level is told from a new one.
@@ -103,58 +103,7 @@ function voiceSessionLeave(sendWsLeave: boolean): void {
     .catch((e) => log.warn("Failed to leave voice session", e));
 }
 
-// Disable the default browser context menu everywhere but text fields.
-document.addEventListener("contextmenu", (e) => {
-  if (!wantsNativeMenu(e.target)) e.preventDefault();
-});
-
-// F12 or Ctrl+Shift+I opens WebView2 DevTools in development builds only.
-// F5 and Ctrl+R are blocked to prevent accidental page reloads which cause
-// ghost voice state (user appears in channel with no LiveKit connection).
-document.addEventListener("keydown", (e) => {
-  // KeyboardEvent.key carries the shifted/CapsLock-cased character, so
-  // Ctrl+Shift+R (and Ctrl+R with CapsLock on) would fall through this guard
-  // as "R" without the lowercase compare.
-  if (e.key === "F5" || (e.ctrlKey && e.key.toLowerCase() === "r")) {
-    e.preventDefault();
-    return;
-  }
-  if (import.meta.env.DEV && (e.key === "F12" || (e.ctrlKey && e.shiftKey && e.key === "I"))) {
-    e.preventDefault();
-    desktop.devTools.open().catch((err: unknown) => log.warn("devtools open failed", err));
-  }
-});
-
-// A file dropped where no composer listens must not navigate the webview.
-installFileDropGuard(new Disposable().signal);
-
-// Open external links (target="_blank") in the user's default browser. A
-// masked link ([text](url): the visible text is not the address) asks first,
-// through a dialog loaded only when one is clicked.
-document.addEventListener("click", (e) => {
-  const link = (e.target as HTMLElement).closest("a[target='_blank']");
-  if (link === null) return;
-  e.preventDefault();
-  const href = (link as HTMLAnchorElement).href;
-  if (href && (href.startsWith("http://") || href.startsWith("https://"))) {
-    const open = (url: string): void => {
-      desktop.urlOpener
-        .open(url)
-        .catch((err: unknown) => log.warn("external link open failed", err));
-    };
-    if (!link.classList.contains("masked")) {
-      open(href);
-      return;
-    }
-    import("@components/MaskedLinkGuard").then(
-      (m) => m.guardMaskedLink(href, open),
-      (err: unknown) => {
-        log.warn("masked link warning failed to load", err);
-        showToast(connectText("link.openFailed"), "error");
-      },
-    );
-  }
-});
+installGlobalGuards();
 
 // Install global error handlers first
 installGlobalErrorHandlers();
@@ -185,10 +134,10 @@ if (!appEl) {
 
 // The active page. `currentPage` further down holds the mounted page
 // *component*, so the page id needs its own name.
-let activePage: "connect" | "main" = "connect";
+let activePage: PageId = "connect";
 
 /** Switch pages, re-rendering only when the page actually changed. */
-function navigate(page: "connect" | "main"): void {
+function navigate(page: PageId): void {
   if (page === activePage) return;
   activePage = page;
   void renderPage(page);
@@ -605,7 +554,7 @@ const renderRecovery: RenderRecovery = {
 };
 
 // Render the appropriate page based on router state
-async function renderPage(pageId: "connect" | "main"): Promise<void> {
+async function renderPage(pageId: PageId): Promise<void> {
   const thisNavigation = ++navGeneration;
   const isCurrentNavigation = (): boolean => thisNavigation === navGeneration;
   log.info("Navigating to page", { pageId });
