@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -36,6 +37,12 @@ const (
 	// (113 tags) and are accepted debt: 3D-5b (113 to 114), 3B-9a (114 to 120)
 	// and 3B-10a (120 to 124). Any further tag fails.
 	modelsJSONTagBaseline = 124
+
+	// storeFullSurfaceBaseline is the compiler's own method count for Store,
+	// promoted methods from the cross-package embeds included (306 plus the 9
+	// of auth.SecondFactorPersister). It closes the gap the source count
+	// leaves for growth inside a cross-package embed.
+	storeFullSurfaceBaseline = 315
 )
 
 // storeCrossPackageEmbeds names every interface embedded in Store that is
@@ -163,7 +170,7 @@ func countJSONTags(src string) (int, error) {
 			tagErr = fmt.Errorf("unquote tag %s: %w", fld.Tag.Value, err)
 			return false
 		}
-		if strings.Contains(raw, `json:"`) {
+		if _, ok := reflect.StructTag(raw).Lookup("json"); ok {
 			n++
 		}
 		return true
@@ -223,6 +230,10 @@ func TestStoreMethodRatchet(t *testing.T) {
 		if !found {
 			t.Errorf("storeCrossPackageEmbeds lists %s but Store no longer embeds it; remove the entry", c)
 		}
+	}
+
+	if full := reflect.TypeFor[Store]().NumMethod(); full != storeFullSurfaceBaseline {
+		t.Errorf("Store has %d methods in total including cross-package embeds, pinned at %d. A method added to an embedded interface from another package grows the surface too; if the surface shrank, set storeFullSurfaceBaseline to %d", full, storeFullSurfaceBaseline, full)
 	}
 
 	t.Logf("Store: %d methods written directly, %d including same-package embeds", got.direct, got.transitive)
@@ -314,6 +325,7 @@ func TestCountJSONTags(t *testing.T) {
 		{"one json tag", "package p\ntype T struct {\n\tA int `json:\"a\"`\n}\n", 1},
 		{"json dash is counted", "package p\ntype T struct {\n\tA int `json:\"-\"`\n}\n", 1},
 		{"json with options is counted once", "package p\ntype T struct {\n\tA int `json:\"a,omitempty\" db:\"a\"`\n}\n", 1},
+		{"a key that merely ends in json is not counted", "package p\ntype T struct {\n\tA int `myjson:\"a\"`\n}\n", 0},
 		{"a non-json tag is not counted", "package p\ntype T struct {\n\tA int `db:\"a\"`\n}\n", 0},
 		{"a comment containing json: is not counted", "package p\n// A is tagged json:\"a\" elsewhere.\ntype T struct {\n\t// json:\"b\" would be wrong here\n\tA int // json:\"c\"\n}\n", 0},
 		{"a string literal containing json: is not counted", "package p\nvar s = `json:\"a\"`\ntype T struct{ A int }\n", 0},
