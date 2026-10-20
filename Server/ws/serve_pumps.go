@@ -257,7 +257,7 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 		cleanupCtx := context.WithoutCancel(ctx)
 		// Snapshot voice state BEFORE unregister to avoid TOCTOU with
 		// replacement connections. The voice lock spans snapshot to park, so
-		// a reconnect's transfer (inheritParkedVoice) runs wholly before or
+		// a reconnect's transfer (voiceTxn.inherit) runs wholly before or
 		// after this teardown (WP 1D-10).
 		txn := hub.begin(c.userID)
 		voiceChID := c.getVoiceChID()
@@ -271,10 +271,10 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 		//
 		// RT-8: a completed membership is parked in the grace window
 		// (voice_grace.go) instead of torn down at once, so a resuming
-		// socket can inherit the call. leaveVoiceOnDisconnect runs the
+		// socket can inherit the call. disconnectVoice runs the
 		// immediate teardown for an incomplete join or a disabled window.
 		if c.user != nil && voiceChID != 0 && !replaced {
-			hub.leaveVoiceOnDisconnect(cleanupCtx, c, voiceLeaveReasonDisconnect)
+			hub.disconnectVoice(cleanupCtx, txn, c, voiceLeaveReasonDisconnect)
 		}
 		txn.end()
 		if c.user != nil {

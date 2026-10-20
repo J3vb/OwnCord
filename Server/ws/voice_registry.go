@@ -12,8 +12,9 @@ package ws
 // guards it: the fields keep their names, so every existing reader and test
 // reaches them unchanged through Go's field promotion, and the old Client
 // accessors stay as one-line delegators. 5.3b (voice_registry_txn.go) routes
-// every membership write through the lock handle Hub.begin returns; whole-slot
-// hand-off and shutdown are 5.3c.
+// every membership write through the lock handle Hub.begin returns. 5.3c moves
+// the whole slot on a hand-off (voiceTxn.transfer), owns the grace window
+// (park, inherit, takeParked) and stops it at shutdown (voiceRegistry.close).
 //
 // Lock order (outermost first) — unchanged by the move; voiceSlot.voiceMu is
 // the old Client.voiceMu:
@@ -44,6 +45,34 @@ import "github.com/J3vb/OwnCord/Server/syncutil"
 type voiceRegistry struct {
 	voiceMember userLocks       // per-user voice membership lock (Hub.begin)
 	voiceGrace  voiceGraceState // RT-8 grace window (voice_grace.go)
+}
+
+// close ends the registry's life at shutdown: it stops every grace timer and
+// drops the parked entries without touching the database (the next boot wipes
+// the rows). After it, park clears a slot and arms no timer, so a readPump that
+// parks late at shutdown leaves nothing running. Safe to call more than once.
+func (r *voiceRegistry) close() {
+	r.voiceGrace.close()
+}
+
+// slotSnap is a copy of one slot's membership: the channel, the join token,
+// whether that join had completed (voiceSlot.voiceJoinCompleted) and the
+// announced E2EE key that goes with it. The clears return what they removed,
+// and a grace entry holds one for the membership it parked. The moderator's
+// pending mute/deafen is not part of it: it is not a membership, it moves on
+// every hand-off (voiceTxn.transfer).
+type slotSnap struct {
+	chID      int64
+	joinToken string
+	completed bool
+	e2ee      e2eeAnnounce
+}
+
+// modFlags is the moderator-imposed mute/deafen stash (see voiceSlot's
+// pendingModServer* fields).
+type modFlags struct {
+	muted, deafened bool
+	mutedBy         *int64
 }
 
 // voiceSlot is one connection's voice membership. Every field is guarded by
@@ -136,21 +165,36 @@ func (s *voiceSlot) markCompletedIfMatch(chID int64, joinToken string) bool {
 	return true
 }
 
+// snapLocked copies the membership. The caller holds voiceMu.
+func (s *voiceSlot) snapLocked() slotSnap {
+	return slotSnap{chID: s.voiceChID, joinToken: s.voiceJoinToken, completed: s.voiceJoinCompleted, e2ee: s.e2ee}
+}
+
+// resetLocked empties the membership: channel, token, completed flag and E2EE
+// key together. The caller holds voiceMu.
+func (s *voiceSlot) resetLocked() {
+	s.voiceChID = 0
+	s.voiceJoinToken = ""
+	s.voiceJoinCompleted = false
+	s.e2ee = e2eeAnnounce{}
+}
+
 // clearState clears the membership and returns the old channel ID, join token
 // and whether that join had completed (see voiceJoinCompleted) — the last is
 // what registerNow consults before handing a resuming connection this state
 // (OC-0270).
 func (s *voiceSlot) clearState() (int64, string, bool) {
+	snap := s.clearSnap()
+	return snap.chID, snap.joinToken, snap.completed
+}
+
+// clearSnap clears the membership and returns what it held.
+func (s *voiceSlot) clearSnap() slotSnap {
 	s.voiceMu.Lock()
 	defer s.voiceMu.Unlock()
-	oldChID := s.voiceChID
-	oldJoinToken := s.voiceJoinToken
-	oldCompleted := s.voiceJoinCompleted
-	s.voiceChID = 0
-	s.voiceJoinToken = ""
-	s.voiceJoinCompleted = false
-	s.e2ee = e2eeAnnounce{}
-	return oldChID, oldJoinToken, oldCompleted
+	snap := s.snapLocked()
+	s.resetLocked()
+	return snap
 }
 
 // clearIfChannel clears the membership only when the current channel is chID,
@@ -158,17 +202,20 @@ func (s *voiceSlot) clearState() (int64, string, bool) {
 // against a snapshotted channel use it so a membership committed after the
 // snapshot survives — the in-memory analogue of LeaveVoiceChannelIfMatch.
 func (s *voiceSlot) clearIfChannel(chID int64) (string, bool) {
+	snap, ok := s.clearSnapIfChannel(chID)
+	return snap.joinToken, ok
+}
+
+// clearSnapIfChannel is clearIfChannel returning the whole snapshot.
+func (s *voiceSlot) clearSnapIfChannel(chID int64) (slotSnap, bool) {
 	s.voiceMu.Lock()
 	defer s.voiceMu.Unlock()
 	if s.voiceChID != chID {
-		return "", false
+		return slotSnap{}, false
 	}
-	oldJoinToken := s.voiceJoinToken
-	s.voiceChID = 0
-	s.voiceJoinToken = ""
-	s.voiceJoinCompleted = false
-	s.e2ee = e2eeAnnounce{}
-	return oldJoinToken, true
+	snap := s.snapLocked()
+	s.resetLocked()
+	return snap, true
 }
 
 // clearExact clears the membership only while it still names this exact join
@@ -181,10 +228,38 @@ func (s *voiceSlot) clearExact(chID int64, joinToken string) bool {
 	if s.voiceChID != chID || s.voiceJoinToken != joinToken {
 		return false
 	}
-	s.voiceChID = 0
-	s.voiceJoinToken = ""
-	s.voiceJoinCompleted = false
-	s.e2ee = e2eeAnnounce{}
+	s.resetLocked()
+	return true
+}
+
+// drainAll empties the whole slot, membership and moderator stash, in one
+// critical section, and returns both. voiceTxn.transfer is its only caller:
+// every field a slot has is either read here or reset by resetLocked, which is
+// what TestVoiceRegistry_TransferCarriesEveryField pins.
+func (s *voiceSlot) drainAll() (slotSnap, modFlags) {
+	s.voiceMu.Lock()
+	defer s.voiceMu.Unlock()
+	snap := s.snapLocked()
+	s.resetLocked()
+	flags := modFlags{muted: s.pendingModServerMuted, deafened: s.pendingModServerDeafened, mutedBy: s.pendingModServerMutedBy}
+	s.pendingModServerMuted = false
+	s.pendingModServerDeafened = false
+	s.pendingModServerMutedBy = nil
+	return snap, flags
+}
+
+// adopt installs snap as this slot's membership, completed flag included, but
+// only while the slot is empty, reporting whether it did.
+func (s *voiceSlot) adopt(snap slotSnap) bool {
+	s.voiceMu.Lock()
+	defer s.voiceMu.Unlock()
+	if s.voiceChID != 0 {
+		return false
+	}
+	s.voiceChID = snap.chID
+	s.voiceJoinToken = snap.joinToken
+	s.voiceJoinCompleted = snap.completed
+	s.e2ee = snap.e2ee
 	return true
 }
 

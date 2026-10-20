@@ -387,8 +387,11 @@ func (h *Hub) GracefulStopContext(ctx context.Context, reason RestartReason) {
 		// Close all remaining client connections.
 		h.closeClientsForStop()
 
-		// Stop LiveKit only now, so a client leaves voice on the socket drop
-		// while its room is still up instead of reconnecting to a dead one.
+		// RT-8 grace timers stop; a late readPump park arms none.
+		h.voiceRegistry.close() //nolint:staticcheck // QF1008: named until 5.3d un-embeds the registry.
+
+		// Stop LiveKit after the sockets, so clients see a close rather than a
+		// dead room. The voice rows stay for the next boot's wipe.
 		h.StopLiveKit()
 
 		// Stop the hub dispatch loop.

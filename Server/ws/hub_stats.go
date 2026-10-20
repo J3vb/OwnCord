@@ -282,7 +282,7 @@ func (h *Hub) wakeBlocked(c *Client) bool {
 // session: its live connection, or the call it parked in the RT-8 grace
 // window. A same-session match is this device's own stale socket or parked
 // call, not another device. Caller holds h.mu (h.mu -> voiceGrace.mu is the
-// order registerNow's inheritParkedVoice already takes).
+// order registerNow's voiceTxn.inherit already takes).
 func (h *Hub) wakeBlockedLocked(c *Client) bool {
 	if !c.wakeReconnect {
 		return false

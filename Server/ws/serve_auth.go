@@ -222,7 +222,7 @@ func (h *Hub) unregisterFailedHandshake(ctx context.Context, c *Client) {
 		// LiveKit participant, and a stale E2EE key-holder entry all survive
 		// this connection's death until the next sweep (up to 60s).
 		if voiceChID != 0 {
-			h.leaveVoiceOnDisconnect(cleanupCtx, c, voiceLeaveReasonHandshake)
+			h.disconnectVoice(cleanupCtx, txn, c, voiceLeaveReasonHandshake)
 		}
 	}
 	txn.end()

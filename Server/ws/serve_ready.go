@@ -623,7 +623,7 @@ func (h *Hub) freshConnectSettleVoice(ctx context.Context, c *Client) {
 	// it); a replay-failure fallback may inherit one only while its row
 	// still exists.
 	if c.lastSeq == 0 {
-		h.voiceGrace.take(c.userID)
+		txn.takeParked(0, "")
 	} else {
 		h.dropOrphanVoiceGrace(ctx, c.userID)
 	}
@@ -665,10 +665,10 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, c *Client, vs *db
 			"user_id", c.userID, "channel_id", vs.ChannelID)
 		return
 	}
-	h.voiceGrace.take(c.userID)
+	txn := h.heldTxn(c.userID)
+	txn.takeParked(0, "")
 	slog.Info("ws fresh connect: cleaning stale voice state",
 		"user_id", c.userID, "channel_id", vs.ChannelID)
-	txn := h.heldTxn(c.userID)
 	if _, delErr := txn.deleteRow(ctx, vs.ChannelID, vs.JoinedAt); delErr != nil {
 		slog.Warn("ws fresh connect: LeaveVoiceChannelIfMatch failed", "err", delErr)
 	}
