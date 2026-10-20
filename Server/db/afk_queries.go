@@ -7,7 +7,7 @@ import (
 	"fmt"
 )
 
-// GetAFKChannel returns the channel flagged AFK (migration 067), or nil when
+// GetAFKChannel returns the channel flagged AFK (migration 068), or nil when
 // none is.
 func (d *DB) GetAFKChannel(ctx context.Context) (*Channel, error) {
 	r, err := d.q.GetAFKChannel(ctx)

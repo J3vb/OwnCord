@@ -8,10 +8,10 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// TestMigration067_AFKUniqueIndex proves the database itself enforces "at most
+// TestMigration068_AFKUniqueIndex proves the database itself enforces "at most
 // one AFK channel": a second flagged row is refused, the flag only accepts 0
 // and 1, and a channel starts unflagged.
-func TestMigration067_AFKUniqueIndex(t *testing.T) {
+func TestMigration068_AFKUniqueIndex(t *testing.T) {
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 

@@ -9,6 +9,20 @@ import (
 	"context"
 )
 
+const addUserRole = `-- name: AddUserRole :exec
+INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (?, ?)
+`
+
+type AddUserRoleParams struct {
+	UserID int64 `json:"userId"`
+	RoleID int64 `json:"roleId"`
+}
+
+func (q *Queries) AddUserRole(ctx context.Context, arg AddUserRoleParams) error {
+	_, err := q.db.ExecContext(ctx, addUserRole, arg.UserID, arg.RoleID)
+	return err
+}
+
 const countRoleMembers = `-- name: CountRoleMembers :many
 SELECT role_id, COUNT(*) AS member_count FROM users GROUP BY role_id
 `
@@ -41,10 +55,21 @@ func (q *Queries) CountRoleMembers(ctx context.Context) ([]CountRoleMembersRow, 
 	return items, nil
 }
 
+const countUserRoles = `-- name: CountUserRoles :one
+SELECT COUNT(*) FROM user_roles WHERE user_id = ?
+`
+
+func (q *Queries) CountUserRoles(ctx context.Context, userID int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countUserRoles, userID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createRole = `-- name: CreateRole :one
 INSERT INTO roles (name, color, permissions, position, is_default)
 VALUES (?, ?, ?, ?, 0)
-RETURNING id, name, color, permissions, position, is_default
+RETURNING id, name, color, permissions, position, is_default, hoist, mentionable
 `
 
 type CreateRoleParams struct {
@@ -69,6 +94,8 @@ func (q *Queries) CreateRole(ctx context.Context, arg CreateRoleParams) (Role, e
 		&i.Permissions,
 		&i.Position,
 		&i.IsDefault,
+		&i.Hoist,
+		&i.Mentionable,
 	)
 	return i, err
 }
@@ -83,7 +110,7 @@ func (q *Queries) DeleteRole(ctx context.Context, id int64) error {
 }
 
 const getDefaultRole = `-- name: GetDefaultRole :one
-SELECT id, name, color, permissions, position, is_default
+SELECT id, name, color, permissions, position, is_default, hoist, mentionable
 FROM roles WHERE is_default = 1 ORDER BY position DESC, id ASC LIMIT 1
 `
 
@@ -99,12 +126,14 @@ func (q *Queries) GetDefaultRole(ctx context.Context) (Role, error) {
 		&i.Permissions,
 		&i.Position,
 		&i.IsDefault,
+		&i.Hoist,
+		&i.Mentionable,
 	)
 	return i, err
 }
 
 const getRoleByID = `-- name: GetRoleByID :one
-SELECT id, name, color, permissions, position, is_default
+SELECT id, name, color, permissions, position, is_default, hoist, mentionable
 FROM roles WHERE id = ?
 `
 
@@ -118,12 +147,14 @@ func (q *Queries) GetRoleByID(ctx context.Context, id int64) (Role, error) {
 		&i.Permissions,
 		&i.Position,
 		&i.IsDefault,
+		&i.Hoist,
+		&i.Mentionable,
 	)
 	return i, err
 }
 
 const getRoleByName = `-- name: GetRoleByName :one
-SELECT id, name, color, permissions, position, is_default
+SELECT id, name, color, permissions, position, is_default, hoist, mentionable
 FROM roles WHERE name = ? COLLATE NOCASE
 `
 
@@ -139,12 +170,14 @@ func (q *Queries) GetRoleByName(ctx context.Context, name string) (Role, error) 
 		&i.Permissions,
 		&i.Position,
 		&i.IsDefault,
+		&i.Hoist,
+		&i.Mentionable,
 	)
 	return i, err
 }
 
 const getRoleForUser = `-- name: GetRoleForUser :one
-SELECT r.id, r.name, r.color, r.permissions, r.position, r.is_default
+SELECT r.id, r.name, r.color, r.permissions, r.position, r.is_default, r.hoist, r.mentionable
 FROM users u
 JOIN roles r ON u.role_id = r.id
 WHERE u.id = ?
@@ -160,6 +193,8 @@ func (q *Queries) GetRoleForUser(ctx context.Context, id int64) (Role, error) {
 		&i.Permissions,
 		&i.Position,
 		&i.IsDefault,
+		&i.Hoist,
+		&i.Mentionable,
 	)
 	return i, err
 }
@@ -221,8 +256,40 @@ func (q *Queries) GetUserWithRole(ctx context.Context, id int64) (GetUserWithRol
 	return i, err
 }
 
+const listRoleIDsByUser = `-- name: ListRoleIDsByUser :many
+SELECT r.id
+FROM user_roles ur
+JOIN roles r ON r.id = ur.role_id
+WHERE ur.user_id = ?
+ORDER BY r.position DESC, r.id ASC
+`
+
+// Held role ids, top role first.
+func (q *Queries) ListRoleIDsByUser(ctx context.Context, userID int64) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, listRoleIDsByUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRoles = `-- name: ListRoles :many
-SELECT id, name, color, permissions, position, is_default
+SELECT id, name, color, permissions, position, is_default, hoist, mentionable
 FROM roles ORDER BY position DESC, id ASC
 `
 
@@ -250,6 +317,8 @@ func (q *Queries) ListRoles(ctx context.Context) ([]Role, error) {
 			&i.Permissions,
 			&i.Position,
 			&i.IsDefault,
+			&i.Hoist,
+			&i.Mentionable,
 		); err != nil {
 			return nil, err
 		}
@@ -291,6 +360,61 @@ func (q *Queries) ListUserIDsByRole(ctx context.Context, roleID int64) ([]int64,
 	return items, nil
 }
 
+const listUserRoles = `-- name: ListUserRoles :many
+SELECT r.id, r.name, r.color, r.permissions, r.position, r.is_default, r.hoist, r.mentionable
+FROM user_roles ur
+JOIN roles r ON r.id = ur.role_id
+WHERE ur.user_id = ?
+ORDER BY r.position DESC, r.id ASC
+`
+
+// Every role a member holds, top role first (highest position, lowest id).
+func (q *Queries) ListUserRoles(ctx context.Context, userID int64) ([]Role, error) {
+	rows, err := q.db.QueryContext(ctx, listUserRoles, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Role{}
+	for rows.Next() {
+		var i Role
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Color,
+			&i.Permissions,
+			&i.Position,
+			&i.IsDefault,
+			&i.Hoist,
+			&i.Mentionable,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const removeUserRole = `-- name: RemoveUserRole :exec
+DELETE FROM user_roles WHERE user_id = ? AND role_id = ?
+`
+
+type RemoveUserRoleParams struct {
+	UserID int64 `json:"userId"`
+	RoleID int64 `json:"roleId"`
+}
+
+func (q *Queries) RemoveUserRole(ctx context.Context, arg RemoveUserRoleParams) error {
+	_, err := q.db.ExecContext(ctx, removeUserRole, arg.UserID, arg.RoleID)
+	return err
+}
+
 const setRolePosition = `-- name: SetRolePosition :exec
 UPDATE roles SET position = ? WHERE id = ?
 `
@@ -302,6 +426,26 @@ type SetRolePositionParams struct {
 
 func (q *Queries) SetRolePosition(ctx context.Context, arg SetRolePositionParams) error {
 	_, err := q.db.ExecContext(ctx, setRolePosition, arg.Position, arg.ID)
+	return err
+}
+
+const syncTopRole = `-- name: SyncTopRole :exec
+UPDATE users
+SET role_id = (
+    SELECT r.id FROM user_roles ur
+    JOIN roles r ON r.id = ur.role_id
+    WHERE ur.user_id = users.id
+    ORDER BY r.position DESC, r.id ASC
+    LIMIT 1
+)
+WHERE users.id = ?1
+  AND EXISTS (SELECT 1 FROM user_roles WHERE user_id = ?1)
+`
+
+// Mirrors the top held role into users.role_id. A member holding no role is
+// left untouched so role_id never goes NULL.
+func (q *Queries) SyncTopRole(ctx context.Context, userID int64) error {
+	_, err := q.db.ExecContext(ctx, syncTopRole, userID)
 	return err
 }
 

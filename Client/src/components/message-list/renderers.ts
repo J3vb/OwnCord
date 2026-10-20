@@ -14,6 +14,7 @@ import { QUICK_REACTIONS, emojiNode, quickReactionEmojiForPass } from "./quick-r
 import { messagesStore, type Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
 import { messagingText } from "../../i18n/messaging";
+import { isSpoilerFilename } from "../../features/messaging/spoilerAttachment";
 import { connectText } from "../../i18n/connect";
 import { uiStore } from "@stores/ui.store";
 import { voiceStore } from "@stores/voice.store";
@@ -456,7 +457,9 @@ function appendAttachments(el: HTMLElement, msg: Message): void {
   // A pending row already lays its images out as the grid, so confirming it
   // does not resize the row; only the lightbox sequence waits for the id.
   const tiles = msg.attachments.filter(isGalleryImage);
-  const images = msg.id === 0 ? [] : tiles;
+  // A spoiler image stays out of the sequence, or the arrows would open it
+  // while it is covered; once revealed it opens on its own.
+  const images = msg.id === 0 ? [] : tiles.filter((att) => !isSpoilerFilename(att.filename));
   const items = images.map((att) => ({
     url: resolveServerUrl(att.url),
     filename: att.filename,

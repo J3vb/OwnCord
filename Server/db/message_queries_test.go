@@ -1234,10 +1234,6 @@ func TestGetChannelUnreadCounts_IncludesAnnouncementChannels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateChannel(announcement): %v", err)
 	}
-	voiceID, err := database.CreateChannel(context.Background(), "voicechan", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel(voice): %v", err)
-	}
 
 	msgID, _ := database.CreateMessage(context.Background(), annID, userID, "server news", nil)
 
@@ -1254,9 +1250,6 @@ func TestGetChannelUnreadCounts_IncludesAnnouncementChannels(t *testing.T) {
 	}
 	if cu.UnreadCount != 1 {
 		t.Errorf("UnreadCount = %d, want 1", cu.UnreadCount)
-	}
-	if _, ok := counts[voiceID]; ok {
-		t.Errorf("voice channel %d must not appear in unread counts", voiceID)
 	}
 }
 

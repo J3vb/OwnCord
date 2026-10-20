@@ -273,7 +273,7 @@ func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.C
 			// flagged channel now (B5-7, permissions.CanReadContent); see
 			// nsfw_acknowledged below for the caller's own consent state.
 			"nsfw": visibleChannels[i].NSFW,
-			// The server's one AFK voice channel (migration 067, WP 6.10a):
+			// The server's one AFK voice channel (migration 068, WP 6.10a):
 			// listen-only, and what the idle sweep moves members into.
 			"afk":     visibleChannels[i].AFK,
 			"private": privacy.Private(visibleChannels[i].ID), // 3D-6, channel-level
@@ -293,7 +293,7 @@ func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.C
 		// over one subject, asked only in affordancesFor. The server remains
 		// the authority; these only pre-disable controls.
 		readyAffordances(role, overrides[visibleChannels[i].ID], &visibleChannels[i], timedOut).spreadInto(entry)
-		if visibleChannels[i].Type == "text" || visibleChannels[i].Type == "announcement" {
+		if carriesChatState(visibleChannels[i].Type) {
 			if u, ok := unreadMap[visibleChannels[i].ID]; ok {
 				entry["unread_count"] = u.UnreadCount
 				entry["last_message_id"] = u.LastMessageID

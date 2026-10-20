@@ -487,7 +487,7 @@ These fields advertise retry-safe `chat_send` support. Older servers omit them;
 clients must not infer support from the protocol epoch or silently retry a
 durable pending message against a server that no longer advertises support.
 
-**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin`, `can_react`, `slow_mode`, `nsfw`, `afk`, `private`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text + announcement), `last_message_id` (text + announcement), `mention_count` (text + announcement), `last_read_message_id` (text + announcement)
+**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin`, `can_react`, `slow_mode`, `nsfw`, `afk`, `private`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text, announcement and voice), `last_message_id` (text, announcement and voice), `mention_count` (text, announcement and voice), `last_read_message_id` (text, announcement and voice)
 
 `last_read_message_id` is the caller's own read pointer (`read_states.last_message_id`):
 the newest message id they have read, or `0` when they have no read state for the
@@ -1370,7 +1370,7 @@ that changed for them, so a connection gets about one frame per second however
 many channels are busy.
 
 - **Audience.** Connected users who may view the channel (the same
-  `CanViewChannel` verdict as `ready`), for `text` and `announcement` channels
+  `CanViewChannel` verdict as `ready`), for `text`, `announcement` and `voice` channels
   only (the channels `ready` gives an `unread_count`). Not sent to the channel's
   topic subscribers (they get `chat_message`), to the author of the window's
   latest message, or for DMs (their participants get the sequenced

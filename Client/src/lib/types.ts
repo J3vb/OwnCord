@@ -227,7 +227,7 @@ export interface ReadyChannel {
    */
   readonly nsfw?: boolean;
   /**
-   * Whether this is the server's AFK voice channel (migration 067): members
+   * Whether this is the server's AFK voice channel (migration 068): members
    * idle past the server's timeout are moved here, and it is listen-only.
    * Absent from older servers, which is read as "not the AFK channel".
    */

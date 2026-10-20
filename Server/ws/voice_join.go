@@ -374,7 +374,7 @@ func (h *Hub) voiceJoinRestoreModFlags(ctx context.Context, c *Client, channelID
 // yields no publish grants (admins bypass overrides, so an override fetch
 // error cannot demote them).
 //
-// afk is the channel's AFK flag (migration 067): the AFK channel is
+// afk is the channel's AFK flag (migration 068): the AFK channel is
 // listen-only, so it grants no publishing whatever the role allows. The
 // token refresh (handleVoiceTokenRefreshV2) and the live SFU reconcile
 // (updateVoiceParticipantPermissions) apply the same rule, or they would

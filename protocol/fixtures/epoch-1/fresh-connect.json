@@ -82,6 +82,9 @@
                 "can_send": true,
                 "category": "",
                 "id": "<id:number>",
+                "last_message_id": "<id:number>",
+                "last_read_message_id": "<id:number>",
+                "mention_count": 0,
                 "name": "Voice",
                 "nsfw": false,
                 "nsfw_acknowledged": false,
@@ -90,6 +93,7 @@
                 "slow_mode": 0,
                 "topic": "",
                 "type": "voice",
+                "unread_count": 0,
                 "voice_max_users": 0,
                 "voice_max_video": 25
               }
@@ -332,6 +336,9 @@
                 "can_send": true,
                 "category": "",
                 "id": "<id:number>",
+                "last_message_id": "<id:number>",
+                "last_read_message_id": "<id:number>",
+                "mention_count": 0,
                 "name": "Voice",
                 "nsfw": false,
                 "nsfw_acknowledged": false,
@@ -340,6 +347,7 @@
                 "slow_mode": 0,
                 "topic": "",
                 "type": "voice",
+                "unread_count": 0,
                 "voice_max_users": 0,
                 "voice_max_video": 25
               }

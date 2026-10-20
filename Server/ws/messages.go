@@ -279,7 +279,7 @@ type channelPayload struct {
 	// shipped so clients can gate or label it; the server applies no content
 	// behaviour of its own to a flagged channel.
 	NSFW bool `json:"nsfw"`
-	// AFK marks the server's one AFK voice channel (migration 067). Always
+	// AFK marks the server's one AFK voice channel (migration 068). Always
 	// sent, and identical for every recipient, so the shared channel_update
 	// frame stays shared. Members in it can listen but not publish.
 	AFK bool `json:"afk"`
