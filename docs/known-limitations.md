@@ -147,7 +147,8 @@ says exactly what the beta does and does not claim about who can read what.
 ## Voice and video
 
 - **Voice needs an open UDP port.** By default that is the range
-  `50000-60000`, or the single `voice.udp_port` if you set one. TCP `7881`
+  `50000-60000`, or the single `voice.udp_port` if you set one (the Docker
+  image and compose stack use `7882/UDP`). TCP `7881`
   must be open too. These ports are on the machine running LiveKit. An HTTP
   reverse proxy cannot carry this traffic. If people can join but hear
   nothing, the cause is almost always a missing port-forwarding rule or a

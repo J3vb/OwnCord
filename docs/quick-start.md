@@ -80,8 +80,11 @@ cd Server
 cp .env.example .env
 cp livekit.yaml.example livekit.yaml
 cp config.yaml.example config.yaml
-# Edit .env and livekit.yaml before you start.
-# Both need the same LiveKit key and secret.
+# Edit .env before you start. Set the LiveKit key and secret there, and only
+# there. Never use a ' in either value; letters and digits (for example
+# `openssl rand -hex 32`) are safest.
+# livekit.yaml is required (compose mounts it); editing it is optional, and it
+# holds no key or secret.
 docker compose up -d
 ```
 

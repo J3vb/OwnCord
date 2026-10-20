@@ -45,6 +45,7 @@ Ports the server uses:
 - `8443/TCP` for chat, the API and the admin panel. Always needed.
 - `7881/TCP` plus UDP media ports for voice and video. The media ports are
   `50000-60000/UDP` by default, or one UDP port if you set `voice.udp_port`.
+  The Docker image and the compose stack use `7882/UDP`.
 - `80/TCP` only if you use the built-in Let's Encrypt mode (`tls.mode: acme`).
 
 You do **not** need to open `7880/TCP`. That is LiveKit's own API port.
@@ -127,8 +128,8 @@ About the image `ghcr.io/j3vb/owncord-server`:
 - Docker Engine 24 or later, and Docker Compose v2.
 - A `linux/amd64` or `linux/arm64` host.
 - Free ports: `8443/TCP` for chat, `7881/TCP`, and the voice media UDP
-  port(s). The single-container image uses `7882/UDP` by default. The compose
-  stack uses the range `50000-60000/UDP`. See
+  port. Both the single-container image and the compose stack use `7882/UDP`.
+  See
   [LiveKit in Docker](#livekit-in-docker).
 
 ### Quick Start
@@ -147,16 +148,22 @@ the source snapshot attached to each release, or from the repository's
    ```
 
 2. Create your secrets file, then edit `.env`. Set `LIVEKIT_API_KEY` and
-   `LIVEKIT_API_SECRET`. The secret must be at least 32 characters.
+   `LIVEKIT_API_SECRET`. The secret must be at least 32 characters. Never use
+   a `'` in either value: LiveKit reads the pair as YAML, and a `'` stops it
+   from starting. Letters and digits, for example the output of
+   `openssl rand -hex 32`, are safest. This is the only place you type them: compose passes the pair to
+   both containers. `docker compose` refuses to run any command, even `down`
+   or `logs`, while either value is missing from `.env`.
 
    ```bash
    cp .env.example .env
    ```
 
-3. Create your LiveKit config, then edit `livekit.yaml`. Paste in the same key
-   and secret. Leave `use_external_ip: true` as it is, so LiveKit finds your
+3. Create your LiveKit config. It has no key or secret in it: those come from
+   `.env`. Leave `use_external_ip: true` as it is, so LiveKit finds your
    public address. Only on a host reached through Tailscale alone do you
-   replace it with `node_ip`.
+   replace it with `node_ip`. Media uses the single UDP port `7882`, which
+   compose sets itself, so do not add a port range.
 
    ```bash
    cp livekit.yaml.example livekit.yaml
@@ -210,7 +217,9 @@ The compose file already sets some values for you, through environment
 variables:
 
 - `OWNCORD_VOICE_LIVEKIT_API_KEY` and `OWNCORD_VOICE_LIVEKIT_API_SECRET`, taken
-  from your `.env`.
+  from your `.env`. LiveKit gets the same pair as `LIVEKIT_KEYS`.
+- `OWNCORD_VOICE_UDP_PORT` set to `7882`, the one UDP media port compose
+  publishes.
 - `OWNCORD_VOICE_LIVEKIT_URL` set to `ws://livekit:7880`, the LiveKit
   container.
 - `OWNCORD_VOICE_AUTO_DOWNLOAD_LIVEKIT` set to `false`, because LiveKit runs in
@@ -341,9 +350,11 @@ has run.
 
 **Two containers (the compose stack).** The shipped `docker-compose.yml` runs
 `livekit/livekit-server:v1.13.7` as its own container. For the server it
-clears `OWNCORD_VOICE_LIVEKIT_BINARY` and sets `OWNCORD_VOICE_UDP_PORT` to
-`0`, so the bundled copy never starts. Choose this when you want to size,
-restart or upgrade LiveKit separately. See
+clears `OWNCORD_VOICE_LIVEKIT_BINARY`, so the bundled copy never starts, and
+sets `OWNCORD_VOICE_UDP_PORT` to `7882`, so the admin connectivity report
+names the right port. It publishes `8443/TCP`, `7881/TCP`
+and `7882/UDP`, and takes the LiveKit key and secret from `.env` only. Choose
+this when you want to size, restart or upgrade LiveKit separately. See
 [LiveKit Setup — Docker](livekit-setup.md#docker).
 
 ### Unraid
@@ -882,8 +893,8 @@ prompt. A self-signed or private-CA proxy certificate prompts on every change
    signalling**, which the server already forwards at `/livekit/*`. You do
    **not** need to expose LiveKit's port 7880 through the proxy.
 2. **What the proxy cannot carry.** Voice and video media. That is UDP
-   `50000-60000` (or the single UDP port if you set one) plus the `7881/TCP`
-   fallback. These must stay directly reachable on the host that runs
+   `50000-60000` (or the single UDP port if you set one, as the compose stack
+   does with `7882`) plus the `7881/TCP` fallback. These must stay directly reachable on the host that runs
    LiveKit. An HTTP proxy never carries this traffic.
 3. **Tell OwnCord about the proxy.** Set `server.trusted_proxies` to the
    proxy's own address or addresses, for example `["10.0.0.2/32"]`. OwnCord
@@ -1962,7 +1973,8 @@ There are three named reasons, each with one fix:
 
 Usually one of these:
 
-- The UDP media port(s) are not forwarded. That is the `50000-60000` range by
+- The UDP media port(s) are not forwarded. With the compose stack or the Docker
+  image that is `7882/UDP`. Otherwise it is the `50000-60000` range by
   default, or your single `voice.udp_port`.
 - `voice.node_ip` is pinned to an old public address. Leave it empty so
   LiveKit finds the address itself, and restart after your address changes.
@@ -2260,6 +2272,14 @@ point here.
 | `80`          | TCP      | ACME HTTP-01 challenge (only with `tls.mode: acme`) |
 | `7881`        | TCP      | LiveKit media over TCP (fallback)                   |
 | `50000-60000` | UDP      | LiveKit voice and video media                       |
+
+**Docker.** The compose stack publishes exactly `8443/TCP`, `7881/TCP` and
+`7882/UDP`, so for it the last row is `7882` instead of the range. The single
+image only exposes those ports: you publish them with `-p`, and ACME adds
+`80/TCP`. On compose the UDP port is set in `docker-compose.yml` (the
+`command`, the `ports:` entry and `OWNCORD_VOICE_UDP_PORT` together), and an
+`rtc.udp_port` in `livekit.yaml` is overridden there. An old `livekit.yaml`
+cannot bring the range back.
 
 **Single UDP port.** If LiveKit uses one UDP port, the last row is that port
 instead of the range. You set it with `voice.udp_port` when OwnCord runs

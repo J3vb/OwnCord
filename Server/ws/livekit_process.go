@@ -116,8 +116,8 @@ func (p *LiveKitProcess) generateConfig() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// Single-port UDP (voice.udp_port): LiveKit ignores port_range_start/end
-	// once udp_port is set, so emit exactly one of the two forms. The range is
+	// Single-port UDP (voice.udp_port): a port_range_start/end in the YAML
+	// wins over udp_port, so emit exactly one of the two forms. The range is
 	// the shipped default.
 	rtcPortLines := "  port_range_start: 50000\n  port_range_end: 60000"
 	if p.cfg.UDPPort > 0 {

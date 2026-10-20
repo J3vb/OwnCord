@@ -180,6 +180,15 @@ and only when it changes something a contributor or fork holder must do
 
 ### Changed
 
+**Voice and video**
+
+- The Docker Compose stack now needs only three ports for chat and voice: `8443/TCP`, `7881/TCP` and `7882/UDP`. Voice media used to need the `50000-60000/UDP` range, and the LiveKit key and secret had to be typed in both `.env` and `livekit.yaml`; now they live only in `.env`. **For server owners using `docker compose`:**
+  - Forward `7882/UDP` on your router instead of the `50000-60000` range, and close the old range.
+  - Put the LiveKit key and secret only in `.env`, never using a `'` in either value (letters and digits, for example `openssl rand -hex 32`, are safest). `docker compose` now refuses to run any command, even `down` or `logs`, if `.env` is missing either value, and the message names the variable.
+  - An existing `livekit.yaml` keeps working: its port range and its `keys:` are overridden by compose.
+  - If `livekit.yaml` has a `webhook:` block whose `api_key` is not the key in `.env`, LiveKit will not start. Change it to the `.env` key.
+  - If `livekit.yaml` has a `key_file:`, it overrides the `.env` pair. Remove it.
+
 **Desktop UI**
 
 - A channel with unread messages now shows only a bold name and the white pill, as in Discord; the number is kept for mentions and DMs.
