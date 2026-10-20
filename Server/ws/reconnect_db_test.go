@@ -160,6 +160,11 @@ func TestReconnect_BufferMiss_FallsBackToDBTier(t *testing.T) {
 	if dbTier != 1 {
 		t.Fatalf("expected db tier count=1, got %d", dbTier)
 	}
+	// WP 4.6a: the same resume is one ring miss — the denominator of the
+	// events table's hit rate.
+	if misses := hub.ReconnectRingMissCount(); misses != 1 {
+		t.Fatalf("expected ring miss count=1, got %d", misses)
+	}
 }
 
 // TestReconnect_ColdTierAtRowLimit_ForcesFullReady locks the truncation guard.

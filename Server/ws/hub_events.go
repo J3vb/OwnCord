@@ -78,6 +78,25 @@ func (h *Hub) ReconnectTierStats() (buffer, db, full uint64) {
 	return h.reconnectTierBuf.Load(), h.reconnectTierDB.Load(), h.reconnectTierFull.Load()
 }
 
+// noteRingMiss counts a resume the ring just failed to serve, but only when the
+// client is behind the ring's oldest entry: the ring also returns nil for an
+// empty ring and for a client ahead of it, and the events table serves neither.
+// One atomic, no hub lock, no I/O, so it is safe outside seqMu on the handshake path
+// (WP 4.6a). The re-read of the ring can race a push, which is harmless here.
+func (h *Hub) noteRingMiss(lastSeq uint64) {
+	if oldest := h.ReplayBuffer().OldestSeq(); oldest != 0 && lastSeq <= oldest {
+		h.reconnectRingMiss.Add(1)
+	}
+}
+
+// ReconnectRingMissCount returns the lifetime number of resumes that passed the
+// resync checks but fell behind the in-memory replay ring (WP 4.6a). The hit
+// rate of the events table is ReconnectTierStats' db / this. It is a separate
+// method so ReconnectTierStats keeps its admin-interface signature.
+func (h *Hub) ReconnectRingMissCount() uint64 {
+	return h.reconnectRingMiss.Load()
+}
+
 // mustFullResync reports whether a client resuming from lastSeq predates the
 // most recent channel-visibility change or content shed (SRV-03) and
 // therefore cannot converge via replay.

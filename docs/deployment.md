@@ -1802,6 +1802,7 @@ the third stage as normal.
   "reconnect_tier_buffer": 120,
   "reconnect_tier_db": 4,
   "reconnect_tier_full": 1,
+  "reconnect_ring_misses": 3,
   "backpressure_queue_disconnects": 0,
   "backpressure_high_fallbacks": 0,
   "backpressure_low_drops": 17,
@@ -1858,6 +1859,9 @@ Signals worth watching as your community grows. Every field is described in
   For an in-memory database this pair just repeats the writer's numbers.
 - **`reconnect_tier_full` becoming a large share of reconnects.** The replay
   buffer is too small for real disconnect gaps.
+- **A high `reconnect_ring_misses` count with a low `reconnect_tier_db` share.**
+  The replay ring, not the event log, is doing the work: the log rescues few of
+  the resumes the ring cannot serve.
 - **`backpressure_queue_disconnects` growing.** Clients are being disconnected
   because they read too slowly. Causes are slow links or an overloaded server.
 
