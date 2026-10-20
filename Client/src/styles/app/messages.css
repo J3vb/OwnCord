@@ -1102,6 +1102,42 @@ ul.md-list-nested {
   object-fit: contain;
   border-radius: var(--radius-md);
 }
+/* Spoiler attachment (6.12): the media is blurred and inert under a cover
+   button until revealed. */
+.msg-spoiler-att:not(.revealed) > :not(.msg-spoiler-cover) {
+  filter: blur(28px);
+  pointer-events: none;
+  user-select: none;
+}
+.msg-spoiler-cover {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  border: none;
+  background: color-mix(in srgb, var(--bg-tertiary) 55%, transparent);
+  cursor: pointer;
+}
+.msg-spoiler-cover-label {
+  padding: 4px 12px;
+  border-radius: var(--radius-lg);
+  background: var(--scrim);
+  color: var(--on-fill);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.msg-spoiler-cover:hover .msg-spoiler-cover-label {
+  background: var(--scrim-strong);
+}
+.msg-spoiler-cover:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
 /* Several images in one message: a mosaic of fixed-height tiles (3A-11a). The
    tiles' inline width/height (layout-shift reservation) give way to the grid. */
 .msg-image-grid {

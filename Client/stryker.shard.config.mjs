@@ -202,6 +202,7 @@ export const shards = {
     "src/lib/dom.ts",
     "src/features/messaging/fileDropGuard.ts",
     "src/features/messaging/shortcodes.ts",
+    "src/features/messaging/spoilerAttachment.ts",
     "src/features/messaging/slashCommands.ts",
     "src/lib/logger.ts",
     "src/lib/logPersistence.ts",

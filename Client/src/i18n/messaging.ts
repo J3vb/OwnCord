@@ -64,6 +64,8 @@ export const messagingText = defineCatalog("messaging", {
   "attach.unavailable": "File uploads not available",
   "attach.serverDisabled": "Uploads are disabled on this server",
   "attach.remove": "Remove attachment {filename}",
+  "attach.markSpoiler": "Mark {filename} as spoiler",
+  "attach.unmarkSpoiler": "Remove spoiler mark from {filename}",
   "attach.expired": "Expired — attach the file again",
   "attach.notSent": "Not sent — attach the file again",
   "emoji.label": "Emoji",
@@ -192,6 +194,7 @@ export const messagingText = defineCatalog("messaging", {
 
   "spoiler.reveal": "Spoiler — click to reveal",
   "spoiler.revealed": "Spoiler — revealed",
+  "spoiler.attachment": "Spoiler",
   "channel.goTo": "Go to #{channel}",
   "message.jumpIn": "Jump to message in {channel}",
   "message.jump": "Jump",

@@ -35,6 +35,7 @@ import { applySlashCommand } from "../features/messaging/slashCommands";
 import { FORMAT_MARKERS, wrapWithMarker } from "../features/messaging/markdownMarkers";
 import { MAX_MESSAGE_LEN } from "../features/messaging/messageLimits";
 import { ATTACHMENT_TTL_MS } from "../features/messaging/attachmentTtl";
+import { isSpoilerFilename, toggleSpoilerFilename } from "../features/messaging/spoilerAttachment";
 
 // The pickers load on their first open, so their code stays out of the
 // main-page chunk.
@@ -281,6 +282,29 @@ function appendFileLabel(item: HTMLDivElement, filename: string): void {
   icon.appendChild(createIcon("file-text", 16));
   const nameEl = createElement("span", { class: "attachment-preview-name" }, filename);
   appendChildren(item, icon, nameEl);
+}
+
+/** Rename a chip's visible labels after its file was renamed. */
+function relabelChip(item: HTMLDivElement, filename: string): void {
+  const nameEl = item.querySelector(".attachment-preview-name");
+  if (nameEl !== null) nameEl.textContent = filename;
+  const img = item.querySelector("img");
+  if (img !== null) img.alt = filename;
+  item
+    .querySelector(".attachment-preview-remove")
+    ?.setAttribute("aria-label", messagingText("attach.remove", { filename }));
+}
+
+/** The spoiler toggle's pressed state and label for the file's current name. */
+function paintSpoilerButton(btn: HTMLButtonElement, filename: string): void {
+  const marked = isSpoilerFilename(filename);
+  btn.setAttribute("aria-pressed", String(marked));
+  btn.setAttribute(
+    "aria-label",
+    messagingText(marked ? "attach.unmarkSpoiler" : "attach.markSpoiler", { filename }),
+  );
+  btn.title = btn.getAttribute("aria-label") ?? "";
+  btn.classList.toggle("active", marked);
 }
 
 export function createMessageInput(options: MessageInputOptions): MessageInputComponent {
@@ -1162,6 +1186,49 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     item.appendChild(removeBtn);
   }
 
+  /** Flip the spoiler mark of a chip's file (6.12). The name is part of the
+   *  upload, so the file goes up again under the new name: a running upload is
+   *  cancelled, a settled one is withdrawn, and neither id is ever sent. */
+  function toggleSpoiler(att: (typeof pendingAttachments)[number], btn: HTMLButtonElement): void {
+    const file = att.file;
+    if (file === undefined) return;
+    const renamed = new File([file], toggleSpoilerFilename(file.name), {
+      type: file.type,
+      lastModified: file.lastModified,
+    });
+    const settledId = att.upload === undefined && att.uploadedAt !== undefined ? att.id : undefined;
+    att.upload?.owner.destroy();
+    att.previewEl.querySelector("progress")?.remove();
+    att.file = renamed;
+    att.filename = renamed.name;
+    att.uploadedAt = undefined;
+    relabelChip(att.previewEl, renamed.name);
+    paintSpoilerButton(btn, renamed.name);
+    void runUpload(att, renamed, settledId === undefined ? undefined : discard(settledId));
+  }
+
+  /** The chip's spoiler toggle; only a chip with its file can rename it. */
+  function appendSpoilerButton(item: HTMLDivElement, file: File | undefined): void {
+    if (file === undefined) return;
+    const btn = createElement("button", {
+      class: "attachment-preview-spoiler",
+      type: "button",
+      "data-testid": "attachment-spoiler",
+    });
+    btn.appendChild(createIcon("eye-off", 14));
+    paintSpoilerButton(btn, file.name);
+    btn.addEventListener(
+      "click",
+      (e) => {
+        e.stopPropagation();
+        const att = pendingAttachments.find((a) => a.previewEl === item);
+        if (att !== undefined) toggleSpoiler(att, btn);
+      },
+      { signal },
+    );
+    item.appendChild(btn);
+  }
+
   async function handlePasteFile(file: File): Promise<void> {
     if (options.onUploadFile === undefined || attachmentPreviewBar === null) return;
     if (disabledReason !== null) return;
@@ -1233,6 +1300,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
 
     appendRemoveButton(item, file.name);
+    appendSpoilerButton(item, file);
     attachmentPreviewBar.appendChild(item);
     const pending: (typeof pendingAttachments)[number] = {
       id: tempId,
@@ -1982,6 +2050,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       const item = createElement("div", { class: "attachment-preview-item" });
       appendFileLabel(item, att.filename);
       appendRemoveButton(item, att.filename);
+      appendSpoilerButton(item, att.file);
       attachmentPreviewBar.classList.add("visible");
       attachmentPreviewBar.appendChild(item);
       const restored = { ...att, previewEl: item };
@@ -1997,6 +2066,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       const item = createElement("div", { class: "attachment-preview-item" });
       appendFileLabel(item, handle.filename);
       appendRemoveButton(item, handle.filename);
+      appendSpoilerButton(item, handle.file);
       attachmentPreviewBar.classList.add("visible");
       attachmentPreviewBar.appendChild(item);
       const pending: (typeof pendingAttachments)[number] = {
@@ -2027,6 +2097,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     });
     appendFileLabel(item, att.filename);
     appendRemoveButton(item, att.filename);
+    appendSpoilerButton(item, att.file);
     attachmentPreviewBar.classList.add("visible");
     attachmentPreviewBar.appendChild(item);
     pendingAttachments.push({
