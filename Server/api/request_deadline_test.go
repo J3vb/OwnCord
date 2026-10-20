@@ -236,6 +236,7 @@ var deadlineBound = []string{
 	"GET /api/v1/invites/{code}/redemptions",
 	"GET /api/v1/livekit/health",
 	"GET /api/v1/metrics",
+	"GET /api/v1/metrics/prometheus",
 	"GET /api/v1/moderation/appeals/",
 	"GET /api/v1/moderation/appeals/{id}",
 	"GET /api/v1/moderation/members/",
@@ -248,6 +249,7 @@ var deadlineBound = []string{
 	"GET /api/v1/search",
 	"GET /api/v1/server-info",
 	"GET /api/v1/users/me/moderation",
+	"GET /api/v1/users/me/notes/{userId}",
 	"GET /api/v1/users/me/recovery-kit",
 	"GET /api/v1/users/me/sessions",
 	"GET /health",
@@ -311,6 +313,7 @@ var deadlineBound = []string{
 	"POST /api/v1/users/me/totp/confirm",
 	"POST /api/v1/users/me/totp/enable",
 	"POST /api/v1/users/me/totp/recovery-codes",
+	"PUT /admin/api/afk-channel",
 	"PUT /admin/api/channels/{id}/permissions/{roleId}",
 	"PUT /admin/api/channels/{id}/retention",
 	"PUT /admin/api/channels/{id}/user-permissions/{userId}",
@@ -318,6 +321,7 @@ var deadlineBound = []string{
 	"PUT /api/v1/channels/{id}/nsfw-acknowledgement/",
 	"PUT /api/v1/dms/{channelId}/owner",
 	"PUT /api/v1/gif/favorites",
+	"PUT /api/v1/users/me/notes/{userId}",
 	"PUT /api/v1/users/me/password",
 }
 
