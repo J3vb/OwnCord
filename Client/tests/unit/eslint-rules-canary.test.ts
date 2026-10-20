@@ -267,3 +267,54 @@ describe("custom lint-rule canaries (ARCH-06)", () => {
     }
   });
 });
+
+// 5.4e: a *.view.ts draws from a row model and imports no store. These are
+// core rules, so they are checked through the real config, not a flat Linter.
+describe("view-file store ban (5.4e)", () => {
+  const VIEW = "src/features/members/memberRow.view.ts";
+  const NON_VIEW = "src/features/members/memberRowModel.ts";
+
+  async function restricted(code: string, filePath: string): Promise<string[]> {
+    const [result] = await eslint.lintText(code, { filePath: path.join(clientRoot, filePath) });
+    return (result?.messages ?? [])
+      .map((m) => m.ruleId)
+      .filter((id) => id === "no-restricted-imports" || id === "no-restricted-syntax")
+      .map(String);
+  }
+
+  it("flags a static store import in a view file", async () => {
+    expect(
+      await restricted(`import { membersStore } from "@stores/members.store";`, VIEW),
+    ).toContain("no-restricted-imports");
+    expect(await restricted(`import { x } from "../../stores/ui.store";`, VIEW)).toContain(
+      "no-restricted-imports",
+    );
+    expect(await restricted(`import { x } from "@lib/livekitSession";`, VIEW)).toContain(
+      "no-restricted-imports",
+    );
+    expect(await restricted(`import { x } from "../safety/store";`, VIEW)).toContain(
+      "no-restricted-imports",
+    );
+  }, 60_000);
+
+  it("flags a dynamic import of a store in a view file", async () => {
+    expect(
+      await restricted(`export const f = () => import("@stores/members.store");`, VIEW),
+    ).toContain("no-restricted-syntax");
+    expect(
+      await restricted(`export const f = () => import("../moderation/store");`, VIEW),
+    ).toContain("no-restricted-syntax");
+    expect(
+      await restricted(`export const f = () => import("@lib/livekitSession");`, VIEW),
+    ).toContain("no-restricted-syntax");
+  }, 60_000);
+
+  it("does not flag a store import outside a view file", async () => {
+    expect(
+      await restricted(`import { membersStore } from "@stores/members.store";`, NON_VIEW),
+    ).toEqual([]);
+    expect(
+      await restricted(`export const f = () => import("@stores/members.store");`, NON_VIEW),
+    ).toEqual([]);
+  }, 60_000);
+});
