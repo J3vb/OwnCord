@@ -31,6 +31,8 @@ export const messageStatusText = defineCatalog("messageStatus", {
   "file.cannotPlay": "Can't play this format",
   "file.retry": "Retry",
 
+  "send.requestTimeout": "The server is busy — retry in a moment",
+
   "reaction.reactedWith": "reacted with {emoji}",
   "reaction.others": {
     one: "{names} and {n} other",

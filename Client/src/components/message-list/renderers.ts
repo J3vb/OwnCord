@@ -13,6 +13,7 @@ import { connectionLockReason, messageActionGates } from "./message-actions";
 import { QUICK_REACTIONS, emojiNode, quickReactionEmojiForPass } from "./quick-reactions";
 import { messagesStore, type Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
+import { messageStatusText } from "../../i18n/messageStatus";
 import { messagingText } from "../../i18n/messaging";
 import { connectText } from "../../i18n/connect";
 import { uiStore } from "@stores/ui.store";
@@ -427,7 +428,7 @@ function sendErrorReason(code: string | null): string {
     case "FORBIDDEN":
       return messagingText("send.forbidden");
     case "REQUEST_TIMEOUT":
-      return messagingText("send.requestTimeout");
+      return messageStatusText("send.requestTimeout");
     case "OFFLINE":
       return messagingText("send.disconnected");
     case "OFFLINE_NO_RECOVERY":
