@@ -16,6 +16,7 @@
 // the model; anything else lets it through.
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 
 const mode = process.argv[2];
 // Claude Code cloud containers start with an older Node, no node_modules and
@@ -47,6 +48,18 @@ function cloudToolchain() {
       return;
     }
     const line = `export PATH="${bin}:$PATH"`;
+    // Subagent shells get no CLAUDE_ENV_FILE and ran the container's Node 22,
+    // so the same line goes to ~/.bashrc, once.
+    try {
+      const rc = `${homedir()}/.bashrc`;
+      if (!(existsSync(rc) && readFileSync(rc, "utf8").split("\n").includes(line))) {
+        appendFileSync(rc, `${line}\n`);
+      }
+    } catch {
+      console.log(
+        `WARNING: could not add Node ${NODE_MAJOR} to ~/.bashrc; subagent shells may use an older Node.`,
+      );
+    }
     if (process.env.CLAUDE_ENV_FILE) {
       appendFileSync(process.env.CLAUDE_ENV_FILE, `${line}\n`);
       console.log(`Cloud session: Node ${NODE_MAJOR} is on PATH (${bin}).`);
