@@ -281,9 +281,8 @@ func (s *MessageService) SetMessagePinned(ctx context.Context, userID, channelID
 // pinEventResult resolves the audience of a committed pin row: its author's
 // role name and, in a DM, its delivery audience (DMAudience, as edit, delete and
 // reactions use, so a DM whose message request is pending reaches only the
-// sender and a group DM reaches every member). A failed audience lookup leaves
-// the list empty and the hub falls back to the topic broadcast, as a DM send
-// does; the row is committed either way.
+// sender and a group DM reaches every member). A failed audience lookup sends
+// the row to the pinner only; the row is committed either way.
 func (s *MessageService) pinEventResult(ctx context.Context, ch *db.Channel, row *db.PinEventRow, author *db.User) *PinEventResult {
 	res := &PinEventResult{Row: row, Author: author}
 	if role, err := s.st.GetRoleByID(ctx, author.RoleID); err == nil && role != nil {
@@ -294,6 +293,9 @@ func (s *MessageService) pinEventResult(ctx context.Context, ch *db.Channel, row
 		ids, err := s.DMAudience(ctx, ch.ID, author.ID)
 		if err != nil {
 			slog.Warn("pin row: participant lookup", "err", err, "channel_id", ch.ID)
+			// Fail closed to the pinner, as EditMessage and DeleteMessage do: an
+			// empty list would make dmEventOrFallback use the topic broadcast.
+			res.ParticipantIDs = []int64{author.ID}
 		} else {
 			res.ParticipantIDs = ids
 		}

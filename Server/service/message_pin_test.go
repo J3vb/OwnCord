@@ -320,3 +320,24 @@ func TestSetMessagePinned_RateLimited(t *testing.T) {
 		t.Errorf("a service without a limiter refused a pin: %v", err)
 	}
 }
+
+// failingDMIDsStore fails the participant read DMAudience falls back to.
+type failingDMIDsStore struct {
+	*db.DB
+}
+
+func (s *failingDMIDsStore) GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error) {
+	return nil, errors.New("simulated GetDMParticipantIDs failure")
+}
+
+// A DM pin row whose audience lookup fails goes to the pinner only, as edit and
+// delete do, never to the channel-topic fallback.
+func TestPinEventResult_AudienceLookupFailureFailsClosed(t *testing.T) {
+	f := newModerationActionsFixture(t)
+	svc := NewMessageService(&failingDMIDsStore{DB: f.database}, nil, nil)
+	author := &db.User{ID: fixtureMember}
+	res := svc.pinEventResult(context.Background(), &db.Channel{ID: 99, Type: "dm"}, &db.PinEventRow{}, author)
+	if !res.IsDM || !slices.Equal(res.ParticipantIDs, []int64{fixtureMember}) {
+		t.Errorf("IsDM = %v participants = %v, want a DM result for the pinner %d only", res.IsDM, res.ParticipantIDs, fixtureMember)
+	}
+}
