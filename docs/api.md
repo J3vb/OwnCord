@@ -4952,6 +4952,7 @@ re-verification against TOCTOU swaps), spawns the new process and shuts down.
 | 409    | `RESTART_PENDING`                                            | A restart from an earlier apply/restore is already pending                                                                                                  |
 | 409    | `UPDATE_IN_PROGRESS`                                         | Another restart-sensitive operation (update apply or backup restore) is running                                                                             |
 | 409    | `NO_UPDATE`                                                  | Already up to date                                                                                                                                          |
+| 503    | `SERVER_SHUTTING_DOWN`                                       | The server began shutting down while the update was being checked or downloaded; nothing was applied, try again once it is back                             |
 | 502    | `UPDATE_CHECK_FAILED` / `MISSING_ASSETS` / `DOWNLOAD_FAILED` | Check, asset or download/verification failure                                                                                                               |
 
 ---
