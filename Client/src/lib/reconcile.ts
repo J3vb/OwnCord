@@ -14,7 +14,12 @@
 
 interface NodeMeta {
   key: string;
+  /** `reconcileChildren` rows: the caller's signature. Empty for model rows. */
   sig: string;
+  /** `reconcileModels` rows: the model the node was last drawn or patched to. */
+  model?: RowModel;
+  /** `reconcileModels` rows: the live item a handler reads through `atEvent`. */
+  ref?: { item: unknown; creating: boolean };
 }
 
 const META = new WeakMap<Element, NodeMeta>();
@@ -73,6 +78,42 @@ export function reconcileChildren<T>(
   opts: ReconcileOptions<T>,
 ): number {
   const { key, signature, create, update, dispose } = opts;
+  return reconcileKeyed(
+    container,
+    items,
+    key,
+    (item, k, current) => {
+      const sig = signature(item);
+      if (current !== undefined && META.get(current)!.sig === sig) {
+        update?.(current, item);
+        return { el: current, reused: true };
+      }
+      const el = create(item);
+      META.set(el, { key: k, sig });
+      return { el, reused: false };
+    },
+    dispose,
+  );
+}
+
+/** What one item became: its node, and whether an existing node was kept. */
+interface Visit {
+  el: Element;
+  reused: boolean;
+}
+
+/**
+ * The shared pass under both entry points: look rows up by key, let `visit`
+ * decide reuse or build per item, drop the gone ones, then move as few nodes
+ * as possible and keep focus. Returns the number of rows built.
+ */
+function reconcileKeyed<T>(
+  container: Element,
+  items: readonly T[],
+  key: (item: T) => string,
+  visit: (item: T, k: string, current: Element | undefined) => Visit,
+  dispose: ((el: Element) => void) | undefined,
+): number {
   const existing = new Map<string, Element>();
   for (const child of Array.from(container.children)) {
     const meta = META.get(child);
@@ -87,19 +128,14 @@ export function reconcileChildren<T>(
   let built = 0;
   for (const item of items) {
     const k = key(item);
-    const sig = signature(item);
     const current = existing.get(k);
     existing.delete(k);
-    if (current !== undefined && META.get(current)!.sig === sig) {
-      update?.(current, item);
-      wanted.push(current);
-      continue;
+    const { el, reused } = visit(item, k, current);
+    if (!reused) {
+      if (current !== undefined) existing.set(k, current);
+      built++;
     }
-    if (current !== undefined) existing.set(k, current);
-    const el = create(item);
-    META.set(el, { key: k, sig });
     wanted.push(el);
-    built++;
   }
   for (const el of existing.values()) {
     dispose?.(el);
@@ -134,4 +170,104 @@ export function reconcileChildren<T>(
     }
   }
   return built;
+}
+
+/** Plain data a row model may hold: no `undefined`, functions, Maps or Elements,
+ *  so a model compares structurally and cannot smuggle live state. */
+export type ModelValue =
+  string | number | boolean | null | readonly ModelValue[] | { readonly [k: string]: ModelValue };
+export type RowModel = { readonly [k: string]: ModelValue };
+
+/** Structural equality over ModelValue; key order ignored. */
+export function sameModel(a: ModelValue, b: ModelValue): boolean {
+  if (a === b || (a !== a && b !== b)) return true;
+  if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    const other = b as readonly ModelValue[];
+    return (a as readonly ModelValue[]).every((v, i) => sameModel(v, other[i]!));
+  }
+  const left = a as { readonly [k: string]: ModelValue };
+  const right = b as { readonly [k: string]: ModelValue };
+  const keys = Object.keys(left);
+  return (
+    keys.length === Object.keys(right).length &&
+    keys.every((k) => Object.hasOwn(right, k) && sameModel(left[k]!, right[k]!))
+  );
+}
+
+/** Every field name of `M`; for a union of models, the names of any member. */
+type FieldOf<M> = M extends unknown ? keyof M & string : never;
+
+export interface ModelRowOptions<T, M extends RowModel> {
+  key: (item: T) => string;
+  model: (item: T) => M;
+  /** Draw from the model only. `atEvent` returns the live item for handlers;
+   *  calling it while `create` runs throws. */
+  create: (model: M, atEvent: () => T) => Element;
+  /** Fields changed in place without a rebuild (status dot, speaking). */
+  patch?: {
+    readonly fields: readonly FieldOf<M>[];
+    readonly apply: (el: Element, next: M) => void;
+  };
+  /** Reused row (equal or patched): reconcile nested children, refresh refs. */
+  update?: (el: Element, item: T, model: M) => void;
+  dispose?: (el: Element) => void;
+}
+
+/** The names of the fields on which two models differ. */
+function changedFields(a: RowModel, b: RowModel): string[] {
+  const names = new Set([...Object.keys(a), ...Object.keys(b)]);
+  return [...names].filter(
+    (k) => !(Object.hasOwn(a, k) && Object.hasOwn(b, k) && sameModel(a[k]!, b[k]!)),
+  );
+}
+
+/**
+ * `reconcileChildren` with the signature derived from a row model: the model is
+ * the drawn values as plain data, so a row cannot draw what its model omits
+ * and no field is listed twice. A row is kept when its model is equal to the
+ * last one, patched in place when only `patch.fields` differ, and rebuilt
+ * otherwise. Focus and moves are handled exactly as in `reconcileChildren`.
+ * Returns the number of rows built.
+ */
+export function reconcileModels<T, M extends RowModel>(
+  container: Element,
+  items: readonly T[],
+  opts: ModelRowOptions<T, M>,
+): number {
+  const { key, model, create, patch, update, dispose } = opts;
+  const patchable: ReadonlySet<string> = new Set(patch?.fields ?? []);
+  return reconcileKeyed(
+    container,
+    items,
+    key,
+    (item, k, current) => {
+      const next = model(item);
+      const meta = current === undefined ? undefined : META.get(current);
+      if (current !== undefined && meta?.model !== undefined && meta.ref !== undefined) {
+        const changed = changedFields(meta.model, next);
+        if (changed.every((f) => patchable.has(f))) {
+          meta.ref.item = item;
+          if (changed.length > 0) {
+            patch?.apply(current, next);
+            meta.model = next;
+          }
+          update?.(current, item, next);
+          return { el: current, reused: true };
+        }
+      }
+      const ref = { item: item as unknown, creating: true };
+      const atEvent = (): T => {
+        // i18n-exempt: developer diagnostic for a programming error, never shown
+        if (ref.creating) throw new Error("atEvent called while the row is being created");
+        return ref.item as T;
+      };
+      const el = create(next, atEvent);
+      ref.creating = false;
+      META.set(el, { key: k, sig: "", model: next, ref });
+      return { el, reused: false };
+    },
+    dispose,
+  );
 }

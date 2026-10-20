@@ -1,0 +1,159 @@
+/**
+ * What a member-list child draws, from a plain-data model and nothing else.
+ *
+ * The model is the drawn values after formatting (the resolved name, the status
+ * line, the role colour), so a field the DOM does not show is not in it and a
+ * value the DOM shows cannot be missing from it: `reconcileModels` derives the
+ * row's signature from the model. This module imports no store; the builder in
+ * `MemberList.ts` resolves the store values into the model.
+ */
+
+import { createElement, appendChildren, setText } from "@lib/dom";
+import { readableRoleColor } from "@lib/themes";
+import type { UserStatus } from "@lib/types";
+import { statusLabel } from "../../i18n/shell";
+import { createAvatarElement, pickAvatarColor } from "../message-list/avatar";
+
+export type MemberRowModel = {
+  readonly kind: "row";
+  readonly id: number;
+  /** The name shown: the display name, else the username. */
+  readonly name: string;
+  /** Username: the avatar's colour. */
+  readonly avatarUser: string;
+  /** Nickname as the avatar sees it: its initial and alt text. */
+  readonly avatarDisplayName: string | null;
+  readonly avatarUrl: string | null;
+  /** The line under the name; null when there is none. */
+  readonly customStatus: string | null;
+  readonly colorVar: string;
+  /** Patch field with `away`: the dot and the dimmed row change in place. */
+  readonly status: UserStatus;
+  readonly away: boolean;
+};
+
+export type MemberHeaderModel = {
+  readonly kind: "header";
+  /** Patch field: the count in a group header changes without a rebuild. */
+  readonly text: string;
+  readonly offline: boolean;
+};
+
+export type MemberEmptyModel = { readonly kind: "empty"; readonly text: string };
+
+export type MemberItemModel = MemberRowModel | MemberHeaderModel | MemberEmptyModel;
+
+/** The fields `patchMemberItem` changes in place. */
+export const MEMBER_PATCH_FIELDS = ["status", "away", "text"] as const;
+
+export function statusColor(status: UserStatus): string {
+  switch (status) {
+    case "online":
+      return "var(--green)";
+    case "idle":
+      return "var(--yellow)";
+    case "dnd":
+      return "var(--red)";
+    case "invisible":
+    case "offline":
+      return "var(--text-micro)";
+    default:
+      return "var(--text-micro)";
+  }
+}
+
+function drawRow(model: MemberRowModel): HTMLDivElement {
+  const item = createElement("div", {
+    class: model.away ? "member-item offline" : "member-item",
+    "data-testid": `member-${model.id}`,
+    role: "button",
+    tabindex: "0",
+    "aria-haspopup": "dialog",
+    "aria-label": model.name,
+  });
+  const statusId = `mi-status-${model.id}`;
+  const customId = `mi-custom-status-${model.id}`;
+
+  const avatar = createAvatarElement(
+    { username: model.avatarUser, displayName: model.avatarDisplayName, avatar: model.avatarUrl },
+    {
+      className: "mi-avatar",
+      background: pickAvatarColor(model.avatarUser),
+      deferUntilVisible: true,
+    },
+  );
+
+  // Set through the style object, as the patch does, so both serialise alike.
+  const dot = createElement("div", {
+    class: "mi-status",
+    id: statusId,
+    "aria-label": statusLabel(model.status),
+    title: statusLabel(model.status),
+  });
+  dot.style.background = statusColor(model.status);
+  avatar.appendChild(dot);
+
+  // Name + custom status stack. The custom status is only rendered when there
+  // is one, so a member without it keeps the single-line row it always had.
+  const nameWrap = createElement("div", { class: "mi-text" });
+  const name = createElement("span", {
+    class: "mi-name",
+    style: `color: ${readableRoleColor(model.colorVar)}`,
+    "data-role-color": model.colorVar,
+  });
+  setText(name, model.name);
+  nameWrap.appendChild(name);
+  if (model.customStatus !== null) {
+    const customEl = createElement("span", {
+      class: "mi-custom-status",
+      "data-testid": `member-custom-status-${model.id}`,
+      id: customId,
+    });
+    setText(customEl, model.customStatus);
+    nameWrap.appendChild(customEl);
+    item.setAttribute("aria-describedby", `${customId} ${statusId}`);
+  } else {
+    item.setAttribute("aria-describedby", statusId);
+  }
+
+  appendChildren(item, avatar, nameWrap);
+  return item;
+}
+
+/** Draw a member-list child from its model. A row comes back without handlers. */
+export function drawMemberItem(model: MemberItemModel): HTMLElement {
+  switch (model.kind) {
+    case "row":
+      return drawRow(model);
+    case "header":
+      return createElement(
+        "div",
+        {
+          class: "member-role-group",
+          ...(model.offline ? { "data-testid": "member-group-offline" } : {}),
+        },
+        model.text,
+      );
+    default: {
+      const emptyState = createElement("div", { class: "member-list-empty" });
+      emptyState.appendChild(createElement("p", { class: "member-list-empty-text" }, model.text));
+      return emptyState;
+    }
+  }
+}
+
+/** Bring a drawn child to `next` in place; only the `MEMBER_PATCH_FIELDS` differ. */
+export function patchMemberItem(el: Element, next: MemberItemModel): void {
+  if (next.kind === "header") {
+    if (el.textContent !== next.text) setText(el, next.text);
+    return;
+  }
+  if (next.kind !== "row") return;
+  el.classList.toggle("offline", next.away);
+  const dot = el.querySelector<HTMLDivElement>(".mi-status");
+  if (dot !== null) {
+    dot.style.background = statusColor(next.status);
+    dot.setAttribute("aria-label", statusLabel(next.status));
+    dot.title = statusLabel(next.status);
+  }
+}

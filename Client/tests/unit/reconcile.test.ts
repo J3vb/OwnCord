@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { reconcileChildren } from "../../src/lib/reconcile";
+import { reconcileChildren, reconcileModels, sameModel } from "../../src/lib/reconcile";
 import { createElement } from "../../src/lib/dom";
 
 interface Row {
@@ -210,5 +210,101 @@ describe("reconcileChildren", () => {
       expect(ids(container)).toEqual(unique.map(String));
       current = unique;
     }
+  });
+});
+
+describe("sameModel", () => {
+  it("compares nested plain data structurally and ignores key order", () => {
+    expect(sameModel({ a: 1, b: [1, { c: null }] }, { b: [1, { c: null }], a: 1 })).toBe(true);
+    expect(sameModel({ a: 1 }, { a: 1, b: 2 })).toBe(false);
+    expect(sameModel([1, 2], [1, 2, 3])).toBe(false);
+    expect(sameModel([], {})).toBe(false);
+    expect(sameModel(null, {})).toBe(false);
+  });
+});
+
+describe("model rows", () => {
+  type Model = { readonly id: number; readonly label: string; readonly status: string };
+  interface Item {
+    id: number;
+    label: string;
+    status: string;
+  }
+  const modelOpts = {
+    key: (i: Item) => String(i.id),
+    model: (i: Item): Model => ({ id: i.id, label: i.label, status: i.status }),
+    create: (m: Model) =>
+      createElement("div", { "data-id": String(m.id) }, `${m.label}/${m.status}`),
+    patch: {
+      fields: ["status"] as const,
+      apply: (el: Element, next: Model) => {
+        el.textContent = `${next.label}/${next.status}`;
+      },
+    },
+  };
+
+  it("equal model reuses node", () => {
+    const container = document.createElement("div");
+    const items = [{ id: 1, label: "a", status: "on" }];
+    reconcileModels(container, items, modelOpts);
+    const before = container.firstElementChild;
+    expect(reconcileModels(container, [{ ...items[0]! }], modelOpts)).toBe(0);
+    expect(container.firstElementChild).toBe(before);
+  });
+
+  it("patch-only diff patches, keeps node", () => {
+    const container = document.createElement("div");
+    reconcileModels(container, [{ id: 1, label: "a", status: "on" }], modelOpts);
+    const before = container.firstElementChild;
+    const built = reconcileModels(container, [{ id: 1, label: "a", status: "off" }], modelOpts);
+    expect(built).toBe(0);
+    expect(container.firstElementChild).toBe(before);
+    expect(before?.textContent).toBe("a/off");
+    // The patched model is the new baseline: going back is a patch again.
+    expect(reconcileModels(container, [{ id: 1, label: "a", status: "on" }], modelOpts)).toBe(0);
+    expect(before?.textContent).toBe("a/on");
+  });
+
+  it("non-patch diff rebuilds", () => {
+    const container = document.createElement("div");
+    reconcileModels(container, [{ id: 1, label: "a", status: "on" }], modelOpts);
+    const before = container.firstElementChild;
+    const built = reconcileModels(container, [{ id: 1, label: "b", status: "off" }], modelOpts);
+    expect(built).toBe(1);
+    expect(container.firstElementChild).not.toBe(before);
+    expect(container.textContent).toBe("b/off");
+  });
+
+  it("atEvent returns the live item and throws during create", () => {
+    const container = document.createElement("div");
+    let read: (() => Item) | undefined;
+    let duringCreate: unknown;
+    const withRef = {
+      ...modelOpts,
+      create: (m: Model, atEvent: () => Item) => {
+        try {
+          atEvent();
+        } catch (e) {
+          duringCreate = e;
+        }
+        read = atEvent;
+        return modelOpts.create(m);
+      },
+    };
+    reconcileModels(container, [{ id: 1, label: "a", status: "on" }], withRef);
+    expect(duringCreate).toBeInstanceOf(Error);
+    const next = { id: 1, label: "a", status: "off" };
+    reconcileModels(container, [next], withRef);
+    expect(read?.()).toBe(next);
+  });
+
+  it("moves and removes rows like reconcileChildren", () => {
+    const container = document.createElement("div");
+    const mk = (id: number): Item => ({ id, label: String(id), status: "on" });
+    reconcileModels(container, [mk(1), mk(2), mk(3)], modelOpts);
+    const two = container.children[1];
+    reconcileModels(container, [mk(3), mk(2)], modelOpts);
+    expect(ids(container)).toEqual(["3", "2"]);
+    expect(container.children[1]).toBe(two);
   });
 });
