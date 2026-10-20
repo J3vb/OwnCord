@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -853,5 +855,162 @@ func TestHandleRestoreBackup_RequiresOwner(t *testing.T) {
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("admin user on restore status = %d, want 403", w.Code)
+	}
+}
+
+// restorePruneFixture sets up a handler, a restore source backup and a backup
+// dir already holding five staggered old pre_restore_ copies (oldest first is
+// pre_restore_20200101_000000.db), three pre_migrate_ copies and a manual one.
+func restorePruneFixture(t *testing.T) (handler http.Handler, token, backupDir string, olds []string) {
+	t.Helper()
+	tmpDir := chdirTemp(t)
+	database := openAdminTestDB(t)
+	handler = admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	token = createAdminUser(t, database)
+	backupDir = filepath.Join(tmpDir, "data", "backups")
+	if err := os.MkdirAll(backupDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmpDir, "data"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	// A valid database for the oldest copy so it can be a restore source.
+	oldest := "pre_restore_20200101_000000.db"
+	if err := database.BackupToSafe(context.Background(), filepath.Join(backupDir, oldest), backupDir); err != nil {
+		t.Fatalf("BackupToSafe fixture: %v", err)
+	}
+	olds = []string{oldest, "pre_restore_20200102_000000.db", "pre_restore_20200103_000000.db", "pre_restore_20200104_000000.db", "pre_restore_20200105_000000.db"}
+	for _, n := range olds[1:] {
+		if err := os.WriteFile(filepath.Join(backupDir, n), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, n := range olds {
+		ts := time.Now().Add(-time.Duration(len(olds)-i) * 24 * time.Hour)
+		if err := os.Chtimes(filepath.Join(backupDir, n), ts, ts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := range 3 {
+		n := "pre_migrate_021_x_" + string(rune('a'+i)) + ".db"
+		if err := os.WriteFile(filepath.Join(backupDir, n), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(backupDir, "chatserver_20200101_000000.db"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	admin.SetBackupBaseDir(backupDir)
+	return handler, token, backupDir, olds
+}
+
+func fileSet(t *testing.T, dir string) map[string]bool {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]bool{}
+	for _, e := range entries {
+		out[e.Name()] = true
+	}
+	return out
+}
+
+// TestHandleRestoreBackup_PrunesSafetyCopiesKeepsSourceAndNew: restoring from
+// the OLDEST pre_restore_ copy while five old ones exist leaves the source and
+// the new safety copy in place, removes exactly the excess unprotected copy,
+// and touches no other prefix.
+func TestHandleRestoreBackup_PrunesSafetyCopiesKeepsSourceAndNew(t *testing.T) {
+	handler, token, backupDir, olds := restorePruneFixture(t)
+	restarted, restoreHook := admin.StubRestart()
+	defer restoreHook()
+
+	w := doRequest(t, handler, http.MethodPost, "/backups/"+olds[0]+"/restore", token, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for !restarted() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !restarted() {
+		t.Error("restore did not request a restart")
+	}
+
+	got := fileSet(t, backupDir)
+	if !got[olds[0]] {
+		t.Errorf("the restore source %s was pruned", olds[0])
+	}
+	for _, n := range olds[1:3] {
+		if got[n] {
+			t.Errorf("%s (excess, unprotected) was kept", n)
+		}
+	}
+	for _, n := range olds[3:] {
+		if !got[n] {
+			t.Errorf("%s was removed, want kept", n)
+		}
+	}
+	newCopies := 0
+	for n := range got {
+		if strings.HasPrefix(n, "pre_restore_") && !slices.Contains(olds, n) {
+			newCopies++
+		}
+	}
+	if newCopies != 1 {
+		t.Errorf("new pre_restore_ copies = %d, want 1", newCopies)
+	}
+	if !got["chatserver_20200101_000000.db"] {
+		t.Error("manual backup was touched")
+	}
+	for i := range 3 {
+		if n := "pre_migrate_021_x_" + string(rune('a'+i)) + ".db"; !got[n] {
+			t.Errorf("%s of another prefix was touched", n)
+		}
+	}
+}
+
+// TestHandleRestoreBackup_PruneErrorDoesNotFailRestore: one failing removal
+// leaves the restore at 200 with the restart requested, and the other excess
+// copies are still removed.
+func TestHandleRestoreBackup_PruneErrorDoesNotFailRestore(t *testing.T) {
+	handler, token, backupDir, olds := restorePruneFixture(t)
+	restarted, restoreHook := admin.StubRestart()
+	defer restoreHook()
+	failName := olds[1]
+	defer admin.SetRemoveSafetyCopyForTest(func(p string) error {
+		if filepath.Base(p) == failName {
+			return errors.New("injected remove failure")
+		}
+		return os.Remove(p)
+	})()
+
+	// Restore from the manual backup so that two old copies are excess.
+	src := "chatserver_20200101_000000.db"
+	if err := os.Remove(filepath.Join(backupDir, src)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(backupDir, olds[0]), filepath.Join(backupDir, src)); err != nil {
+		t.Fatal(err)
+	}
+
+	w := doRequest(t, handler, http.MethodPost, "/backups/"+src+"/restore", token, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 despite the prune error; body: %s", w.Code, w.Body.String())
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for !restarted() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !restarted() {
+		t.Error("restart was not requested after a prune error")
+	}
+	got := fileSet(t, backupDir)
+	if !got[failName] {
+		t.Error("the copy whose removal failed should still exist")
+	}
+	if got[olds[2]] {
+		t.Errorf("%s (the other excess copy) was kept", olds[2])
 	}
 }

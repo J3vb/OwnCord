@@ -3,11 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
@@ -356,5 +359,110 @@ func TestRestoreCLI_RefusesSourceWithPendingWAL(t *testing.T) {
 	}
 	if !userExists(t, dbPath, "existing-owner") {
 		t.Fatal("the live database changed despite the refusal")
+	}
+}
+
+// TestRestoreCLI_PrunesKeepsSource: restoring from the oldest pre_restore_ copy
+// while four exist keeps the source and the new safety copy and removes only
+// the excess unprotected copy.
+func TestRestoreCLI_PrunesKeepsSource(t *testing.T) {
+	cfgPath, _, backupDir := restoreCLIFixture(t)
+	if err := os.MkdirAll(backupDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	oldest := makeBackup(t, backupDir, "pre_restore_20200101_000000.db", "restored-user")
+	olds := make([]string, 0, 4)
+	olds = append(olds, oldest)
+	for _, n := range []string{"pre_restore_20200102_000000.db", "pre_restore_20200103_000000.db", "pre_restore_20200104_000000.db"} {
+		p := filepath.Join(backupDir, n)
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		olds = append(olds, p)
+	}
+	for i, p := range olds {
+		ts := time.Now().Add(-time.Duration(len(olds)-i) * 24 * time.Hour)
+		if err := os.Chtimes(p, ts, ts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manual := filepath.Join(backupDir, "chatserver_20200101_000000.db")
+	if err := os.WriteFile(manual, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if code := runRestoreCLI(cfgPath, []string{"--force", oldest}); code != 0 {
+		t.Fatalf("restore exited %d, want 0", code)
+	}
+	exists := func(p string) bool { _, err := os.Stat(p); return err == nil }
+	if !exists(oldest) {
+		t.Error("the restore source was pruned")
+	}
+	if exists(olds[1]) {
+		t.Error("the excess unprotected copy was kept")
+	}
+	for _, p := range olds[2:] {
+		if !exists(p) {
+			t.Errorf("%s was removed, want kept", p)
+		}
+	}
+	if !exists(manual) {
+		t.Error("manual backup was touched")
+	}
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "pre_restore_") {
+			n++
+		}
+	}
+	if n != 4 { // new copy + p3 + p2 + source (protected)
+		t.Errorf("pre_restore_ copies = %d, want 4", n)
+	}
+}
+
+// TestRestoreCLI_PruneFailureStillExitsZero: a prune error is a warning on
+// stderr; the restore stands and the command exits 0.
+func TestRestoreCLI_PruneFailureStillExitsZero(t *testing.T) {
+	cfgPath, dbPath, backupDir := restoreCLIFixture(t)
+	if err := os.MkdirAll(backupDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for i, n := range []string{"pre_restore_20200101_000000.db", "pre_restore_20200102_000000.db", "pre_restore_20200103_000000.db", "pre_restore_20200104_000000.db"} {
+		p := filepath.Join(backupDir, n)
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		ts := time.Now().Add(-time.Duration(10-i) * 24 * time.Hour)
+		if err := os.Chtimes(p, ts, ts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backup := makeBackup(t, t.TempDir(), "backup.db", "restored-user")
+	defer admin.SetRemoveSafetyCopyForTest(func(string) error { return errors.New("injected remove failure") })()
+
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	code := runRestoreCLI(cfgPath, []string{"--force", backup})
+	os.Stderr = oldStderr
+	_ = w.Close()
+	var buf bytes.Buffer
+	_, _ = buf.ReadFrom(r)
+
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 despite the prune error", code)
+	}
+	if !userExists(t, dbPath, "restored-user") {
+		t.Fatal("the restore did not take effect")
+	}
+	if !strings.Contains(buf.String(), "could not prune old safety copies") {
+		t.Fatalf("stderr = %q, want the prune warning", buf.String())
 	}
 }
