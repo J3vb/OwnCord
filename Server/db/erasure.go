@@ -174,6 +174,11 @@ var erasureStatements = []struct {
 	// otherwise outlives the erasure. The policy stays in effect — only the
 	// link to who set it is cut, as with the recovery_assists issuer above.
 	{"channel_retention setter", `UPDATE channel_retention SET updated_by = 0 WHERE updated_by = ?`},
+	// Private profile notes (migration 069, class 16a): notes the subject keeps
+	// and notes others keep about the subject. The users delete below would
+	// cascade both, but this is the explicit statement the inventory's zero is
+	// proved against.
+	{"user_notes", `DELETE FROM user_notes WHERE owner_id = ?1 OR target_id = ?1`},
 	{"user_blocks", `DELETE FROM user_blocks WHERE blocker_id = ?1 OR blocked_id = ?1`},
 	{"channel_user_overrides", `DELETE FROM channel_user_overrides WHERE user_id = ?`},
 	// Message requests and trusted senders (migration 046, B5-6, classes 14c

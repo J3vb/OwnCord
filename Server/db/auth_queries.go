@@ -347,7 +347,7 @@ func (d *DB) GetUserByUsername(ctx context.Context, username string) (*User, err
 	if err != nil {
 		return nil, fmt.Errorf("GetUserByUsername: %w", err)
 	}
-	return userFromGen(u), nil
+	return userFromRow(dbgen.GetUserByIDRow(u)), nil
 }
 
 // GetUserByID returns the user with the given ID, or nil if not found.
@@ -359,7 +359,7 @@ func (d *DB) GetUserByID(ctx context.Context, id int64) (*User, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GetUserByID: %w", err)
 	}
-	return userFromGen(u), nil
+	return userFromRow(u), nil
 }
 
 // UpdateUserStatus sets the status column for the given user ID.

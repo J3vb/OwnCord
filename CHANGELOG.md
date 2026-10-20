@@ -52,6 +52,7 @@ and only when it changes something a contributor or fork holder must do
 **Accounts & admin**
 
 - A server can now name one voice channel as its AFK channel (`PUT /admin/api/afk-channel`, Manage Server) and set how long a member must be idle first (the `afk_timeout_seconds` setting: 1, 5, 15, 30 or 60 minutes, 5 by default). Nobody is moved yet and the admin panel has no card for it; this release only adds the setting, the channel flag everyone's client receives, and the rule that the AFK channel is listen-only, with no microphone, camera or screen sharing.
+- The server can now keep a private note about any member and sync it between your devices. A note is yours alone: nobody else, including admins and moderators, can read it through OwnCord, and it is capped at 256 characters. The notes are stored in the server database, not end-to-end encrypted, so the server operator can read them there, as with direct messages. Deleting an account removes the notes that account kept and the notes others kept about it. Clients start using this in a later release; until then the notes you keep in the DM side panel stay on your device.
 
 **Desktop UI**
 

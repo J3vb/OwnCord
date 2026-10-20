@@ -115,5 +115,5 @@ func (d *DB) GetOwnerUser(ctx context.Context) (*User, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GetOwnerUser: %w", err)
 	}
-	return userFromGen(u), nil
+	return userFromRow(dbgen.GetUserByIDRow(u)), nil
 }

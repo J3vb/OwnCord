@@ -6,6 +6,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // ─── Rate limits ────────────────────────────────────────────────────────────
@@ -224,6 +225,18 @@ const (
 	// minute. Lower than the attachment limit: every accepted upload fans a
 	// user_update out to every connected session and orphans the previous file.
 	avatarUploadRateLimitPerMinute = 5
+
+	// maxUserNoteLen is the rune cap on a private profile note (migration 069).
+	maxUserNoteLen = service.MaxUserNoteRunes
+
+	// userNoteMaxBody bounds a note PUT body. maxUserNoteLen*4 bytes is the raw
+	// bound the service enforces; JSON escaping can take up to six bytes per
+	// raw byte (\u00XX), plus room for the JSON envelope.
+	userNoteMaxBody = maxUserNoteLen*4*6 + 512
+
+	// userNoteRateLimitPerMinute is the maximum note writes per client per
+	// minute. The client debounces at 600 ms, so steady typing stays under it.
+	userNoteRateLimitPerMinute = 30
 
 	// maxRequestIDLen bounds a client-supplied X-Request-Id. chi's
 	// middleware.RequestID adopts that header verbatim, and the value then

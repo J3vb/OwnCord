@@ -69,6 +69,27 @@ WHERE banned = 0
 ORDER BY (SELECT r.position FROM roles r WHERE r.id = users.role_id) DESC, id ASC
 `
 
+type GetOwnerUserRow struct {
+	ID                    int64   `json:"id"`
+	Username              string  `json:"username"`
+	Password              string  `json:"password"`
+	Avatar                *string `json:"avatar"`
+	RoleID                int64   `json:"roleId"`
+	TotpSecret            *string `json:"totpSecret"`
+	Status                string  `json:"status"`
+	CreatedAt             string  `json:"createdAt"`
+	LastSeen              *string `json:"lastSeen"`
+	Banned                int64   `json:"banned"`
+	BanReason             *string `json:"banReason"`
+	BanExpires            *string `json:"banExpires"`
+	IdentityPublicKey     *string `json:"identityPublicKey"`
+	DisplayName           *string `json:"displayName"`
+	About                 *string `json:"about"`
+	CustomStatus          *string `json:"customStatus"`
+	RegistrationStatus    string  `json:"registrationStatus"`
+	CustomStatusExpiresAt *string `json:"customStatusExpiresAt"`
+}
+
 // The highest-privilege account (role with the greatest position), used as the
 // default identity for `token create`. FROM is users-only (role position is a
 // correlated subquery, not a join) so the row maps through userFromGen exactly
@@ -84,9 +105,9 @@ ORDER BY (SELECT r.position FROM roles r WHERE r.id = users.role_id) DESC, id AS
 // so a lapsed temporary ban stays eligible; the replace() normalises the space
 // separator form of ban_expires to 'T' before comparing, because ' ' sorts
 // below 'T' and a same-day space-form expiry would otherwise read as lapsed.
-func (q *Queries) GetOwnerUser(ctx context.Context) (User, error) {
+func (q *Queries) GetOwnerUser(ctx context.Context) (GetOwnerUserRow, error) {
 	row := q.db.QueryRowContext(ctx, getOwnerUser)
-	var i User
+	var i GetOwnerUserRow
 	err := row.Scan(
 		&i.ID,
 		&i.Username,
