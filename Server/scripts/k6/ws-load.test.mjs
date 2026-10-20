@@ -23,6 +23,8 @@ function harness(env = {}, vu = 1, files = {}) {
   const timeouts = [];
   const connects = [];
   const logins = [];
+  const patches = [];
+  const routes = {};
   const sleeps = [];
   let closes = 0;
   let body = {};
@@ -58,7 +60,15 @@ function harness(env = {}, vu = 1, files = {}) {
         logins.push({ url, payload: JSON.parse(payload), params });
         return { status: 200, body: '{"token":"test-token"}', headers: {} };
       },
-      get: () => ({ status: 200, json: () => body }),
+      get: (url) => {
+        const route = Object.keys(routes).find((prefix) => url.includes(prefix));
+        if (route) return { status: 200, json: () => routes[route] };
+        return { status: 200, json: () => body };
+      },
+      patch: (url, payload, params) => {
+        patches.push({ url, payload: JSON.parse(payload), params });
+        return { status: 200, json: () => ({}) };
+      },
     },
     ws: {
       connect: (url, params, callback) => {
@@ -93,6 +103,8 @@ function harness(env = {}, vu = 1, files = {}) {
     timeouts,
     connects,
     logins,
+    patches,
+    routes,
     closes: () => closes,
     sleeps,
     evaluate,
@@ -1006,4 +1018,130 @@ test("voice_vus_joined counts every VU that joins voice, including the one past 
     h.receive({ type: "voice_token", payload: {} });
     assert.equal(h.metrics.voice_vus_joined.length, 1, `vu ${vu} counted`);
   }
+});
+
+// --- role flip (WP 4.4a) ----------------------------------------------------
+
+const flipEnv = (extra = {}) =>
+  scaleEnv({ K6_ROLE_FLIP_EVERY: "30", K6_ROLE_FLIP_TOKEN: "/admin", ...extra });
+const flipFiles = { "/admin": "admin-token\n" };
+const flipRoutes = (h) => {
+  h.routes["/admin/api/roles"] = [
+    { id: 1, name: "Owner", permissions: 1073741823, is_default: false },
+    { id: 3, name: "Moderator", permissions: 1048575, is_default: false },
+    { id: 4, name: "Member", permissions: 1635, is_default: true },
+  ];
+  h.routes["/admin/api/users"] = [
+    { id: 7, username: "loadtest20" },
+    { id: 9, username: "loadtest2000" },
+  ];
+};
+
+test("role flip is off unless K6_ROLE_FLIP_EVERY is set, and registers nothing then", () => {
+  const h = harness(scaleEnv());
+  assert.equal(h.evaluate("ROLE_FLIP_ON"), false);
+  assert.equal(h.evaluate('"role_flip" in options.scenarios'), false);
+  assert.equal(h.evaluate('"role_patches" in options.thresholds'), false);
+  assert.equal(h.evaluate("SCALE_VUS_MAX"), 2501);
+  assert.equal(h.evaluate("rolePatchTime"), null);
+  assert.equal(h.summary().load_measurement.role_flip, undefined);
+});
+
+test("role flip rejects a non-scale profile, a bad period and a missing token", () => {
+  assert.throws(
+    () => harness({ K6_PROFILE: "capacity", K6_ROLE_FLIP_EVERY: "30" }),
+    /scale profile only/,
+  );
+  for (const every of ["abc", "0.5", "-3", "9999"]) {
+    assert.throws(
+      () => harness(flipEnv({ K6_ROLE_FLIP_EVERY: every }), 1, flipFiles),
+      /K6_ROLE_FLIP_EVERY/,
+      every,
+    );
+  }
+  assert.throws(() => harness(scaleEnv({ K6_ROLE_FLIP_EVERY: "30" })), /K6_ROLE_FLIP_TOKEN/);
+});
+
+test("role flip runs one admin VU from steady to the herd, and widens the account pool by one", () => {
+  const h = harness(flipEnv(), 1, flipFiles);
+  const scenario = JSON.parse(h.evaluate("JSON.stringify(options.scenarios.role_flip)"));
+  assert.equal(scenario.vus, 1);
+  assert.equal(scenario.exec, "roleFlipScenario");
+  assert.equal(scenario.startTime, "180s");
+  assert.equal(scenario.duration, `${h.evaluate("SCALE_HERD_AT_S") - 180}s`);
+  assert.equal(h.evaluate("SCALE_VUS_MAX"), 2502);
+  assert.equal(h.evaluate("ROLE_FLIP_USER"), "loadtest2000");
+});
+
+test("role flip alternates the user's role and the default role's name and mask, and reports it", () => {
+  const h = harness(flipEnv(), 1, flipFiles);
+  flipRoutes(h);
+  h.at(20); // seconds into this scenario, which starts at 180 s on the run clock
+  h.evaluate("roleFlipScenario()");
+  h.evaluate("roleFlipScenario()");
+  assert.equal(h.patches.length, 4);
+  const [u1, r1, u2, r2] = h.patches;
+  assert.ok(u1.url.endsWith("/admin/api/users/9"));
+  assert.deepEqual(u1.payload, { role_id: 3 });
+  assert.ok(r1.url.endsWith("/admin/api/roles/4"));
+  assert.deepEqual(r1.payload, { name: "Member-lt", permissions: 1635 ^ 0x40 });
+  assert.deepEqual(u2.payload, { role_id: 4 });
+  assert.deepEqual(r2.payload, { name: "Member", permissions: 1635 });
+  for (const call of h.patches) {
+    assert.equal(call.params.headers.Authorization, "Bearer admin-token");
+  }
+  assert.equal(h.metrics.role_patch_time.length, 2);
+  assert.equal(h.metrics.role_patches.length, 2);
+  assert.equal(h.metrics.role_patch_time[0].tags.phase, "steady");
+  assert.equal(h.metrics.role_flip_errors?.length ?? 0, 0);
+});
+
+test("role flip counts an unresolvable role or user as an error and retries, never silently idles", () => {
+  const h = harness(flipEnv(), 1, flipFiles);
+  h.routes["/admin/api/roles"] = [{ id: 4, name: "Member", permissions: 1, is_default: true }];
+  h.evaluate("roleFlipScenario()");
+  assert.equal(h.patches.length, 0);
+  assert.equal(h.metrics.role_flip_errors.length, 1);
+  flipRoutes(h);
+  h.evaluate("roleFlipScenario()");
+  assert.equal(h.patches.length, 2);
+});
+
+test("role flip observer records broadcast drops and dispatch lag per phase, and the summary publishes them", () => {
+  const h = harness(flipEnv(), 1, flipFiles);
+  h.at(200);
+  h.observe({ broadcast_drops: 5, backpressure_queue_disconnects: 1 });
+  h.at(205);
+  h.observe({
+    broadcast_drops: 8,
+    backpressure_queue_disconnects: 1,
+    ws_dispatch_lag_ms: { count: 10, p50: 1, p95: 4, p99: 9, max: 20 },
+  });
+  assert.deepEqual(
+    h.metrics.obs_broadcast_drops.map((m) => m.value),
+    [3],
+  );
+  assert.equal(h.metrics.obs_dispatch_lag_p99_ms[0].value, 9);
+  assert.equal(h.metrics.obs_dispatch_lag_p99_ms[0].tags.phase, "steady");
+  const t = (key) => h.evaluate(`options.thresholds[${JSON.stringify(key)}]`);
+  assert.deepEqual([...t("role_flip_errors")], ["count==0"]);
+  assert.ok(t("role_patch_time{phase:steady}").includes("p(95)>=0"));
+  assert.ok(t("obs_broadcast_drops{phase:steady}").includes("count>=0"));
+  const summary = h.summary({
+    metrics: {
+      role_patches: { values: { count: 12 } },
+      "role_patch_time{phase:steady}": {
+        values: { med: 30, "p(95)": 90, "p(99)": 120, count: 12 },
+      },
+      "obs_broadcast_drops{phase:steady}": { values: { count: 3 } },
+      "obs_dispatch_lag_p99_ms{phase:steady}": { values: { max: 9 } },
+    },
+  }).load_measurement.role_flip;
+  assert.equal(summary.every_s, 30);
+  assert.equal(summary.role_patches, 12);
+  const steady = summary.windows.find((w) => w.phase === "steady");
+  assert.equal(steady.role_patch.p95_ms, 90);
+  assert.equal(steady.broadcast_drops, 3);
+  assert.equal(steady.dispatch_lag_p99_ms, 9);
+  assert.equal(steady.queue_disconnects, 0);
 });

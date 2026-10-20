@@ -88,6 +88,10 @@
 #     limits see distinct people — a MEASUREMENT setting, never a deployment
 #     recommendation. Registration runs 2 x NumCPU in parallel and keeps each
 #     session token, so VUs start from a token as a returning client does.
+#     The `scale-role-flip` choice is this profile plus the WP 4.4a role-flip
+#     scenario (K6_ROLE_FLIP_EVERY=30): the workflow keeps the owner session
+#     token it gets at setup in the run directory, and one admin VU changes
+#     roles with it from steady to the herd.
 #
 # The restart, ceiling-search and scale profiles set no voice channel: their voice leg
 # is off, both in the script (no K6_VOICE_VUS) and in the server load, because
@@ -113,6 +117,7 @@ on:
           - restart
           - ceiling-search
           - scale
+          - scale-role-flip
       users:
         description: "Registered users to seed (BPR-030 says 250)"
         required: false
@@ -184,21 +189,25 @@ jobs:
     # promised rather than a timeout in the middle of a probe.
     # scale seeds scale_connections + 501 users at cost 12 (~10 min on two
     # cores) and runs ~11 min of k6 after its VUs initialise.
-    timeout-minutes: ${{ (inputs.profile || 'capacity') == 'ceiling-search' && 75 || ((inputs.profile || 'capacity') == 'scale' && 90 || 45) }}
+    timeout-minutes: ${{ (inputs.profile || 'capacity') == 'ceiling-search' && 75 || (startsWith(inputs.profile || 'capacity', 'scale') && 90 || 45) }}
     # Per-run parameters, so the profile logic is one derive step rather than
     # an `if:` on a dozen steps. These sit at job scope, not workflow scope:
     # `matrix` is not an available context in the workflow-level `env:` block.
     # TLS_MODE is `matrix.tls` (always self_signed outside the operational
     # profile) and drives both the URL scheme and the server's own tls.mode.
     env:
-      PROFILE: ${{ inputs.profile || 'capacity' }}
+      # scale-role-flip is the scale profile with the WP 4.4a role-flip
+      # scenario on: a profile choice rather than an eleventh input, because
+      # actionlint caps workflow_dispatch at ten.
+      PROFILE: ${{ inputs.profile == 'scale-role-flip' && 'scale' || inputs.profile || 'capacity' }}
       TLS_MODE: ${{ matrix.tls }}
       CEILING_MAX: ${{ inputs.ceiling_max || '500' }}
       SEED_USERS_INPUT: ${{ inputs.users || '250' }}
-      CONNECTIONS: ${{ (inputs.profile || 'capacity') == 'scale' && (inputs.scale_connections || '2000') || inputs.connections || '100' }}
+      CONNECTIONS: ${{ startsWith(inputs.profile || 'capacity', 'scale') && (inputs.scale_connections || '2000') || inputs.connections || '100' }}
       SCALE_ACTIVE: ${{ inputs.scale_active || '0.1' }}
       SCALE_BURST_SEND_MS: ${{ inputs.scale_burst_send_ms || '2000' }}
       SCALE_HERD_SPREAD_S: "15"
+      SCALE_ROLE_FLIP_EVERY: ${{ inputs.profile == 'scale-role-flip' && '30' || '' }}
       VOICE: ${{ inputs.voice || '25' }}
       EVENT_PERSISTENCE: ${{ inputs.event_persistence || 'on' }}
     strategy:
@@ -329,10 +338,16 @@ jobs:
           # scale's login burst logs K fresh users in, one per login-burst VU,
           # and those VUs share the id pool with the cohort and the observer.
           scale_logins=500
+          # The role-flip admin VU (WP 4.4a) takes one more id from the same
+          # pool, so one more account has to exist for it to land on.
+          scale_flip_users=0
+          if [ "$PROFILE" = "scale" ] && [ -n "$SCALE_ROLE_FLIP_EVERY" ]; then
+            scale_flip_users=1
+          fi
           if [ "$PROFILE" = "ceiling-search" ]; then
             seed_users=$((CEILING_MAX + 1))
           elif [ "$PROFILE" = "scale" ]; then
-            seed_users=$((CONNECTIONS + 1 + scale_logins))
+            seed_users=$((CONNECTIONS + 1 + scale_flip_users + scale_logins))
           elif [ "$PROFILE" = "operational" ] && [ "$SEED_USERS_INPUT" -lt $((2 * CONNECTIONS + 1)) ]; then
             seed_users=$((2 * CONNECTIONS + 1))
           elif [ "$PROFILE" = "restart" ] && [ "$SEED_USERS_INPUT" -lt $((CONNECTIONS + 1)) ]; then
@@ -562,6 +577,12 @@ jobs:
             exit 1
           fi
           echo "::add-mask::$TOKEN"
+          # The role-flip VU sends this owner session token (WP 4.4a). Like
+          # tokens.txt it stays in the run directory, readable by this user
+          # only, and is not in the uploaded artifact.
+          if [ "$PROFILE" = "scale" ] && [ -n "$SCALE_ROLE_FLIP_EVERY" ]; then
+            (umask 077 && printf '%s' "$TOKEN" >"$WORK/admin-token.txt")
+          fi
 
           CHANNEL_ID=$(curl -sk -X POST "$BASE/admin/api/channels" \
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
@@ -712,6 +733,8 @@ jobs:
           K6_SCALE_BURST_SEND_MS: ${{ env.SCALE_BURST_SEND_MS }}
           K6_SCALE_HERD_SPREAD_S: ${{ env.SCALE_HERD_SPREAD_S }}
           K6_SCALE_LOGINS: ${{ env.SCALE_LOGINS }}
+          K6_ROLE_FLIP_EVERY: ${{ env.PROFILE == 'scale' && env.SCALE_ROLE_FLIP_EVERY || '' }}
+          K6_ROLE_FLIP_TOKEN: ${{ env.PROFILE == 'scale' && env.SCALE_ROLE_FLIP_EVERY != '' && format('{0}/admin-token.txt', env.WORK) || '' }}
           K6_RESTART_AT: ${{ env.RESTART_AT }}
           K6_RESTART_RECOVERY_S: ${{ env.RESTART_RECOVERY_S }}
           MATRIX_LEG: ${{ matrix.leg }}
