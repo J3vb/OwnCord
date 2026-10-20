@@ -306,7 +306,14 @@ They are selected by `K6_PROFILE`, and `capacity` remains the default.
 gh workflow run load-baseline.yml -f profile=operational    --ref <branch>   # both TLS legs in one run
 gh workflow run load-baseline.yml -f profile=restart        --ref <branch>
 gh workflow run load-baseline.yml -f profile=ceiling-search -f ceiling_max=500 --ref <branch>
+gh workflow run load-baseline.yml -f profile=ceiling-search -f event_persistence=off --ref <branch>   # A/B arm, WP 4.6
 ```
+
+`event_persistence=off` (any profile) boots the server with event persistence
+off (no writes to, or replay from, the events table), for the WP 4.6 comparison of the replay tiers. The run fails if the
+metrics snapshot does not show the arm that was asked for. The spread of the
+`scale` herd is fixed at 15 s and is no longer a dispatch input, because GitHub
+allows ten.
 
 **None of them introduces a latency budget.** A scenario either applies a budget
 this document already publishes, or publishes its number as what it is with no
@@ -617,7 +624,7 @@ the scaling phase measures itself against, and like the rest of this document
 ```
 gh workflow run load-baseline.yml -f profile=scale --ref dev
 # the defaults, spelled out:
-#   -f scale_connections=2000 -f scale_active=0.1 -f scale_burst_send_ms=2000 -f scale_herd_spread_s=15
+#   -f scale_connections=2000 -f scale_active=0.1 -f scale_burst_send_ms=2000
 ```
 
 Constrained leg only, no voice leg. `K6_PROFILE=scale` in
@@ -661,7 +668,7 @@ defaults are:
 | `steady`    | [180, 360) s      | The traffic model above                                                                                                                                     | acknowledgement, delivery, the held population                                                      |
 | `burst`     | [360, 420) s      | Active users send every `K6_SCALE_BURST_SEND_MS` (default 2,000 ms: about **100 messages/s**)                                                               | acknowledgement, delivery                                                                           |
 | `login`     | [420, 510) s      | `K6_SCALE_LOGINS` (default **500**) fresh password logins over `K6_SCALE_LOGIN_SPREAD_S` (default **10 s**), each from its own address, over steady traffic | time to a token including retries, give-ups, per-attempt login time, refusals                       |
-| `herd`      | [510, 600) s      | Every socket drops on its own slot of a `scale_herd_spread_s` spread (default **15 s**) and redials a full `ready`                                          | time until all N are `ready`, dial → `ready` p50/p95/p99, `auth_ok`, backpressure queue disconnects |
+| `herd`      | [510, 600) s      | Every socket drops on its own slot of a 15 s spread and redials a full `ready`                                                                              | time until all N are `ready`, dial → `ready` p50/p95/p99, `auth_ok`, backpressure queue disconnects |
 | `ramp-down` | [600, end) and on | Draining                                                                                                                                                    | Excluded                                                                                            |
 
 `K6_SCALE_RAMP_S`, `_STEADY_S`, `_BURST_S`, `_LOGIN_S` and `_HERD_S` move the
