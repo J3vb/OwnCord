@@ -32,6 +32,11 @@ const afkMovesPerSweep = 25
 // it holds the window in which a member returns or switches channel.
 var afkSweepSnapshotHook func()
 
+// afkAfterEvictHook, when non-nil, runs between a member's eviction and the
+// voice_moved send. Test-only (always nil in production): it holds the window
+// in which the member's connection drops.
+var afkAfterEvictHook func()
+
 // afkCandidate is one idle voice member the sweep may move: the connection it
 // saw, the channel it saw it in, and the idle stamp it judged by.
 type afkCandidate struct {
@@ -68,7 +73,7 @@ func (h *Hub) sweepAFK(ctx context.Context) {
 		if moved >= afkMovesPerSweep || ctx.Err() != nil {
 			return
 		}
-		if !h.afkMoveAllowed(ctx, afk, cand) {
+		if !h.afkMoveAllowed(ctx, afk, cand, moved) {
 			continue
 		}
 		if h.EvictForAFKMove(ctx, cand.c, cand.fromCh, cand.idleSince, afk.ID) {
@@ -116,8 +121,10 @@ func (h *Hub) afkCandidates(afkID int64, cutoff time.Time) []afkCandidate {
 // (a DM or group call is never moved) and the member must be able to join the
 // AFK channel themselves, with room in it — the checks the moderator move
 // makes (handleVoiceModMoveV2), so a member is not dropped from voice for a
-// re-join that would bounce. A refusal leaves the member where they are.
-func (h *Hub) afkMoveAllowed(ctx context.Context, afk *db.Channel, cand afkCandidate) bool {
+// re-join that would bounce. inFlight is the number of members this sweep has
+// already moved and whose join is still to come. A refusal leaves the member
+// where they are.
+func (h *Hub) afkMoveAllowed(ctx context.Context, afk *db.Channel, cand afkCandidate, inFlight int) bool {
 	userID := cand.c.userID
 	src, err := h.readers.Dispatch.GetChannel(ctx, cand.fromCh)
 	if err != nil || src == nil || src.Type != "voice" {
@@ -136,8 +143,10 @@ func (h *Hub) afkMoveAllowed(ctx context.Context, afk *db.Channel, cand afkCandi
 	if capacity <= 0 {
 		return true
 	}
+	// A member moved earlier in this sweep joins the AFK channel only once its
+	// client answers voice_moved, so the stored count has not risen for it yet.
 	count, err := h.voice.CountInChannel(ctx, afk.ID)
-	if err != nil || count >= capacity {
+	if err != nil || count+inFlight >= capacity {
 		slog.Debug("voice afk: AFK channel full or unreadable, member left in place", "user_id", userID, "err", err)
 		return false
 	}
@@ -172,6 +181,9 @@ func (h *Hub) EvictForAFKMove(ctx context.Context, c *Client, fromCh int64, idle
 		return false
 	}
 	blockVoiceRejoin(h, c.userID, fromCh)
+	if afkAfterEvictHook != nil {
+		afkAfterEvictHook()
+	}
 	if !h.SendToUser(c.userID, buildVoiceMoved(afkID, voiceMovedReasonAFK)) {
 		clearPendingModFlags(h, c.userID)
 		slog.Info("voice afk move: member was reconnecting, removed from voice instead of moved",

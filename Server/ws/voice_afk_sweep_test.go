@@ -79,7 +79,7 @@ func newAFKRig(t *testing.T, n int) *afkRig {
 	if _, err := h.db.SetAFKChannel(context.Background(), &r.afk); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { afkSweepSnapshotHook = nil })
+	t.Cleanup(func() { afkSweepSnapshotHook = nil; afkAfterEvictHook = nil })
 	return r
 }
 
@@ -406,5 +406,87 @@ func TestSweepAFK_BoundedPerSweepAndStopsOnCtx(t *testing.T) {
 	r.sweep()
 	if n := left(); n != 0 {
 		t.Fatalf("after the next sweep %d members remain, want 0", n)
+	}
+}
+
+// A sweep must not move more members than the AFK channel has room for: the
+// stored count does not rise until each client answers voice_moved, so the
+// sweep counts its own moves. The member who does not fit stays where they are.
+func TestSweepAFK_CappedChannelTakesOnlyWhatFits(t *testing.T) {
+	r := newAFKRig(t, 2)
+	a, b := r.members[0], r.members[1]
+	if _, err := r.db.ExecContext(context.Background(), `UPDATE channels SET voice_max_users = 1 WHERE id = ?`, r.afk); err != nil {
+		t.Fatal(err)
+	}
+	r.seat(a, r.room)
+	r.seat(b, r.room)
+	r.idle(a, 2*time.Hour)
+	r.idle(b, time.Hour)
+	r.sweep()
+	if len(r.moved(a)) != 1 || r.rowChannel(a) != 0 {
+		t.Fatal("the longest-idle member was not moved")
+	}
+	if len(r.moved(b)) != 0 || r.rowChannel(b) != r.room {
+		t.Fatal("a second member was evicted for a channel with room for one")
+	}
+}
+
+// A member who comes back and goes idle again inside the window has a new idle
+// stamp; the sweep must judge by that, not by the stamp it snapshotted.
+func TestSweepAFK_IdleAgainAfterReturnIsNotMovedOnTheOldStamp(t *testing.T) {
+	r := newAFKRig(t, 1)
+	a := r.members[0]
+	r.seat(a, r.room)
+	r.idle(a, time.Hour)
+	afkSweepSnapshotHook = func() {
+		a.c.setLivePresence(db.StatusOnline, nil, "")
+		a.c.setLivePresence(db.StatusIdle, nil, "")
+	}
+	r.sweep()
+	if len(r.moved(a)) != 0 || r.rowChannel(a) != r.room {
+		t.Fatal("a member idle again for seconds was moved on the old idle stamp")
+	}
+	r.check()
+}
+
+// A connection that is replaced after the snapshot is never evicted, even
+// while presence and channel still match.
+func TestSweepAFK_ReplacedConnectionIsNotEvicted(t *testing.T) {
+	r := newAFKRig(t, 1)
+	a := r.members[0]
+	r.seat(a, r.room)
+	r.idle(a, time.Hour)
+	old := a.c
+	afkSweepSnapshotHook = func() { r.hub.unregisterNow(old) }
+	r.sweep()
+	if r.rowChannel(a) != r.room || stashed(old) {
+		t.Fatal("a connection that was no longer registered was evicted")
+	}
+}
+
+// When the voice_moved send is refused (the member's queue is full), the
+// moderator-flag stash is cleared again: nothing is left to turn the member's
+// next unrelated join into a server mute.
+func TestSweepAFK_FailedMovedSendClearsStash(t *testing.T) {
+	r := newAFKRig(t, 1)
+	a := r.members[0]
+	r.seat(a, r.room)
+	if ok, err := r.hub.voice.SetServerMute(context.Background(), a.userID, r.room, true); err != nil || !ok {
+		t.Fatalf("SetServerMute: %v %v", ok, err)
+	}
+	r.idle(a, time.Hour)
+	c := a.c
+	afkAfterEvictHook = func() {
+		for {
+			select {
+			case c.send <- []byte(`{"type":"filler"}`):
+			default:
+				return
+			}
+		}
+	}
+	r.sweep()
+	if stashed(c) {
+		t.Fatal("a failed voice_moved send left the moderator-flag stash behind")
 	}
 }
