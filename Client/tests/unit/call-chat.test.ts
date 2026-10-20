@@ -12,7 +12,11 @@ import {
   voiceStore,
   setVoiceStatus,
 } from "@stores/voice.store";
-import { createCallChat, type CallChat } from "../../src/pages/main-page/callChat";
+import {
+  createCallChat,
+  type CallChat,
+  type CallChatState,
+} from "../../src/pages/main-page/callChat";
 
 const TEXT = 1;
 const VOICE_A = 10;
@@ -25,14 +29,19 @@ function channel(id: number, type: "text" | "voice" | "dm") {
 
 function fakeCtrl() {
   let videoMode = false;
+  let poppedOut = false;
   return {
     openCall: vi.fn(() => {
       videoMode = true;
     }),
     setChatBeside: vi.fn<(on: boolean) => void>(),
     isVideoMode: () => videoMode,
+    isGridInWindow: () => videoMode && !poppedOut,
     close: () => {
       videoMode = false;
+    },
+    popOut: (out: boolean) => {
+      poppedOut = out;
     },
   };
 }
@@ -51,6 +60,7 @@ describe("callChat (WP 6.1b)", () => {
   let chat: CallChat | null = null;
 
   beforeEach(() => {
+    localStorage.clear();
     resetChannelsStore();
     resetVoiceStore();
     setChannels([
@@ -220,5 +230,108 @@ describe("callChat (WP 6.1b)", () => {
     joinVoiceChannel(VOICE_B);
     flush();
     expect(ctrl.setChatBeside).not.toHaveBeenCalled();
+  });
+
+  describe("Hide chat / Show chat (WP 6.1c)", () => {
+    function inCall(ctrl: ReturnType<typeof fakeCtrl>, onStateChange?: (s: CallChatState) => void) {
+      chat = createCallChat({ videoModeCtrl: ctrl, onStateChange });
+      joinVoiceChannel(VOICE_A);
+      flush();
+      chat.openVoiceCall();
+    }
+
+    it("is split-capable only with the grid open on the joined voice channel", () => {
+      const ctrl = fakeCtrl();
+      const states: CallChatState[] = [];
+      chat = createCallChat({ videoModeCtrl: ctrl, onStateChange: (s) => states.push(s) });
+      joinVoiceChannel(VOICE_A);
+      setActiveChannel(VOICE_A);
+      flush();
+      // Grid closed: not capable.
+      expect(states.at(-1)).toEqual({ capable: false, open: true });
+
+      ctrl.openCall();
+      chat.refresh();
+      expect(states.at(-1)).toEqual({ capable: true, open: true });
+
+      ctrl.close();
+      chat.refresh();
+      expect(states.at(-1)).toEqual({ capable: false, open: true });
+    });
+
+    it("a popped-out call is not split-capable, so the toggle hides", () => {
+      const ctrl = fakeCtrl();
+      const states: CallChatState[] = [];
+      chat = createCallChat({ videoModeCtrl: ctrl, onStateChange: (s) => states.push(s) });
+      joinVoiceChannel(VOICE_A);
+      setActiveChannel(VOICE_A);
+      flush();
+      ctrl.openCall();
+      chat.refresh();
+      expect(states.at(-1)?.capable).toBe(true);
+
+      ctrl.popOut(true);
+      chat.refresh();
+      expect(states.at(-1)?.capable).toBe(false);
+
+      ctrl.popOut(false);
+      chat.refresh();
+      expect(states.at(-1)?.capable).toBe(true);
+    });
+
+    it("a DM call or an unjoined voice chat is never capable", () => {
+      const ctrl = fakeCtrl();
+      const states: CallChatState[] = [];
+      chat = createCallChat({ videoModeCtrl: ctrl, onStateChange: (s) => states.push(s) });
+      joinVoiceChannel(DM);
+      flush();
+      chat.openVoiceCall();
+      expect(states.at(-1)?.capable).toBe(false);
+
+      leaveVoiceChannel();
+      setActiveChannel(VOICE_B);
+      flush();
+      expect(states.at(-1)?.capable).toBe(false);
+    });
+
+    it("pref off keeps the chat hidden", () => {
+      const ctrl = fakeCtrl();
+      inCall(ctrl);
+      expect(lastBeside(ctrl)).toBe(true);
+
+      chat?.toggleChat();
+      expect(lastBeside(ctrl)).toBe(false);
+
+      // Moving around the call keeps the grid over the chat while it is off.
+      setVoiceStatus("reconnecting");
+      flush();
+      expect(lastBeside(ctrl)).toBe(false);
+
+      chat?.toggleChat();
+      expect(lastBeside(ctrl)).toBe(true);
+    });
+
+    it("pref survives a reload", () => {
+      const first = fakeCtrl();
+      inCall(first);
+      chat?.toggleChat();
+      chat?.destroy();
+      chat = null;
+
+      const second = fakeCtrl();
+      const states: CallChatState[] = [];
+      chat = createCallChat({ videoModeCtrl: second, onStateChange: (s) => states.push(s) });
+      chat.openVoiceCall();
+      chat.refresh();
+      expect(states.at(-1)).toEqual({ capable: true, open: false });
+      expect(lastBeside(second)).toBe(false);
+    });
+
+    it("an unreadable pref falls back to the chat open", () => {
+      localStorage.setItem("owncord:callChatOpen", JSON.stringify("nope"));
+      const ctrl = fakeCtrl();
+      inCall(ctrl);
+      expect(lastBeside(ctrl)).toBe(true);
+    });
   });
 });
