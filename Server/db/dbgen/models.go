@@ -252,6 +252,11 @@ type MessageRequest struct {
 	DecidedAt      *string `json:"decidedAt"`
 }
 
+type MessageRoleMention struct {
+	MessageID int64 `json:"messageId"`
+	RoleID    int64 `json:"roleId"`
+}
+
 type MessagesFt struct {
 	Content string `json:"content"`
 }
@@ -429,6 +434,8 @@ type Role struct {
 	Permissions int64   `json:"permissions"`
 	Position    int64   `json:"position"`
 	IsDefault   int64   `json:"isDefault"`
+	Hoist       int64   `json:"hoist"`
+	Mentionable int64   `json:"mentionable"`
 }
 
 type Session struct {
@@ -494,6 +501,11 @@ type UserBlock struct {
 	BlockerID int64  `json:"blockerId"`
 	BlockedID int64  `json:"blockedId"`
 	CreatedAt string `json:"createdAt"`
+}
+
+type UserRole struct {
+	UserID int64 `json:"userId"`
+	RoleID int64 `json:"roleId"`
 }
 
 type UserStorage struct {

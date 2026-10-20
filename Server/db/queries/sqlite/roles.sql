@@ -1,5 +1,5 @@
 -- name: GetRoleByID :one
-SELECT id, name, color, permissions, position, is_default
+SELECT id, name, color, permissions, position, is_default, hoist, mentionable
 FROM roles WHERE id = ?;
 
 -- name: ListRoles :many
@@ -11,11 +11,11 @@ FROM roles WHERE id = ?;
 -- NOTE: keep comments in this file ASCII-only. sqlc mixes byte and rune
 -- offsets when stripping them, so a non-ASCII character here truncates the
 -- generated SQL of THIS and every following query by the byte/rune delta.
-SELECT id, name, color, permissions, position, is_default
+SELECT id, name, color, permissions, position, is_default, hoist, mentionable
 FROM roles ORDER BY position DESC, id ASC;
 
 -- name: GetRoleForUser :one
-SELECT r.id, r.name, r.color, r.permissions, r.position, r.is_default
+SELECT r.id, r.name, r.color, r.permissions, r.position, r.is_default, r.hoist, r.mentionable
 FROM users u
 JOIN roles r ON u.role_id = r.id
 WHERE u.id = ?;
@@ -32,19 +32,19 @@ WHERE u.id = ?;
 -- name: GetRoleByName :one
 -- Case-insensitive by design: migration 023 enforces uniqueness under the same
 -- collation, so this is the lookup that agrees with the constraint.
-SELECT id, name, color, permissions, position, is_default
+SELECT id, name, color, permissions, position, is_default, hoist, mentionable
 FROM roles WHERE name = ? COLLATE NOCASE;
 
 -- name: GetDefaultRole :one
 -- The fallback role every member lands on when their role is deleted. Highest
 -- position wins if a database somehow carries more than one default.
-SELECT id, name, color, permissions, position, is_default
+SELECT id, name, color, permissions, position, is_default, hoist, mentionable
 FROM roles WHERE is_default = 1 ORDER BY position DESC, id ASC LIMIT 1;
 
 -- name: CreateRole :one
 INSERT INTO roles (name, color, permissions, position, is_default)
 VALUES (?, ?, ?, ?, 0)
-RETURNING id, name, color, permissions, position, is_default;
+RETURNING id, name, color, permissions, position, is_default, hoist, mentionable;
 
 -- name: UpdateRole :exec
 UPDATE roles SET name = ?, color = ?, permissions = ?, position = ? WHERE id = ?;
@@ -61,3 +61,42 @@ SELECT role_id, COUNT(*) AS member_count FROM users GROUP BY role_id;
 -- name: ListUserIDsByRole :many
 SELECT id FROM users WHERE role_id = ?;
 
+
+-- name: ListUserRoles :many
+-- Every role a member holds, top role first (highest position, lowest id).
+SELECT r.id, r.name, r.color, r.permissions, r.position, r.is_default, r.hoist, r.mentionable
+FROM user_roles ur
+JOIN roles r ON r.id = ur.role_id
+WHERE ur.user_id = ?
+ORDER BY r.position DESC, r.id ASC;
+
+-- name: ListRoleIDsByUser :many
+-- Held role ids, top role first.
+SELECT r.id
+FROM user_roles ur
+JOIN roles r ON r.id = ur.role_id
+WHERE ur.user_id = ?
+ORDER BY r.position DESC, r.id ASC;
+
+-- name: AddUserRole :exec
+INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (?, ?);
+
+-- name: RemoveUserRole :exec
+DELETE FROM user_roles WHERE user_id = ? AND role_id = ?;
+
+-- name: CountUserRoles :one
+SELECT COUNT(*) FROM user_roles WHERE user_id = ?;
+
+-- name: SyncTopRole :exec
+-- Mirrors the top held role into users.role_id. A member holding no role is
+-- left untouched so role_id never goes NULL.
+UPDATE users
+SET role_id = (
+    SELECT r.id FROM user_roles ur
+    JOIN roles r ON r.id = ur.role_id
+    WHERE ur.user_id = users.id
+    ORDER BY r.position DESC, r.id ASC
+    LIMIT 1
+)
+WHERE users.id = sqlc.arg(user_id)
+  AND EXISTS (SELECT 1 FROM user_roles WHERE user_id = sqlc.arg(user_id));

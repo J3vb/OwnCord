@@ -84,7 +84,9 @@ CREATE TABLE IF NOT EXISTS roles (
     color       TEXT,
     permissions INTEGER NOT NULL DEFAULT 0,
     position    INTEGER NOT NULL DEFAULT 0,
-    is_default  INTEGER NOT NULL DEFAULT 0
+    is_default  INTEGER NOT NULL DEFAULT 0,
+    hoist       INTEGER NOT NULL DEFAULT 0,
+    mentionable INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_roles_name_nocase ON roles(name COLLATE NOCASE);
