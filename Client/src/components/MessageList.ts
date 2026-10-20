@@ -1502,7 +1502,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     if (prevIndex.size < prevKeys.length || nextIndex.size < nextKeys.length) return false;
 
     // The rows that stay keep their order, and no message lands above every
-    // message that stays (a history prepend, left to renderAll).
+    // message that stays (a history prepend sets `prepended`).
     let last = -1;
     let anchored = false;
     let prepended = false;
@@ -1633,8 +1633,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
     if (atBottom) {
       scrollToBottom();
+      if (prepended) renderWindow();
       updateScrollToBottomBtn();
-    } else if (anchorKey !== undefined) {
+    } else if (anchorKey === undefined) {
+      if (prepended) renderWindow();
+    } else {
       const anchorAt = nextIndex.get(anchorKey)!;
       root.scrollTop = Math.max(0, offsetBefore(anchorAt) + anchorOffset);
       if (prepended) {
