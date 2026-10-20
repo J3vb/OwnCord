@@ -282,7 +282,7 @@ func TestPatchBannerColor_ValidatesAndClears(t *testing.T) {
 
 // PATCH /users/me has no banner id or URL field: an image can only be set by
 // uploading it to this server, so there is nothing for the server to fetch.
-func TestPatchProfile_RefusesBannerURL(t *testing.T) {
+func TestPatchProfile_IgnoresBannerURL(t *testing.T) {
 	database := newAuthTestDB(t)
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
@@ -344,6 +344,39 @@ func TestServeFile_ReplacedBannerRefused(t *testing.T) {
 	}
 	if got := doServeFile(t, router, newID, peerToken, nil); got.Code != http.StatusOK {
 		t.Errorf("peer fetch of the new banner = %d, want 200", got.Code)
+	}
+	if got := doServeThumb(t, router, oldID, peerToken); got.Code != http.StatusForbidden {
+		t.Errorf("peer fetch of the replaced banner's thumbnail = %d, want 403", got.Code)
+	}
+}
+
+// Denying a pending application clears banner_id (DenyPendingUser), so the
+// file stops being anyone's live banner and a peer is refused it.
+func TestServeFile_DeniedOwnersBannerRefused(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildBannerRouter(database, store, &userUpdateSpy{})
+	ownerToken := uploadCreateToken(t, database, "bden_owner", 4)
+	peerToken := uploadCreateToken(t, database, "bden_peer", 4)
+
+	id := uploadedID(t, doBannerUpload(t, router, ownerToken, "b.png", makePNGBytes(t, 64, 32)))
+	if got := doServeFile(t, router, id, peerToken, nil); got.Code != http.StatusOK {
+		t.Fatalf("peer fetch before deny = %d, want 200", got.Code)
+	}
+	owner, err := database.GetUserByUsername(context.Background(), "bden_owner")
+	if err != nil || owner == nil {
+		t.Fatalf("GetUserByUsername: %v", err)
+	}
+	// DenyPendingUser only touches a still-pending row.
+	if _, err := database.ExecContext(context.Background(),
+		`UPDATE users SET registration_status = 'pending' WHERE id = ?`, owner.ID); err != nil {
+		t.Fatalf("mark pending: %v", err)
+	}
+	if err := database.DenyPendingUser(context.Background(), owner.ID); err != nil {
+		t.Fatalf("DenyPendingUser: %v", err)
+	}
+	if got := doServeFile(t, router, id, peerToken, nil); got.Code != http.StatusForbidden {
+		t.Errorf("peer fetch after deny = %d, want 403", got.Code)
 	}
 }
 
