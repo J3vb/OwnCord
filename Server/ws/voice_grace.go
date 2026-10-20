@@ -288,13 +288,13 @@ func (h *Hub) dropOrphanVoiceGrace(ctx context.Context, userID int64) {
 // parked entry instead.
 func (t *voiceTxn) inherit(c *Client) int64 {
 	if c.lastSeq == 0 {
-		t.takeParked(0, "")
+		t.takeParked(0)
 		return 0
 	}
 	if c.voice.channel() != 0 {
 		return 0
 	}
-	e := t.takeParked(0, "")
+	e := t.takeParked(0)
 	if e == nil || !t.adoptParked(c, e.snap) {
 		return 0
 	}

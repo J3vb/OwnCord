@@ -624,7 +624,7 @@ func (h *Hub) DisconnectFromVoice(ctx context.Context, userID int64) bool {
 	defer txn.end()
 	c := h.GetClient(userID)
 	if c == nil {
-		return h.leaveParkedVoice(ctx, txn, txn.takeParked(0, ""), voiceLeaveReasonModerator)
+		return h.leaveParkedVoice(ctx, txn, txn.takeParked(0), voiceLeaveReasonModerator)
 	}
 	h.handleVoiceLeave(ctx, txn, c, voiceLeaveReasonModerator)
 	return true
@@ -644,7 +644,7 @@ func (h *Hub) DisconnectFromVoiceInChannel(ctx context.Context, userID, channelI
 	defer txn.end()
 	c := h.GetClient(userID)
 	if c == nil {
-		return h.leaveParkedVoice(ctx, txn, txn.takeParked(channelID, ""), reason)
+		return h.leaveParkedVoice(ctx, txn, txn.takeParked(channelID), reason)
 	}
 	return h.handleVoiceLeaveIfStillIn(ctx, txn, c, channelID, reason)
 }

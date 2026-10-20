@@ -180,18 +180,18 @@ func (r *voiceRegistry) deleteJoinRow(ctx context.Context, h *Hub, userID, chID 
 }
 
 // takeParked removes and returns userID's grace entry, or nil, and stops its
-// timer. A zero chID or an empty token matches any entry; otherwise the entry
-// must park exactly that join. Taking under the member lock is what keeps a
+// timer. A zero chID matches any entry; otherwise the entry must park that
+// channel. Taking under the member lock is what keeps a
 // resuming socket's inherit and the expiry teardown from both running
 // (expireVoiceGrace's takeForExpiry).
-func (t *voiceTxn) takeParked(chID int64, token string) *voiceGraceEntry {
-	return t.h.voiceReg.voiceGrace.takeJoin(t.userID, chID, token)
+func (t *voiceTxn) takeParked(chID int64) *voiceGraceEntry {
+	return t.h.voiceReg.voiceGrace.takeJoin(t.userID, chID, "")
 }
 
 // dropParked drops userID's grace entry for chID whatever its join token, for
 // a channel being torn down under every member.
 func (t *voiceTxn) dropParked(chID int64) {
-	t.takeParked(chID, "")
+	t.takeParked(chID)
 }
 
 // transfer hands old's slot to c when a new connection replaces it, and
