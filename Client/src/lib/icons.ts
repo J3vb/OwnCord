@@ -277,11 +277,25 @@ const SVG_NS = "http://www.w3.org/2000/svg";
  * @returns An SVGSVGElement ready to be appended to the DOM.
  */
 export function createIcon(name: IconName, size = 24): SVGSVGElement {
-  const svg = document.createElementNS(SVG_NS, "svg");
-
-  svg.setAttribute("viewBox", "0 0 24 24");
+  let tpl = ICON_TEMPLATES.get(name);
+  if (tpl === undefined) {
+    tpl = buildTemplate(name);
+    ICON_TEMPLATES.set(name, tpl);
+  }
+  const svg = tpl.cloneNode(true) as SVGSVGElement;
   svg.setAttribute("width", String(size));
   svg.setAttribute("height", String(size));
+  return svg;
+}
+
+/** One parsed template per icon name; innerHTML runs once per name per session. */
+const ICON_TEMPLATES = new Map<IconName, SVGSVGElement>();
+
+function buildTemplate(name: IconName): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "24");
+  svg.setAttribute("height", "24");
   svg.setAttribute("fill", "none");
   svg.setAttribute("stroke", "currentColor");
   svg.setAttribute("stroke-width", "2");
@@ -295,9 +309,7 @@ export function createIcon(name: IconName, size = 24): SVGSVGElement {
   // They must NEVER contain user data or dynamically-loaded content.
   // This is the only safe use of innerHTML in the codebase — do not copy this pattern.
   const pathData = ICON_PATHS[name];
-  if (pathData === undefined) return svg;
-  svg.innerHTML = pathData;
-
+  if (pathData !== undefined) svg.innerHTML = pathData;
   return svg;
 }
 

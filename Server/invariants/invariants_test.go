@@ -107,7 +107,8 @@ func TestRunExclusions(t *testing.T) {
 	write("ws/testdata/x.go") // excluded: skipDirs
 	write("api/other.go")     // excluded: out of scope
 
-	got, err := Run(root)
+	// syncutil-locks alone: this tree has no lock_order.go for lock-inventory.
+	got, err := runWith([]Rule{syncutilLocks}, root)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}

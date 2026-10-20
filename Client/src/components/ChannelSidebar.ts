@@ -16,7 +16,7 @@ import type { MountableComponent } from "@lib/safe-render";
 import { channelsStore } from "@stores/channels.store";
 import { navigateToChannel } from "@lib/channel-navigation";
 import { isChannelMuted } from "@lib/channel-mutes";
-import { HIDE_MUTED_CHANNELS_KEY, isHideMutedChannels } from "@lib/hide-muted-channels";
+import { isHideMutedChannels } from "@lib/hide-muted-channels";
 import type { Channel, ChannelsState } from "@stores/channels.store";
 import { authStore, getCurrentUser, type AuthState } from "@stores/auth.store";
 import { uiStore, toggleCategory, type UiState } from "@stores/ui.store";
@@ -251,6 +251,68 @@ function occupiedKey(inputs: VoiceRowInputs): string {
   return ids.toSorted((a, b) => a - b).join(",");
 }
 
+/** Everything the sidebar draws, from one `select` (5.4d-2): the voice rows'
+ *  inputs, the channel list's, and the header's server name. */
+interface SidebarInputs {
+  readonly voice: VoiceRowInputs;
+  readonly list: ChannelListInputs;
+  readonly serverName: string | null;
+}
+
+/**
+ * The sidebar's inputs from the states its `select` hands it. Reads only its
+ * arguments. `mute` is a fresh token per mute event and `hideMuted` the
+ * preference's current value, so a change to either is a change to `list`.
+ */
+function projectSidebarInputs(
+  voice: VoiceState,
+  members: MembersState,
+  auth: AuthState,
+  channels: ChannelsState,
+  ui: UiState,
+  safety: SafetyState,
+  localMute: object,
+  mute: object,
+  hideMuted: boolean,
+): SidebarInputs {
+  return {
+    voice: projectVoiceInputs(voice, members, auth, channels, ui, safety, localMute),
+    list: {
+      channels: channels.channels,
+      activeChannelId: channels.activeChannelId,
+      selfRole: auth.user?.role ?? "",
+      roles: channels.roles,
+      collapsed: ui.collapsedCategories,
+      hideMuted,
+      mute,
+    },
+    serverName: auth.serverName,
+  };
+}
+
+/** `===` on every list field. */
+function sameListInputs(a: ChannelListInputs, b: ChannelListInputs): boolean {
+  return (
+    a.channels === b.channels &&
+    a.activeChannelId === b.activeChannelId &&
+    a.selfRole === b.selfRole &&
+    a.roles === b.roles &&
+    a.collapsed === b.collapsed &&
+    a.hideMuted === b.hideMuted &&
+    a.mute === b.mute
+  );
+}
+
+/** `sameVoiceInputs` for the voice part, `===` on every list field and on the
+ *  server name. */
+function sameSidebarInputs(a: SidebarInputs, b: SidebarInputs): boolean {
+  return (
+    sameVoiceInputs(a.voice, b.voice) &&
+    sameListInputs(a.list, b.list) &&
+    a.serverName === b.serverName
+  );
+}
+
 export function createChannelSidebar(options: ChannelSidebarOptions): MountableComponent {
   const {
     onVoiceJoin,
@@ -294,16 +356,15 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     });
   }
 
-  const unsubscribers: Array<() => void> = [];
-
   /** Each participant row now in the list, by user id: the profile popup's
    *  fallback focus. Set when a row is built; deleted when it is disposed,
    *  only if the map still holds that row (a user moved between channels is
    *  built in the new list before the old row goes). */
   const voiceRowByUserId = new Map<number, HTMLElement>();
 
-  /** The voice row inputs (5.4c-2), from the one `select` mount() creates. */
-  let voiceSel: Selection<VoiceRowInputs> | null = null;
+  /** Everything the sidebar draws (5.4c-2, 5.4d-2), from the one `select`
+   *  mount() creates. */
+  let sidebarSel: Selection<SidebarInputs> | null = null;
   /** Each voice channel's live wrapper, for the refreshes that skip the full
    *  render. Set when the wrapper is built or updated; deleted when it is
    *  disposed, only if the entry is still that element. */
@@ -481,8 +542,8 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
    * `.voice-users-list` exists only while the channel has people in it.
    */
   function updateVoiceRow(el: Element, ch: Channel): void {
-    if (voiceSel === null) return;
-    const inputs = voiceSel.get();
+    if (sidebarSel === null) return;
+    const inputs = sidebarSel.get().voice;
     const chrome = voiceChannelChrome(ch, inputs);
     const prev = chromeByEl.get(el);
     if (prev !== undefined && !sameModel(prev, chrome)) patchVoiceChannelChrome(el, chrome);
@@ -510,8 +571,8 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
    *  click, then its participant rows, built now so the outer reconcile can
    *  restore focus into them by key. */
   function createVoiceRow(channel: Channel, signal: AbortSignal): HTMLDivElement {
-    // voiceSel exists from mount() on, before the first render.
-    const inputs = voiceSel?.get();
+    // sidebarSel exists from mount() on, before the first render.
+    const inputs = sidebarSel?.get().voice;
     // i18n-exempt: developer-facing invariant error, never shown to a user
     if (inputs === undefined) throw new Error("voice row built before the sidebar mounted");
     const wrapper = drawVoiceChannelChrome(voiceChannelChrome(channel, inputs));
@@ -603,22 +664,6 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     restoreVoiceFocus(focus);
   }
 
-  /** The channel list's inputs, read now (5.4d-1); 5.4d-2 hands them over from
-   *  one `select`. The mute token is fixed: the mute list is read live through
-   *  `listCtx.isMuted` and every mute event redraws. */
-  const muteToken = {};
-  function readListInputs(): ChannelListInputs {
-    const channelsState = channelsStore.getState();
-    return {
-      channels: channelsState.channels,
-      activeChannelId: channelsState.activeChannelId,
-      selfRole: authStore.getState().user?.role ?? "",
-      roles: channelsState.roles,
-      collapsed: uiStore.getState().collapsedCategories,
-      hideMuted: isHideMutedChannels(),
-      mute: muteToken,
-    };
-  }
   const listCtx: ChannelListContext = {
     isMuted: isChannelMuted,
     canCreate: onCreateChannel !== undefined,
@@ -627,13 +672,12 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
   const UNCATEGORIZED_KEY = "\u0000uncategorized";
 
   function drawChannels(): void {
-    // voiceSel exists from mount() on, which is also when channelList does.
-    if (channelList === null || voiceSel === null) {
+    // sidebarSel exists from mount() on, which is also when channelList does.
+    if (channelList === null || sidebarSel === null) {
       return;
     }
 
-    const list = readListInputs();
-    const voice = voiceSel.get();
+    const { list, voice } = sidebarSel.get();
     const groups = channelGroups(list);
 
     if (groups.length === 0) {
@@ -836,33 +880,71 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     return group;
   }
 
-  /** Redraw when a row's mute is toggled (see CHANNEL_MUTE_CHANGED). */
-  function handleMuteChanged(): void {
-    renderChannels();
-  }
-
-  /** Redraw when the Hide Muted Channels preference flips. */
-  function handlePrefChanged(e: Event): void {
-    const key = (e as CustomEvent<{ key?: string }>).detail?.key;
-    if (key === HIDE_MUTED_CHANNELS_KEY) renderChannels();
-  }
-
   function mount(container: Element): void {
     root = createElement("div", { class: "channel-sidebar", "data-testid": "channel-sidebar" });
-    window.addEventListener("owncord:pref-change", handlePrefChanged, {
-      signal: disposable.signal,
-    });
+
+    // Everything the sidebar draws, as one selection over its sources (5.4c-2,
+    // 5.4d-2). Created before the header and the first render, which read it
+    // (onChange cannot fire synchronously), and owned by the sidebar's
+    // lifetime signal, so destroy() releases it.
+    //
+    // Rows take channelAccess(list) from these inputs (and canModerateVoice()
+    // is read only when the voice menu opens). The role and the roles are
+    // sources, so a self MEMBER_UPDATE or a ROLES_UPDATE alone redraws the
+    // category "+", the channel menu and the voice-moderation menu; nothing
+    // can read them unsubscribed (OC-0142).
+    // A fresh token per event: localSilenced answers may differ after it.
+    const localMuteSource = eventSource(USER_LOCAL_MUTE_CHANGED, () => ({}));
     // The event is dispatched on window by the mute store, so every writer
-    // (context menu, Settings unmute) redraws the rows (F16).
-    window.addEventListener(CHANNEL_MUTE_CHANGED, handleMuteChanged, { signal: disposable.signal });
+    // (context menu, Settings unmute) redraws the rows (F16). A fresh token per
+    // event; the mute list itself is read live through `listCtx.isMuted`.
+    const muteSource = eventSource(CHANNEL_MUTE_CHANGED, () => ({}));
+    // The Hide Muted Channels preference; any other key reruns the projection
+    // and compares equal.
+    const hideMutedSource = eventSource("owncord:pref-change", isHideMutedChannels);
+    sidebarSel = select(
+      [
+        voiceStore,
+        membersStore,
+        authStore,
+        channelsStore,
+        uiStore,
+        safetyStore,
+        localMuteSource,
+        muteSource,
+        hideMutedSource,
+      ],
+      projectSidebarInputs,
+      (next, prev) => {
+        if (next.serverName !== prev.serverName && serverNameEl !== null) {
+          setText(serverNameEl, next.serverName ?? shellText("common.serverNameFallback"));
+        }
+        if (!sameListInputs(next.list, prev.list)) {
+          renderChannels();
+          return;
+        }
+        // Collapsed and Hide Muted visibility follow occupancy, so a change
+        // to it takes the full render; everything else (speaking, mute,
+        // verification, connection, a rename) takes the cheap path.
+        if (sameVoiceInputs(next.voice, prev.voice)) return;
+        if (
+          next.voice.currentChannelId !== prev.voice.currentChannelId ||
+          occupiedKey(next.voice) !== occupiedKey(prev.voice)
+        ) {
+          renderChannels();
+        } else {
+          refreshVoiceRows();
+        }
+      },
+      { signal: disposable.signal, equals: sameSidebarInputs },
+    );
 
     // Header
     const header = createElement("div", { class: "channel-sidebar-header" });
-    const authState = authStore.getState();
     serverNameEl = createElement(
       "h2",
       {},
-      authState.serverName ?? shellText("common.serverNameFallback"),
+      sidebarSel.get().serverName ?? shellText("common.serverNameFallback"),
     );
     header.appendChild(serverNameEl);
 
@@ -877,85 +959,8 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     appendChildren(root, header, channelList);
     container.appendChild(root);
 
-    // Everything the voice rows draw, as one selection over its sources
-    // (5.4c-2). Created before the first render, which reads it, and owned
-    // by the sidebar's lifetime signal, so destroy() releases it.
-    voiceSel = select(
-      [
-        voiceStore,
-        membersStore,
-        authStore,
-        channelsStore,
-        uiStore,
-        safetyStore,
-        // A fresh token per event: localSilenced answers may differ after it.
-        eventSource(USER_LOCAL_MUTE_CHANGED, () => ({})),
-      ],
-      projectVoiceInputs,
-      (next, prev) => {
-        // Collapsed and Hide Muted visibility follow occupancy, so a change
-        // to it takes the full render; everything else (speaking, mute,
-        // verification, connection, a rename) takes the cheap path.
-        if (
-          next.currentChannelId !== prev.currentChannelId ||
-          occupiedKey(next) !== occupiedKey(prev)
-        ) {
-          renderChannels();
-        } else {
-          refreshVoiceRows();
-        }
-      },
-      { signal: disposable.signal, equals: sameVoiceInputs },
-    );
-
     // Initial render
     renderChannels();
-
-    // Subscribe to channels store changes (channels map OR active channel)
-    const unsubChannelsMap = channelsStore.subscribeSelector(
-      (s) => s.channels,
-      () => renderChannels(),
-    );
-    unsubscribers.push(unsubChannelsMap);
-    const unsubActiveChannel = channelsStore.subscribeSelector(
-      (s) => s.activeChannelId,
-      () => renderChannels(),
-    );
-    unsubscribers.push(unsubActiveChannel);
-
-    // Subscribe to auth store for server name updates
-    const unsubAuth = authStore.subscribeSelector(
-      (s) => s.serverName,
-      (serverName) => {
-        if (serverNameEl !== null) {
-          setText(serverNameEl, serverName ?? shellText("common.serverNameFallback"));
-        }
-      },
-    );
-    unsubscribers.push(unsubAuth);
-
-    // Rows take channelAccess(list) from readListInputs() (and canModerateVoice()
-    // is read only when the voice menu opens), but nothing above re-renders when
-    // the role or its mask changes on its own: a self MEMBER_UPDATE or a
-    // ROLES_UPDATE would leave the category "+", the channel menu and the
-    // voice-moderation menu stale until an unrelated event fired (OC-0142).
-    const unsubRole = authStore.subscribeSelector(
-      (s) => s.user?.role ?? "",
-      () => renderChannels(),
-    );
-    unsubscribers.push(unsubRole);
-    const unsubRoles = channelsStore.subscribeSelector(
-      (s) => s.roles,
-      () => renderChannels(),
-    );
-    unsubscribers.push(unsubRoles);
-
-    // Subscribe to UI store for category collapse changes
-    const unsubUi = uiStore.subscribeSelector(
-      (s) => s.collapsedCategories,
-      () => renderChannels(),
-    );
-    unsubscribers.push(unsubUi);
   }
 
   function destroy(): void {
@@ -964,13 +969,9 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     disposable.destroy();
     closeProfilePopup?.();
     closeProfilePopup = null;
-    for (const unsub of unsubscribers) {
-      unsub();
-    }
-    unsubscribers.length = 0;
     voiceRowByUserId.clear();
     voiceWrappers.clear();
-    voiceSel = null;
+    sidebarSel = null;
     if (root !== null) {
       root.remove();
       root = null;

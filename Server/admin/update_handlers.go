@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -69,6 +70,50 @@ func handleCheckUpdate(u *updater.Updater) http.HandlerFunc {
 // shrink it; the broadcast countdown below stays 5 to match this value.
 var applyRestartDelay = 5 * time.Second
 
+// downloadAndVerify is the updater's download stage; a var only so a test can
+// stand in for it (the real one needs a signed release manifest).
+var downloadAndVerify = (*updater.Updater).DownloadAndVerify
+
+// applyCancelled answers 503 SERVER_SHUTTING_DOWN and reports true when the
+// apply's context was cancelled (shutdown, via EndApplies) rather than timed
+// out. A deadline stays on the ordinary failure codes.
+func applyCancelled(ctx context.Context, w http.ResponseWriter) bool {
+	if !errors.Is(ctx.Err(), context.Canceled) {
+		return false
+	}
+	slog.Info("update apply cancelled: the server is shutting down", "cause", ctx.Err())
+	writeErr(w, http.StatusServiceUnavailable, "SERVER_SHUTTING_DOWN",
+		"The server is shutting down; try the update again once it is back")
+	return true
+}
+
+// applyBudget bounds one POST /updates/apply: the release check, the asset
+// download and its verification, together. It matches the transfer lifetime in
+// api (transferMaxLifetime). The request context ends at this budget, and the
+// connection deadlines are set from that context's deadline plus
+// applyDeadlineMargin (see extendApplyDeadlines).
+const applyBudget = 10 * time.Minute
+
+// applyDeadlineMargin is added to applyBudget for the connection deadlines so
+// the handler's own context expires first and its error response can still be
+// written.
+const applyDeadlineMargin = 30 * time.Second
+
+// extendApplyDeadlines pushes the connection's read and write deadlines out to
+// cover applyBudget. The server's WriteTimeout is far shorter than a slow
+// download; without this the stream is reset (HTTP/2) or the late response is
+// never delivered (HTTP/1.1) while the update carries on. The read deadline
+// moves too because on HTTP/1.1 an expired read deadline cancels the request
+// context. Errors are ignored: http.ErrNotSupported means the writer has no
+// connection (a test recorder), so there is no deadline to extend. The
+// ResponseController reaches the connection through any wrapper that exposes
+// Unwrap.
+func extendApplyDeadlines(w http.ResponseWriter, deadline time.Time) {
+	ctl := http.NewResponseController(w)
+	_ = ctl.SetReadDeadline(deadline)
+	_ = ctl.SetWriteDeadline(deadline)
+}
+
 // handleApplyUpdate downloads and applies a server update.
 //
 // It is audited, which is why it takes a database handle it otherwise has no
@@ -132,23 +177,20 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 			}
 		}()
 
+		// One budget for the check and the download. EndApplies cancels it at
+		// shutdown. The connection deadlines are derived from it, so the final
+		// response can always still be written after the context expires.
+		ctx, cancel := context.WithTimeout(r.Context(), applyBudget)
+		defer cancel()
+		srv, _ := r.Context().Value(http.ServerContextKey).(*http.Server)
+		defer trackApply(srv, cancel)()
+		if dl, ok := ctx.Deadline(); ok {
+			extendApplyDeadlines(w, dl.Add(applyDeadlineMargin))
+		}
+
 		// Check for available update.
-		info, err := u.CheckForUpdate(r.Context())
-		if err != nil {
-			slog.Error("update check failed during apply", "err", err)
-			writeErr(w, http.StatusBadGateway, "UPDATE_CHECK_FAILED", "failed to check for updates — see server logs")
-			return
-		}
-		if !info.UpdateAvailable {
-			if semver.Compare(info.Current, info.Latest) < 0 && !info.RequiredAssetsPresent {
-				writeErr(w, http.StatusBadGateway, "MISSING_ASSETS", "release is missing required assets")
-				return
-			}
-			writeErr(w, http.StatusConflict, "NO_UPDATE", "server is already up to date")
-			return
-		}
-		if !info.RequiredAssetsPresent {
-			writeErr(w, http.StatusBadGateway, "MISSING_ASSETS", "release is missing required assets")
+		info, ok := checkApplyUpdate(ctx, w, u)
+		if !ok {
 			return
 		}
 
@@ -162,17 +204,13 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 		newPath := exePath + ".new"
 
 		// Download and verify.
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
-		defer cancel()
 
 		// DownloadAndVerify stages the binary and returns its trusted hash
 		// (bound to the signed release manifest). The apply goroutine below
 		// re-verifies the staged file against this hash through an open
 		// handle — never by path — before the rename.
-		stagedHash, err := u.DownloadAndVerify(ctx, info.Latest, info.DownloadURL, info.ChecksumURL, info.SignatureURL, info.ManifestURL, info.ManifestSignatureURL, newPath)
-		if err != nil {
-			slog.Error("update download/verify failed", "err", err)
-			writeErr(w, http.StatusBadGateway, "DOWNLOAD_FAILED", "download or verification failed — see server logs")
+		stagedHash, ok := stageApplyUpdate(ctx, w, u, &info, newPath)
+		if !ok {
 			return
 		}
 
@@ -220,6 +258,58 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 			"version": info.Latest,
 		})
 	})
+}
+
+// checkApplyUpdate runs the release check for an apply. It reports false after
+// writing the refusal (cancelled, check failed, missing assets, or no update).
+func checkApplyUpdate(ctx context.Context, w http.ResponseWriter, u *updater.Updater) (updater.UpdateInfo, bool) {
+	info, err := u.CheckForUpdate(ctx)
+	if err == nil && ctx.Err() != nil {
+		err = ctx.Err() // the check does not stop on cancel; the apply must
+	}
+	if err != nil {
+		if applyCancelled(ctx, w) {
+			return updater.UpdateInfo{}, false
+		}
+		slog.Error("update check failed during apply", "err", err)
+		writeErr(w, http.StatusBadGateway, "UPDATE_CHECK_FAILED", "failed to check for updates — see server logs")
+		return updater.UpdateInfo{}, false
+	}
+	if !info.UpdateAvailable {
+		if semver.Compare(info.Current, info.Latest) < 0 && !info.RequiredAssetsPresent {
+			writeErr(w, http.StatusBadGateway, "MISSING_ASSETS", "release is missing required assets")
+			return updater.UpdateInfo{}, false
+		}
+		writeErr(w, http.StatusConflict, "NO_UPDATE", "server is already up to date")
+		return updater.UpdateInfo{}, false
+	}
+	if !info.RequiredAssetsPresent {
+		writeErr(w, http.StatusBadGateway, "MISSING_ASSETS", "release is missing required assets")
+		return updater.UpdateInfo{}, false
+	}
+	return info, true
+}
+
+// stageApplyUpdate downloads and verifies the release into newPath and returns
+// its trusted hash (bound to the signed release manifest). It reports false
+// after writing the refusal, having removed the staged file.
+func stageApplyUpdate(ctx context.Context, w http.ResponseWriter, u *updater.Updater, info *updater.UpdateInfo, newPath string) (string, bool) {
+	stagedHash, err := downloadAndVerify(u, ctx, info.Latest, info.DownloadURL, info.ChecksumURL, info.SignatureURL, info.ManifestURL, info.ManifestSignatureURL, newPath)
+	if err == nil && ctx.Err() != nil {
+		// Cancelled (shutdown) after verification but before the swap was
+		// promised: do not start it, and do not leave the staged file.
+		err = ctx.Err()
+	}
+	if err != nil {
+		_ = os.Remove(newPath)
+		if applyCancelled(ctx, w) {
+			return "", false
+		}
+		slog.Error("update download/verify failed", "err", err)
+		writeErr(w, http.StatusBadGateway, "DOWNLOAD_FAILED", "download or verification failed — see server logs")
+		return "", false
+	}
+	return stagedHash, true
 }
 
 // applyAndRestart is POST /updates/apply's background tail: give clients the

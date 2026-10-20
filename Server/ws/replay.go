@@ -96,8 +96,8 @@ func (h *Hub) handleReconnect(
 	// startup + one RTT) is delivered to nobody on this socket, and the client
 	// can never ask for it back because it only ever reports max(seq).
 	//
-	// Set outside the h.seqMu section below so this does not introduce a
-	// seqMu -> c.mu lock-order edge that nothing else in the hub has.
+	// Set outside the h.seqMu section below: it needs no seq ordering, so it
+	// stays out of that section. (seqMu -> c.mu is a normal edge: lock_order.go.)
 	//
 	// c.authChannelID is attacker-controlled, so it is honoured only when the
 	// freshly computed read-permission set contains it. Fail closed: an
