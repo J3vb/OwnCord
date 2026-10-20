@@ -753,9 +753,8 @@ func (h *Hub) leaveVoiceChannelWithRetryTest(ctx context.Context, userID, channe
 // SetCommandDeadlineForTest overrides the per-frame deadline for the test's
 // duration.
 func SetCommandDeadlineForTest(t interface{ Cleanup(func()) }, d time.Duration) {
-	prev := wsCommandDeadline
-	wsCommandDeadline = d
-	t.Cleanup(func() { wsCommandDeadline = prev })
+	prev := wsCommandDeadline.Swap(int64(d))
+	t.Cleanup(func() { wsCommandDeadline.Store(prev) })
 }
 
 // CommandDeadlineExemptTypesForTest returns the exempt set's message types.

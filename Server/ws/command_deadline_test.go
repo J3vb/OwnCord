@@ -198,34 +198,33 @@ func TestHandleMessage_DeadlineAfterCommitStillSucceeds(t *testing.T) {
 	}
 }
 
-// Every registered type is either deadline-bound or exempt, with no stale
-// exempt entries.
+// Every registered type is listed below as deadline-bound or exempt, so a new
+// handler must be classified on purpose. The exempt side is also checked
+// against the production set, so neither list can go stale.
 func TestCommandDeadline_EveryTypeClassified(t *testing.T) {
+	bound := []string{
+		"ping", "typing_start", "presence_update", "channel_focus", "mark_read",
+		"mark_unread", "reaction_add", "reaction_remove", "chat_send", "chat_edit",
+		"chat_delete", "voice_join", "voice_leave", "voice_mute", "voice_deafen",
+		"voice_camera", "voice_screenshare", "voice_e2ee_announce",
+		"voice_e2ee_offer", "voice_token_refresh", "call_ring", "call_decline",
+	}
+	exempt := []string{"voice_mod_mute", "voice_mod_deafen", "voice_mod_move", "voice_mod_kick", "chat_command"}
+
 	hub, _ := newTestHub(t)
 	registered := hub.RegisteredTypesForTest()
-	exempt := ws.CommandDeadlineExemptTypesForTest()
-	if len(exempt) == 0 {
-		t.Fatal("exempt set is empty")
-	}
-	for _, typ := range exempt {
-		if !slices.Contains(registered, typ) {
-			t.Errorf("exempt entry %q is not a registered type", typ)
-		}
-	}
-	want := []string{"voice_mod_mute", "voice_mod_deafen", "voice_mod_move", "voice_mod_kick", "chat_command"}
-	slices.Sort(want)
+	production := ws.CommandDeadlineExemptTypesForTest()
+
 	slices.Sort(exempt)
-	if !slices.Equal(want, exempt) {
-		t.Errorf("exempt set = %v, want %v", exempt, want)
+	slices.Sort(production)
+	if !slices.Equal(exempt, production) {
+		t.Errorf("exempt set = %v, want %v", production, exempt)
 	}
-	bound := 0
-	for _, typ := range registered {
-		if !slices.Contains(exempt, typ) {
-			bound++
-		}
-	}
-	if bound == 0 {
-		t.Error("no deadline-bound types")
+	classified := append(slices.Clone(bound), exempt...)
+	slices.Sort(classified)
+	slices.Sort(registered)
+	if !slices.Equal(classified, registered) {
+		t.Errorf("registered types = %v\nclassified (bound + exempt) = %v", registered, classified)
 	}
 }
 

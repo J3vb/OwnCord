@@ -3,14 +3,21 @@ package ws
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"time"
 )
 
 // wsCommandDeadline bounds the database work behind one inbound frame (WP
 // 4.1b). It sits under the 25 s ping interval so a single stalled command
 // cannot by itself starve the pong. A package var, not a config key, so tests
-// can shrink it; nobody has measured a better value yet.
-var wsCommandDeadline = 10 * time.Second
+// can shrink it (an atomic, so a parallel test cannot race the readers);
+// nobody has measured a better value yet.
+var wsCommandDeadline atomic.Int64
+
+func init() { wsCommandDeadline.Store(int64(10 * time.Second)) }
+
+// commandDeadline returns the current per-frame deadline.
+func commandDeadline() time.Duration { return time.Duration(wsCommandDeadline.Load()) }
 
 // commandDeadlineExempt lists the message types whose handlers dispatch on the
 // connection context instead of the per-frame deadline. Every other registered

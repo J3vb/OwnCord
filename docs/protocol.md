@@ -2690,7 +2690,10 @@ is safe: `chat_send` dedupes on `client_message_id`, an edit is idempotent, a
 delete answers `ALREADY_DELETED`, a reaction answers `CONFLICT` and `mark_read`
 is idempotent. `voice_mod_mute`, `voice_mod_deafen`, `voice_mod_move`,
 `voice_mod_kick` and `chat_command` are exempt: they pair a database write with
-a LiveKit call or a plugin budget of their own. A client that predates the code
+a LiveKit call or a plugin budget of their own. `channel_focus`, `mark_read` and `typing_start` answer nothing on a timeout: they
+already swallow every error that is not a refusal, so the client sees no frame
+and keeps its state. A `voice_token_refresh` that times out answers
+`REQUEST_TIMEOUT` and leaves the user in voice; only a real refusal evicts. A client that predates the code
 treats it as an unknown error string.
 
 ---

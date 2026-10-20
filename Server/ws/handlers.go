@@ -48,7 +48,7 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 	// connection context, so a disconnect still cancels it. Exempt types
 	// (command_deadline.go) dispatch on c.ctx below; handleMessageApply never
 	// sees it, so its events and the voice join keep the connection context.
-	fctx, cancel := context.WithTimeout(c.ctx, wsCommandDeadline)
+	fctx, cancel := context.WithTimeout(c.ctx, commandDeadline())
 	defer cancel()
 	if h.handleMessageSessionRecheck(fctx, c) {
 		return
@@ -119,29 +119,40 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		supersedeDeferredFocus(c)
 	}
 	if result.Error != nil {
-		if !exempt && commandDeadlineExceeded(fctx, result.Error) {
-			// REQUEST_TIMEOUT means "not applied": a transaction whose context
-			// ends before Commit rolls back, and post-commit work is detached.
-			slog.Warn("ws command deadline exceeded",
-				"user_id", c.userID, "msg_type", msgType, "req_id", reqID, "err", result.Error)
-			c.sendMsg(buildErrorMsgWithID(ErrCodeRequestTimeout, "the server is busy, try again", env.ID))
-		} else if ce, ok := errors.AsType[ClientError](result.Error); ok {
-			c.sendMsg(buildErrorMsgWithID(ce.Code, ce.Message, env.ID))
-		} else {
-			slog.Error("ws handler internal error",
-				"user_id", c.userID, "msg_type", msgType, "req_id", reqID, "err", result.Error)
-			c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "internal error", env.ID))
-		}
-		// A rejection may still need to evict: voice_token_refresh returns
-		// LeaveVoice alongside its error when the join gate now refuses, so the
-		// user is removed from the SFU rather than merely denied a new token.
-		if result.LeaveVoice {
-			h.leaveVoiceLocked(c, result.LeaveVoiceReason)
-		}
+		h.handleMessageError(fctx, c, env, msgType, reqID, result, exempt)
 		return
 	}
 
 	h.handleMessageApply(c, env, reqID, result, receivedAt)
+}
+
+// handleMessageError answers a failed command: REQUEST_TIMEOUT when the
+// per-frame deadline fctx cut it short, otherwise the handler's own error.
+func (h *Hub) handleMessageError(fctx context.Context, c *Client, env envelope, msgType, reqID string, result Result, exempt bool) {
+	if !exempt && commandDeadlineExceeded(fctx, result.Error) {
+		// REQUEST_TIMEOUT means "not applied": a transaction whose context
+		// ends before Commit rolls back, and post-commit work is detached.
+		slog.Warn("ws command deadline exceeded",
+			"user_id", c.userID, "msg_type", msgType, "req_id", reqID, "err", result.Error)
+		c.sendMsg(buildErrorMsgWithID(ErrCodeRequestTimeout, "the server is busy, try again", env.ID))
+		// A lookup that timed out is not a refusal, so the LeaveVoice a
+		// handler attaches to a failed gate read (voice_token_refresh) is
+		// not honoured: the user stays in voice and retries.
+		return
+	}
+	if ce, ok := errors.AsType[ClientError](result.Error); ok {
+		c.sendMsg(buildErrorMsgWithID(ce.Code, ce.Message, env.ID))
+	} else {
+		slog.Error("ws handler internal error",
+			"user_id", c.userID, "msg_type", msgType, "req_id", reqID, "err", result.Error)
+		c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "internal error", env.ID))
+	}
+	// A rejection may still need to evict: voice_token_refresh returns
+	// LeaveVoice alongside its error when the join gate now refuses, so the
+	// user is removed from the SFU rather than merely denied a new token.
+	if result.LeaveVoice {
+		h.leaveVoiceLocked(c, result.LeaveVoiceReason)
+	}
 }
 
 // handleMessageSessionRecheck performs handleMessage's periodic session
