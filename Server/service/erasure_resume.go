@@ -241,9 +241,8 @@ func (s *ErasureService) Resume(ctx context.Context) (int, error) {
 // somebody else is driving the user or already finished the job.
 func (s *ErasureService) resumeQueued(ctx context.Context, job *db.ErasureJob) (bool, error) {
 	if !s.claim(job.UserID) {
-		// Whoever holds the claim may be about to give the job up; make
-		// sure the loop looks again soon rather than at the next tick.
-		s.RequestResume()
+		// No wake here: Erase wakes the loop after it releases the claim
+		// when it leaves the job queued, and a wake now would only spin.
 		return false, nil
 	}
 	defer s.release(job.UserID)

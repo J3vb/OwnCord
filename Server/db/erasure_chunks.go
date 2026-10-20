@@ -291,3 +291,19 @@ func sessionRowID(res sql.Result, err error, userID int64) (int64, error) {
 	}
 	return res.LastInsertId()
 }
+
+// refuseWhileErasing fails a write for a user whose deletion is being
+// completed. Run inside the writer transaction, it cannot interleave with the
+// lock stage, so nothing the drain has already passed over is written again.
+func refuseWhileErasing(ctx context.Context, tx *sql.Tx, userID int64) error {
+	var one int
+	err := tx.QueryRowContext(ctx,
+		`SELECT 1 FROM erasure_jobs WHERE user_id = ? AND state = 'queued' LIMIT 1`, userID).Scan(&one)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil
+	case err != nil:
+		return fmt.Errorf("erasure check: %w", err)
+	}
+	return fmt.Errorf("user %d: %w", userID, ErrAccountErasing)
+}

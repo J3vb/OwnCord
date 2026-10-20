@@ -293,7 +293,7 @@ func TestErasureService_InFlightUserIsNotDrivenTwice(t *testing.T) {
 
 // The wake Erase sends must find the user already released: a loop that
 // resumes the moment it is woken completes the job without waiting for a
-// tick, and a wake that loses the claim to a live holder is re-armed.
+// tick, and a skip for a live holder does not wake the loop again.
 func TestErasureService_WakeFindsTheUserReleased(t *testing.T) {
 	defer func(prev time.Duration) { eraseInlineBudget = prev }(eraseInlineBudget)
 	eraseInlineBudget = -time.Second
@@ -333,7 +333,8 @@ func TestErasureService_WakeFindsTheUserReleased(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	// A skipped queued job re-arms the wake.
+	// A queued job skipped for a live claim does not re-arm the wake: the
+	// holder wakes the loop when it lets go, and a self-wake would spin.
 	uid2, _ := seedSecondMember(t, database)
 	if _, err := database.EraseAccountLock(ctx, uid2, true); err != nil {
 		t.Fatal(err)
@@ -341,20 +342,19 @@ func TestErasureService_WakeFindsTheUserReleased(t *testing.T) {
 	if !svc.claim(uid2) {
 		t.Fatal("claim refused")
 	}
-	// Drain whatever wake is pending, then skip the claimed user.
+	cancel()
+	<-loopDone
 	select {
 	case <-svc.WakeCh():
 	default:
 	}
-	cancel()
-	<-loopDone
 	if done, err := svc.Resume(context.Background()); done != 0 || err != nil {
 		t.Fatalf("Resume = %d, %v", done, err)
 	}
 	select {
 	case <-svc.WakeCh():
+		t.Error("a queued job skipped for a live claim re-armed the wake")
 	default:
-		t.Error("a queued job skipped for a live claim did not re-arm the wake")
 	}
 	svc.release(uid2)
 }

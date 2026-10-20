@@ -339,3 +339,35 @@ func TestEraseAccountFinish_SweepsEventsWrittenSinceTheLock(t *testing.T) {
 	}
 	assertInventoryZero(t, database, sub)
 }
+
+// A send that reaches the writer after the lock writes nothing: the drain
+// may already be past it, and its mention would then be reversed before it
+// was ever counted.
+func TestEraseAccountLock_RefusesLaterMessages(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	sub := seedEraseSubject(t, database)
+	if _, err := database.EraseAccountLock(ctx, sub.id, true); err != nil {
+		t.Fatalf("EraseAccountLock: %v", err)
+	}
+	count := func() int {
+		var n int
+		if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE user_id = ? AND content = 'late'`, sub.id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if _, err := database.CreateMessageWithMentions(ctx, sub.channel, sub.id, "late", nil, nil, 0, false); !errors.Is(err, db.ErrAccountErasing) {
+		t.Errorf("CreateMessageWithMentions = %v, want ErrAccountErasing", err)
+	}
+	now := time.Now().UnixMilli()
+	if _, err := database.CreateMessageDelivery(ctx, db.MessageDeliveryParams{
+		UserID: sub.id, ChannelID: sub.channel, ClientMessageID: "late-1", PayloadHash: []byte("h"),
+		ExpiresAtMS: now + 60_000, CreatedAtMS: now, Content: "late",
+	}); !errors.Is(err, db.ErrAccountErasing) {
+		t.Errorf("CreateMessageDelivery = %v, want ErrAccountErasing", err)
+	}
+	if n := count(); n != 0 {
+		t.Errorf("late messages written = %d, want 0", n)
+	}
+}
