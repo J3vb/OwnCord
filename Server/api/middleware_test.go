@@ -3,6 +3,7 @@ package api_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1660,9 +1661,11 @@ func TestAdminIPRestrict_NoForwardedPeerWarningWhenPeerRefused(t *testing.T) {
 }
 
 // With the server's connection-writes batch installed, an API-token touch and
-// an expired-session delete are only queued: no request spawns a goroutine
-// (ARCH-034), and the flush later lands both writes.
-func TestAuthMiddleware_BatchedTouchAndDiscardSpawnNoGoroutine(t *testing.T) {
+// an expired-session delete are only queued (ARCH-034): nothing is written
+// until the batch flushes, and the flush then lands both. That no request
+// spawns a goroutine is enforced by the invariants request-path-go rule, not
+// by the goleak check here, which cannot prove it.
+func TestAuthMiddleware_BatchedTouchAndDiscardAreQueuedUntilFlush(t *testing.T) {
 	database := newAPITestDB(t)
 	batch := service.NewConnWrites(database)
 	sessions := service.NewSessionService(database)
@@ -1706,6 +1709,15 @@ func TestAuthMiddleware_BatchedTouchAndDiscardSpawnNoGoroutine(t *testing.T) {
 	if rows != 1 {
 		t.Fatalf("expired session rows before the flush = %d, want 1 (the delete is queued, not written)", rows)
 	}
+	var lastUsed sql.NullString
+	tokenHash := auth.HashToken(apiToken)
+	if err := database.QueryRowContext(context.Background(),
+		`SELECT last_used_at FROM api_tokens WHERE token_hash = ?`, tokenHash).Scan(&lastUsed); err != nil {
+		t.Fatalf("read last_used_at: %v", err)
+	}
+	if lastUsed.Valid {
+		t.Fatalf("api_tokens.last_used_at = %q before the flush, want NULL (the touch is queued, not written)", lastUsed.String)
+	}
 	if err := batch.Flush(context.Background()); err != nil {
 		t.Fatalf("Flush: %v", err)
 	}
@@ -1715,5 +1727,12 @@ func TestAuthMiddleware_BatchedTouchAndDiscardSpawnNoGoroutine(t *testing.T) {
 	}
 	if rows != 0 {
 		t.Fatalf("expired session rows after the flush = %d, want 0", rows)
+	}
+	if err := database.QueryRowContext(context.Background(),
+		`SELECT last_used_at FROM api_tokens WHERE token_hash = ?`, tokenHash).Scan(&lastUsed); err != nil {
+		t.Fatalf("read last_used_at: %v", err)
+	}
+	if !lastUsed.Valid {
+		t.Fatal("api_tokens.last_used_at is still NULL after the flush")
 	}
 }

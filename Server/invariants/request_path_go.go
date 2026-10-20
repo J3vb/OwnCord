@@ -50,6 +50,10 @@ var GoAllow = map[string]GoEntry{
 // GoAllow with its reason; anything that outlives its caller runs on
 // syncutil.Group.Go instead.
 //
+// The rule is syntactic on go statements. It does not catch a spawn through
+// sync.WaitGroup.Go or errgroup.Group.Go, which start a goroutine without
+// one; review those by hand.
+//
 // time.AfterFunc is out of scope: its timers either check the hub's stop
 // signal or touch memory only, and the rule is syntactic on go statements.
 var requestPathGo = Rule{

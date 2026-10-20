@@ -220,6 +220,11 @@ func (m *maintenance) steps() []maintenanceStep {
 func (m *maintenance) tick(ctx context.Context) bool {
 	failed := false
 	for _, step := range m.steps() {
+		// Once the loop is cancelled (shutdown), the remaining steps would
+		// only do wasted work before failing; stop walking.
+		if ctx.Err() != nil {
+			break
+		}
 		if m.runStep(ctx, step) != nil {
 			failed = true
 		}

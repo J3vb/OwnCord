@@ -66,16 +66,17 @@ func TestGroup_GoDuringStopIsRefused(t *testing.T) {
 	if n := g.Stop(context.Background(), 5*time.Second); n != 0 {
 		t.Errorf("Stop stragglers = %d, want 0", n)
 	}
-	// Nothing admitted may run after Stop returned: the count is final.
 	got := ran.Load()
-	if got != admitted.Load() {
-		t.Errorf("ran %d jobs, admitted %d: a job was lost or admitted after the drain", got, admitted.Load())
-	}
 	if g.Go(context.Background(), func(context.Context) { t.Error("refused job ran") }) {
 		t.Error("Go admitted work after Stop")
 	}
 	close(stopSpawn)
 	wg.Wait()
+	// Every spawner has returned, so admitted is final. Every admitted job
+	// ran before Stop returned, and nothing ran after it.
+	if got != admitted.Load() {
+		t.Errorf("ran %d jobs before Stop returned, admitted %d: a job was lost or admitted after the drain", got, admitted.Load())
+	}
 	time.Sleep(10 * time.Millisecond)
 	if ran.Load() != got {
 		t.Errorf("a job ran after Stop returned: %d -> %d", got, ran.Load())

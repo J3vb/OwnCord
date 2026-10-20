@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"log/slog"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
 	"go.uber.org/goleak"
 )
@@ -179,4 +181,87 @@ func (n *inFlightNotifier) Notify(ctx context.Context, _, _ int64, _ []int64) {
 	close(n.started)
 	<-ctx.Done()
 	n.ended <- ctx.Err()
+}
+
+// Once the loop's context is cancelled, tick stops walking its steps: a later
+// step (Storage reconciliation lists the whole upload store) must not start,
+// and none is recorded as a failure.
+func TestMaintenanceTick_StopsWalkingOnceCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var laterRan atomic.Bool
+	m := &maintenance{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	m.stepsOverride = []maintenanceStep{
+		{job: "first", failLog: "first failed", run: func(context.Context) error {
+			cancel() // the shutdown arrives mid-tick
+			return nil
+		}},
+		{job: "later", failLog: "later failed", run: func(context.Context) error {
+			laterRan.Store(true)
+			return nil
+		}},
+	}
+	if failed := m.tick(ctx); failed {
+		t.Error("tick reported a failure for a step skipped by cancellation")
+	}
+	if laterRan.Load() {
+		t.Error("a step ran after the loop context was cancelled")
+	}
+}
+
+// A token touch and an expired-session discard queued just before Close are
+// on disk once Run returns: the conn-writes final flush runs before the
+// database closes.
+func TestRun_QueuedTouchAndDiscardAreFlushedAtClose(t *testing.T) {
+	port := freePort(t)
+	a := bootTestApp(t, fmt.Sprint(port), "")
+	cancel, runErr := runUntilHealthy(t, a, port)
+
+	ctx := context.Background()
+	uid, err := a.database.CreateUser(ctx, "flusher", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	apiHash := "api-token-hash-flush"
+	if _, err := a.database.CreateAPIToken(ctx, uid, apiHash, "ci", nil); err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+	sessHash := "expired-session-hash-flush"
+	past := time.Now().Add(-time.Hour).UTC().Format("2006-01-02 15:04:05")
+	if _, err := a.database.ExecContext(ctx,
+		`INSERT INTO sessions (user_id, token, device, ip_address, expires_at) VALUES (?, ?, ?, ?, ?)`,
+		uid, sessHash, "test", "127.0.0.1", past); err != nil {
+		t.Fatalf("insert expired session: %v", err)
+	}
+
+	sessions := a.runtime.Services.Sessions
+	if err := sessions.TouchAPIToken(ctx, apiHash); err != nil {
+		t.Fatalf("TouchAPIToken: %v", err)
+	}
+	if err := sessions.DiscardSession(ctx, sessHash); err != nil {
+		t.Fatalf("DiscardSession: %v", err)
+	}
+
+	cancel()
+	awaitRun(t, runErr)
+
+	reopened, err := db.Open(a.cfg.Database.Path)
+	if err != nil {
+		t.Fatalf("reopen database: %v", err)
+	}
+	defer func() { _ = reopened.Close() }()
+	var lastUsed sql.NullString
+	if err := reopened.QueryRowContext(ctx, `SELECT last_used_at FROM api_tokens WHERE token_hash = ?`, apiHash).Scan(&lastUsed); err != nil {
+		t.Fatalf("read last_used_at: %v", err)
+	}
+	if !lastUsed.Valid {
+		t.Error("the queued API-token touch was lost at shutdown: last_used_at is NULL")
+	}
+	var rows int
+	if err := reopened.QueryRowContext(ctx, `SELECT COUNT(*) FROM sessions WHERE token = ?`, sessHash).Scan(&rows); err != nil {
+		t.Fatalf("count sessions: %v", err)
+	}
+	if rows != 0 {
+		t.Errorf("the queued expired-session discard was lost at shutdown: %d row(s) remain", rows)
+	}
 }
