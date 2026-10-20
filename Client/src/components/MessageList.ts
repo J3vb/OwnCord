@@ -1425,6 +1425,35 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   const MAX_INCREMENTAL_WINDOW = 200;
 
   /**
+   * Whether a history prepend leaves every rendered row in place: each item of
+   * the new window [start, end) was a rendered row, and each rendered row is
+   * in it, bar day dividers at its head (the day now starts higher up).
+   */
+  function keepsRenderedRows(
+    prevItems: readonly VirtualItem[],
+    prevKeys: readonly string[],
+    prevIndex: ReadonlyMap<string, number>,
+    nextKeys: readonly string[],
+    nextIndex: ReadonlyMap<string, number>,
+    start: number,
+    end: number,
+  ): boolean {
+    for (let j = start; j < end; j++) {
+      const i = prevIndex.get(nextKeys[j]!);
+      if (i === undefined || i < renderedStart || i >= renderedEnd) return false;
+    }
+    let atHead = true;
+    for (let i = renderedStart; i < renderedEnd; i++) {
+      if (nextIndex.has(prevKeys[i]!)) {
+        atHead = false;
+      } else if (!atHead || prevItems[i]!.kind !== "divider") {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
    * Fast path for a store update that changes a few rows (P4-01): diff the new
    * items against the rendered ones by key and touch only what changed — a
    * reaction, edit, delete or send confirmation re-renders its own row, plus a
@@ -1435,9 +1464,18 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    * playing video, a revealed spoiler or focus survive. A row outside the
    * rendered window only moves its height entry.
    *
+   * A history prepend keeps the DOM too, when every rendered row survives
+   * (a day divider that moved up with the page excepted) and the new items all
+   * land above the rendered window, the tail trim of the message cap included:
+   * the window's indices shift by the inserted count, the spacers take the
+   * page's estimated height and the reading position is re-applied in the same
+   * task, so no rendered row is rebuilt or has its media reloaded. A prepend
+   * that moves the NEW line, reaches into the window or drops a rendered row
+   * is left to renderAll.
+   *
    * Returns false, for renderAll to rebuild, when there is nothing rendered to
    * keep, rows were reordered, or a message was inserted above every row that
-   * stays (a history prepend, whose reading position renderAll keeps).
+   * stays and the prepend conditions above do not hold.
    *
    * The Fenwick tree is re-seeded from the height cache, as for any rebuild,
    * and the topmost visible message row that stays keeps its offset in the
@@ -1464,13 +1502,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     if (prevIndex.size < prevKeys.length || nextIndex.size < nextKeys.length) return false;
 
     // The rows that stay keep their order, and no message lands above every
-    // message that stays (a history prepend, left to renderAll).
+    // message that stays (a history prepend sets `prepended`).
     let last = -1;
     let anchored = false;
+    let prepended = false;
     for (const [j, item] of nextItems.entries()) {
       const i = prevIndex.get(nextKeys[j]!);
       if (i === undefined) {
-        if (!anchored && item.kind === "message") return false;
+        if (!anchored && item.kind === "message") prepended = true;
         continue;
       }
       if (i < last) return false;
@@ -1490,7 +1529,15 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       end = j + 1;
     }
     if (start === -1) return false;
-    if (renderedStart === 0) start = 0;
+    if (
+      prepended &&
+      !keepsRenderedRows(prevItems, prevKeys, prevIndex, nextKeys, nextIndex, start, end)
+    ) {
+      return false;
+    }
+    // A prepend's window stays on the rows already drawn; the page above it is
+    // drawn by the slide below, as for any scroll.
+    if (renderedStart === 0 && !prepended) start = 0;
     if (renderedEnd === prevItems.length) end = nextItems.length;
     if (end - start > MAX_INCREMENTAL_WINDOW) return false;
 
@@ -1510,6 +1557,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     }
     const anchorKey = prevKeys[anchor];
     const anchorOffset = root.scrollTop - offsetBefore(anchor);
+    const anchorRow = prepended ? renderedRowAt(anchor) : undefined;
+    const anchorEdge = anchorRow === undefined ? null : edgeOf(anchorRow);
 
     // A reply re-renders its quote when its parent left, arrived, or changed
     // what the quote draws (renderReplyRef reads the parent from replyParents);
@@ -1584,9 +1633,23 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
     if (atBottom) {
       scrollToBottom();
+      if (prepended) renderWindow();
       updateScrollToBottomBtn();
-    } else if (anchorKey !== undefined) {
-      root.scrollTop = Math.max(0, offsetBefore(nextIndex.get(anchorKey)!) + anchorOffset);
+    } else if (anchorKey === undefined) {
+      if (prepended) renderWindow();
+    } else {
+      const anchorAt = nextIndex.get(anchorKey)!;
+      root.scrollTop = Math.max(0, offsetBefore(anchorAt) + anchorOffset);
+      if (prepended) {
+        // The page above is spacer only: draw the rows now in view, then
+        // re-place the anchor against the heights they measured.
+        renderWindow();
+        for (let pass = 0; pass < 3; pass++) {
+          if (!placeIndex(anchorAt, anchorOffset)) break;
+        }
+        const el = renderedRowAt(anchorAt);
+        if (el !== undefined && anchorEdge !== null) holdRow(el, anchorEdge);
+      }
     }
     dropGoneEdit(editHadFocus);
     return true;
