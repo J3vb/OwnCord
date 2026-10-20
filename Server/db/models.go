@@ -134,13 +134,6 @@ type Role struct {
 	Permissions int64   `json:"permissions"`
 	Position    int     `json:"position"`
 	IsDefault   bool    `json:"is_default"`
-	// Hoist: the role forms its own member-list group. Mentionable: members
-	// may ping the role. Both are stored by migration 067 and not yet read
-	// by any behaviour.
-	// No json tags: the models.go tag count is a ratchet (service
-	// TestModelsJSONTagRatchet). The wire shape is added by 6.3c.
-	Hoist       bool
-	Mentionable bool
 }
 
 // Channel represents a row in the channels table.

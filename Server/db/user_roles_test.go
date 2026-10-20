@@ -190,3 +190,20 @@ func TestMemberGeneration_BumpsOnUserRolesWrite(t *testing.T) {
 		t.Errorf("generation moved on a mentionable edit: %d -> %d", g3, g4)
 	}
 }
+
+func TestRemoveUserRole_NotHeldIsNoOp(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	execAll(t, database,
+		`INSERT INTO users (id, username, password, role_id) VALUES (1, 'u', 'h', 4)`)
+	if err := database.RemoveUserRole(ctx, 1, 3); err != nil {
+		t.Errorf("removing a role the member does not hold err = %v, want nil", err)
+	}
+	mr, err := database.GetMemberRoles(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mr.Top.ID != 4 || len(mr.IDs) != 1 {
+		t.Errorf("member roles after no-op removal = %+v, want only role 4", mr)
+	}
+}

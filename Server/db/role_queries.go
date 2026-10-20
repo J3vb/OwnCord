@@ -22,8 +22,6 @@ func roleFromGen(r dbgen.Role) *Role {
 		Permissions: r.Permissions,
 		Position:    int(r.Position),
 		IsDefault:   r.IsDefault != 0,
-		Hoist:       r.Hoist != 0,
-		Mentionable: r.Mentionable != 0,
 	}
 }
 
