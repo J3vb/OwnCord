@@ -282,9 +282,24 @@ endpoints return plain-text errors — see their section):
 | `GIF_DISABLED`                  | 503         | GIF proxy is not configured on this server (no `gif.api_key`)                                                                                                                                                                                    |
 | `GIF_FAVORITES_FULL`            | 409         | You have reached the favorite GIF limit (250)                                                                                                                                                                                                    |
 | `PUSH_DISABLED`                 | 503         | Web Push is not enabled on this server (`push.enabled` is false)                                                                                                                                                                                 |
+| `SERVICE_UNAVAILABLE`           | 503         | A request that was still running after the server's 15 s request deadline failed (WP 4.1c); `Retry-After: 2`, retry. Only the generic `{"error":"SERVICE_UNAVAILABLE"}` body is sent                                                             |
 | `NSFW_ACKNOWLEDGEMENT_REQUIRED` | 403         | Content from a labelled channel requested before the caller acknowledged it (history, around, pins, reaction users, search, attachment bytes — B5-7)                                                                                             |
 | `NOT_NSFW`                      | 409         | `PUT /api/v1/channels/{id}/nsfw-acknowledgement` on a channel that is not labelled                                                                                                                                                               |
 | `CHANNEL_NAME_TAKEN`            | 409         | Admin channel create or rename onto a name the same type already has in that category                                                                                                                                                            |
+
+### Request deadline
+
+Every REST route except the streaming and long-running ones carries a 15 s
+deadline on its request context. A handler that fails with a 5xx after that
+deadline passed (a database call cancelled behind a stalled writer, say) is
+answered `503 {"error":"SERVICE_UNAVAILABLE"}` with `Retry-After: 2` in place
+of its own error body; the request had not committed, so it is safe to retry.
+A response below 500, including a 2xx written after the deadline, is never
+rewritten. Exempt, with no deadline of their own beyond the transfer and
+archive progress deadlines: the WebSocket upgrade, the LiveKit proxy, file
+uploads and downloads, avatar and group-icon uploads, client-update, the admin
+log stream, archive, backup, restore, update-apply and restart routes, plugin
+install and account erasure.
 
 ---
 

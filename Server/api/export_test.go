@@ -205,3 +205,22 @@ func SetBackgroundWriteTimeoutForTest(tb testing.TB, d time.Duration) {
 
 // HandlePrometheusMetricsForTest exposes handlePrometheusMetrics for external tests.
 var HandlePrometheusMetricsForTest = handlePrometheusMetrics
+
+// RequestDeadlineExemptForTest exposes the exempt-table lookup (WP 4.1c).
+func RequestDeadlineExemptForTest(method, escapedPath string) bool {
+	return requestDeadlineExemptRequest(method, escapedPath)
+}
+
+// RequestDeadlineExemption is one exempt-table row, for external tests.
+type RequestDeadlineExemption struct {
+	Method, Pattern, Reason string
+}
+
+// RequestDeadlineExemptionsForTest lists the exempt table (WP 4.1c).
+func RequestDeadlineExemptionsForTest() []RequestDeadlineExemption {
+	out := make([]RequestDeadlineExemption, 0, len(requestDeadlineExempt))
+	for _, e := range requestDeadlineExempt {
+		out = append(out, RequestDeadlineExemption{Method: e.method, Pattern: e.path.String(), Reason: e.reason})
+	}
+	return out
+}
