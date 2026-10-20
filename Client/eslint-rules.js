@@ -8,7 +8,9 @@
 //
 // Plain JS, ESM, no build step — eslint.config.js imports this directly.
 
+import { statSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 /** True when `node` calls `<methodName>(...)` through any of the receivers the
  *  reconnect code uses: `this.<methodName>()` (the class form in
@@ -851,6 +853,219 @@ const subscriptionResultKept = {
   },
 };
 
+// --- layer-direction -------------------------------------------------------
+// A lower layer never imports a higher one. The rank is the first path segment
+// under Client/src/; an importer of rank R may import targets of rank <= R, and
+// peers (same rank) may import each other.
+//
+//   6  main.ts, app/
+//   5  pages/
+//   4  components/, features/        (peers)
+//   3  stores/
+//   2  lib/, platform/, i18n/        (peers)
+//   1  styles/, assets/
+//
+// Counted: static `import`, `export ... from` (including `export *`), a
+// side-effect import and a dynamic `import("literal")`: each is a runtime edge.
+// Not counted: `import type`, `export type`, a list whose every specifier is
+// `type`, and `typeof import("x")` in a type position (emit drops all of them).
+// A plain `import { X }` used only as a type is a value import to the parser,
+// so it counts; write `import type`. Colocated `*.test.ts(x)` files are exempt.
+//
+// The rule is string and path based. An alias (`@lib`, `@stores`,
+// `@components`, `@pages`, `@styles`, as in tsconfig.json) and a relative
+// specifier that name the same module get the same verdict and the same
+// baseline key: the resolved file relative to src/ (a directory import
+// resolves to its index.ts). The filesystem is read only for a site that is
+// upward, to find that file.
+//
+// Option `baseline` is Client/scripts/layer-baseline.json:
+// `{ sanctioned, debt }`, each `{ "<importer>": { "<target>": <site count> } }`.
+// A site is reported only when its importer has more sites to that target than
+// the baseline lists, so a second upward import of a listed target is an
+// error. tests/unit/layer-baseline.test.ts keeps the baseline shrink-only.
+const SRC_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "src");
+
+/** Layer rank by first path segment under src/ (`main` is `main.ts`). */
+const LAYER_RANK = new Map([
+  ["main", 6],
+  ["app", 6],
+  ["pages", 5],
+  ["components", 4],
+  ["features", 4],
+  ["stores", 3],
+  ["lib", 2],
+  ["platform", 2],
+  ["i18n", 2],
+  ["styles", 1],
+  ["assets", 1],
+]);
+
+/** The five tsconfig `paths` aliases, as alias -> directory under src/. */
+const LAYER_ALIASES = new Map([
+  ["@lib", "lib"],
+  ["@stores", "stores"],
+  ["@components", "components"],
+  ["@pages", "pages"],
+  ["@styles", "styles"],
+]);
+
+const TEST_FILE = /\.test\.tsx?$/;
+
+/** Layer name of a posix path relative to src/, or null when it has none. */
+function layerOfRel(rel) {
+  const parts = rel.split("/");
+  if (parts.length === 1) return parts[0] === "main.ts" ? "main" : null;
+  return LAYER_RANK.has(parts[0]) ? parts[0] : null;
+}
+
+/** `file` as a posix path relative to src/, or null when it is outside src/. */
+function relToSrc(file) {
+  const rel = path.relative(SRC_ROOT, file).split(path.sep).join("/");
+  return rel === "" || rel.startsWith("..") || path.isAbsolute(rel) ? null : rel;
+}
+
+const resolvedTargets = new Map();
+
+/** The file a specifier base names, relative to src/: the extensionless or
+ *  `.js` form resolves to `.ts`/`.tsx`, a directory to its index. Falls back
+ *  to `<base>.ts` when nothing exists on disk (fixtures). */
+function resolveTargetFile(relBase) {
+  const cached = resolvedTargets.get(relBase);
+  if (cached !== undefined) return cached;
+  const candidates = [
+    relBase,
+    `${relBase}.ts`,
+    `${relBase}.tsx`,
+    `${relBase}/index.ts`,
+    `${relBase}/index.tsx`,
+    relBase.replace(/\.js$/, ".ts"),
+  ];
+  let found = `${relBase}.ts`;
+  for (const candidate of candidates) {
+    try {
+      if (statSync(path.join(SRC_ROOT, candidate)).isFile()) {
+        found = candidate;
+        break;
+      }
+    } catch {
+      // not a file; try the next form
+    }
+  }
+  resolvedTargets.set(relBase, found);
+  return found;
+}
+
+/** The target of `spec` as a posix path relative to src/ (extension and index
+ *  not yet resolved), or null for a bare package or a path outside src/. */
+function targetBase(spec, importerRel) {
+  if (spec.startsWith(".")) {
+    return relToSrc(path.join(SRC_ROOT, path.posix.dirname(importerRel), spec));
+  }
+  for (const [alias, dir] of LAYER_ALIASES) {
+    if (spec === alias) return dir;
+    if (spec.startsWith(`${alias}/`)) return `${dir}/${spec.slice(alias.length + 1)}`;
+  }
+  return null;
+}
+
+function baselineCount(baseline, importer, target) {
+  let total = 0;
+  for (const section of [baseline.sanctioned, baseline.debt]) {
+    const n = section?.[importer]?.[target];
+    if (typeof n === "number") total += n;
+  }
+  return total;
+}
+
+function allSpecifiersTypeOnly(specifiers, kindKey) {
+  return specifiers.length > 0 && specifiers.every((s) => s[kindKey] === "type");
+}
+
+const layerDirection = {
+  meta: {
+    type: "problem",
+    docs: {
+      description:
+        "A lower layer must not import a higher one (main/app > pages > components/features > stores > lib/platform/i18n > styles/assets). Existing upward imports are listed in scripts/layer-baseline.json and only shrink.",
+    },
+    schema: [
+      {
+        type: "object",
+        properties: { baseline: { type: "object" } },
+        additionalProperties: false,
+      },
+    ],
+    messages: {
+      upwardImport:
+        "{{importer}} -> {{target}}: {{fromLayer}}/ must not import {{toLayer}}/ (layers import downward or sideways only). Move the shared piece down, or invert the dependency. Listed edges live in scripts/layer-baseline.json and only shrink.",
+    },
+  },
+  create(context) {
+    const baseline = context.options[0]?.baseline ?? {};
+    const filename = path.isAbsolute(context.filename)
+      ? context.filename
+      : path.resolve(path.dirname(SRC_ROOT), context.filename);
+    const importerRel = relToSrc(filename);
+    if (importerRel === null || TEST_FILE.test(importerRel)) return {};
+    const fromLayer = layerOfRel(importerRel);
+    if (fromLayer === null) return {};
+    const fromRank = LAYER_RANK.get(fromLayer);
+
+    /** Upward sites in source order, grouped by resolved target file. */
+    const sites = new Map();
+    const check = (node, source) => {
+      if (typeof source !== "string") return;
+      const base = targetBase(source, importerRel);
+      if (base === null) return;
+      const toLayer = layerOfRel(base);
+      if (toLayer === null || LAYER_RANK.get(toLayer) <= fromRank) return;
+      const target = resolveTargetFile(base);
+      const list = sites.get(target) ?? [];
+      list.push({ node, toLayer });
+      sites.set(target, list);
+    };
+
+    return {
+      ImportDeclaration(node) {
+        if (node.importKind === "type" || allSpecifiersTypeOnly(node.specifiers, "importKind")) {
+          return;
+        }
+        check(node, node.source.value);
+      },
+      ExportNamedDeclaration(node) {
+        if (node.source === null || node.source === undefined) return;
+        if (node.exportKind === "type" || allSpecifiersTypeOnly(node.specifiers, "exportKind")) {
+          return;
+        }
+        check(node, node.source.value);
+      },
+      ExportAllDeclaration(node) {
+        if (node.exportKind === "type") return;
+        check(node, node.source.value);
+      },
+      ImportExpression(node) {
+        if (node.source.type === "Literal") check(node, node.source.value);
+      },
+      "Program:exit"() {
+        for (const [target, list] of sites) {
+          const allowed = baselineCount(baseline, importerRel, target);
+          for (const site of list.slice(allowed)) {
+            context.report({
+              node: site.node,
+              messageId: "upwardImport",
+              data: { importer: importerRel, target, fromLayer, toLayer: site.toLayer },
+            });
+          }
+        }
+      },
+    };
+  },
+};
+
+// Exported so tests/unit/layer-baseline.test.ts can pin the maps to the real tree.
+export { LAYER_ALIASES, LAYER_RANK };
+
 export default {
   rules: {
     "no-leave-voice-when-superseded": noLeaveVoiceWhenSuperseded,
@@ -861,5 +1076,6 @@ export default {
     "invoke-needs-try-catch": invokeNeedsTryCatch,
     "no-raw-html-sink": noRawHtmlSink,
     "subscription-result-kept": subscriptionResultKept,
+    "layer-direction": layerDirection,
   },
 };
