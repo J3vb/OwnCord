@@ -260,8 +260,8 @@ func (d *DB) getOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64, g
 	return ch, true, recipientOpened, nil, nil
 }
 
-// acceptUndecidedRequestOnOpen accepts the pending or ignored request that
-// senderID holds against recipientID (the caller opening the DM), if any:
+// acceptUndecidedRequestOnOpen accepts the pending, ignored or deleted request
+// that senderID holds against recipientID (the caller opening the DM), if any:
 // TrustSender, then the transition to accepted. The recipient's dm_open_state
 // row is already written by the caller. Returns nil when there is no such
 // request. q must be bound to the caller's transaction.
@@ -273,7 +273,13 @@ func acceptUndecidedRequestOnOpen(ctx context.Context, q *dbgen.Queries, recipie
 	if err != nil {
 		return nil, fmt.Errorf("get request: %w", err)
 	}
-	if row.State != "pending" && row.State != "ignored" {
+	// Deleted is server-side identical to ignored (service.Delete): the
+	// recipient dismissed the request without deciding about the sender, and
+	// opening the conversation themselves is the decision. Accepted and
+	// blocked rows stay as they are.
+	switch row.State {
+	case "pending", "ignored", "deleted":
+	default:
 		return nil, nil
 	}
 	if err := q.TrustSender(ctx, dbgen.TrustSenderParams{RecipientID: recipientID, SenderID: senderID, Source: "accepted"}); err != nil {

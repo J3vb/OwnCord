@@ -255,12 +255,12 @@ func openStateCount(t *testing.T, database *DB, userID, channelID int64) int {
 }
 
 // TestGetOrCreateDMChannelGated_RecipientWithPendingRequestAccepts: a recipient
-// holding a pending (or ignored) request from the other user who opens the DM
+// holding a pending, ignored or deleted request from the other user who opens the DM
 // themselves (POST /dms) accepts it, atomically: trust row, open state and the
 // request's state all land together, and the accepted request is returned so
 // the caller can announce it.
 func TestGetOrCreateDMChannelGated_RecipientWithPendingRequestAccepts(t *testing.T) {
-	for _, preState := range []string{"pending", "ignored"} {
+	for _, preState := range []string{"pending", "ignored", "deleted"} {
 		t.Run(preState, func(t *testing.T) {
 			database := contentionOpenMigrated(t)
 			ctx := context.Background()
@@ -311,6 +311,63 @@ func TestGetOrCreateDMChannelGated_RecipientWithPendingRequestAccepts(t *testing
 			}
 			if n := openStateCount(t, database, recipient, ch.ID); n != 1 {
 				t.Errorf("recipient's dm_open_state rows = %d, want 1", n)
+			}
+		})
+	}
+}
+
+// TestGetOrCreateDMChannelGated_OpenDoesNotAcceptBlockedOrAbsentRequest: the
+// open-time acceptance covers only pending, ignored and deleted requests. A
+// blocked request stays blocked with no trust written, and opening a DM with
+// no request from the other user returns no accepted request and writes no
+// trust.
+func TestGetOrCreateDMChannelGated_OpenDoesNotAcceptBlockedOrAbsentRequest(t *testing.T) {
+	for _, preState := range []string{"blocked", "none"} {
+		t.Run(preState, func(t *testing.T) {
+			database := contentionOpenMigrated(t)
+			ctx := context.Background()
+			sender := contentionSeedUser(t, database, "gated-nacc-sender-"+preState)
+			recipient := contentionSeedUser(t, database, "gated-nacc-recipient-"+preState)
+
+			ch, _, _, _, err := database.GetOrCreateDMChannelGated(ctx, sender, recipient)
+			if err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			if preState == "blocked" {
+				msgID, err := database.CreateMessage(ctx, ch.ID, sender, "hi", nil)
+				if err != nil {
+					t.Fatalf("CreateMessage: %v", err)
+				}
+				if _, err := database.CreateMessageRequest(ctx, sender, recipient, ch.ID, msgID); err != nil {
+					t.Fatalf("CreateMessageRequest: %v", err)
+				}
+				req, err := database.GetMessageRequestByPair(ctx, sender, recipient)
+				if err != nil {
+					t.Fatalf("GetMessageRequestByPair: %v", err)
+				}
+				if _, err := database.TransitionMessageRequest(ctx, req.ID, recipient, "blocked"); err != nil {
+					t.Fatalf("Transition: %v", err)
+				}
+			}
+
+			_, _, _, accepted, err := database.GetOrCreateDMChannelGated(ctx, recipient, sender)
+			if err != nil {
+				t.Fatalf("GetOrCreateDMChannelGated: %v", err)
+			}
+			if accepted != nil {
+				t.Errorf("accepted = %+v, want nil", accepted)
+			}
+			if ok, _ := database.IsTrustedSender(ctx, recipient, sender); ok {
+				t.Error("recipient trusts sender, want no trust written")
+			}
+			if preState == "blocked" {
+				got, err := database.GetMessageRequestByPair(ctx, sender, recipient)
+				if err != nil {
+					t.Fatalf("GetMessageRequestByPair: %v", err)
+				}
+				if got.State != "blocked" {
+					t.Errorf("request state = %q, want blocked", got.State)
+				}
 			}
 		})
 	}
