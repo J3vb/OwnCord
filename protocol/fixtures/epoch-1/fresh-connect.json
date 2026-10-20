@@ -50,6 +50,7 @@
             },
             "channels": [
               {
+                "afk": false,
                 "can_delete_others": false,
                 "can_moderate_voice": false,
                 "can_pin": false,
@@ -73,6 +74,7 @@
                 "voice_max_video": 25
               },
               {
+                "afk": false,
                 "can_delete_others": false,
                 "can_moderate_voice": false,
                 "can_pin": false,
@@ -298,6 +300,7 @@
             },
             "channels": [
               {
+                "afk": false,
                 "can_delete_others": false,
                 "can_moderate_voice": false,
                 "can_pin": false,
@@ -321,6 +324,7 @@
                 "voice_max_video": 25
               },
               {
+                "afk": false,
                 "can_delete_others": false,
                 "can_moderate_voice": false,
                 "can_pin": false,

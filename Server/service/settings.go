@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -45,7 +46,21 @@ var allowedSettingKeys = map[string]struct{}{
 	// The upload file-type lists (upload_filetypes.go).
 	UploadBlockedExtensionsKey: {},
 	UploadAllowedExtensionsKey: {},
+	// How long a member must be idle before the AFK channel sweep may move
+	// them (WP 6.10). A missing row means AFKTimeoutDefaultSeconds.
+	AFKTimeoutKey: {},
 }
+
+// AFKTimeoutKey is the settings key holding the AFK timeout in seconds.
+const AFKTimeoutKey = "afk_timeout_seconds"
+
+// AFKTimeoutDefaultSeconds is the timeout in force while AFKTimeoutKey is
+// unset.
+const AFKTimeoutDefaultSeconds = 300
+
+// afkTimeoutChoices are the only values AFKTimeoutKey accepts, in seconds
+// (1, 5, 15, 30 and 60 minutes): the admin card offers exactly these.
+var afkTimeoutChoices = []int{60, 300, 900, 1800, 3600}
 
 // inertSettingKeys are rows the setup wizard still writes and GET /settings
 // still shows, but that no code reads at runtime: config.yaml owns the real
@@ -245,6 +260,12 @@ func normalizeSettingUpdates(updates map[string]string) (map[string]string, erro
 				return nil, fmt.Errorf("%s: %w", key, err)
 			}
 			normalized[key] = strings.Join(list, ",")
+		case AFKTimeoutKey:
+			secs, err := strconv.Atoi(strings.TrimSpace(value))
+			if err != nil || !slices.Contains(afkTimeoutChoices, secs) {
+				return nil, fmt.Errorf("%s: must be one of 60, 300, 900, 1800, 3600", key)
+			}
+			normalized[key] = strconv.Itoa(secs)
 		case "backup_schedule":
 			schedule := strings.ToLower(strings.TrimSpace(value))
 			switch schedule {

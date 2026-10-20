@@ -87,7 +87,7 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 	state = h.voiceJoinRestoreModFlags(ctx, c, channelID, state, wasServerMuted, wasServerDeafened, wasServerMutedBy)
 	persistDone := time.Now()
 
-	if !h.voiceJoinGrantToken(ctx, txn, c, channelID, state, reqID) {
+	if !h.voiceJoinGrantToken(ctx, txn, c, channelID, ch.AFK, state, reqID) {
 		// OC-0420: voiceJoinRestoreModFlags above just wrote these flags into
 		// the row voiceJoinGrantToken's own failure path is about to roll
 		// back (rollbackVoiceJoin deletes it) — re-stash for the same reason
@@ -373,7 +373,16 @@ func (h *Hub) voiceJoinRestoreModFlags(ctx context.Context, c *Client, channelID
 // and overrides once per bit. Both branches fail closed: an unresolved role or override map
 // yields no publish grants (admins bypass overrides, so an override fetch
 // error cannot demote them).
-func (h *Hub) voiceJoinPublishPerms(ctx context.Context, userID, channelID int64) (canPublish, canVideo, canScreenShare bool) {
+//
+// afk is the channel's AFK flag (migration 067): the AFK channel is
+// listen-only, so it grants no publishing whatever the role allows. The
+// token refresh (handleVoiceTokenRefreshV2) and the live SFU reconcile
+// (updateVoiceParticipantPermissions) apply the same rule, or they would
+// hand the microphone back.
+func (h *Hub) voiceJoinPublishPerms(ctx context.Context, userID, channelID int64, afk bool) (canPublish, canVideo, canScreenShare bool) {
+	if afk {
+		return false, false, false
+	}
 	if h.perms != nil {
 		// PermissionService answers all three bits from one cached
 		// role+overrides snapshot (populated by the join gate
@@ -404,7 +413,7 @@ func (h *Hub) voiceJoinPublishPerms(ctx context.Context, userID, channelID int64
 // voiceJoinGrantToken mints the LiveKit credential and delivers it, withholding
 // it if the join was superseded in the meantime. Returns false once the join
 // has been abandoned (rolled back, or superseded) and must not complete.
-func (h *Hub) voiceJoinGrantToken(ctx context.Context, txn *voiceTxn, c *Client, channelID int64, state *db.VoiceState, reqID string) bool {
+func (h *Hub) voiceJoinGrantToken(ctx context.Context, txn *voiceTxn, c *Client, channelID int64, afk bool, state *db.VoiceState, reqID string) bool {
 	// Generate LiveKit token if LiveKit client is available.
 	// Token generation failure is fatal — without a token the client cannot
 	// connect to the SFU, so we must roll back the DB join.
@@ -413,7 +422,7 @@ func (h *Hub) voiceJoinGrantToken(ctx context.Context, txn *voiceTxn, c *Client,
 	// is still called with broadcast=false, so a failure here does not
 	// broadcast a spurious voice_leave for a join no other client ever saw.
 	if h.livekit != nil {
-		canPublish, canVideo, canScreenShare := h.voiceJoinPublishPerms(ctx, c.userID, channelID)
+		canPublish, canVideo, canScreenShare := h.voiceJoinPublishPerms(ctx, c.userID, channelID, afk)
 		// Moderator mute/deafen follows the voice session across channel moves.
 		// Carry it into the SFU grant too: muting an existing track cannot stop
 		// a replacement microphone track from being published with this token.
@@ -652,6 +661,12 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 	canPublish := voiceMicrophoneAllowed(hasPerm(ctx, d.Reader, d.Permissions, d.PermSvc, userID, channelID, permissions.SpeakVoice), state)
 	canVideo := hasPerm(ctx, d.Reader, d.Permissions, d.PermSvc, userID, channelID, permissions.UseVideo)
 	canScreenShare := hasPerm(ctx, d.Reader, d.Permissions, d.PermSvc, userID, channelID, permissions.ShareScreen)
+	if ch.AFK {
+		// The AFK channel is listen-only: a refresh must not re-grant what the
+		// join withheld. The moderator flags are untouched, since state is
+		// still read above and carried by the next join.
+		canPublish, canVideo, canScreenShare = false, false, false
+	}
 
 	joinToken := info.VoiceJoinToken
 	var result Result

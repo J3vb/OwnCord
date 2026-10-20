@@ -487,13 +487,22 @@ These fields advertise retry-safe `chat_send` support. Older servers omit them;
 clients must not infer support from the protocol epoch or silently retry a
 durable pending message against a server that no longer advertises support.
 
-**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin`, `can_react`, `slow_mode`, `nsfw`, `private`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text + announcement), `last_message_id` (text + announcement), `mention_count` (text + announcement), `last_read_message_id` (text + announcement)
+**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin`, `can_react`, `slow_mode`, `nsfw`, `afk`, `private`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text + announcement), `last_message_id` (text + announcement), `mention_count` (text + announcement), `last_read_message_id` (text + announcement)
 
 `last_read_message_id` is the caller's own read pointer (`read_states.last_message_id`):
 the newest message id they have read, or `0` when they have no read state for the
 channel. It is not `last_message_id`, which is the newest live message in the
 channel. A client can place its NEW line after the pointer. It is plain data with
 no capability flag; an older server omits it.
+
+`afk` is `true` on the server's one AFK voice channel and `false` everywhere
+else (migration `067`, WP 6.10a); it rides the same payload on `ready`,
+`channel_create` and `channel_update`, and an older server omits it, which a
+client reads as `false`. The AFK channel is listen-only: the voice token for it
+(on `voice_join` and on `voice_token_refresh`) grants no microphone, camera or
+screen-share publishing whatever the role allows. An admin sets or clears it
+with `PUT /admin/api/afk-channel`, and the previous and the new channel each
+get a `channel_update`.
 
 `nsfw`, `nsfw_acknowledged`, `voice_max_users` and `voice_max_video` are always
 present, with their column defaults on an unconfigured channel — `false`,
@@ -1409,6 +1418,7 @@ Channel messages are triggered by REST API calls from admins and reach only the 
     "position": 3,
     "slow_mode": 0,
     "nsfw": false,
+    "afk": false,
     "private": false,
     "voice_max_users": 0,
     "voice_max_video": 0,

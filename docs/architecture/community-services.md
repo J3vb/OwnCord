@@ -53,7 +53,10 @@ read-only), so they add nothing here; their lifecycle rows are classes 11c and
 `066_group_dm_icon.sql` adds `channels.dm_icon`, the attachment id of a group DM's
 icon (WP 3B-10c). It is an uploaded image like an avatar, kept alive and served to
 the group's members only while the column names it, so it adds no data class here;
-its file follows the attachment rows of class 12. Other
+its file follows the attachment rows of class 12. **Amended 2026-10-20 (AFK channel):**
+`067_channel_afk.sql` adds `channels.afk`, the flag on the server's one AFK voice
+channel (WP 6.10a). It is a setting an administrator writes, holds no user content
+and is removed with its channel, so it adds no data class here. Other
 historical
 status statements retain their `cbebd37c` baseline.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each

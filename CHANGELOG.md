@@ -49,6 +49,10 @@ and only when it changes something a contributor or fork holder must do
 
 ### Added
 
+**Accounts & admin**
+
+- A server can now name one voice channel as its AFK channel (`PUT /admin/api/afk-channel`, Manage Server) and set how long a member must be idle first (the `afk_timeout_seconds` setting: 1, 5, 15, 30 or 60 minutes, 5 by default). Nobody is moved yet and the admin panel has no card for it; this release only adds the setting, the channel flag everyone's client receives, and the rule that the AFK channel is listen-only, with no microphone, camera or screen sharing.
+
 **Desktop UI**
 
 - The member list now sits on the right; Appearance > Member list position puts it back under the channels.

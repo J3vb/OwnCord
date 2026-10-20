@@ -227,6 +227,12 @@ export interface ReadyChannel {
    */
   readonly nsfw?: boolean;
   /**
+   * Whether this is the server's AFK voice channel (migration 067): members
+   * idle past the server's timeout are moved here, and it is listen-only.
+   * Absent from older servers, which is read as "not the AFK channel".
+   */
+  readonly afk?: boolean;
+  /**
    * Whether the channel is private: @everyone cannot see it (a permission
    * override hides it), worked out per channel, not per viewer. Sent on every
    * guild channel, never on DMs; absent from older servers, which is read as

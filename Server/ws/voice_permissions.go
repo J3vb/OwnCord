@@ -46,6 +46,15 @@ func (h *Hub) updateVoiceParticipantPermissions(ctx context.Context, userID, cha
 	if err != nil {
 		return err
 	}
+	// The AFK channel is listen-only: reconciliation must not re-grant what
+	// the join and the token refresh withheld. Fail closed on a lookup error.
+	ch, err := h.readers.Dispatch.GetChannel(ctx, channelID)
+	if err != nil {
+		return err
+	}
+	if ch != nil && ch.AFK {
+		return h.livekit.updateParticipantPublishing(ctx, channelID, userID, joinToken, false, false, false)
+	}
 	return h.livekit.updateParticipantPublishing(ctx, channelID, userID, joinToken,
 		voiceMicrophoneAllowed(sub.Has(permissions.SpeakVoice), state),
 		sub.Has(permissions.UseVideo), sub.Has(permissions.ShareScreen))

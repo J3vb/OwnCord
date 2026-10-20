@@ -36,12 +36,13 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 198 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 199 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
 | GET     | `/admin/`                                                            |
 | GET     | `/admin/*`                                                           |
+| PUT     | `/admin/api/afk-channel`                                             |
 | GET     | `/admin/api/archive`                                                 |
 | GET     | `/admin/api/archive/download`                                        |
 | POST    | `/admin/api/archive/link`                                            |
@@ -3760,7 +3761,7 @@ Authorization is two-layered:
 | `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions`, `/user-permissions` and `/access/…`)                                             | `MANAGE_CHANNELS`                                                                            |
 | `GET/POST/PATCH/DELETE /admin/api/roles…` (incl. `/roles/reorder`)                                                                                   | `MANAGE_ROLES`                                                                               |
 | `GET /admin/api/audit-log`                                                                                                                           | `VIEW_AUDIT_LOG`                                                                             |
-| `GET/PATCH /admin/api/settings`                                                                                                                      | `MANAGE_SERVER`                                                                              |
+| `GET/PATCH /admin/api/settings`, `PUT /admin/api/afk-channel`                                                                                        | `MANAGE_SERVER`                                                                              |
 | `GET /admin/api/config`                                                                                                                              | `MANAGE_SERVER`                                                                              |
 | `GET/PATCH /admin/api/config/settings`, `POST /admin/api/restart`                                                                                    | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`)                           |
 | `GET /admin/api/retention`, `GET /admin/api/retention/channels`, `GET /admin/api/retention/preview`, `PUT/DELETE /admin/api/channels/{id}/retention` | `MANAGE_SERVER` — B4-11                                                                      |
@@ -4542,7 +4543,7 @@ audited as `setting_change`.
 A flat map of key → string value. Allowed keys: `server_name`, `server_icon`,
 `motd`, `require_2fa`,
 `registration_mode`, `backup_schedule`, `backup_retention`, `retention_days`,
-`upload_blocked_extensions`, `upload_allowed_extensions`.
+`upload_blocked_extensions`, `upload_allowed_extensions`, `afk_timeout_seconds`.
 Boolean settings
 accept `1/0/true/false` and are normalized to `1`/`0`. `registration_mode`
 accepts `closed`, `invite`, `approval` or `open` (case-insensitive, stored
@@ -4577,6 +4578,12 @@ channel (pinned messages exempt, direct messages never in scope); a
 per-channel override in either direction is
 [`PUT /admin/api/channels/{id}/retention`](#put-adminapichannelsidretention).
 
+`afk_timeout_seconds` (WP 6.10a) is how long a member must have been idle
+before the AFK channel may take them: one of `60`, `300`, `900`, `1800` or
+`3600`, anything else is refused with `400`. A server with no row uses `300`.
+Which channel is the AFK channel is not a setting: see
+[`PUT /admin/api/afk-channel`](#put-adminapiafk-channel).
+
 `server_name` (1–100 bytes) and `motd` (at most 500 bytes) are trimmed and
 held to the same limits the first-run setup wizard enforces.
 
@@ -4600,6 +4607,39 @@ user has TOTP enabled.
 | 400    | `BAD_REQUEST` | Unknown key, a value outside its key's rules above, or `require_2fa` preconditions not met |
 
 ---
+
+### PUT /admin/api/afk-channel
+
+Names the server's AFK channel, or clears it (WP 6.10a). Clearing the old flag
+and setting the new one is one transaction, audited as `afk_channel_change`,
+and a `channel_update` is broadcast for each channel whose flag moved. The AFK
+channel is listen-only: its voice tokens grant no microphone, camera or screen
+sharing.
+
+**Auth:** `MANAGE_SERVER`
+
+#### Request
+
+```json
+{ "channel_id": 12 }
+```
+
+`channel_id` must be present: a channel id flags that channel, `null` clears
+the flag.
+
+#### Response 200 OK
+
+```json
+{ "channel_id": 12 }
+```
+
+#### Errors
+
+| Status | Code            | Cause                                                 |
+| ------ | --------------- | ----------------------------------------------------- |
+| 400    | `BAD_REQUEST`   | `channel_id` missing or not an id or `null`           |
+| 400    | `INVALID_INPUT` | The channel is not a voice channel, or it is archived |
+| 404    | `NOT_FOUND`     | No such channel (a DM id answers the same)            |
 
 ### GET /admin/api/config
 
