@@ -340,7 +340,9 @@ func TestGetPinnedMessages_ReturnsPinnedOnly(t *testing.T) {
 
 	id1, _ := database.CreateMessage(context.Background(), chID, userID, "pinned msg", nil)
 	_, _ = database.CreateMessage(context.Background(), chID, userID, "not pinned", nil)
-	_, _ = database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: id1, Pinned: true, UserID: 1})
+	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: id1, Pinned: true, UserID: userID}); err != nil {
+		t.Fatalf("SetMessagePinned: %v", err)
+	}
 
 	msgs, err := database.GetPinnedMessages(context.Background(), chID, userID)
 	if err != nil {
@@ -382,7 +384,9 @@ func TestSetMessagePinned_Unpin(t *testing.T) {
 	chID := seedChannel(t, database, "unpin-ch")
 
 	id, _ := database.CreateMessage(context.Background(), chID, userID, "to unpin", nil)
-	_, _ = database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: id, Pinned: true, UserID: 1})
+	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: id, Pinned: true, UserID: userID}); err != nil {
+		t.Fatalf("SetMessagePinned: %v", err)
+	}
 	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: id, Pinned: false, UserID: 1}); err != nil {
 		t.Fatalf("SetMessagePinned(false): %v", err)
 	}

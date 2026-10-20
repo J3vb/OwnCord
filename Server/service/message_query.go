@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"time"
 
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
@@ -218,6 +220,9 @@ type PinEventResult struct {
 // SetMessagePinned pins or unpins a message. When the pin writes a pin row it
 // returns it for the caller to fan out; otherwise the result is nil.
 func (s *MessageService) SetMessagePinned(ctx context.Context, userID, channelID, msgID int64, pinned bool) (*PinEventResult, error) {
+	if s.limiter != nil && !s.limiter.Allow(auth.Key("chat_pin", userID), 10, time.Second) {
+		return nil, ErrRateLimited
+	}
 	if channelID <= 0 || msgID <= 0 {
 		return nil, fmt.Errorf("%w: invalid IDs", ErrBadRequest)
 	}
@@ -268,11 +273,15 @@ func (s *MessageService) SetMessagePinned(ctx context.Context, userID, channelID
 	if row == nil {
 		return nil, nil
 	}
-	return s.pinEventResult(ctx, ch, row, author), nil
+	// The pin has committed: resolve the audience on a context detached from the
+	// request so a dropped caller does not cost the room the row.
+	return s.pinEventResult(context.WithoutCancel(ctx), ch, row, author), nil
 }
 
 // pinEventResult resolves the audience of a committed pin row: its author's
-// role name and, in a DM, the participants. A failed participant lookup leaves
+// role name and, in a DM, its delivery audience (DMAudience, as edit, delete and
+// reactions use, so a DM whose message request is pending reaches only the
+// sender and a group DM reaches every member). A failed audience lookup leaves
 // the list empty and the hub falls back to the topic broadcast, as a DM send
 // does; the row is committed either way.
 func (s *MessageService) pinEventResult(ctx context.Context, ch *db.Channel, row *db.PinEventRow, author *db.User) *PinEventResult {
@@ -282,7 +291,7 @@ func (s *MessageService) pinEventResult(ctx context.Context, ch *db.Channel, row
 	}
 	if ch.Type == "dm" {
 		res.IsDM = true
-		ids, err := s.st.GetDMParticipantIDs(ctx, ch.ID)
+		ids, err := s.DMAudience(ctx, ch.ID, author.ID)
 		if err != nil {
 			slog.Warn("pin row: participant lookup", "err", err, "channel_id", ch.ID)
 		} else {

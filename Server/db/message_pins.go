@@ -37,7 +37,7 @@ type PinEventRow struct {
 }
 
 // SetMessagePinned updates the pinned column on a message and, when it pins a
-// message that was not already pinned and no live pin row for it was written in
+// message that was not already pinned and no pin row for it, deleted or not, was written in
 // the last PinEventWindow, writes a pin row (kind 7) in the same transaction and
 // advances the pinner's read state past it. It returns that row, or nil when
 // none was written (an unpin, a re-pin, or a pin inside the window). A failed

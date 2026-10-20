@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
@@ -202,5 +203,120 @@ func TestPinRow_DeleteAndPinRules(t *testing.T) {
 	}
 	if _, err := svc.DeleteMessage(ctx, 2, rowID); err != nil {
 		t.Errorf("author delete of own pin row = %v, want nil", err)
+	}
+}
+
+// A pin row in a one-to-one DM follows the delivery audience: while the
+// recipient has not accepted the sender's request it reaches only the pinner,
+// and once they trust the pinner it reaches both.
+func TestSetMessagePinned_DMPendingRequestAudience(t *testing.T) {
+	f := newModerationActionsFixture(t)
+	ctx := context.Background()
+	f.messages.SetMessageRequests(NewMessageRequestService(f.database, NewBlockService(f.database)))
+	dms := NewDMService(f.database, f.mod.perms)
+	direct, err := dms.CreateDM(ctx, fixtureMember, fixtureMember2)
+	if err != nil {
+		t.Fatalf("CreateDM: %v", err)
+	}
+	sent, err := f.messages.SendMessage(ctx, SendMessageParams{
+		ChannelID: direct.Channel.ID, UserID: fixtureMember, Username: "u3", Content: "hi",
+	})
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	res, err := f.messages.SetMessagePinned(ctx, fixtureMember, direct.Channel.ID, sent.MessageID, true)
+	if err != nil || res == nil {
+		t.Fatalf("pin: res = %v, err = %v", res, err)
+	}
+	if !slices.Equal(res.ParticipantIDs, []int64{fixtureMember}) {
+		t.Errorf("audience with a pending request = %v, want only the pinner %d", res.ParticipantIDs, fixtureMember)
+	}
+
+	if err := f.database.TrustSender(ctx, fixtureMember2, fixtureMember, "accepted"); err != nil {
+		t.Fatalf("TrustSender: %v", err)
+	}
+	if _, err := f.messages.SetMessagePinned(ctx, fixtureMember, direct.Channel.ID, sent.MessageID, false); err != nil {
+		t.Fatalf("unpin: %v", err)
+	}
+	// Move the first row out of the window so a fresh pin writes another.
+	if _, err := f.database.ExecContext(ctx, `UPDATE messages SET timestamp = '2000-01-01 00:00:00' WHERE kind = 7`); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+	res, err = f.messages.SetMessagePinned(ctx, fixtureMember, direct.Channel.ID, sent.MessageID, true)
+	if err != nil || res == nil {
+		t.Fatalf("re-pin: res = %v, err = %v", res, err)
+	}
+	got := append([]int64(nil), res.ParticipantIDs...)
+	slices.Sort(got)
+	want := []int64{fixtureMember, fixtureMember2}
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Errorf("audience after accept = %v, want %v", got, want)
+	}
+}
+
+func TestSetMessagePinned_GroupDMReachesEveryMember(t *testing.T) {
+	f := newGroupMembershipFixture(t)
+	ctx := context.Background()
+	f.messages.SetMessageRequests(NewMessageRequestService(f.database, NewBlockService(f.database)))
+	sent, err := f.messages.SendMessage(ctx, SendMessageParams{
+		ChannelID: f.dm, UserID: fixtureMember, Username: "u3", Content: "hi",
+	})
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	res, err := f.messages.SetMessagePinned(ctx, fixtureMember2, f.dm, sent.MessageID, true)
+	if err != nil || res == nil {
+		t.Fatalf("pin: res = %v, err = %v", res, err)
+	}
+	got := append([]int64(nil), res.ParticipantIDs...)
+	slices.Sort(got)
+	if want := f.members(t); !slices.Equal(got, want) {
+		t.Errorf("group audience = %v, want every member %v", got, want)
+	}
+}
+
+// A deleted pin row still holds its window, so a pin that follows its deletion
+// inside the window writes no new row.
+func TestSetMessagePinned_DeletedRowHoldsWindow(t *testing.T) {
+	svc, _, database, msgID := pinFixture(t)
+	ctx := context.Background()
+	res, err := svc.SetMessagePinned(ctx, 2, 10, msgID, true)
+	if err != nil || res == nil {
+		t.Fatalf("pin: res = %v, err = %v", res, err)
+	}
+	if _, err := svc.DeleteMessage(ctx, 2, res.Row.MessageID); err != nil {
+		t.Fatalf("delete pin row: %v", err)
+	}
+	if _, err := svc.SetMessagePinned(ctx, 2, 10, msgID, false); err != nil {
+		t.Fatalf("unpin: %v", err)
+	}
+	again, err := svc.SetMessagePinned(ctx, 2, 10, msgID, true)
+	if err != nil || again != nil {
+		t.Errorf("pin after deleting the row: res = %v, err = %v, want nil, nil", again, err)
+	}
+	var n int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE kind = 7`).Scan(&n); err != nil || n != 1 {
+		t.Errorf("pin rows = %d (err %v), want 1", n, err)
+	}
+}
+
+func TestSetMessagePinned_RateLimited(t *testing.T) {
+	svc, perms, database, msgID := pinFixture(t)
+	limited := NewMessageService(database, perms, auth.NewRateLimiter())
+	ctx := context.Background()
+	var limitedErr error
+	for i := range 20 {
+		_, err := limited.SetMessagePinned(ctx, 2, 10, msgID, i%2 == 0)
+		if err != nil {
+			limitedErr = err
+			break
+		}
+	}
+	if !errors.Is(limitedErr, ErrRateLimited) {
+		t.Errorf("20 rapid pin toggles: err = %v, want ErrRateLimited", limitedErr)
+	}
+	if _, err := svc.SetMessagePinned(ctx, 2, 10, msgID, true); err != nil {
+		t.Errorf("a service without a limiter refused a pin: %v", err)
 	}
 }

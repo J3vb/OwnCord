@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
@@ -155,4 +157,81 @@ func mustMarshal(t *testing.T, v any) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+// gotChatMessage reports whether ch receives a chat_message frame within d.
+func gotChatMessage(ch chan []byte, d time.Duration) bool {
+	timer := time.After(d)
+	for {
+		select {
+		case raw := <-ch:
+			var env struct {
+				Type string `json:"type"`
+			}
+			if json.Unmarshal(raw, &env) == nil && env.Type == "chat_message" {
+				return true
+			}
+		case <-timer:
+			return false
+		}
+	}
+}
+
+// The pin row takes the ordinary channel path, so a member denied READ on the
+// channel and a member who has not acknowledged an NSFW channel receive nothing,
+// while an allowed member still does.
+func TestPinEventRow_ChannelGates(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+	ctx := context.Background()
+
+	chID := seedTestChannel(t, database, "gated")
+	if _, err := database.ExecContext(ctx, `UPDATE channels SET nsfw = 1 WHERE id = ?`, chID); err != nil {
+		t.Fatalf("label channel: %v", err)
+	}
+	pinner := seedTestUser(t, database, "gate-pinner")
+	acked := seedTestUser(t, database, "gate-acked")
+	unacked := seedTestUser(t, database, "gate-unacked")
+	denied := seedTestUser(t, database, "gate-denied")
+	if _, err := database.AcknowledgeNSFW(ctx, acked, chID); err != nil {
+		t.Fatalf("AcknowledgeNSFW: %v", err)
+	}
+	if _, err := database.AcknowledgeNSFW(ctx, denied, chID); err != nil {
+		t.Fatalf("AcknowledgeNSFW(denied): %v", err)
+	}
+	if err := database.UpsertChannelUserOverride(ctx, chID, denied, 0, permissions.ReadMessages); err != nil {
+		t.Fatalf("UpsertChannelUserOverride: %v", err)
+	}
+
+	// READ is enforced when a client focuses the channel: a refused focus leaves
+	// the connection off the channel topic, so the denied member's client is
+	// never subscribed and the pin row has no path to it.
+	svc := service.New(database, nil)
+	if _, err := svc.Channels.AdmitChannelFocus(ctx, denied, chID); !errors.Is(err, service.ErrForbidden) {
+		t.Fatalf("focus without READ: err = %v, want ErrForbidden", err)
+	}
+	sends := map[string]chan []byte{}
+	var last *ws.Client
+	for name, uid := range map[string]int64{"acked": acked, "unacked": unacked, "denied": denied} {
+		sends[name] = make(chan []byte, 8)
+		focus := chID
+		if name == "denied" {
+			focus = 0
+		}
+		last = ws.NewTestClientWithChannel(hub, uid, focus, sends[name])
+		hub.Register(last)
+	}
+	waitRegistered(t, hub, last)
+
+	hub.PinEventRow(ctx, pinResult(&db.User{ID: pinner, Username: "gate-pinner"}, chID, 601, 90, false, nil))
+
+	if !gotChatMessage(sends["acked"], time.Second) {
+		t.Error("an allowed, acknowledged member did not receive the pin row")
+	}
+	for _, name := range []string{"unacked", "denied"} {
+		if gotChatMessage(sends[name], 300*time.Millisecond) {
+			t.Errorf("%s member received the pin row", name)
+		}
+	}
 }

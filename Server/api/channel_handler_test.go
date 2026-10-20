@@ -917,7 +917,9 @@ func TestGetPins_ReturnsPinnedMessages(t *testing.T) {
 	chID, _ := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
 
 	msgID, _ := database.CreateMessage(context.Background(), chID, user.ID, "pinned message", nil)
-	_, _ = database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: msgID, Pinned: true, UserID: 1})
+	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: msgID, Pinned: true, UserID: user.ID}); err != nil {
+		t.Fatalf("SetMessagePinned: %v", err)
+	}
 	// Also create an unpinned message — should not appear.
 	_, _ = database.CreateMessage(context.Background(), chID, user.ID, "not pinned", nil)
 
@@ -1077,7 +1079,9 @@ func TestSetPinned_UnpinSuccessfully(t *testing.T) {
 	user, _ := database.GetUserByUsername(context.Background(), "unpinner1")
 	chID, _ := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
 	msgID, _ := database.CreateMessage(context.Background(), chID, user.ID, "unpin me", nil)
-	_, _ = database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: msgID, Pinned: true, UserID: 1})
+	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: msgID, Pinned: true, UserID: user.ID}); err != nil {
+		t.Fatalf("SetMessagePinned: %v", err)
+	}
 
 	rr := chDelete(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", chID, msgID), token)
 	if rr.Code != http.StatusNoContent {
@@ -1135,7 +1139,9 @@ func TestSetPinned_Idempotent(t *testing.T) {
 	user, _ := database.GetUserByUsername(context.Background(), "pinner4")
 	chID, _ := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
 	msgID, _ := database.CreateMessage(context.Background(), chID, user.ID, "already pinned", nil)
-	_, _ = database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: msgID, Pinned: true, UserID: 1})
+	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: msgID, Pinned: true, UserID: user.ID}); err != nil {
+		t.Fatalf("SetMessagePinned: %v", err)
+	}
 
 	// Pinning again should still succeed (idempotent).
 	rr := chPost(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", chID, msgID), token)

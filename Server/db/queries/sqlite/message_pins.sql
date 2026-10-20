@@ -6,6 +6,6 @@ RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned
           mentions_everyone, pinned_at, kind;
 
 -- name: RecentPinEventExists :one
--- True when a live pin row for the message was written at or after the cutoff
+-- True when a pin row (deleted or not: a deleted row still holds its window) for the message was written at or after the cutoff
 -- (a messages.timestamp-layout string).
-SELECT EXISTS (SELECT 1 FROM messages WHERE reply_to = ? AND kind = 7 AND deleted = 0 AND timestamp >= ?);
+SELECT EXISTS (SELECT 1 FROM messages WHERE reply_to = ? AND kind = 7 AND timestamp >= ?);

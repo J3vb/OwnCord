@@ -267,3 +267,25 @@ func TestPurge_TakesPinRowsNotCallOrGroupRows(t *testing.T) {
 		}
 	})
 }
+
+// A deleted pin row still holds its window: pinning again inside it writes no
+// new row, and the same pin after the window writes one.
+func TestSetMessagePinned_DeletedRowHoldsWindow(t *testing.T) {
+	f := newPinFixture(t)
+	t0 := time.Now().UTC()
+	row := f.pin(t, true, t0)
+	if row == nil {
+		t.Fatal("first pin wrote no row")
+	}
+	if err := f.database.DeleteMessage(context.Background(), row.MessageID, f.alice, false); err != nil {
+		t.Fatalf("delete pin row: %v", err)
+	}
+	f.pin(t, false, t0.Add(time.Minute))
+	if f.pin(t, true, t0.Add(2*time.Minute)) != nil {
+		t.Error("pin inside the window of a deleted row wrote a new row")
+	}
+	f.pin(t, false, t0.Add(3*time.Minute))
+	if f.pin(t, true, t0.Add(11*time.Minute)) == nil {
+		t.Error("pin after the window wrote no row")
+	}
+}

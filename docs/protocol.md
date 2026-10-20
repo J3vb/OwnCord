@@ -830,8 +830,9 @@ target is soft-deleted, and `reply_to` becomes null when the target is purged).
 row is written in the same transaction as the pin, only when the message was not
 already pinned and no live pin row for it was written in the last 10 minutes, so
 pin, unpin and pin again writes one row. Unpinning writes none. It is a sequenced
-`chat_message` to the channel's readers or the DM's participants, replayed on
-reconnect; it raises the unread count for everyone but the pinner, carries no
+`chat_message` to the channel's readers or the DM's delivery audience, as any DM
+frame (a one-to-one DM whose request is still pending reaches only the pinner), replayed on
+reconnect; it raises the unread count for everyone but the pinner (the pinner's read state advances to the row and their mention count resets, as for call and group rows), carries no
 mention and sends no push. Unlike a call or group row, its author or a moderator
 (MANAGE_MESSAGES in a channel, the author only in a DM) may delete it, as an
 ordinary message. It cannot be edited, replied to, reacted to or pinned.

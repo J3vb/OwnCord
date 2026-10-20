@@ -50,7 +50,7 @@ func (q *Queries) InsertPinEventMessage(ctx context.Context, arg InsertPinEventM
 }
 
 const recentPinEventExists = `-- name: RecentPinEventExists :one
-SELECT EXISTS (SELECT 1 FROM messages WHERE reply_to = ? AND kind = 7 AND deleted = 0 AND timestamp >= ?)
+SELECT EXISTS (SELECT 1 FROM messages WHERE reply_to = ? AND kind = 7 AND timestamp >= ?)
 `
 
 type RecentPinEventExistsParams struct {
@@ -58,7 +58,7 @@ type RecentPinEventExistsParams struct {
 	Timestamp string `json:"timestamp"`
 }
 
-// True when a live pin row for the message was written at or after the cutoff
+// True when a pin row (deleted or not: a deleted row still holds its window) for the message was written at or after the cutoff
 // (a messages.timestamp-layout string).
 func (q *Queries) RecentPinEventExists(ctx context.Context, arg RecentPinEventExistsParams) (int64, error) {
 	row := q.db.QueryRowContext(ctx, recentPinEventExists, arg.ReplyTo, arg.Timestamp)
