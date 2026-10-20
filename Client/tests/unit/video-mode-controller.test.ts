@@ -31,7 +31,10 @@ vi.mock("@lib/livekitSession", () => ({
 // Imports
 // ---------------------------------------------------------------------------
 
-import { createVideoModeController } from "../../src/pages/main-page/VideoModeController";
+import {
+  CALL_CHAT_STACK_BELOW_PX,
+  createVideoModeController,
+} from "../../src/pages/main-page/VideoModeController";
 import type { VideoModeControllerOptions } from "../../src/pages/main-page/VideoModeController";
 import { createVideoGrid } from "../../src/components/VideoGrid";
 
@@ -430,6 +433,40 @@ describe("createVideoModeController", () => {
 
       ctrl.setCallPoppedOut(false, true);
       expect(chatColumn.classList.contains("chat-area--call-chat")).toBe(true);
+    });
+
+    it("a chat column narrower than the split needs stacks the chat under the grid", () => {
+      let report: ResizeObserverCallback = () => undefined;
+      const disconnect = vi.fn();
+      vi.stubGlobal(
+        "ResizeObserver",
+        class {
+          constructor(cb: ResizeObserverCallback) {
+            report = cb;
+          }
+          observe(): void {}
+          disconnect = disconnect;
+        },
+      );
+      try {
+        const { chatColumn, ctrl } = setup();
+        ctrl.setChatBeside(true);
+        ctrl.showVideoGrid();
+        const resize = (width: number) =>
+          report([{ contentRect: { width } } as ResizeObserverEntry], {} as ResizeObserver);
+
+        resize(CALL_CHAT_STACK_BELOW_PX - 1);
+        expect(chatColumn.classList.contains("chat-area--call-chat-stacked")).toBe(true);
+        resize(CALL_CHAT_STACK_BELOW_PX);
+        expect(chatColumn.classList.contains("chat-area--call-chat-stacked")).toBe(false);
+
+        resize(400);
+        ctrl.showChat();
+        expect(chatColumn.classList.contains("chat-area--call-chat-stacked")).toBe(false);
+        expect(disconnect).toHaveBeenCalled();
+      } finally {
+        vi.unstubAllGlobals();
+      }
     });
 
     it("destroy clears the split", () => {

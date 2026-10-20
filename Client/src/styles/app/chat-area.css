@@ -152,6 +152,29 @@
   grid-row: 4;
 }
 
+/* Set while the chat column is narrower than the split needs (side panels
+   included): the chat stacks under the grid. */
+.chat-area--call-chat-stacked {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto 45vh minmax(0, 1fr) auto auto;
+}
+.chat-area--call-chat-stacked > .video-grid-slot {
+  grid-column: 1;
+  grid-row: 2;
+}
+.chat-area--call-chat-stacked > .messages-slot {
+  grid-column: 1;
+  grid-row: 3;
+}
+.chat-area--call-chat-stacked > .typing-slot {
+  grid-column: 1;
+  grid-row: 4;
+}
+.chat-area--call-chat-stacked > .input-slot {
+  grid-column: 1;
+  grid-row: 5;
+}
+
 /* ── Slot wrappers (inside .chat-area flex column) ── */
 .messages-slot {
   flex: 1;

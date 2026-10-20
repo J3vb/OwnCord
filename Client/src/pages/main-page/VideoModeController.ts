@@ -80,6 +80,9 @@ export interface VideoModeController {
 // Factory
 // ---------------------------------------------------------------------------
 
+/** The split needs room for the 360px chat column and a usable grid. */
+export const CALL_CHAT_STACK_BELOW_PX = 720;
+
 export function createVideoModeController(opts: VideoModeControllerOptions): VideoModeController {
   const { slots, videoGrid, getCurrentUserId } = opts;
   let videoMode = false;
@@ -112,6 +115,8 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
   let peopleGiven = false;
   /** The grid shows beside the chat, not over it. */
   let chatBeside = false;
+  /** Watches the chat column's width while the split shows. */
+  let splitObserver: ResizeObserver | null = null;
   const avatarCache: CallAvatarCache = new Map();
 
   function clearPeople(): void {
@@ -155,10 +160,29 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
   function showSlots(grid: boolean): void {
     const chat = grid && !chatBeside ? "none" : "";
     opts.chatColumn.classList.toggle("chat-area--call-chat", grid && chatBeside);
+    watchSplitWidth(grid && chatBeside);
     slots.messagesSlot.style.display = chat;
     slots.typingSlot.style.display = chat;
     slots.inputSlot.style.display = chat;
     slots.videoGridSlot.style.display = grid ? "block" : "none";
+  }
+
+  /** A chat column too narrow for both (the side panels count, not only the
+   *  window) stacks the chat under the grid. */
+  function watchSplitWidth(on: boolean): void {
+    if (!on) {
+      splitObserver?.disconnect();
+      splitObserver = null;
+      opts.chatColumn.classList.remove("chat-area--call-chat-stacked");
+      return;
+    }
+    if (splitObserver !== null || typeof ResizeObserver === "undefined") return;
+    splitObserver = new ResizeObserver(([entry]) => {
+      if (entry === undefined) return;
+      const narrow = entry.contentRect.width < CALL_CHAT_STACK_BELOW_PX;
+      opts.chatColumn.classList.toggle("chat-area--call-chat-stacked", narrow);
+    });
+    splitObserver.observe(opts.chatColumn);
   }
 
   function setChatBeside(on: boolean): void {

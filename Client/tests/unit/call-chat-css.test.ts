@@ -1,9 +1,6 @@
 // The call view's chat column (WP 6.1b). jsdom never applies app.css, so these
 // assert the parsed stylesheet (tests/helpers/app-css.ts).
 import { describe, it, expect } from "vitest";
-import { bundle } from "lightningcss";
-import { join } from "node:path";
-import type { Rule } from "lightningcss";
 import { cascadedDeclaration, hasRule } from "../helpers/app-css";
 
 describe("call chat CSS", () => {
@@ -30,27 +27,13 @@ describe("call chat CSS", () => {
     }
   });
 
-  it("stacks the grid over the chat at the narrow breakpoint", () => {
-    let rules: Rule[] = [];
-    bundle({
-      filename: join(process.cwd(), "src/styles/app.css"),
-      visitor: {
-        StyleSheet(s) {
-          rules = s.rules;
-        },
-      },
-    });
-    const narrow = rules.filter(
-      (r) =>
-        r.type === "media" &&
-        r.value.rules.some(
-          (inner) =>
-            inner.type === "style" &&
-            inner.value.selectors.some((sel) =>
-              sel.some((c) => c.type === "class" && c.name === "chat-area--call-chat"),
-            ),
-        ),
-    );
-    expect(narrow.length).toBeGreaterThan(0);
+  it("stacks the grid over the chat when the chat column is narrow", () => {
+    expect(
+      cascadedDeclaration(".chat-area--call-chat-stacked", "grid-template-columns"),
+    ).toBeDefined();
+    for (const slot of ["video-grid-slot", "messages-slot", "typing-slot", "input-slot"]) {
+      const row = cascadedDeclaration(`.chat-area--call-chat-stacked > .${slot}`, "grid-row");
+      expect(row, slot).toBeDefined();
+    }
   });
 });
