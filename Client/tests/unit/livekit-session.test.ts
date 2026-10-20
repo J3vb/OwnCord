@@ -1369,6 +1369,42 @@ describe("LiveKitSession", () => {
         expect((session as any)._peerPublicKeys.has(A_PEER)).toBe(false);
       });
 
+      it("keeps a newer queued channel's announcements when the join before it starts its exchange", async () => {
+        let resolveCalls = 0;
+        const parkedResolve = createDeferred<string>();
+        vi.spyOn(session as any, "resolveLiveKitUrl").mockImplementation(
+          async (...args: unknown[]) =>
+            resolveCalls++ === 1 ? parkedResolve.promise : String(args[1] ?? args[0]),
+        );
+        const { firstConnect, firstJoin } = await startConnectingJoinOfOne();
+
+        mockVoiceState.currentChannelId = 2;
+        await session.handleVoiceToken("token-2", "/livekit-two", 2, "ws://localhost:7882", true);
+        firstConnect.resolve(undefined);
+        await vi.advanceTimersByTimeAsync(0);
+        // Channel 2's attempt is parked in URL resolution, before its key exchange.
+        expect(resolveCalls).toBe(2);
+
+        mockVoiceState.currentChannelId = 3;
+        await session.handleVoiceToken(
+          "token-3",
+          "/livekit-three",
+          3,
+          "ws://localhost:7883",
+          false,
+        );
+        await session.handleE2EEAnnounce(C_PEER, "Y3BlZXI=", "sig");
+
+        parkedResolve.resolve("ws://localhost:7882");
+        await vi.advanceTimersByTimeAsync(0);
+        await session.handleE2EEOffer(C_PEER, "enc", "iv");
+        await vi.advanceTimersByTimeAsync(20_000);
+        await firstJoin;
+
+        expect(connectedChannel()).toBe(3);
+        expect((session as any)._peerPublicKeys.has(C_PEER)).toBe(true);
+      });
+
       it("keeps only the last channel's announcements across a rapid A to B to C switch", async () => {
         const { firstConnect, firstJoin } = await startConnectingJoinOfOne();
 

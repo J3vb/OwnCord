@@ -608,6 +608,8 @@ export class JoinOrchestration {
         // starts only when the drain re-enters connectAndSetup. Hold them for
         // that session; the attempt in flight is about to be discarded, and
         // retargeting drops what a superseded queued channel had collected.
+        // Set synchronously, before any await: correctness relies on the voice_token
+        // and voice_e2ee_announce handlers resolving their dynamic imports in order.
         this._e2ee.holdAnnouncesForQueuedJoin(channelId);
       }
       log.warn("handleVoiceToken: already connecting, queued latest join request", { channelId });

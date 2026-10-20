@@ -112,9 +112,13 @@ export class E2EEPeerState {
     this._stagedAnnounces = this._stagedAnnounces.filter((entry) => entry.userId !== userId);
   }
   /** Hand over what was held for `channelId` and stop holding. Anything held
-   *  for another channel is discarded, never applied to this one. */
+   *  for another channel is never applied to this one, and is left in place. */
   takeStagedAnnounces(channelId: number): PendingAnnounce[] {
-    const mine = this._stagedChannelId === channelId ? this._stagedAnnounces : [];
+    // A hold for another channel is never applied here, and can only be a
+    // NEWER queued join's (this exchange is the one that was queued earlier),
+    // so it is left alone for that join to take.
+    if (this._stagedChannelId !== channelId) return [];
+    const mine = this._stagedAnnounces;
     this.discardStagedAnnounces();
     return mine;
   }
