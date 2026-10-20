@@ -25,6 +25,8 @@ const log = createLogger("attachments");
 import type { Attachment } from "@lib/types";
 import { externalAllowed, setExternalConsentScope } from "../../features/content-consent/external";
 import { mediaControlsText } from "../../i18n/mediaControls";
+import { messagingText } from "../../i18n/messaging";
+import { isSpoilerFilename } from "../../features/messaging/spoilerAttachment";
 import { messageStatusText } from "../../i18n/messageStatus";
 import { clearStillCache } from "../../features/messaging/emojiStill";
 import { registerSessionReset } from "@lib/sessionRegistry";
@@ -1236,7 +1238,77 @@ export function isGalleryImage(att: Attachment): boolean {
   return isImageMime(att.mime) && isSafeUrl(resolveServerUrl(att.url)) && !isVideoAttachment(att);
 }
 
+/** Cover an inline image or video until the reader asks for it (6.12). The
+ *  cover is a button over the blurred media, and while it is up nothing under
+ *  it takes input: a capture-phase guard on the box stops the lightbox, the
+ *  keyboard open, the image menu and the play button, and `inert` takes the
+ *  media out of the tab order, including media that arrives after the first
+ *  paint. The revealed state is this element's alone: a re-render covers it
+ *  again, and nothing is stored. */
+function coverSpoiler(wrap: HTMLDivElement): HTMLDivElement {
+  let covered = true;
+  wrap.classList.add("msg-spoiler-att");
+  const cover = createElement("button", {
+    class: "msg-spoiler-cover",
+    type: "button",
+    "aria-label": messagingText("spoiler.reveal"),
+  });
+  cover.appendChild(
+    createElement(
+      "span",
+      { class: "msg-spoiler-cover-label" },
+      messagingText("spoiler.attachment"),
+    ),
+  );
+
+  const setInert = (on: boolean): void => {
+    for (const child of wrap.children) {
+      if (child !== cover) child.toggleAttribute("inert", on);
+    }
+  };
+  const observer = new MutationObserver(() => setInert(true));
+  const guard = (e: Event): void => {
+    if (!covered || (e.target instanceof Node && cover.contains(e.target))) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  };
+  for (const type of ["click", "dblclick", "auxclick", "keydown", "contextmenu"]) {
+    wrap.addEventListener(type, guard, { capture: true });
+  }
+
+  cover.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    covered = false;
+    observer.disconnect();
+    setInert(false);
+    cover.remove();
+    wrap.classList.add("revealed");
+    // The cover held focus: hand it to something focusable so the keyboard
+    // keeps its place. A still-loading image has nothing yet, so the box itself.
+    let target = wrap.querySelector<HTMLElement>("img[tabindex], .msg-media-play, video[controls]");
+    if (target === null) {
+      wrap.tabIndex = -1;
+      target = wrap;
+    }
+    target.focus();
+  });
+
+  wrap.appendChild(cover);
+  setInert(true);
+  observer.observe(wrap, { childList: true });
+  return wrap;
+}
+
 export function renderAttachment(att: Attachment, gallery?: LightboxGallery): HTMLDivElement {
+  const node = renderAttachmentContent(att, gallery);
+  // Only an inline image or video is covered; a file chip or audio row shows no picture.
+  return isSpoilerFilename(att.filename) && node.classList.contains("msg-image")
+    ? coverSpoiler(node)
+    : node;
+}
+
+function renderAttachmentContent(att: Attachment, gallery?: LightboxGallery): HTMLDivElement {
   const resolvedUrl = resolveServerUrl(att.url);
   const inlineable = isSafeUrl(resolvedUrl);
   if (inlineable && isVideoAttachment(att)) {
