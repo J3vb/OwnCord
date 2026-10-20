@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 const { fetchMock, putSpy, brokerImageMock, idbData, idbStub } = vi.hoisted(() => ({
   fetchMock: vi.fn<any>(),
@@ -367,7 +367,7 @@ describe("attachment cache clearing", () => {
     expect(brokerImageMock.mock.calls.length).toBe(calls + 1);
   });
 
-  it("re-requests an on-screen image whose blob: URL the FIFO cap evicted", async () => {
+  it("re-requests an on-screen image whose blob: URL the LRU cap evicted", async () => {
     clearExternalImageCache();
     brokerImageMock.mockReset();
     brokerImageMock.mockResolvedValue({ ok: true, value: new Blob(["x"]) });
@@ -425,7 +425,7 @@ describe("attachment cache clearing", () => {
     await vi.waitFor(() => expect(img.src).toBe("blob:clear-2"));
   });
 
-  it("re-requests an external avatar whose blob: URL the FIFO cap evicted", async () => {
+  it("re-requests an external avatar whose blob: URL the LRU cap evicted", async () => {
     clearExternalImageCache();
     brokerImageMock.mockReset();
     brokerImageMock.mockResolvedValue({ ok: true, value: new Blob(["x"]) });
@@ -445,6 +445,9 @@ describe("attachment cache clearing", () => {
     const img = avatar.querySelector("img")!;
     expect(img.src).toBe("blob:avatar-1");
 
+    // A mounted image is never evicted (see "keeps what is on screen"); this
+    // one has left the document, as after a row release, so its URL goes.
+    avatar.remove();
     for (let i = 1; i <= EXTERNAL_IMAGE_CACHE_MAX; i++) {
       await fetchExternalImage({ url: `https://cdn.elsewhere.example/${i}.png` });
     }
@@ -514,6 +517,141 @@ describe("attachment cache clearing", () => {
     img.dispatchEvent(new Event("error"));
     await vi.waitFor(() => expect(img.src).toBe("blob:bytes-live-4"));
     expect(brokerImageMock.mock.calls.length).toBe(calls + 1);
+  });
+
+  describe("keeps what is on screen (LRU)", () => {
+    const url = (i: number): string => `https://cdn.elsewhere.example/${i}.gif`;
+    let revoke: Mock<(url: string) => void>;
+
+    beforeEach(() => {
+      clearExternalImageCache();
+      brokerImageMock.mockReset();
+      brokerImageMock.mockResolvedValue({ ok: true, value: new Blob(["x"]) });
+      let next = 0;
+      URL.createObjectURL = vi.fn(() => `blob:lru-${++next}`);
+      revoke = vi.fn<(url: string) => void>();
+      URL.revokeObjectURL = revoke;
+    });
+
+    afterEach(() => {
+      document.body.replaceChildren();
+    });
+
+    function mount(src: string): HTMLImageElement {
+      const img = document.createElement("img");
+      img.setAttribute("src", src);
+      document.body.appendChild(img);
+      return img;
+    }
+
+    it("never evicts a URL a mounted image shows; the oldest unreferenced goes instead", async () => {
+      const first = (await fetchExternalImage({ url: url(1) }))!;
+      const second = (await fetchExternalImage({ url: url(2) }))!;
+      mount(first);
+      mount(second);
+      for (let i = 3; i <= EXTERNAL_IMAGE_CACHE_MAX + 1; i++) {
+        await fetchExternalImage({ url: url(i) });
+      }
+      expect(revoke).toHaveBeenCalledTimes(1);
+      expect(revoke).toHaveBeenCalledWith("blob:lru-3"); // oldest unreferenced
+
+      const calls = brokerImageMock.mock.calls.length;
+      expect(await fetchExternalImage({ url: url(1) })).toBe(first);
+      expect(await fetchExternalImage({ url: url(2) })).toBe(second);
+      expect(brokerImageMock.mock.calls.length).toBe(calls); // no re-fetch
+    });
+
+    it("lets a URL go once the last image showing it is gone, and keeps one shown twice", async () => {
+      const first = (await fetchExternalImage({ url: url(1) }))!;
+      const a = mount(first);
+      const b = mount(first);
+      a.remove(); // one release of two
+      for (let i = 2; i <= EXTERNAL_IMAGE_CACHE_MAX + 1; i++) {
+        await fetchExternalImage({ url: url(i) });
+      }
+      expect(revoke).not.toHaveBeenCalledWith(first);
+
+      b.remove();
+      await fetchExternalImage({ url: url(EXTERNAL_IMAGE_CACHE_MAX + 2) });
+      expect(revoke).toHaveBeenCalledWith(first);
+    });
+
+    it("does not pin a URL shown only by a hidden (failed) image", async () => {
+      const first = (await fetchExternalImage({ url: url(1) }))!;
+      mount(first).hidden = true;
+      for (let i = 2; i <= EXTERNAL_IMAGE_CACHE_MAX + 1; i++) {
+        await fetchExternalImage({ url: url(i) });
+      }
+      expect(revoke).toHaveBeenCalledWith(first);
+    });
+
+    it("moves a hit to the back so a re-read entry outlives older ones", async () => {
+      const first = (await fetchExternalImage({ url: url(1) }))!;
+      for (let i = 2; i <= EXTERNAL_IMAGE_CACHE_MAX; i++) {
+        await fetchExternalImage({ url: url(i) });
+      }
+      await fetchExternalImage({ url: url(1) }); // touch
+      await fetchExternalImage({ url: url(EXTERNAL_IMAGE_CACHE_MAX + 1) });
+      expect(revoke).toHaveBeenCalledTimes(1);
+      expect(revoke).toHaveBeenCalledWith("blob:lru-2"); // not the touched one
+      expect(revoke).not.toHaveBeenCalledWith(first);
+    });
+
+    it("bounds the unreferenced bytes while mounted images stay", async () => {
+      brokerImageMock.mockResolvedValue({
+        ok: true,
+        value: bigBlob(Math.floor(EXTERNAL_IMAGE_CACHE_MAX_BYTES * 0.4)),
+      });
+      const first = (await fetchExternalImage({ url: url(1) }))!;
+      mount(first);
+      await fetchExternalImage({ url: url(2) });
+      await fetchExternalImage({ url: url(3) });
+      expect(revoke).toHaveBeenCalledTimes(1);
+      expect(revoke).toHaveBeenCalledWith("blob:lru-2");
+      expect(revoke).not.toHaveBeenCalledWith(first);
+    });
+
+    it("keeps one copy when two images recover the same evicted URL at once", async () => {
+      const img1 = mount("");
+      const img2 = mount("");
+      recoverEvictedImage(img1, { url: url(1) });
+      recoverEvictedImage(img2, { url: url(1) });
+      const first = (await fetchExternalImage({ url: url(1) }))!;
+      img1.setAttribute("src", first);
+      img2.setAttribute("src", first);
+      img1.remove();
+      img2.remove();
+      for (let i = 2; i <= EXTERNAL_IMAGE_CACHE_MAX + 1; i++) {
+        await fetchExternalImage({ url: url(i) });
+      }
+      expect(revoke).toHaveBeenCalledWith(first);
+      const calls = brokerImageMock.mock.calls.length;
+      img1.setAttribute("src", first);
+      img2.setAttribute("src", first);
+      document.body.append(img1, img2);
+      img1.dispatchEvent(new Event("error"));
+      img2.dispatchEvent(new Event("error"));
+      await vi.waitFor(() => expect(img1.src).toMatch(/^blob:lru-/));
+      await vi.waitFor(() => expect(img2.src).toBe(img1.src));
+      expect(brokerImageMock.mock.calls.length).toBe(calls + 1); // one fetch, one entry
+    });
+
+    it("keeps the animated source of a mounted GIF whose image shows the still", async () => {
+      const gif = (await fetchExternalImage({ url: url(1) }))!;
+      const img = mount("blob:a-frozen-still");
+      img.dataset["mediaSrc"] = gif;
+      for (let i = 2; i <= EXTERNAL_IMAGE_CACHE_MAX + 1; i++) {
+        await fetchExternalImage({ url: url(i) });
+      }
+      expect(revoke).not.toHaveBeenCalledWith(gif);
+    });
+
+    it("clearExternalImageCache still drops everything, mounted or not", async () => {
+      const first = (await fetchExternalImage({ url: url(1) }))!;
+      mount(first);
+      clearExternalImageCache();
+      expect(revoke).toHaveBeenCalledWith(first);
+    });
   });
 });
 
