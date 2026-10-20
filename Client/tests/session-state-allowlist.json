@@ -203,7 +203,7 @@
       "file": "lib/read-state.ts",
       "binding": "highestSeen",
       "category": "reset-elsewhere",
-      "reason": "Emptied by resetReadPointerState (pendingMarkUnread also by forgetPendingMarkUnread) in the dispatcher cleanup, which also runs when wirePostAuth retries"
+      "reason": "Emptied by resetReadPointerState (pendingMarkUnread also by forgetPendingMarkUnread) in the dispatcher cleanup, which also runs when startSession retries"
     },
     {
       "file": "lib/read-state.ts",
@@ -245,13 +245,13 @@
       "file": "lib/read-state.ts",
       "binding": "pendingMarkUnread",
       "category": "reset-elsewhere",
-      "reason": "Emptied by resetReadPointerState (pendingMarkUnread also by forgetPendingMarkUnread) in the dispatcher cleanup, which also runs when wirePostAuth retries"
+      "reason": "Emptied by resetReadPointerState (pendingMarkUnread also by forgetPendingMarkUnread) in the dispatcher cleanup, which also runs when startSession retries"
     },
     {
       "file": "lib/read-state.ts",
       "binding": "unreadHold",
       "category": "reset-elsewhere",
-      "reason": "Emptied by resetReadPointerState (pendingMarkUnread also by forgetPendingMarkUnread) in the dispatcher cleanup, which also runs when wirePostAuth retries"
+      "reason": "Emptied by resetReadPointerState (pendingMarkUnread also by forgetPendingMarkUnread) in the dispatcher cleanup, which also runs when startSession retries"
     },
     {
       "file": "lib/screenShare.ts",
