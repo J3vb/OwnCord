@@ -5,6 +5,7 @@ package ws
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -780,4 +781,10 @@ func (h *Hub) ReplaceHandlerForTest(typ string, fn func(ctx context.Context) Res
 	}
 	entry.handler = func(ctx context.Context, _ Command, _ ClientInfo, _ any) Result { return fn(ctx) }
 	h.registry.handlersV2[typ] = entry
+}
+
+// handleVoiceJoin runs a voice join with ctx as both the frame and connection
+// context.
+func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMessage, reqID string) {
+	h.handleVoiceJoinFrame(ctx, ctx, c, payload, reqID)
 }

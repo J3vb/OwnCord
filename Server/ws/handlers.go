@@ -46,8 +46,9 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 	}
 	// fctx is this frame's database deadline (WP 4.1b). It is derived from the
 	// connection context, so a disconnect still cancels it. Exempt types
-	// (command_deadline.go) dispatch on c.ctx below; handleMessageApply never
-	// sees it, so its events and the voice join keep the connection context.
+	// (command_deadline.go) dispatch on c.ctx below. handleMessageApply takes it
+	// only for the voice join's pre-commit work; its events and the rest of the
+	// join keep the connection context.
 	fctx, cancel := context.WithTimeout(c.ctx, commandDeadline())
 	defer cancel()
 	if h.handleMessageSessionRecheck(fctx, c) {
@@ -133,7 +134,7 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		return
 	}
 
-	h.handleMessageApply(c, env, reqID, result, receivedAt)
+	h.handleMessageApply(c.ctx, fctx, c, env, reqID, result, receivedAt)
 }
 
 // handleMessageError answers a failed command: REQUEST_TIMEOUT when the
@@ -261,8 +262,10 @@ func (h *Hub) handleMessageDecode(c *Client, raw []byte) (envelope, string, stri
 
 // handleMessageApply applies the client state mutations and side effects that a
 // successful V2 Result asks for. receivedAt is when handleMessage read the
-// frame, used to time the send→ack round trip (chat_send_ok).
-func (h *Hub) handleMessageApply(c *Client, env envelope, reqID string, result Result, receivedAt time.Time) {
+// frame, used to time the send→ack round trip (chat_send_ok). fctx is the
+// frame's deadline: only the voice join's pre-commit work runs on it; ctx, the
+// connection context, serves the rest of the apply.
+func (h *Hub) handleMessageApply(ctx, fctx context.Context, c *Client, env envelope, reqID string, result Result, receivedAt time.Time) {
 	// Apply client state mutations and side effects.
 	if result.SetChannelID != nil {
 		h.applyFocusResult(c, env.Type, *result.SetChannelID)
@@ -291,7 +294,7 @@ func (h *Hub) handleMessageApply(c *Client, env envelope, reqID string, result R
 		}
 	}
 	if len(result.Events) > 0 {
-		h.emitEventsFrom(c.ctx, c.userID, result.Events)
+		h.emitEventsFrom(ctx, c.userID, result.Events)
 	}
 	// Voice join/leave hand off to the hub-internal routines (also called
 	// un-throttled on disconnect/switch). handleVoiceJoin re-reads channel_id
@@ -300,7 +303,7 @@ func (h *Hub) handleMessageApply(c *Client, env envelope, reqID string, result R
 		h.leaveVoiceLocked(c, result.LeaveVoiceReason)
 	}
 	if result.JoinVoice {
-		h.handleVoiceJoin(c.ctx, c, env.Payload, reqID)
+		h.handleVoiceJoinFrame(fctx, ctx, c, env.Payload, reqID)
 	}
 }
 

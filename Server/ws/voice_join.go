@@ -43,7 +43,7 @@ func validVoiceQuality(q string) bool {
 // analogous CleanupVoiceForChannel race.
 var voiceJoinPostTokenRaceHook func(*Client)
 
-// handleVoiceJoin processes a voice_join message.
+// handleVoiceJoinFrame processes a voice_join message.
 // 1. Parses channel_id.
 // 2. Checks the voice join gate (permissions.CanJoinVoice).
 // 3. If already in a different voice channel, leaves it first.
@@ -57,9 +57,15 @@ var voiceJoinPostTokenRaceHook func(*Client)
 // reqID is the joining frame's client-supplied request id (envelope.id), logged
 // on the "voice join" line so an operator can correlate a token with the arrival
 // that produced it (SRE-M2). Empty when the frame carried none.
-func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMessage, reqID string) {
+// fctx is the frame deadline (WP 4.1b): it bounds the database
+// reads and the membership insert up to the commit point, and a failure caused
+// by it is answered REQUEST_TIMEOUT with nothing applied (voiceJoinFail). ctx
+// is the connection context for everything that must not be cut short: the
+// leave of a previous channel, the rollback, and the work after the commit
+// (token, broadcasts), so a late deadline never leaves a half-applied join.
+func (h *Hub) handleVoiceJoinFrame(fctx, ctx context.Context, c *Client, payload json.RawMessage, reqID string) {
 	start := time.Now()
-	channelID, ch, capacity, ok := h.voiceJoinPrecheck(ctx, c, payload, reqID)
+	channelID, ch, capacity, ok := h.voiceJoinPrecheck(fctx, c, payload, reqID)
 	if !ok {
 		return
 	}
@@ -67,13 +73,13 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 	txn := h.begin(c.userID)
 	defer txn.end()
 
-	wasServerMuted, wasServerDeafened, wasServerMutedBy, ok := h.voiceJoinLeaveCurrent(ctx, txn, c, channelID, reqID)
+	wasServerMuted, wasServerDeafened, wasServerMutedBy, ok := h.voiceJoinLeaveCurrent(fctx, ctx, txn, c, channelID, reqID)
 	if !ok {
 		return
 	}
 	leaveDone := time.Now()
 
-	state, ok := h.voiceJoinPersist(ctx, txn, c, capacity, channelID, reqID)
+	state, ok := h.voiceJoinPersist(fctx, ctx, txn, c, capacity, channelID, reqID)
 	if !ok {
 		// OC-0420: voiceJoinLeaveCurrent already took the moderator
 		// mute/deafen stash off the client (or read it off the row it just
@@ -158,7 +164,7 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 	// the current voice channel, persisting join, etc.).
 	ch, err := h.readers.Dispatch.GetChannel(ctx, channelID)
 	if err != nil || ch == nil {
-		c.sendMsg(buildErrorMsgWithID(ErrCodeNotFound, "channel not found", reqID))
+		voiceJoinFail(ctx, c, reqID, err, ErrCodeNotFound, "channel not found")
 		return 0, nil, 0, false
 	}
 
@@ -180,7 +186,7 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 	sub, subErr := channelSubject(ctx, h.readers.Dispatch, h.permChecker, h.perms, c.userID, ch, true)
 	if subErr != nil {
 		slog.Error("ws voice_join: permission lookup failed, denying", "user_id", c.userID, "channel_id", channelID, "err", subErr)
-		c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "permission check failed", reqID))
+		voiceJoinFail(ctx, c, reqID, subErr, ErrCodeInternal, "permission check failed")
 		return 0, nil, 0, false
 	}
 	if joinErr := permissions.CanJoinVoice(sub); joinErr != nil {
@@ -228,7 +234,7 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 	if h.lkProcess == nil {
 		if healthy, err := h.livekit.HealthCheck(ctx); !healthy || err != nil {
 			slog.Warn("handleVoiceJoin: external LiveKit unreachable", "user_id", c.userID, "err", err)
-			c.sendMsg(buildErrorMsgWithID(ErrCodeVoiceError, "voice is temporarily unavailable — LiveKit is not reachable", reqID))
+			voiceJoinFail(ctx, c, reqID, errors.Join(err, errVoiceJoinUnhealthy), ErrCodeVoiceError, "voice is temporarily unavailable — LiveKit is not reachable")
 			return 0, nil, 0, false
 		}
 	}
@@ -242,7 +248,7 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 // and verifies the old row is really gone. The two booleans are the
 // snapshotted flags for voiceJoinRestoreModFlags; false in the third position
 // means the join must not proceed (the error frame has already been sent).
-func (h *Hub) voiceJoinLeaveCurrent(ctx context.Context, txn *voiceTxn, c *Client, channelID int64, reqID string) (wasServerMuted, wasServerDeafened bool, wasServerMutedBy *int64, ok bool) {
+func (h *Hub) voiceJoinLeaveCurrent(fctx, ctx context.Context, txn *voiceTxn, c *Client, channelID int64, reqID string) (wasServerMuted, wasServerDeafened bool, wasServerMutedBy *int64, ok bool) {
 	currentChID := c.voice.channel()
 
 	// If user is already in the same voice channel, no-op.
@@ -268,7 +274,13 @@ func (h *Hub) voiceJoinLeaveCurrent(ctx context.Context, txn *voiceTxn, c *Clien
 	// out here instead. Take-and-clear so an ordinary first join, unrelated to
 	// any move, is unaffected by a stash nobody consumed.
 	if currentChID > 0 {
-		if prevState, prevErr := h.voice.State(ctx, c.userID); prevErr == nil && prevState != nil {
+		prevState, prevErr := h.voice.State(fctx, c.userID)
+		if commandDeadlineExceeded(fctx, prevErr) {
+			// Nothing has been torn down yet, so the switch can still be refused whole.
+			voiceJoinFail(fctx, c, reqID, prevErr, ErrCodeInternal, "voice channel switch failed — please try again")
+			return false, false, nil, false
+		}
+		if prevErr == nil && prevState != nil {
 			wasServerMuted = prevState.ServerMuted
 			wasServerDeafened = prevState.ServerDeafened
 			wasServerMutedBy = prevState.ServerMutedBy
@@ -286,11 +298,11 @@ func (h *Hub) voiceJoinLeaveCurrent(ctx context.Context, txn *voiceTxn, c *Clien
 		// background), the old row persists and JoinVoiceChannelIfCapacity's
 		// COUNT(*) may produce an incorrect result. Fail the switch so the
 		// user can retry cleanly.
-		vs, err := h.voice.State(ctx, c.userID)
+		vs, err := h.voice.State(fctx, c.userID)
 		if err != nil {
 			slog.Warn("handleVoiceJoin: could not verify voice state cleared",
 				"user_id", c.userID, "err", err)
-			c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "voice channel switch failed — please try again", reqID))
+			voiceJoinFail(fctx, c, reqID, err, ErrCodeInternal, "voice channel switch failed — please try again")
 			return false, false, nil, false
 		}
 		if vs != nil {
@@ -321,14 +333,14 @@ func (h *Hub) voiceJoinLeaveCurrent(ctx context.Context, txn *voiceTxn, c *Clien
 // voiceJoinPersist commits the join to the DB under capacity, loads back the
 // persisted row and publishes the client's in-memory voice state. Returns
 // false once the error frame has been sent.
-func (h *Hub) voiceJoinPersist(ctx context.Context, txn *voiceTxn, c *Client, capacity int, channelID int64, reqID string) (*db.VoiceState, bool) {
+func (h *Hub) voiceJoinPersist(fctx, ctx context.Context, txn *voiceTxn, c *Client, capacity int, channelID int64, reqID string) (*db.VoiceState, bool) {
 	// The service picks the capacity-checked insert or the plain one from
 	// capacity, so only voiceJoinPrecheck's moderator decision can select the
 	// unchecked insert for a capped channel. persistJoin sets the client's
 	// voice channel as soon as the row is confirmed (BUG-088), before the
 	// permission checks and LiveKit token mint below; a failure further down
 	// unwinds it via rollbackVoiceJoin.
-	state, err := txn.persistJoin(ctx, c, channelID, capacity)
+	state, err := txn.persistJoin(fctx, c, channelID, capacity)
 	switch {
 	case errors.Is(err, service.ErrVoiceChannelFull):
 		c.sendMsg(buildErrorMsgWithID(ErrCodeChannelFull, "voice channel is full", reqID))
@@ -336,11 +348,11 @@ func (h *Hub) voiceJoinPersist(ctx context.Context, txn *voiceTxn, c *Client, ca
 	case errors.Is(err, errVoiceJoinReadBack):
 		slog.Error("ws handleVoiceJoin State", "err", err, "user_id", c.userID)
 		h.rollbackVoiceJoin(ctx, txn, c, channelID, "", false)
-		c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "failed to join voice channel", reqID))
+		voiceJoinFail(fctx, c, reqID, err, ErrCodeInternal, "failed to join voice channel")
 		return nil, false
 	case err != nil:
 		slog.Error("ws handleVoiceJoin Join", "err", err, "user_id", c.userID)
-		c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "failed to join voice channel", reqID))
+		voiceJoinFail(fctx, c, reqID, err, ErrCodeInternal, "failed to join voice channel")
 		return nil, false
 	}
 	return state, true

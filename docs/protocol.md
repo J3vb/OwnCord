@@ -2695,10 +2695,13 @@ command: a retried `reaction_add` answers `CONFLICT` and a retried
 `reaction_remove` answers `BAD_REQUEST`. A timed-out send in a slow-mode channel,
 or a timed-out `voice_token_refresh`, has already spent its rate budget, so the
 retry may answer `SLOW_MODE` or `RATE_LIMITED` until the window passes.
-`channel_focus`, `mark_read` and `typing_start` usually answer nothing on a
-timeout, because they swallow every error that is not a refusal; a timed-out
-access check in `channel_focus` or `mark_read` is read as a refusal and answers
-`REQUEST_TIMEOUT`. A `voice_token_refresh` that times out answers
+`typing_start` answers nothing on a timeout, because it swallows every error
+that is not a refusal. `channel_focus`, `mark_read` and `mark_unread` answer
+`REQUEST_TIMEOUT`, including when the wait is for the lock that orders
+`mention_count` and `read_state` frames behind a stalled mention write. A
+`voice_join` bounds its checks and the membership insert by the deadline and
+answers `REQUEST_TIMEOUT` with no voice state left behind; once the membership
+row is committed the rest of the join runs to completion. A `voice_token_refresh` that times out answers
 `REQUEST_TIMEOUT` and leaves the user in voice; only a real refusal evicts, and
 a client `voice_leave` always releases the user's slot. One exception to the
 bound: `chat_delete` flushes the message's pending mention counts on a detached
