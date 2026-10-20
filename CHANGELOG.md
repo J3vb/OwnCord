@@ -178,6 +178,10 @@ and only when it changes something a contributor or fork holder must do
 
 - A viewer can tell the server which video codecs it can decode: `voice_e2ee_announce` takes an optional `video_decode` list, and the server passes it on with the voice key to everyone in the call, including people who join later or reconnect. A list that is malformed is dropped and the key still goes through. Older servers and apps behave as before. The desktop app uses it to pick a codec everyone in the call can play.
 
+**Server (operators)**
+
+- `GET /api/v1/metrics` gains a `windows` key with the latency, worst-hold and counter figures for the last minute and fifteen minutes, so a stall shows up and then clears instead of being buried in totals since boot; every existing key is unchanged.
+
 ### Changed
 
 **Voice and video**

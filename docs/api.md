@@ -3561,9 +3561,80 @@ switch), `persist` (the `voice_states` write and moderator-flag restore),
 `token` (minting and sending `voice_token`), `complete` (the voice topic
 subscription, `voice_state` fan-out, existing states and `voice_config`) and
 `total`; a refused or rolled-back join is not counted. A
-`hub_seqmu_max_hold_ms` above ~100 ms is worth investigating. It is the
-longest hold since start, not a recent one; the replay purges run their
-database deletes outside `seqMu`.
+`hub_seqmu_max_hold_ms` above ~100 ms is worth investigating. The top-level
+figure is the longest hold since start, so it never falls; read the same key
+under `windows` for the longest hold in the last minute or fifteen. The replay
+purges run their database deletes outside `seqMu`.
+
+#### The `windows` block
+
+Every figure above is cumulative since boot, so after a day of uptime ten
+minutes of stall barely moves a lifetime `p95`. The `windows` key holds the
+same figures for the last minute (`1m`) and the last fifteen minutes (`15m`).
+Use it to see what is happening now; keep the top-level figures for scrapers
+that take their own deltas.
+
+```json
+{
+  "windows": {
+    "1m": {
+      "seconds": 60.0,
+      "as_of": "2026-10-17T12:00:00Z",
+      "ws_broadcast_ms": { "count": 52, "p50": 1, "p95": 5, "p99": 20, "max": 18.4 },
+      "ws_dispatch_lag_ms": { "count": 52, "p50": 0.5, "p95": 2, "p99": 5, "max": 6.1 },
+      "chat_send_ack_ms": { "count": 9, "p50": 2, "p95": 10, "p99": 10, "max": 9.7 },
+      "voice_join_ms": {
+        "precheck": { "count": 0, "p50": 0, "p95": 0, "p99": 0, "max": 0 },
+        "...": "five more phases"
+      },
+      "hub_seqmu_max_hold_ms": 3.1,
+      "broadcast_drops": 0,
+      "topic_sheds_total": 0,
+      "reconnect_tier_buffer": 2,
+      "reconnect_tier_db": 0,
+      "reconnect_tier_full": 0,
+      "backpressure_queue_disconnects": 0,
+      "backpressure_high_fallbacks": 0,
+      "backpressure_low_drops": 3,
+      "backpressure_presence_drops": 0,
+      "delivery_loss_marks": 0,
+      "ws_conn_rejects": 0,
+      "db_writer_wait_count": 0,
+      "db_writer_wait_seconds": 0,
+      "db_reader_wait_count": 0,
+      "db_reader_wait_seconds": 0
+    },
+    "15m": { "seconds": 900.0, "as_of": "2026-10-17T12:00:00Z", "...": "same keys" }
+  }
+}
+```
+
+- **Latency distributions** (`ws_broadcast_ms`, `ws_dispatch_lag_ms`,
+  `chat_send_ack_ms`, each `voice_join_ms` phase) use the same fields as the
+  lifetime ones, over the observations made inside the window. `max` is the
+  largest observation the window saw, to the microsecond; the percentiles are
+  the same coarse bucket bounds. Each observation is counted once, but at a
+  sample boundary its count and its `max` can land in adjacent windows. A
+  window with no observations reports `count: 0` and zero percentiles, and its
+  `max` can still show a value carried from an observation at the window's
+  edge.
+- **`hub_seqmu_max_hold_ms`** is the longest hold inside the window.
+- **Counters** (`broadcast_drops`, `topic_sheds_total`, the `reconnect_tier_*`
+  and `backpressure_*` counts, `delivery_loss_marks`, `ws_conn_rejects` and the
+  `db_*_wait_*` pairs) are how much each grew during the window. They are never
+  negative: a counter that was reset counts as no change.
+- **`seconds`** is the time the window really covers. A server that started 40
+  seconds ago reports `seconds: 40` under `1m`, and a gap in sampling (missed
+  ticks) can make it longer than the nominal length.
+- **`as_of`** is the newest sample's time (UTC). A sampler takes one sample
+  every 10 seconds, so the figures can be up to 10 seconds old.
+- **Omitted when unknown.** Until two samples exist, the whole `windows` key is
+  absent, and a window that cannot be answered is left out, so a missing
+  window is never a reassuring zero. A restart resets the windows with the rest
+  of the process state.
+- Only the figures listed above are windowed. Gauges that already describe
+  now (`connected_users`, `hub_broadcast_queue_depth`, the disk and heap
+  figures) are unchanged and not repeated.
 
 ### GET /metrics (Prometheus)
 

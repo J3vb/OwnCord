@@ -11,7 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/goleak"
+
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/metrics"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
@@ -265,5 +268,59 @@ func TestAppClose_OverallDeadlineCapsTheSteps(t *testing.T) {
 	}
 	if want := []string{"http", "audit-writer", "database"}; !slices.Equal(ran, want) {
 		t.Errorf("steps run = %v, want %v", ran, want)
+	}
+}
+
+// TestStartHub_MetricsWindowsStopsBeforeHub pins WP 4.3a's close order: the
+// metrics sampler reads hub atomics and both pools' Stats(), so its close step
+// must come right after "hub" in the start order (the reverse walk then joins
+// it first), and by the time the hub's step runs the sampler goroutine has
+// exited.
+func TestStartHub_MetricsWindowsStopsBeforeHub(t *testing.T) {
+	leakOpt := goleak.IgnoreCurrent()
+	a := bootTestApp(t, "0", "maintenance")
+	if err := a.Run(context.Background()); err == nil {
+		t.Fatal("Run() = nil, want the injected maintenance failure")
+	}
+	stages := make([]string, 0, len(a.closers))
+	for _, c := range a.closers {
+		stages = append(stages, c.stage)
+	}
+	hub := slices.Index(stages, "hub")
+	sampler := slices.Index(stages, "metrics-windows")
+	if hub < 0 || sampler != hub+1 {
+		t.Fatalf("close steps in start order = %v, want metrics-windows registered right after hub", stages)
+	}
+	if err := goleak.Find(leakOpt); err != nil {
+		t.Fatalf("the metrics sampler outlived Run: %v", err)
+	}
+}
+
+// The sampler is done, not merely cancelled, when the step after it runs.
+func TestStartMetricsWindows_StepJoinsTheSampler(t *testing.T) {
+	var h metrics.Histogram
+	w, err := metrics.NewWindows(metrics.WindowSpec{
+		Tick: time.Hour, Horizon: 2 * time.Hour,
+		Histograms: []metrics.NamedHistogram{{Name: "x", H: &h}},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leakOpt := goleak.IgnoreCurrent()
+	a := newTestApp()
+	a.bgCtx = context.Background()
+	hubStopped := false
+	a.onClose("hub", func(context.Context) error { hubStopped = true; return nil })
+	a.startMetricsWindows(w)
+
+	if err := a.Close(context.Background()); err != nil {
+		t.Fatalf("Close() = %v", err)
+	}
+	if !hubStopped {
+		t.Fatal("hub step did not run")
+	}
+	// The step returned only once the goroutine exited, so none is left.
+	if err := goleak.Find(leakOpt); err != nil {
+		t.Fatalf("the sampler goroutine is still running after its close step: %v", err)
 	}
 }

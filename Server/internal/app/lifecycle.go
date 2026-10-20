@@ -298,6 +298,13 @@ func (a *App) startHub() error {
 	a.onClose("hub", func(ctx context.Context) error {
 		return stopHub(ctx, a.runtime.Hub, a.deps.Restart.noticeReason())
 	})
+	// Windowed metrics sampler (WP 4.3a). Registered right after "hub", so the
+	// reverse walk joins it BEFORE the hub stops and the database closes: it
+	// reads hub atomics and both pools' Stats(), and must not outlive either.
+	// It runs on bgCtx and exits on ctx.Done().
+	if rt.MetricsWindows != nil {
+		a.startMetricsWindows(rt.MetricsWindows)
+	}
 	// Mention badges' single bounded worker (P5-O05). Its close step flushes
 	// every queued job and joins the loop, and the reverse walk runs it before
 	// the database closes because it registers here, after "database" but

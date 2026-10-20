@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"slices"
 	"strings"
@@ -198,6 +199,14 @@ type attentionJob struct {
 // the attention panel's writer-wait source.
 func WriterWaitSource(database *db.DB) func() time.Duration {
 	return func() time.Duration { return database.SQLDb().Stats().WaitDuration }
+}
+
+// PoolStatsSources returns the writer and reader pools' Stats readers, for the
+// windowed metrics sampler (WP 4.3a). It lives here so the composition root
+// names no raw pool.
+func PoolStatsSources(database *db.DB) (writer, reader func() sql.DBStats) {
+	return func() sql.DBStats { return database.SQLDb().Stats() },
+		func() sql.DBStats { return database.SQLReaderDB().Stats() }
 }
 
 // NewAttentionService builds the service over its thresholds and sources.

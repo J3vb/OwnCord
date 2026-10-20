@@ -1818,6 +1818,11 @@ the third stage as normal.
 }
 ```
 
+The response also carries a `windows` block with the latency, worst-hold and
+counter figures for the last minute (`1m`) and fifteen minutes (`15m`), updated
+every 10 seconds. It is described in `docs/api.md`. It is left out until the
+server has taken two samples.
+
 Signals worth watching as your community grows. Every field is described in
 `docs/api.md`.
 
@@ -1827,15 +1832,20 @@ Signals worth watching as your community grows. Every field is described in
   and messages were dropped before delivery. They cannot be replayed, so alert
   on any growth too. A client that missed a message this way reloads it from
   the database on its next reconnect.
-- **`ws_dispatch_lag_ms.p95` climbing.** The single delivery loop is falling
-  behind. `hub_broadcast_queue_depth` getting close to 1024 is the same signal
-  from the other side.
-- **`hub_seqmu_max_hold_ms` above about 100 ms.** Something that blocks every
-  broadcast is holding things up. A replay purge's full scan is the known
-  cause.
-- **`db_writer_wait_seconds` climbing faster than uptime.** Requests are
-  queuing for SQLite's single write connection. Writes are near their limit.
-- **`db_reader_wait_seconds` growing.** Read queries are waiting for a free
+- **`windows.1m.ws_dispatch_lag_ms.p95` climbing.** The single delivery loop
+  is falling behind. `hub_broadcast_queue_depth` getting close to 1024 is the
+  same signal from the other side. The top-level `ws_dispatch_lag_ms` covers
+  the whole time since boot, so on a long-running server it moves slowly; read
+  the `windows` copy for what is happening now.
+- **`windows.1m.hub_seqmu_max_hold_ms` above about 100 ms.** Something that
+  blocks every broadcast is holding things up. A replay purge's full scan is
+  the known cause. The top-level figure is the worst hold since boot and never
+  falls.
+- **`windows.1m.db_writer_wait_seconds` growing.** Requests are queuing for
+  SQLite's single write connection, so writes are near their limit. Over a
+  minute it is the time spent queuing in that minute; the top-level figure is a
+  total since boot, so watch its growth, not its size.
+- **`windows.1m.db_reader_wait_seconds` growing.** Read queries are waiting for a free
   read connection (`database.max_readers`). Raise it, or look for slow reads.
   For an in-memory database this pair just repeats the writer's numbers.
 - **`reconnect_tier_full` becoming a large share of reconnects.** The replay

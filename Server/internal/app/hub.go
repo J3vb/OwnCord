@@ -97,6 +97,15 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 		hub.SetPluginEventSink(sink)
 	}
 
+	// Windowed figures for /api/v1/metrics. Built here, started by startHub.
+	// Built before the LiveKit process starts, so an error return cannot leave
+	// that child running.
+	writerStats, readerStats := service.PoolStatsSources(database)
+	windows, err := newMetricsWindows(hub, writerStats, readerStats)
+	if err != nil {
+		return api.Runtime{}, err
+	}
+
 	// Start the supervised LiveKit process only once the hub holds it
 	// (OC-0019): the voice_join guard must be able to fail closed via
 	// IsRunning() == false the moment Start fails, never see a half-wired
@@ -117,7 +126,7 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 		slog.Error("boot: load active timeouts", "err", err)
 	}
 
-	return api.Runtime{Hub: hub, Limiter: limiter, Services: svc, VoiceEnabled: voiceEnabled}, nil
+	return api.Runtime{Hub: hub, Limiter: limiter, Services: svc, VoiceEnabled: voiceEnabled, MetricsWindows: windows}, nil
 }
 
 // storageLimits is B5-2's two bounds on the upload service: the per-user
