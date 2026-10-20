@@ -57,15 +57,8 @@ import {
   parseRelayedLogin,
 } from "@lib/credentials";
 import { initWindowState } from "@lib/window-state";
-import {
-  createProfileManager,
-  createTauriBackend,
-  deriveCompatibility,
-  type Compatibility,
-} from "@lib/profiles";
-import { PROTOCOL_EPOCH } from "@lib/protocolTypes";
+import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import { parseRegistrationMode, retentionNotice } from "@lib/types";
-import type { ServerInfoResponse } from "@lib/types";
 import type { AuthResponse } from "@lib/types";
 import { saveUserStatus } from "@lib/userStatus";
 import { getActivePresenceSender } from "@lib/presence";
@@ -74,6 +67,15 @@ import { setInviteJoinHandler } from "@lib/invite-navigation";
 import { desktop } from "./platform/desktop";
 import { connectText } from "./i18n/connect";
 import { installCertPrompts } from "./app/certPrompts";
+import { createConnectProfiles } from "./app/connectProfiles";
+import {
+  checkHealth,
+  configureServerHealth,
+  probeServerInfo,
+  runHealthChecks,
+  serverInfoFor,
+  serverInfoProbing,
+} from "./app/serverHealth";
 
 // First, while storage still holds only what earlier sessions wrote: that is
 // how an install from before the notification level is told from a new one.
@@ -177,6 +179,7 @@ void registerSessionReset(
 wireConnectionStatus(ws);
 const profileManager = createProfileManager(createTauriBackend());
 configureSession(api, ws, appEl, () => activePage, navigate);
+configureServerHealth(api);
 // Re-run the connect page's health checks (set while the connect page is
 // mounted, cleared otherwise) — refreshes a server's status after its
 // certificate is trusted for the first time.
@@ -222,116 +225,6 @@ desktop.trayStatus.onStatusChange((status) => {
 
 // Current page component reference for cleanup
 let currentPage: { destroy?(): void } | null = null;
-
-/**
- * Last `server-info` snapshot per host, fed by `runHealthChecks`. B7-12 reads
- * it for the advisory epoch badge and the incompatible notice; B7-15 reads the
- * same snapshot for `registration_mode` and the retention notice.
- */
-const serverInfoByHost = new Map<string, ServerInfoResponse>();
-/** Hosts with a `server-info` probe in flight, so a typed host is not probed twice. */
-const serverInfoInFlight = new Set<string>();
-
-/** The connect page's per-server health readouts. */
-interface HealthReadout {
-  updateHealthStatus(
-    host: string,
-    status: {
-      status: string;
-      latencyMs: number | null;
-      version: string | null;
-      onlineUsers: number | null;
-    },
-  ): void;
-  updateCompatibility(host: string, compatibility: Compatibility, serverEpoch: number | null): void;
-}
-
-/** Run health checks for a list of profiles and update the connect page. */
-function runHealthChecks(
-  connectPage: HealthReadout,
-  profiles: readonly { host: string }[],
-  owner: SessionScope,
-): void {
-  for (const profile of profiles) void checkHealth(connectPage, profile.host, owner);
-}
-
-/**
- * Advisory epoch preflight, beside the health probe and sharing its
- * timeout/dispose shape. Resolves whether `server-info` answered; a failed
- * probe is `unreachable` — no badge, never an error banner (the WebSocket
- * refusal stays authoritative). A degraded server (health 503) still answers it.
- */
-async function probeServerInfo(
-  connectPage: HealthReadout,
-  host: string,
-  owner: SessionScope,
-): Promise<boolean> {
-  let serverEpoch: number | null = null;
-  let compatibility: Compatibility = "unreachable";
-  serverInfoInFlight.add(host);
-  try {
-    const info = await api.getServerInfo(host, 3000, owner.signal);
-    owner.assertCurrent();
-    serverInfoByHost.set(host, info);
-    serverEpoch = info.protocol_epoch;
-    compatibility = deriveCompatibility(serverEpoch, PROTOCOL_EPOCH);
-  } catch (infoErr) {
-    if (!owner.isCurrent()) return false;
-    serverInfoByHost.delete(host);
-    log.debug("server-info preflight failed", {
-      host,
-      error: String(infoErr),
-    });
-  } finally {
-    serverInfoInFlight.delete(host);
-  }
-  connectPage.updateCompatibility(host, compatibility, serverEpoch);
-  return compatibility !== "unreachable";
-}
-
-/** Probe one server and update its row; resolves whether it answered. */
-async function checkHealth(
-  connectPage: HealthReadout,
-  host: string,
-  owner: SessionScope,
-): Promise<boolean> {
-  try {
-    owner.assertCurrent();
-    connectPage.updateHealthStatus(host, {
-      status: "checking",
-      latencyMs: null,
-      version: null,
-      onlineUsers: null,
-    });
-    const start = performance.now();
-    const health = await api.getHealth(host, 3000, owner.signal);
-    owner.assertCurrent();
-    const elapsed = Math.round(performance.now() - start);
-    connectPage.updateHealthStatus(host, {
-      status: elapsed > 1500 ? "slow" : "online",
-      latencyMs: elapsed,
-      version: health.version ?? null,
-      onlineUsers: health.online_users ?? null,
-    });
-    await probeServerInfo(connectPage, host, owner);
-    return true;
-  } catch (err) {
-    if (!owner.isCurrent()) return false;
-    // Record why the check failed (TLS/cert-pin/network) — otherwise a
-    // "can't connect" report has no logged cause to diagnose.
-    log.warn("health check failed", { host, error: String(err) });
-    connectPage.updateHealthStatus(host, {
-      status: "offline",
-      latencyMs: null,
-      version: null,
-      onlineUsers: null,
-    });
-    // A degraded server (503) fails the health call but may still answer
-    // server-info; the probe clears the badge itself when it fails too.
-    await probeServerInfo(connectPage, host, owner);
-    return false;
-  }
-}
 
 // Guards the async MainPage mount below against the destroy-before-mount race:
 // a stale mount is discarded when a newer navigation supersedes it.
@@ -411,98 +304,8 @@ async function renderPage(pageId: PageId): Promise<void> {
 
   if (pageId === "connect") {
     const pageOwner = new SessionScope({ host: "", generation: 0 });
-    // Helper to get the profile list for the ConnectPage
-    function getProfileList(): readonly {
-      name: string;
-      host: string;
-      id?: string;
-      username?: string;
-      synthetic?: boolean;
-    }[] {
-      const saved = profileManager.getAll();
-      if (saved.length > 0) return saved;
-      // Fallback: show a default local server entry
-      return [
-        { name: connectText("profiles.defaultName"), host: "localhost:8443", synthetic: true },
-      ];
-    }
-
-    // Persist a profile mutation, surfacing a failure instead of letting it
-    // silently revert on next launch: profiles.ts awaits invoke("save_settings"),
-    // which rejects when the store write fails (read-only file, disk full),
-    // and `void`-ing that rejection at each call site (as this used to) left
-    // the in-memory store as the only record of the change.
-    function persistProfiles(): void {
-      void profileManager.saveProfiles().catch(() => {
-        setTransientError(connectText("profiles.saveFailed"));
-      });
-    }
-
-    // Stay signed in is the only reason an auto-connect-only profile holds a
-    // token. When a change moves auto-connect off such a profile and nothing
-    // else on that host keeps a sign-in (neither flag on any profile there),
-    // the token would sit in the credential store with both flags off, so it
-    // goes. `skipHost` is the host of a login in flight, whose own save/delete
-    // already decides its credential.
-    function mutateAutoLogin(mutate: () => void, skipHost?: string): void {
-      const heldBefore = new Set(
-        profileManager
-          .getAll()
-          .filter((p) => p.autoConnect)
-          .map((p) => p.host),
-      );
-      mutate();
-      const after = profileManager.getAll();
-      for (const host of heldBefore) {
-        if (host === skipHost) continue;
-        if (after.some((p) => p.host === host && (p.autoConnect || p.rememberPassword))) continue;
-        void (async () => {
-          const removed = await deleteCredential(host);
-          if (!removed && pageOwner.isCurrent()) {
-            log.warn("Credential delete failed — the saved sign-in is still stored", { host });
-            setTransientError(connectText("session.passwordRemoveFailed"));
-          }
-        })();
-      }
-    }
-
-    // Auto-save a profile for a host after successful login (if not already saved)
-    function ensureProfileExists(
-      host: string,
-      username: string,
-      rememberPassword: boolean,
-      autoConnect: boolean,
-    ): void {
-      const existing = profileManager.getAll().find((p) => p.host === host);
-      if (existing) {
-        // Update username, rememberPassword preference, and lastConnected
-        profileManager.updateProfile(existing.id, { username, rememberPassword });
-        profileManager.setLastConnected(existing.id);
-      } else {
-        const created = profileManager.addProfile({
-          name: host.split(":")[0] ?? host,
-          host,
-          username,
-          autoConnect: false,
-          rememberPassword,
-          color: "#5865F2",
-        });
-        profileManager.setLastConnected(created.id);
-      }
-
-      // Re-find: the profile may have just been created above.
-      const profile = profileManager.getAll().find((p) => p.host === host);
-      if (profile) {
-        if (autoConnect) {
-          mutateAutoLogin(() => profileManager.setAutoLogin(profile.id), host);
-        } else if (profile.autoConnect) {
-          // Only clear when this profile is the current holder — setAutoLogin(null)
-          // clears auto-login on every profile, not just this one.
-          mutateAutoLogin(() => profileManager.setAutoLogin(null), host);
-        }
-      }
-      persistProfiles();
-    }
+    const [getProfileList, persistProfiles, mutateAutoLogin, ensureProfileExists] =
+      createConnectProfiles(profileManager, pageOwner);
 
     // Shared tail of both login paths: branch to the 2FA challenge, or wire the
     // session. Structural rather than duplicated, so the saved-password path
@@ -543,13 +346,13 @@ async function renderPage(pageId: PageId): Promise<void> {
         // beside the health probe. Unknown (no snapshot / unrecognised value)
         // returns null, which LoginForm treats as invite-required.
         getRegistrationMode(host) {
-          const info = serverInfoByHost.get(host);
+          const info = serverInfoFor(host);
           return parseRegistrationMode(info?.registration_mode);
         },
-        getRetentionNotice: (host) => retentionNotice(serverInfoByHost.get(host)),
+        getRetentionNotice: (host) => retentionNotice(serverInfoFor(host)),
         // A typed host has no health row; probe it so register mode can read its mode.
         onHostSettled(host) {
-          if (!serverInfoByHost.has(host) && !serverInfoInFlight.has(host))
+          if (!serverInfoFor(host) && !serverInfoProbing(host))
             void probeServerInfo(connectPage, host, pageOwner);
         },
         async onLogin(host, username, password) {
@@ -972,7 +775,7 @@ async function renderPage(pageId: PageId): Promise<void> {
       const mainPage = createMainPage({
         ws,
         api,
-        getRetentionNotice: () => retentionNotice(serverInfoByHost.get(api.getConfig().host ?? "")),
+        getRetentionNotice: () => retentionNotice(serverInfoFor(api.getConfig().host ?? "")),
       });
       safeMount(mainPage, appEl!, renderRecovery);
       currentPage = mainPage;
