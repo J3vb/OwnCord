@@ -923,6 +923,21 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onStatusChange: (status) => applyPresence(status),
       systemIdleMs: () => desktop.systemIdle.idleMs(),
     });
+    // Talking in a call is being here even with hands off the keyboard and
+    // mouse, which neither the window nor (for another app) the OS poll sees.
+    // The local ring is the same on web and native (voice.store withLocalRing).
+    unsubscribers.push(
+      voiceStore.subscribeSelector(
+        (v) => {
+          const uid = authStore.getState().user?.id ?? 0;
+          const ch = v.currentChannelId;
+          return ch !== null && v.voiceUsers.get(ch)?.get(uid)?.speaking === true;
+        },
+        (speaking) => {
+          if (speaking) autoIdle?.notifyActivity();
+        },
+      ),
+    );
 
     unsubscribers.push(
       ws.on("server_restart", (payload) => {

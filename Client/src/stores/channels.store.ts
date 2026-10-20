@@ -81,6 +81,11 @@ export interface Channel {
    */
   readonly voiceMaxUsers: number;
   readonly voiceMaxVideo: number;
+  /**
+   * The server's AFK voice channel: idle members are moved here and it is
+   * listen-only. Absent from older servers, which is read as false.
+   */
+  readonly afk?: boolean | undefined;
 }
 
 export interface ChannelsState {
@@ -161,6 +166,7 @@ export function setChannels(channels: readonly ReadyChannel[]): void {
       nsfwAcknowledged: (ch.nsfw ?? false) && ch.nsfw_acknowledged === true,
       voiceMaxUsers: ch.voice_max_users ?? 0,
       voiceMaxVideo: ch.voice_max_video ?? 0,
+      afk: ch.afk ?? false,
     });
   }
   channelsStore.setState((prev) => {
@@ -242,6 +248,7 @@ export function addChannel(channel: ChannelCreatePayload): void {
       nsfwAcknowledged: (channel.nsfw ?? false) && existing?.nsfwAcknowledged === true,
       voiceMaxUsers: channel.voice_max_users ?? 0,
       voiceMaxVideo: channel.voice_max_video ?? 0,
+      afk: channel.afk ?? existing?.afk ?? false,
     });
     return { ...prev, channels: next };
   });
@@ -278,6 +285,7 @@ export function updateChannel(update: ChannelUpdatePayload): void {
       ...(update.private !== undefined ? { isPrivate: update.private } : {}),
       ...(update.voice_max_users !== undefined ? { voiceMaxUsers: update.voice_max_users } : {}),
       ...(update.voice_max_video !== undefined ? { voiceMaxVideo: update.voice_max_video } : {}),
+      ...(update.afk !== undefined ? { afk: update.afk } : {}),
     };
     const next = new Map(prev.channels);
     next.set(update.id, updated);
@@ -649,4 +657,9 @@ export function setReadPointer(
     });
     return { ...prev, channels: map };
   });
+}
+
+/** Whether `channelId` is the server's AFK voice channel. */
+export function isAfkChannel(channelId: number | null): boolean {
+  return channelId !== null && channelsStore.getState().channels.get(channelId)?.afk === true;
 }

@@ -44,3 +44,19 @@
   color: var(--text-micro);
   flex-shrink: 0;
 }
+
+/* The moon and "AFK" on the server's AFK voice channel. */
+.channel-item .ch-afk {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  font-size: var(--font-size-xxs);
+  font-weight: 600;
+  color: var(--text-micro);
+  flex-shrink: 0;
+}
+
+.channel-item .ch-afk + .ch-capacity {
+  margin-left: 6px;
+}

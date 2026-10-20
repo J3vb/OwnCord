@@ -13,6 +13,7 @@ import type {
   VoiceSpeakersPayload,
 } from "@lib/types";
 import { membersStore } from "@stores/members.store";
+import { channelsStore, isAfkChannel } from "@stores/channels.store";
 import { authStore, registerVoiceLogoutTeardown } from "@stores/auth.store";
 import { registerSessionReset } from "@lib/sessionRegistry";
 import { noteJoinSucceeded } from "../features/voice/joinBackoff";
@@ -88,6 +89,11 @@ export interface VoiceState {
    *  the store; optional for the same fixture reason as peerVerifications. */
   readonly localServerMuted?: boolean;
   readonly localServerDeafened?: boolean;
+  /** True while the current channel is the server's AFK channel, which is
+   *  listen-only: the mic is not published and its control is locked muted.
+   *  Derived from the channel store (see syncInAfkChannel); optional for the
+   *  fixture reason above. */
+  readonly inAfkChannel?: boolean;
   /** The local deafen in effect is the one a moderator's deafen applied, not
    *  the member's own: the moderator's lift releases it, while a deafen the
    *  member chose survives the lift. Follows localDeafened, so it outlives a
@@ -183,6 +189,21 @@ export const voiceStore = createStore<VoiceState>(INITIAL_STATE);
 // App-lifetime: the store and this listener live as long as the app.
 void voiceStore.subscribeSelector((state) => state.currentChannelId !== null, setVoiceInSession);
 
+/** Keep `inAfkChannel` equal to "the current channel carries the AFK flag".
+ *  The one writer: it runs when the current channel changes and when a channel
+ *  row changes (ready, channel_create, channel_update), so a flag set while
+ *  the user is already inside takes effect too. */
+function syncInAfkChannel(): void {
+  const afk = isAfkChannel(voiceStore.getState().currentChannelId);
+  voiceStore.setState((prev) =>
+    (prev.inAfkChannel ?? false) === afk ? prev : { ...prev, inAfkChannel: afk },
+  );
+}
+// App-lifetime: both stores and these listeners live as long as the app.
+void voiceStore.subscribeSelector((state) => state.currentChannelId, syncInAfkChannel);
+// App-lifetime, as above.
+void channelsStore.subscribeSelector((state) => state.channels, syncInAfkChannel);
+
 /** Incremented by the incremental roster mutators (updateVoiceState,
  *  removeVoiceUser) — never by setVoiceStates, which replaces the whole
  *  roster on the initial `ready` and on a full resync. DP-40's voice UI sounds
@@ -209,6 +230,7 @@ export function resetVoiceStore(): void {
     localDeafened: false,
     localServerMuted: false,
     localServerDeafened: false,
+    inAfkChannel: false,
     moderatorDeafened: false,
     mutedBeforeDeafen: false,
     pttGated: false,

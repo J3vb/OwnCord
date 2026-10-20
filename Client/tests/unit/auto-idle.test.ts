@@ -7,6 +7,7 @@ import {
   startAutoIdle,
   type AutoIdleController,
 } from "@lib/autoIdle";
+import { joinVoiceChannel, leaveVoiceChannel } from "@stores/voice.store";
 import { loadUserStatus, loadUserStatusOrigin, saveUserStatus } from "@lib/userStatus";
 
 /**
@@ -472,5 +473,82 @@ describe("startAutoIdle with an OS idle source", () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(onStatusChange).not.toHaveBeenCalled();
+  });
+});
+
+describe("startAutoIdle with activity reported from a call", () => {
+  // 6.10c: speaking in a voice call is being here, with hands off the keyboard.
+  // MainPage reports it through notifyActivity; the OS poll must agree.
+  let controller: AutoIdleController | null = null;
+
+  beforeEach(() => {
+    localStorage.clear();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    controller?.destroy();
+    controller = null;
+    leaveVoiceChannel();
+    vi.useRealTimers();
+  });
+
+  it("keeps a speaking user online with no input at all", () => {
+    saveUserStatus("online");
+    const onStatusChange = vi.fn();
+    controller = startAutoIdle({ onStatusChange, target: createTarget() });
+
+    for (let i = 0; i < 12; i++) {
+      vi.advanceTimersByTime(AUTO_IDLE_DELAY_MS / 2);
+      controller.notifyActivity();
+    }
+
+    expect(onStatusChange).not.toHaveBeenCalled();
+    expect(loadUserStatus()).toBe("online");
+  });
+
+  it("does not flap a speaking, hands-off user when the OS reports long idle", async () => {
+    saveUserStatus("online");
+    const onStatusChange = vi.fn();
+    controller = startAutoIdle({
+      onStatusChange,
+      target: createTarget(),
+      // Nothing touched the keyboard or mouse for an hour.
+      systemIdleMs: async () => 6 * AUTO_IDLE_DELAY_MS,
+    });
+
+    // Speaking now and then (every two minutes) across a stretch of polls.
+    controller.notifyActivity();
+    for (let i = 0; i < 20; i++) {
+      await vi.advanceTimersByTimeAsync(2 * 60 * 1000);
+      controller.notifyActivity();
+    }
+    expect(onStatusChange).not.toHaveBeenCalled();
+    expect(loadUserStatus()).toBe("online");
+
+    // Once they stop speaking for the full delay, the OS answer takes over.
+    await vi.advanceTimersByTimeAsync(AUTO_IDLE_DELAY_MS + SYSTEM_IDLE_POLL_MS);
+    expect(onStatusChange).toHaveBeenCalledExactlyOnceWith("idle");
+  });
+
+  it("keeps an automatic Idle through an automatic (re)join of a voice channel", async () => {
+    saveUserStatus("online");
+    const onStatusChange = vi.fn();
+    controller = startAutoIdle({
+      onStatusChange,
+      target: createTarget(),
+      systemIdleMs: async () => AUTO_IDLE_DELAY_MS,
+    });
+    await vi.advanceTimersByTimeAsync(SYSTEM_IDLE_POLL_MS);
+    expect(onStatusChange).toHaveBeenCalledExactlyOnceWith("idle");
+
+    // An AFK move or a reconnect leaves and rejoins on its own.
+    leaveVoiceChannel();
+    joinVoiceChannel(7);
+    await vi.advanceTimersByTimeAsync(SYSTEM_IDLE_POLL_MS * 3);
+
+    expect(onStatusChange).toHaveBeenCalledOnce();
+    expect(loadUserStatus()).toBe("idle");
+    expect(loadUserStatusOrigin()).toBe("auto");
   });
 });

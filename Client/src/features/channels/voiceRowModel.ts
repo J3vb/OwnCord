@@ -155,6 +155,7 @@ export function voiceChannelChrome(
     name: channel.name,
     nsfw: channel.nsfw,
     private: channel.isPrivate,
+    afk: channel.afk === true,
     joined,
     frozenReason,
     timeoutReason,

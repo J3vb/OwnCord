@@ -62,6 +62,7 @@ and only when it changes something a contributor or fork holder must do
 **Voice**
 
 - Members who stay idle in a server voice channel are now moved to the AFK channel once it is set, after the AFK timeout on top of the client's own idle delay. A member who could not join the AFK channel, a DM or group call, and a member who comes back first are left alone. A moderator mute or deafen is kept through the move, and the member returns by joining a channel themselves. The client does not show why yet and the admin panel has no card for it.
+- The client now shows when it was moved to the AFK channel (a short note once the move is done), marks the AFK channel in the channel list, and keeps the microphone off there with the mic button locked. Speaking or typing counts as activity again, also while in a call.
 
 **Desktop UI**
 

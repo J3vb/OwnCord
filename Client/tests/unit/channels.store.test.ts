@@ -91,6 +91,7 @@ describe("channels store", () => {
         nsfwAcknowledged: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
+        afk: false,
       });
 
       const voice = state.channels.get(2);
@@ -111,6 +112,7 @@ describe("channels store", () => {
         nsfwAcknowledged: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
+        afk: false,
       });
     });
 
@@ -189,6 +191,7 @@ describe("channels store", () => {
         nsfwAcknowledged: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
+        afk: false,
       });
     });
 
@@ -436,6 +439,7 @@ describe("channels store", () => {
         nsfwAcknowledged: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
+        afk: false,
       });
     });
 

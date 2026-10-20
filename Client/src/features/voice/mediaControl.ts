@@ -133,6 +133,8 @@ export class MediaControl {
   async retryMicPermission(): Promise<void> {
     const room = this._room;
     if (room === null) return;
+    // Nothing to retry in the AFK channel: it grants no microphone.
+    if (voiceStore.getState().inAfkChannel === true) return;
     try {
       await this.enableMicrophone(room, true);
       if (this._room !== room) return;
@@ -167,6 +169,11 @@ export class MediaControl {
     // Muting is always permitted.
     if (!muted && voiceStore.getState().localServerMuted === true) {
       log.debug("Ignoring unmute: server-muted by a moderator");
+      return;
+    }
+    // The AFK channel is listen-only; the mic control is locked muted there.
+    if (!muted && voiceStore.getState().inAfkChannel === true) {
+      log.debug("Ignoring unmute: AFK channel is listen-only");
       return;
     }
     setLocalMuted(muted);

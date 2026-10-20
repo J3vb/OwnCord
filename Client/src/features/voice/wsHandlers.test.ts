@@ -4,6 +4,7 @@ import {
   handleVoiceError,
   handleVoiceJoinRollback,
   handleVoiceLeave,
+  handleVoiceMoved,
   handleVoiceState,
   snapshotReadyVoice,
 } from "./wsHandlers";
@@ -17,6 +18,8 @@ import {
   clearPeerVerifications,
 } from "../../stores/voice.store";
 import { authStore } from "../../stores/auth.store";
+import { channelsStore } from "../../stores/channels.store";
+import { clearAfkMove } from "./moveHint";
 import { joinRetryInMs, noteJoinSucceeded } from "./joinBackoff";
 import { noteJoinSent, resetJoinRequest } from "./joinRequest";
 import type { Payload, ReconnectClock } from "../connection/dispatchContext";
@@ -375,5 +378,70 @@ describe("handleVoiceE2eeAnnounce with a malformed video_decode", () => {
   it("keeps at most 8 entries", () => {
     handleVoiceE2eeAnnounce(raw(Array.from({ length: 12 }, (_, i) => `c${i}`)));
     expect(voiceStore.getState().peerVideoDecode?.get(5)).toHaveLength(8);
+  });
+});
+
+describe("handleVoiceMoved toast", () => {
+  const clock = { voiceRejoinChannelId: null } as ReconnectClock;
+  const ack = (channelId: number): void =>
+    handleVoiceState(socketStub(), voiceState({ channel_id: channelId, user_id: 9 }));
+
+  beforeEach(() => {
+    clearAfkMove();
+    channelsStore.setState((prev) => ({
+      ...prev,
+      channels: new Map([[4, { id: 4, name: "Parking", type: "voice", afk: true } as never]]),
+    }));
+  });
+
+  it("says why only once the AFK join is acknowledged", async () => {
+    const socket = socketStub();
+    handleVoiceMoved(socket, { to_channel_id: 4, reason: "afk" }, clock);
+    await vi.waitFor(() =>
+      expect(socket.send).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "voice_join", payload: { channel_id: 4 } }),
+      ),
+    );
+    expect(showToast).not.toHaveBeenCalled();
+
+    ack(4);
+    expect(showToast).toHaveBeenCalledExactlyOnceWith(
+      "Moved to Parking because you were idle",
+      "info",
+    );
+    // A later state frame for the same channel does not say it again.
+    ack(4);
+    expect(showToast).toHaveBeenCalledOnce();
+  });
+
+  it("says nothing for a move with no reason, even once acknowledged", async () => {
+    const socket = socketStub();
+    handleVoiceMoved(socket, { to_channel_id: 4 }, clock);
+    await vi.waitFor(() => expect(socket.send).toHaveBeenCalled());
+    ack(4);
+    expect(showToast).not.toHaveBeenCalled();
+  });
+
+  it("says nothing when the AFK join is refused", async () => {
+    const socket = socketStub();
+    handleVoiceMoved(socket, { to_channel_id: 4, reason: "afk" }, clock);
+    await vi.waitFor(() => expect(socket.send).toHaveBeenCalled());
+    noteJoinSent("join-1");
+    setVoiceStatus("joining");
+    handleVoiceJoinRollback({ code: "FORBIDDEN", message: "no" } as Payload<"error">, "join-1");
+    joinVoiceChannel(4);
+    ack(4);
+    expect(showToast).not.toHaveBeenCalled();
+  });
+
+  it("says nothing for a move a reconnect abandoned", async () => {
+    const socket = socketStub();
+    handleVoiceMoved(socket, { to_channel_id: 4, reason: "afk" }, clock);
+    await vi.waitFor(() => expect(socket.send).toHaveBeenCalled());
+
+    // The socket dropped before the answer; the fresh ready supersedes the move.
+    snapshotReadyVoice()(socketStub(), readyWith([]));
+    ack(4);
+    expect(showToast).not.toHaveBeenCalled();
   });
 });
