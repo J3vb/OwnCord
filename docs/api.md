@@ -3493,6 +3493,7 @@ Runtime server metrics. IP-restricted (not token-based): allowed CIDRs come from
   "delivery_loss_marks": 0,
   "ws_conn_rejects": 0,
   "disk_free_mb": 51200.5,
+  "db_wal_mb": 4.2,
   "db_writer_wait_count": 3,
   "db_writer_wait_seconds": 0.021,
   "db_reader_wait_count": 11,
@@ -3541,7 +3542,9 @@ pairs report one pool. `perm_cache_*` report
 permission-cache effectiveness (a miss is any lookup that repopulated from the
 database). `ws_conn_rejects` counts upgrades refused by the
 `server.max_ws_connections` cap, and `disk_free_mb` is free space on the data
-volume (omitted when the platform can't report it). `livekit_healthy` is
+volume (omitted when the platform can't report it). `db_wal_mb` is the size of
+the SQLite write-ahead log file, read on each request (omitted when it can't be
+read). `livekit_healthy` is
 omitted when no LiveKit health check is wired; `event_persister` is omitted
 when event persistence is disabled.
 
@@ -3690,6 +3693,7 @@ Prometheus parses.
 | `owncord_event_persister_total`                                                                                                    | counter   | `kind`: `persisted`, `dropped`, `flushes`, `errors`                                                                                     | `event_persister` (omitted while event persistence is off)                       |
 | `owncord_livekit_healthy`, `owncord_disk_low`                                                                                      | gauge 0/1 |                                                                                                                                         | `livekit_healthy`, `disk_low` (omitted when the JSON omits them)                 |
 | `owncord_disk_free_bytes`, `owncord_disk_min_free_bytes`, `owncord_upload_storage_used_bytes`                                      | gauge     |                                                                                                                                         | `disk_free_mb`, `disk_min_free_mb`, `upload_storage_used_mb`                     |
+| `owncord_db_wal_bytes`                                                                                                             | gauge     |                                                                                                                                         | `db_wal_mb` (omitted when the JSON omits it)                                     |
 
 Notes:
 

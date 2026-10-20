@@ -143,6 +143,9 @@ func encodePrometheus(m *ServerMetrics, counts ws.LatencyCounts) []byte {
 	if m.UploadStorageUsedMB != nil {
 		e.scalar("owncord_upload_storage_used_bytes", gauge, "Bytes of attachments stored, summed over every attachment row.", *m.UploadStorageUsedMB*1024*1024)
 	}
+	if m.DBWALMB != nil {
+		e.scalar("owncord_db_wal_bytes", gauge, "Size of the SQLite write-ahead log file, in bytes.", *m.DBWALMB*1024*1024)
+	}
 	return e.t.Bytes()
 }
 

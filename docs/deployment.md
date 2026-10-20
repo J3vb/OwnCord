@@ -1039,6 +1039,13 @@ The database runs in SQLite's WAL (write-ahead log) mode. **Do not copy the
 `.db` file while the server is running.** The copy may be inconsistent. Use
 the backup endpoint instead, or stop the server first.
 
+The size of the write-ahead log file is `db_wal_mb` in `GET /api/v1/metrics`
+(`owncord_db_wal_bytes` in the Prometheus output). It rises under heavy writes
+and falls when SQLite checkpoints; a value that keeps climbing is worth a look.
+On every start the server also logs one `db: migration applied` line per
+migration it ran, with the time in milliseconds, then a `db: migrations
+applied` summary, so a slow upgrade can be traced to the migration behind it.
+
 ### Admin Backup Endpoint
 
 All of these are Owner-only.
@@ -1805,6 +1812,7 @@ the third stage as normal.
   "disk_min_free_mb": 256,
   "disk_low": false,
   "upload_storage_used_mb": 3072.25,
+  "db_wal_mb": 4.2,
   "db_writer_wait_count": 3,
   "db_writer_wait_seconds": 0.021,
   "db_reader_wait_count": 11,

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"log/slog"
 	"net/http"
 	"runtime"
 	"slices"
@@ -88,6 +89,10 @@ type ServerMetrics struct {
 	// uploader). Emoji, a bounded exclusion, are not in it. Omitted when the
 	// query fails.
 	UploadStorageUsedMB *float64 `json:"upload_storage_used_mb,omitempty"`
+	// DBWALMB is the SQLite write-ahead log file's size, stat'd once per
+	// scrape. A WAL that keeps growing means checkpoints are not keeping up.
+	// Omitted when no source is wired or the stat fails.
+	DBWALMB *float64 `json:"db_wal_mb,omitempty"`
 
 	// SQLite writer-pool saturation: time spent queueing for the single write
 	// connection. The most direct signal for the documented single-writer
@@ -264,6 +269,7 @@ type MetricsSources struct {
 	DiskFree            func() (uint64, error)
 	DiskMinFree         uint64
 	UploadBytes         func(context.Context) (int64, error)
+	WALBytes            func() (int64, error) // db.(*DB).WALBytes: one stat per scrape
 	// PushCounters is nil when dispatch is off (the compiled default); the
 	// three fields stay at their zero value then.
 	PushCounters func() (dispatched, failed, pruned uint64)
@@ -356,6 +362,14 @@ func collectMetrics(ctx context.Context, src MetricsSources) ServerMetrics {
 		if n, err := src.UploadBytes(ctx); err == nil {
 			mb := float64(n) / 1024 / 1024
 			metrics.UploadStorageUsedMB = &mb
+		}
+	}
+	if src.WALBytes != nil {
+		if n, err := src.WALBytes(); err == nil {
+			mb := float64(n) / 1024 / 1024
+			metrics.DBWALMB = &mb
+		} else {
+			slog.Debug("metrics: wal size unavailable", "error", err)
 		}
 	}
 	if src.PushCounters != nil {

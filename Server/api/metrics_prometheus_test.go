@@ -326,7 +326,7 @@ var wantFamilies = map[string]string{
 	"owncord_push_total": "counter", "owncord_event_persister_total": "counter",
 	"owncord_livekit_healthy": "gauge", "owncord_disk_free_bytes": "gauge",
 	"owncord_disk_min_free_bytes": "gauge", "owncord_disk_low": "gauge",
-	"owncord_upload_storage_used_bytes": "gauge",
+	"owncord_upload_storage_used_bytes": "gauge", "owncord_db_wal_bytes": "gauge",
 }
 
 // TestPromText_GrammarAndUniqueFamilies scrapes a fully wired handler and
@@ -373,7 +373,7 @@ func TestPrometheusMetrics_AbsentSourcesOmitFamilies(t *testing.T) {
 	})
 	for _, name := range []string{
 		"owncord_livekit_healthy", "owncord_event_persister_total", "owncord_disk_free_bytes",
-		"owncord_disk_low", "owncord_upload_storage_used_bytes", "owncord_ws_broadcast_seconds",
+		"owncord_disk_low", "owncord_upload_storage_used_bytes", "owncord_db_wal_bytes", "owncord_ws_broadcast_seconds",
 		"owncord_ws_dispatch_lag_seconds", "owncord_chat_send_ack_seconds", "owncord_voice_join_seconds",
 	} {
 		if promFamily(fams, name) != nil {
@@ -628,6 +628,7 @@ func promFieldMap() map[string]metricsPathSel {
 		"disk_min_free_mb":                sel("owncord_disk_min_free_bytes"),
 		"disk_low":                        sel("owncord_disk_low"),
 		"upload_storage_used_mb":          sel("owncord_upload_storage_used_bytes"),
+		"db_wal_mb":                       sel("owncord_db_wal_bytes"),
 		"db_writer_wait_count":            sel("owncord_db_wait_total", "pool", "writer"),
 		"db_writer_wait_seconds":          sel("owncord_db_wait_seconds_total", "pool", "writer"),
 		"db_reader_wait_count":            sel("owncord_db_wait_total", "pool", "reader"),
