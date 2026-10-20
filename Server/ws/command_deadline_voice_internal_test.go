@@ -152,7 +152,7 @@ func TestHandleMessage_DeadlineDoesNotEvictFromVoice(t *testing.T) {
 	if code != ErrCodeRequestTimeout {
 		t.Errorf("error code = %v, want %s", code, ErrCodeRequestTimeout)
 	}
-	if got := c.getVoiceChID(); got != chID {
+	if got := c.voice.channel(); got != chID {
 		t.Errorf("voice channel after timed-out refresh = %d, want %d (still joined)", got, chID)
 	}
 }
@@ -193,7 +193,7 @@ func TestHandleMessage_SpentDeadlineStillHonoursVoiceLeave(t *testing.T) {
 		}
 	})
 	h.handleMessage(c, voiceFrame(t, "voice_leave", "req-leave", map[string]any{}))
-	if got := c.getVoiceChID(); got != 0 {
+	if got := c.voice.channel(); got != 0 {
 		t.Errorf("voice channel after a spent-deadline voice_leave = %d, want 0 (left)", got)
 	}
 }
