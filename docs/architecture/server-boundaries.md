@@ -496,26 +496,27 @@ collaborator is now a `startHub` error at boot instead of a later panic
 
 ### Locks
 
-Five locks on `Hub`, all `syncutil` (so the `-tags deadlock` pass sees them):
+Six locks are declared directly on `Hub`, all `syncutil` (so the
+`-tags deadlock` pass sees them). The hub's embedded states add more, and `ws`
+declares 27 mutexes in all (non-test files, at `f4a359e8`).
 
-| Lock          | Declared        | Guards (from the field comment)                                         |
-| ------------- | --------------- | ----------------------------------------------------------------------- |
-| `mu`          | `ws/hub.go:25`  | the client registry and subscriptions                                   |
-| `seqMu`       | `ws/hub.go:58`  | seq assignment + replay insertion + delivery order, serialised together |
-| `settingsMu`  | `ws/hub.go:122` | the cached server settings                                              |
-| `keyHolderMu` | `ws/hub.go:130` | the voice E2EE key-holder map                                           |
-| `presenceMu`  | `ws/hub.go:135` | presence coalescing state                                               |
+| Lock             | Declared        | Guards (from the field comment)                                         |
+| ---------------- | --------------- | ----------------------------------------------------------------------- |
+| `mu`             | `ws/hub.go:25`  | the client registry and subscriptions                                   |
+| `seqMu`          | `ws/hub.go:65`  | seq assignment + replay insertion + delivery order, serialised together |
+| `settingsMu`     | `ws/hub.go:219` | the cached server settings                                              |
+| `uploadPolicyMu` | `ws/hub.go:224` | orders `BroadcastUploadPolicy`'s saves                                  |
+| `keyHolderMu`    | `ws/hub.go:228` | the voice E2EE key-holder map                                           |
+| `presenceMu`     | `ws/hub.go:232` | presence coalescing state                                               |
 
-**The voice lock order is written down** in the header comment of
-`Server/ws/voice_registry.go` (summarised in
-[websocket.md](websocket.md#voice-membership)). **Only part of the order for the five
-locks above is written.** The voice lock order in `voice_registry.go` and
-[websocket.md](websocket.md#voice-membership) fixes `seqMu`, `keyHolderMu` and
-`mu` relative to each other. `settingsMu` and `presenceMu` appear in no written
-order. The whole is proven only by the
-`-tags deadlock -count=10 ./ws/` pass. B3-5 records the order in `hub.go`'s
-package comment before it moves a single function, so every pure-move commit
-has something to be checked against.
+**The order is written once, in `Server/ws/lock_order.go`**: the rule (no I/O
+under a state lock), the split between serialisers and state locks, and a rank
+table naming every lock with the path that takes it. Local fragments elsewhere
+(the voice header in `ws/voice_registry.go`, summarised in
+[websocket.md](websocket.md#voice-membership)) point there, and where one
+disagrees with `lock_order.go`, the table wins. The order is read from the code,
+not checked by a test yet: the `-tags deadlock -count=10 ./ws/` pass reports an
+inversion only when one test takes the same two lock instances in both orders.
 
 ### Start, drain, stop — before B3-3 (`main.go` `run`, `main.go:107`)
 

@@ -15,11 +15,8 @@ package ws
 // the Client delegators. Callers read the slot with c.voice.channel() and
 // c.voice.state().
 //
-// Lock order (outermost first) — unchanged by the move; voiceSlot.voiceMu is
-// the old Client.voiceMu:
-//
-//	voiceMember(uid) → voiceMod(uid) → seqMu → keyHolderMu → h.mu → ps.mu →
-//	c.mu / voiceSlot.voiceMu / voiceGrace.mu / voiceReconcile.mu
+// Lock order: see lock_order.go, the one written order for the package.
+// voiceSlot.voiceMu is the old Client.voiceMu.
 //
 // voiceMember (WP 1D-10) serializes every change to a user's voice
 // membership: the voice_states row, the slot's channel and join token, and
@@ -32,8 +29,8 @@ package ws
 // run after unlock or on removeLiveKitParticipantAsync. A goroutine holds at
 // most one user's voiceMember lock and never takes it while holding any lock
 // to its right. The hub dispatch goroutine never takes it. A path holding
-// voiceMod never calls a membership path. The locks in the last row are
-// leaves: they do no I/O and take no other lock. voiceMod is described in
+// voiceMod never calls a membership path. voiceSlot.voiceMu, voiceGrace.mu and
+// voiceReconcile.mu are leaves: they do no I/O and take no other lock. voiceMod is described in
 // user_locks.go.
 
 import "github.com/J3vb/OwnCord/Server/syncutil"

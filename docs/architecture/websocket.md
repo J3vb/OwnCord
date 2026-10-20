@@ -180,11 +180,10 @@ At shutdown the hub calls `voiceReg.close()`. It stops every grace timer and
 leaves the rows for the next boot to wipe. Reads need no handle:
 `c.voice.channel()` and `c.voice.state()` take only the slot's own mutex.
 
-Lock order, outermost first: `voiceMember(uid)`, `voiceMod(uid)`, `seqMu`,
-`keyHolderMu`, `h.mu`, `ps.mu`, then the leaf locks (`c.mu`, the slot mutex,
-`voiceGrace.mu`, `voiceReconcile.mu`). A goroutine holds at most one user's
-member lock. The hub dispatch goroutine never takes it. The full rules are in
-the header comment of `Server/ws/voice_registry.go`. The `voice-membership-writes`
+The lock order for the whole package, voice locks included, is written in
+`Server/ws/lock_order.go`. A goroutine holds at most one user's member lock.
+The hub dispatch goroutine never takes it. The voice-specific rules are in the
+header comment of `Server/ws/voice_registry.go`. The `voice-membership-writes`
 invariant fails CI if code outside `ws/voice_registry*.go` writes the slot or a
 membership row.
 

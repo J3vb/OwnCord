@@ -347,7 +347,8 @@ func buildPresenceBatchMsg(updates []presenceBatchEntry, full bool) []byte {
 // (Client.sendPresenceMsg): the next flush sends that client a snapshot, and
 // the user's next resume takes the full ready, because the dropped seq sits
 // below later ones the client may still see and ack. Lock-free apart from the
-// leaf presenceResyncMu, since it runs under seqMu and the client's mu.
+// leaf presenceRepairState.mu. Client.sendPresenceMsg releases the client's mu
+// before it calls this, but its callers may hold seqMu, ps.mu or presenceMu.
 func (h *Hub) presenceDropped(userID int64) {
 	h.presenceRepair.drops.Add(1)
 	h.presenceRepair.mark(&h.presenceRepair.users, userID, true)
