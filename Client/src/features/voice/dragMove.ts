@@ -76,9 +76,15 @@ export function markVoiceDropTarget(el: HTMLElement, channelId: number): void {
 }
 
 /**
- * Make one participant row draggable. `signal` is the row's per-render signal
+ * Make one participant row draggable. `signal` is the row's own signal
  * (scopes the mousedown); `lifetimeSignal` is the sidebar's, and ends an
  * in-flight drag when the sidebar is destroyed.
+ *
+ * The caller draws the `voice-user-draggable` class (the row model's
+ * `draggable`, which carries the inputs of `canDragVoiceUser`) and attaches
+ * only to a row drawn that way, so the row's DOM is its model's draw. Each
+ * press re-checks `canDragVoiceUser`, so a row drawn from a snapshot that is
+ * a moment old never starts a drag the live state refuses.
  */
 export function attachVoiceUserDrag(
   row: HTMLElement,
@@ -88,9 +94,6 @@ export function attachVoiceUserDrag(
   signal: AbortSignal,
   lifetimeSignal: AbortSignal,
 ): void {
-  if (!canDragVoiceUser(channelId)) return;
-  row.classList.add("voice-user-draggable");
-
   row.addEventListener(
     "mousedown",
     (e) => {
