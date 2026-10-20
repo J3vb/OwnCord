@@ -62,12 +62,13 @@ var ErrRestoreInProgress = errors.New("a staged restore is in progress: start th
 
 // prepareOpen applies any staged restore and then reads the message retry
 // cutoff, so the cutoff read sees a value the apply advanced. The apply needs
-// the process lock; a caller without it (short-lived tooling, or a lock the
-// platform could not take) must not open the database while a restore is
-// pending or half done, because opening would create a live database where
-// the apply expects none.
-func prepareOpen(path string, locked bool) (int64, error) {
-	if locked {
+// process lock, which every server open takes (a filesystem that cannot lock
+// still lets the server open, and the server is then the only opener). A
+// caller that never takes it (short-lived tooling) must not open the database
+// while a restore is pending or half done, because opening would create a
+// live database where the apply expects none.
+func prepareOpen(path string, serverOpen bool) (int64, error) {
+	if serverOpen {
 		if _, err := applyOnOpen(path); err != nil {
 			return 0, fmt.Errorf("applying staged restore: %w", err)
 		}

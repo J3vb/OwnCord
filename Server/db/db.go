@@ -272,7 +272,7 @@ func openFile(path string, maxReaders int, takeLock bool) (*DB, error) {
 			release()
 		}
 	}()
-	retryFloor, err := prepareOpen(path, takeLock && release != nil)
+	retryFloor, err := prepareOpen(path, takeLock)
 	if err != nil {
 		return nil, err
 	}

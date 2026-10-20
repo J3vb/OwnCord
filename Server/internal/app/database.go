@@ -206,9 +206,9 @@ func recordRestoreResult(log *slog.Logger, dbPath string, database *db.DB) servi
 		log.Error("staged restore refused", "backup", res.Backup, "reason", res.Error)
 	}
 	if err := database.LogAudit(context.Background(), res.ActorID, action, "server", 0, detail); err != nil {
-		log.Error("staged restore audit write failed", "action", action, "error", err)
-	}
-	if err := db.ClearRestoreResult(dbPath); err != nil {
+		// Kept so the next boot retries the audit row.
+		log.Error("staged restore audit write failed, result kept for the next boot", "action", action, "error", err)
+	} else if err := db.ClearRestoreResult(dbPath); err != nil {
 		log.Warn("staged restore result could not be removed", "error", err)
 	}
 	return service.RestoreOutcome{Recorded: true, Status: res.Status, Backup: res.Backup, At: res.AppliedAt, Reason: res.Error}

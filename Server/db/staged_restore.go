@@ -476,9 +476,25 @@ func finishRestore(p restorePaths, res RestoreResult) error {
 		if err := removeAll(p.rollback); err != nil {
 			return fmt.Errorf("removing replaced database: %w", err)
 		}
+		// Make the deletions durable first: a marker removal that survived a
+		// power loss while a rollback file came back would read as a
+		// hand-cancelled restore and discard the restored database.
+		syncDir(filepath.Dir(p.marker))
 	}
 	if err := removeIfPresent(p.marker); err != nil {
 		return fmt.Errorf("removing restore marker: %w", err)
 	}
 	return nil
+}
+
+// syncDir flushes a directory's entries so completed removals survive a power
+// loss. Best effort: Windows cannot sync a directory, and a failure here only
+// narrows the durability window the caller already tolerates.
+func syncDir(dir string) {
+	d, err := os.Open(dir) //nolint:gosec // G304: the configured database directory
+	if err != nil {
+		return
+	}
+	_ = d.Sync()
+	_ = d.Close()
 }
