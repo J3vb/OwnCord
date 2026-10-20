@@ -490,3 +490,42 @@ func TestSweepAFK_FailedMovedSendClearsStash(t *testing.T) {
 		t.Fatal("a failed voice_moved send left the moderator-flag stash behind")
 	}
 }
+
+// A member with moderation in flight is skipped, not waited for: the eviction
+// would otherwise race the moderator's mute and could drop it.
+func TestSweepAFK_SkipsMemberWithModerationInFlight(t *testing.T) {
+	r := newAFKRig(t, 1)
+	a := r.members[0]
+	r.seat(a, r.room)
+	r.idle(a, time.Hour)
+	unlock := r.hub.voiceMod.lock(a.userID)
+	r.sweep()
+	unlock()
+	if len(r.moved(a)) != 0 || r.rowChannel(a) != r.room || stashed(a.c) {
+		t.Fatal("a member with moderation in flight was evicted")
+	}
+	r.sweep()
+	if len(r.moved(a)) != 1 {
+		t.Fatal("the member was not moved once moderation finished")
+	}
+}
+
+// If the administrator unsets the AFK channel while a sweep is running, the
+// remaining candidates are not evicted towards it.
+func TestSweepAFK_StopsWhenTheAFKChannelIsUnsetMidSweep(t *testing.T) {
+	r := newAFKRig(t, 2)
+	a, b := r.members[0], r.members[1]
+	r.seat(a, r.room)
+	r.seat(b, r.room)
+	r.idle(a, time.Hour)
+	r.idle(b, time.Hour)
+	afkSweepSnapshotHook = func() {
+		if _, err := r.db.SetAFKChannel(context.Background(), nil); err != nil {
+			t.Error(err)
+		}
+	}
+	r.sweep()
+	if len(r.moved(a)) != 0 || len(r.moved(b)) != 0 || r.rowChannel(a) != r.room || r.rowChannel(b) != r.room {
+		t.Fatal("members were evicted towards a channel that is no longer the AFK channel")
+	}
+}
