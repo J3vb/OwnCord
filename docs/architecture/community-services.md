@@ -59,7 +59,11 @@ and `message_role_mentions` (WP 6.3a). `user_roles` is the member's role
 assignment, which `users.role_id` already carried and which only an administrator
 can change. The role flags are role settings and `message_role_mentions` is the
 server-written record of which roles a message pinged. They add no data class
-here, and a row goes with its user, role or message by cascade. Other
+here, and a row goes with its user, role or message by cascade.
+**Amended 2026-10-20 (AFK channel):**
+`068_channel_afk.sql` adds `channels.afk`, the flag on the server's one AFK voice
+channel (WP 6.10a). It is a setting an administrator writes, holds no user content
+and is removed with its channel, so it adds no data class here. Other
 historical
 status statements retain their `cbebd37c` baseline.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each

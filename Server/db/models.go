@@ -156,6 +156,9 @@ type Channel struct {
 	// content behaviour of its own (see migration 025). Clients decide what
 	// to do with it — the desktop client shows a per-session age gate.
 	NSFW bool `json:"nsfw"`
+	// AFK marks the server's one AFK voice channel (migration 068): members
+	// parked there can only listen. At most one row carries it.
+	AFK bool `json:"afk"`
 }
 
 // Message represents a row in the messages table.

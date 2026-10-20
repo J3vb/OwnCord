@@ -37,10 +37,10 @@ const (
 	// modelsJSONTagBaseline is the number of struct fields in db/models.go
 	// whose tag carries a json: key, json:"-" included.
 	//
-	// 11 of these were added after the 2026-10-10 architecture audit
+	// 12 of these were added after the 2026-10-10 architecture audit
 	// (113 tags) and are accepted debt: 3D-5b (113 to 114), 3B-9a (114 to 120)
-	// and 3B-10a (120 to 124). Any further tag fails.
-	modelsJSONTagBaseline = 124
+	// 3B-10a (120 to 124) and 6.10a (124 to 125, channels.afk). Any further tag fails.
+	modelsJSONTagBaseline = 125
 
 	// storeFullSurfaceBaseline is the compiler's own method count for Store,
 	// promoted methods from the cross-package embeds included (309 plus the 9

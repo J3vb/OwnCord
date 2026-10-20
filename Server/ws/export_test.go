@@ -733,7 +733,7 @@ func (h *Hub) rollbackVoiceJoinTest(ctx context.Context, c *Client, channelID in
 func (h *Hub) voiceJoinGrantTokenTest(ctx context.Context, c *Client, channelID int64, state *db.VoiceState, reqID string) bool {
 	txn := h.begin(c.userID)
 	defer txn.end()
-	return h.voiceJoinGrantToken(ctx, txn, c, channelID, state, reqID)
+	return h.voiceJoinGrantToken(ctx, txn, c, channelID, false, state, reqID)
 }
 
 func (h *Hub) leaveParkedVoiceTest(ctx context.Context, userID int64, e *voiceGraceEntry, reason string) bool {

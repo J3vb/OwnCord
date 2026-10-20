@@ -272,7 +272,10 @@ func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.C
 			// Age-gate flag. The server enforces content behaviour on a
 			// flagged channel now (B5-7, permissions.CanReadContent); see
 			// nsfw_acknowledged below for the caller's own consent state.
-			"nsfw":    visibleChannels[i].NSFW,
+			"nsfw": visibleChannels[i].NSFW,
+			// The server's one AFK voice channel (migration 068, WP 6.10a):
+			// listen-only, and what the idle sweep moves members into.
+			"afk":     visibleChannels[i].AFK,
 			"private": privacy.Private(visibleChannels[i].ID), // 3D-6, channel-level
 			// Whether THIS caller has acknowledged the label (B5-7). Always
 			// present, like nsfw itself — false for an unlabelled channel,

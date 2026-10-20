@@ -10,7 +10,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// channelFields carries the 14 columns shared by GetChannelRow and
+// channelFields carries the 15 columns shared by GetChannelRow and
 // ListChannelsRow; both generated row types are structurally identical, so a
 // single mapper narrows either to the domain Channel model.
 type channelFields struct {
@@ -31,6 +31,7 @@ type channelFields struct {
 	// generated row types are narrowed by a direct struct conversion, which
 	// requires identical field names.
 	Nsfw int64
+	Afk  int64
 }
 
 func channelFromFields(f channelFields) Channel {
@@ -49,6 +50,7 @@ func channelFromFields(f channelFields) Channel {
 		MixingThreshold: ptrI64toI(f.MixingThreshold),
 		VoiceMaxVideo:   int(f.VoiceMaxVideo),
 		NSFW:            f.Nsfw != 0,
+		AFK:             f.Afk != 0,
 	}
 }
 

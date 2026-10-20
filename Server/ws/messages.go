@@ -279,6 +279,10 @@ type channelPayload struct {
 	// shipped so clients can gate or label it; the server applies no content
 	// behaviour of its own to a flagged channel.
 	NSFW bool `json:"nsfw"`
+	// AFK marks the server's one AFK voice channel (migration 068). Always
+	// sent, and identical for every recipient, so the shared channel_update
+	// frame stays shared. Members in it can listen but not publish.
+	AFK bool `json:"afk"`
 	// Private is the channel-level lock flag (3D-6): the default role cannot
 	// read the channel after its override is applied. Always sent, like NSFW,
 	// and identical for every recipient — never per-viewer — so the shared
@@ -326,6 +330,7 @@ func channelPayloadFrom(ch *db.Channel, private bool) channelPayload {
 		Position:      ch.Position,
 		SlowMode:      ch.SlowMode,
 		NSFW:          ch.NSFW,
+		AFK:           ch.AFK,
 		Private:       private,
 		VoiceMaxUsers: ch.VoiceMaxUsers,
 		VoiceMaxVideo: ch.VoiceMaxVideo,
