@@ -140,6 +140,8 @@ func (h *Hub) removeLiveKitParticipantAsync(ctx context.Context, channelID, user
 	// when the hub stops is cancelled with the hub and waited for, and one
 	// requested after the group closed is refused (ARCH-034).
 	admitted := h.background.Go(ctx, func(jobCtx context.Context) {
+		// Still matters for struct-literal test hubs, whose nil group is
+		// unowned and so never cancelled by the hub stop.
 		select {
 		case <-h.stop:
 			return
@@ -223,6 +225,10 @@ func leaveVoiceChannelWithRetry(ctx context.Context, txn *voiceTxn, channelID in
 				_, retryErr := h.voiceReg.deleteJoinRow(attemptCtx, h, userID, channelID, joinToken)
 				cancel()
 				if retryErr != nil {
+					if retryCtx.Err() != nil {
+						// The group cancelled the attempt: a hub stop, not a failure.
+						return
+					}
 					slog.Warn("LeaveVoiceChannelIfMatch retry failed",
 						"err", retryErr, "user_id", userID, "channel_id", channelID,
 						"attempt", attempt, "max_retries", maxRetries)

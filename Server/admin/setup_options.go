@@ -37,4 +37,8 @@ type SetupOptions struct {
 	// tail before the database closes. Nil runs the tail on an unowned group
 	// (tests, direct construction).
 	Background *syncutil.Group
+	// Shutdown closes when the process begins to shut down, at the start of
+	// App.Close. The update apply tail watches it so a SIGTERM during the
+	// restart countdown aborts the binary swap. Nil never fires.
+	Shutdown <-chan struct{}
 }

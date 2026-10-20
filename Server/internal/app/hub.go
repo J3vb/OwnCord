@@ -250,9 +250,11 @@ func stopHub(ctx context.Context, hub dispatchHub, reason ws.RestartReason) erro
 		err = fmt.Errorf("hub dispatch did not exit: %w", ctx.Err())
 	}
 	// The hub's own background jobs (a voice leave's LiveKit removal and
-	// delete retries) are cancelled with the hub; join them here, inside the
-	// step's budget and before the database closes (ARCH-034). Not in the
-	// dispatch goroutine's exit: a job may need a lock Run would be holding.
+	// delete retries) get a short grace to finish, then are cancelled and
+	// joined, inside the step's budget and before the database closes
+	// (ARCH-034). Not in the dispatch goroutine's exit: a job may need a lock
+	// Run would be holding. After a dispatch timeout ctx is already spent, so
+	// the jobs are cancelled and counted, not waited for.
 	if n := hub.JoinBackground(ctx); n > 0 {
 		slog.Warn("hub background jobs still running at shutdown, abandoning them", "count", n)
 	}

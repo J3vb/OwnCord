@@ -133,6 +133,12 @@ var ApplyStagedUpdate = applyStagedUpdate
 // StubRestart and SetApplyRestartDelay.
 var ApplyAndRestart = applyAndRestart
 
+// NewStopSignal builds the shutdown signal applyAndRestart watches: draining
+// is the background group's Draining channel, shutdown the process-wide one.
+func NewStopSignal(draining, shutdown <-chan struct{}) stopSignal {
+	return stopSignal{draining: draining, shutdown: shutdown}
+}
+
 // SetApplyRestartDelay shrinks the client-facing restart countdown so tests
 // of applyAndRestart don't sleep the real 5 seconds.
 func SetApplyRestartDelay(d time.Duration) (restore func()) {

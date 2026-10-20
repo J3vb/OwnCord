@@ -4912,10 +4912,11 @@ works, and `apply_blocked` (present only then) says why:
 
 #### Errors
 
-| Status | Code                  | Cause                             |
-| ------ | --------------------- | --------------------------------- |
-| 503    | `UPDATE_UNAVAILABLE`  | Update checking is not configured |
-| 502    | `UPDATE_CHECK_FAILED` | GitHub API failure                |
+| Status | Code                  | Cause                                                                                                                                                       |
+| ------ | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 503    | `UPDATE_UNAVAILABLE`  | Update checking is not configured                                                                                                                           |
+| 503    | `SHUTTING_DOWN`       | The server has begun shutting down, so the update was not downloaded or applied (checked before the download and again before the restart countdown starts) |
+| 502    | `UPDATE_CHECK_FAILED` | GitHub API failure                                                                                                                                          |
 
 ---
 

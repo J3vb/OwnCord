@@ -79,7 +79,8 @@ var applyRestartDelay = 5 * time.Second
 // recorded: update_apply when the verified binary is staged and the swap
 // becomes inevitable, update_applied or update_failed for what actually
 // happened.
-func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, _ string, bg *syncutil.Group) http.Handler {
+func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, _ string, bg *syncutil.Group, shutdown <-chan struct{}) http.Handler {
+	stop := stopSignal{draining: bg.Draining(), shutdown: shutdown}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// In a container the running binary is image content: the staged
 		// replacement dies with the container and the restart comes back as
@@ -152,6 +153,13 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 		}
 		newPath := exePath + ".new"
 
+		// A shutdown that has already begun refuses the request up front,
+		// while the database is surely open and before a long download.
+		if stop.stopping() {
+			refuseApplyShuttingDown(w)
+			return
+		}
+
 		// Download and verify.
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 		defer cancel()
@@ -185,12 +193,14 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 		// deferred abort and the outcome row records that nothing was swapped.
 		// The goroutine takes over the busy state claimed above, so the
 		// deferred release stands down once the job is admitted.
-		if !bg.Go(auditCtx, func(jobCtx context.Context) {
-			applyAndRestart(jobCtx, database, actor, info.Latest, hub, exePath, newPath, stagedHash, bg.Draining())
+		// Checked again after the download: a handler that finishes during
+		// the drain must not tell the admin UI the server is restarting.
+		if stop.stopping() || !bg.Go(auditCtx, func(jobCtx context.Context) {
+			applyAndRestart(jobCtx, database, actor, info.Latest, hub, exePath, newPath, stagedHash, stop)
 		}) {
 			auditUpdateOutcome(auditCtx, database, actor, "update_failed",
 				fmt.Sprintf("staged server update %s was not applied, the server is shutting down", info.Latest))
-			writeErr(w, http.StatusServiceUnavailable, "SHUTTING_DOWN", "the server is shutting down — the update was not applied")
+			refuseApplyShuttingDown(w)
 			return
 		}
 		claimed = false
@@ -211,23 +221,23 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 // without a manual restart (the corrective update_aborted broadcast is sent
 // by applyStagedUpdate's deferred guard).
 //
-// draining closes when the process starts shutting down. It, not ctx, ends the
+// stop fires when the process starts shutting down. It, not ctx, ends the
 // countdown early: ctx is cancelled only after the group's grace, so a
 // SIGTERM during the countdown would otherwise still swap the binary and ask
 // for a restart the operator did not want. On a drain nothing is swapped, the
 // slot is released and an update_failed row is written while the database is
 // still open (the background-jobs step runs before it closes).
-func applyAndRestart(ctx context.Context, database *db.DB, actor int64, version string, hub HubBroadcaster, exePath, newPath, stagedHash string, draining <-chan struct{}) {
+func applyAndRestart(ctx context.Context, database *db.DB, actor int64, version string, hub HubBroadcaster, exePath, newPath, stagedHash string, stop stopSignal) {
 	if hub != nil {
 		hub.BroadcastServerRestart(ws.RestartReasonUpdate, 5)
 	}
-	if !waitCountdown(draining) {
+	if !stop.waitCountdown() {
 		auditUpdateOutcome(ctx, database, actor, "update_failed",
 			fmt.Sprintf("staged server update %s was not applied, the server began shutting down during the countdown and the running binary is unchanged", version))
 		abortRestartSensitiveOp()
 		return
 	}
-	if applyStagedUpdate(hub, exePath, newPath, stagedHash) {
+	if applyStagedUpdate(hub, exePath, newPath, stagedHash, stop.stopping) {
 		// Synchronous, like the backup restore's row and for the same reason:
 		// the next thing this process does is hand itself over to the restart
 		// coordinator, and a row still sitting in the async writer's buffer
@@ -244,24 +254,48 @@ func applyAndRestart(ctx context.Context, database *db.DB, actor int64, version 
 	abortRestartSensitiveOp()
 }
 
+// stopSignal says the process has begun to shut down. Two channels carry it
+// because they close at different times: shutdown closes at the very start of
+// App.Close (before the HTTP drain), draining only when the background group
+// is stopped, seven steps later. The group's ctx is cancelled later still, so
+// it is never the signal. Either channel may be nil, which never fires.
+type stopSignal struct {
+	draining <-chan struct{}
+	shutdown <-chan struct{}
+}
+
+// stopping reports, without blocking, whether a shutdown has begun.
+func (s stopSignal) stopping() bool {
+	select {
+	case <-s.shutdown:
+		return true
+	case <-s.draining:
+		return true
+	default:
+		return false
+	}
+}
+
 // waitCountdown sleeps the restart countdown and reports whether it ran to
-// the end. It returns false as soon as draining closes, and also when the
-// drain began in the instant the timer fired, so a shutdown that has started
-// never goes on to swap the binary.
-func waitCountdown(draining <-chan struct{}) bool {
+// the end. It returns false as soon as either signal fires, and also when a
+// shutdown began in the instant the timer fired, so a shutdown that has
+// started never goes on to swap the binary.
+func (s stopSignal) waitCountdown() bool {
 	timer := time.NewTimer(applyRestartDelay)
 	defer timer.Stop()
 	select {
-	case <-draining:
+	case <-s.shutdown:
+		return false
+	case <-s.draining:
 		return false
 	case <-timer.C:
 	}
-	select {
-	case <-draining:
-		return false
-	default:
-		return true
-	}
+	return !s.stopping()
+}
+
+// refuseApplyShuttingDown answers a request the shutdown arrived before.
+func refuseApplyShuttingDown(w http.ResponseWriter) {
+	writeErr(w, http.StatusServiceUnavailable, "SHUTTING_DOWN", "the server is shutting down — the update was not applied")
 }
 
 // updateOutcomeTimeout bounds the synchronous outcome row. The row must be
@@ -304,7 +338,7 @@ func auditUpdateOutcome(ctx context.Context, database *db.DB, actor int64, actio
 // Windows a server on a console stays behind until its replacement exits
 // (updater.SpawnReplacement), and its image cannot be replaced or removed
 // until then.
-func applyStagedUpdate(hub HubBroadcaster, exePath, newPath, stagedHash string) bool {
+func applyStagedUpdate(hub HubBroadcaster, exePath, newPath, stagedHash string, stopping func() bool) bool {
 	committed := false
 	defer func() {
 		if !committed && hub != nil {
@@ -322,6 +356,14 @@ func applyStagedUpdate(hub HubBroadcaster, exePath, newPath, stagedHash string) 
 		return false
 	}
 	defer staged.Close() //nolint:errcheck
+
+	// Last chance to honour a shutdown that landed in the moments since the
+	// countdown ended: nothing has been renamed yet. A nil stopping never
+	// fires.
+	if stopping != nil && stopping() {
+		slog.Info("update: shutdown began before the swap, leaving the running binary in place")
+		return false
+	}
 
 	// Rename: current -> .old-*, verified staged binary -> current
 	reserved, err := os.CreateTemp(filepath.Dir(exePath), filepath.Base(exePath)+".old-*")

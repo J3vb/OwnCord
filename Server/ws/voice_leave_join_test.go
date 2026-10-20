@@ -56,16 +56,22 @@ func TestRemoveParticipantAsync_JoinedByStopHub(t *testing.T) {
 		t.Fatal("the removal never reached LiveKit")
 	}
 
-	// Stop alone cancels the hub's life; the join is what waits for the job.
-	start := time.Now()
+	// Stop alone does not cancel an in-flight removal (a mid-request cancel
+	// leaves a ghost in the SFU). A short join must therefore report the job
+	// still running, which also proves it is owned by the hub's group: on an
+	// unowned group this would report 0.
 	h.Stop()
+	short, cancelShort := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancelShort()
+	if n := h.JoinBackground(short); n != 1 {
+		t.Fatalf("JoinBackground within the grace reported %d running jobs, want the removal still in flight", n)
+	}
+	// That join gave up and cancelled the group; a second one waits the
+	// cancelled job out.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if n := h.JoinBackground(ctx); n != 0 {
 		t.Fatalf("JoinBackground left %d jobs running, want the removal cancelled and joined", n)
-	}
-	if took := time.Since(start); took > 3*time.Second {
-		t.Errorf("JoinBackground took %v, want the removal cancelled by the hub stop, not by its own timeout", took)
 	}
 
 	// Edge: a removal requested once the hub is stopped is refused, so nothing
@@ -119,15 +125,16 @@ func TestVoiceLeaveRetry_JoinedByStopHub(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	start := time.Now()
 	h.Stop()
+	short, cancelShort := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancelShort()
+	if n := h.JoinBackground(short); n != 1 {
+		t.Fatalf("JoinBackground within the grace reported %d running jobs, want the parked retry (owned by the hub group)", n)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if n := h.JoinBackground(ctx); n != 0 {
 		t.Fatalf("JoinBackground left %d jobs running, want the retry cancelled and joined", n)
-	}
-	if took := time.Since(start); took > 3*time.Second {
-		t.Errorf("JoinBackground took %v, want the retry cancelled by the hub stop", took)
 	}
 	select {
 	case err := <-voice.ended:

@@ -9,6 +9,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/syncutil"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // TestApplyUpdate_DrainDuringCountdownAbortsSwap pins the 4.5b hand-off: a
@@ -41,7 +42,7 @@ func TestApplyUpdate_DrainDuringCountdownAbortsSwap(t *testing.T) {
 	bg := syncutil.NewGroup(context.Background())
 	hub := &mockHub{}
 	if !bg.Go(context.Background(), func(ctx context.Context) {
-		admin.ApplyAndRestart(ctx, database, actor, "v9.9.9", hub, exePath, newPath, stagedHash, bg.Draining())
+		admin.ApplyAndRestart(ctx, database, actor, "v9.9.9", hub, exePath, newPath, stagedHash, admin.NewStopSignal(bg.Draining(), nil))
 	}) {
 		t.Fatal("Go refused the apply tail on a live group")
 	}
@@ -74,6 +75,10 @@ func TestApplyUpdate_DrainDuringCountdownAbortsSwap(t *testing.T) {
 		t.Errorf("restart state = %q, want idle: the slot must be released", got)
 	}
 
+	if len(hub.restartCalls) != 1 || hub.restartCalls[0].reason != ws.RestartReasonUpdate {
+		t.Errorf("restartCalls = %+v, want exactly the countdown broadcast and no corrective one", hub.restartCalls)
+	}
+
 	var rows int
 	if err := database.QueryRowContext(context.Background(),
 		`SELECT COUNT(*) FROM audit_log WHERE action = 'update_failed' AND actor_id = ? AND target_type = 'server'`,
@@ -82,5 +87,61 @@ func TestApplyUpdate_DrainDuringCountdownAbortsSwap(t *testing.T) {
 	}
 	if rows != 1 {
 		t.Errorf("update_failed rows = %d, want 1", rows)
+	}
+}
+
+// TestApplyUpdate_ShutdownBeforeGroupDrainAbortsSwap is the SIGTERM case: the
+// process-wide shutdown signal closes at the start of App.Close, while the
+// background group is still open (its Draining closes seven steps later,
+// after a hub-notice wait that lasts 5 s with a client connected). The
+// countdown must end on the shutdown signal alone, with the group untouched.
+func TestApplyUpdate_ShutdownBeforeGroupDrainAbortsSwap(t *testing.T) {
+	exePath, newPath, stagedHash := stageFakeUpdate(t)
+	admin.ResetRestartState()
+	admin.ForceRestartState(true)
+	t.Cleanup(admin.ResetRestartState)
+	reasons, restoreHook := admin.StubRestartCapture()
+	defer restoreHook()
+	defer admin.SetApplyRestartDelay(time.Hour)()
+
+	bg := syncutil.NewGroup(context.Background())
+	shutdown := make(chan struct{})
+	hub := &mockHub{}
+	done := make(chan struct{})
+	if !bg.Go(context.Background(), func(ctx context.Context) {
+		defer close(done)
+		admin.ApplyAndRestart(ctx, nil, 0, "v9.9.9", hub, exePath, newPath, stagedHash, admin.NewStopSignal(bg.Draining(), shutdown))
+	}) {
+		t.Fatal("Go refused the apply tail on a live group")
+	}
+	close(shutdown) // the group is NOT stopped
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the countdown ignored the shutdown signal and kept waiting")
+	}
+	if got, err := os.ReadFile(exePath); err != nil || string(got) != "old binary" {
+		t.Errorf("exePath contents = %q, err=%v; want the binary unchanged", got, err)
+	}
+	if got := reasons(); len(got) != 0 {
+		t.Errorf("restart hook reasons = %v, want none", got)
+	}
+	if got := admin.CurrentRestartState(); got != "idle" {
+		t.Errorf("restart state = %q, want idle", got)
+	}
+}
+
+// A shutdown landing between the countdown and the first rename still aborts:
+// applyStagedUpdate re-checks right before it touches the disk.
+func TestApplyStagedUpdate_ShutdownBeforeRenameLeavesBinary(t *testing.T) {
+	exePath, newPath, stagedHash := stageFakeUpdate(t)
+	if admin.ApplyStagedUpdate(&mockHub{}, exePath, newPath, stagedHash, func() bool { return true }) {
+		t.Fatal("ApplyStagedUpdate = true, want the swap refused during a shutdown")
+	}
+	if got, err := os.ReadFile(exePath); err != nil || string(got) != "old binary" {
+		t.Errorf("exePath contents = %q, err=%v; want the binary unchanged", got, err)
+	}
+	if olds := oldBinaries(t, exePath); len(olds) != 0 {
+		t.Errorf("old binaries = %v, want none", olds)
 	}
 }
