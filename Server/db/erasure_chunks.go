@@ -112,6 +112,8 @@ func (d *DB) EraseAccountLock(ctx context.Context, userID int64, guard bool) (*E
 	if err != nil {
 		return nil, err
 	}
+	// The lock has committed: a test hook here must not return an error, or
+	// the caller would treat a committed lock as nothing changed.
 	if err := d.erasureHook("lock", 0); err != nil {
 		return nil, err
 	}

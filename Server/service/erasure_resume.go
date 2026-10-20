@@ -11,11 +11,11 @@ import (
 )
 
 // eraseInlineBudget is how long Erase drives the drain stage itself before it
-// hands the rest to the maintenance loop. It is under the HTTP server's 30 s
-// WriteTimeout, so a request still answers while most accounts finish inline,
+// hands the rest to the maintenance loop. With the lock, the finish and the
+// file removals on top it stays under the HTTP server's 30 s WriteTimeout, so a request still answers while most accounts finish inline,
 // as they did when the erasure was one transaction. A variable so tests can
 // shrink it.
-var eraseInlineBudget = 20 * time.Second
+var eraseInlineBudget = 12 * time.Second
 
 // ErasureStageStore is the database half of a live erasure in three short
 // writer transactions (db.EraseAccountLock, EraseAccountDrain,
