@@ -303,16 +303,26 @@ func (h *Hub) webhookLeftCleanupClient(ctx context.Context, txn *voiceTxn, c *Cl
 // re-elected, never runs for it; the election here takes its place. A parked
 // member's slot was cleared when it was parked, so it no longer counts in the
 // election scan, while the key-holder map may still name it. The election runs
-// whether or not a row was deleted, because the grace entry is dropped either
-// way, and it is a no-op when the holder does not change. txn is the caller's
+// only when this call removed membership: a row was deleted, or a grace entry
+// parking this exact join (channel AND token) was dropped, even if the delete
+// failed. A late leave for an older join instance removes neither, and must
+// not demote a holder who is merely parked. The grace entry is read before
+// deleteRow takes it, safe because the member lock is held and the expiry and
+// resume paths take entries under that same lock. txn is the caller's
 // Hub.begin(userID) handle; no hub lock is held.
 func (h *Hub) webhookLeftDeleteRow(ctx context.Context, txn *voiceTxn, userID, channelID int64, joinToken, stage string) {
+	parked := false
+	if e := h.voiceReg.voiceGrace.get(userID); e != nil {
+		parked = e.snap.chID == channelID && e.snap.joinToken == joinToken
+	}
 	deleted, dbErr := txn.deleteRow(ctx, channelID, joinToken)
 	if dbErr != nil {
 		slog.Error("livekit webhook: LeaveVoiceChannelIfMatch failed",
 			"error", dbErr, "stage", stage, "user_id", userID, "channel_id", channelID)
 	}
-	h.updateKeyHolder(channelID)
+	if parked || deleted {
+		h.updateKeyHolder(channelID)
+	}
 	if dbErr == nil && deleted {
 		h.broadcastVoiceEvent(ctx, channelID, userID, buildVoiceLeave(channelID, userID))
 		slog.Info("livekit webhook: cleaned stale DB voice row",

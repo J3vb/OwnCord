@@ -175,8 +175,28 @@ func TestWebhookParticipantLeft_ParkedLastMemberEmptiesChannel(t *testing.T) {
 	}
 }
 
-// The webhook and a resuming socket both run under the member lock, so the
-// outcome is one or the other and never a live slot over a deleted row (or a
+// A late leave for an older join instance removes nothing, so a holder that is
+// merely parked keeps the key and its entry and row stay.
+func TestWebhookParticipantLeft_StaleTokenKeepsParkedHolder(t *testing.T) {
+	r := newGraceRoom(t)
+	r.park(t)
+
+	r.h.HandleWebhookParticipantLeftForTest(r.uid, r.chID, "older-join-token")
+
+	if !r.h.IsVoiceKeyHolder(r.chID, r.uid) {
+		t.Error("a stale-token leave demoted the parked key holder")
+	}
+	if !r.h.voiceReg.voiceGrace.has(r.uid, r.chID) {
+		t.Error("a stale-token leave dropped the grace entry")
+	}
+	if row, err := r.h.voice.State(context.Background(), r.uid); err != nil || row == nil || row.JoinedAt != r.parkedTok {
+		t.Errorf("a stale-token leave changed the row: %+v, %v", row, err)
+	}
+}
+
+// A race/deadlock probe, not an ordering proof: it runs the webhook and a
+// resuming socket concurrently. Both run under the member lock, so the outcome
+// is one or the other and never a live slot over a deleted row (or a
 // live row with no slot) — and the key holder is never left on a gone member.
 func TestWebhookParticipantLeft_RacingGraceResumeIsConsistent(t *testing.T) {
 	for range 8 {
