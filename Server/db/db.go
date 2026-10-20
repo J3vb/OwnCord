@@ -272,8 +272,6 @@ func openFile(path string, maxReaders int, takeLock bool) (*DB, error) {
 			release()
 		}
 	}()
-	// A restore staged by the admin panel is applied here, under the lock and
-	// before any connection exists (prepareOpen).
 	retryFloor, err := prepareOpen(path, takeLock && release != nil)
 	if err != nil {
 		return nil, err
