@@ -678,9 +678,10 @@ func TestAdminAPI_ApplyUpdate_OutlastsServerWriteTimeout(t *testing.T) {
 	}
 }
 
-// The shutdown hook cancels an apply that is already running: the handler
-// stops with 502 instead of carrying on to its 409, and does not hold the
-// drain for the rest of its budget.
+// The shutdown hook ends an apply that is in its release-check stage: that
+// stage waits for its detached lookup to return (here 600 ms; up to about 30 s
+// in production) and then the handler answers SERVER_SHUTTING_DOWN instead of
+// carrying on to its 409.
 func TestAdminAPI_ApplyUpdate_EndAppliesCancelsInFlight(t *testing.T) {
 	srv, token := newApplyTestServer(t, 5*time.Second, 600*time.Millisecond)
 	hook := admin.EndApplies(srv.Config)
@@ -688,13 +689,9 @@ func TestAdminAPI_ApplyUpdate_EndAppliesCancelsInFlight(t *testing.T) {
 		time.Sleep(150 * time.Millisecond)
 		hook()
 	}()
-	start := time.Now()
-	resp, _ := postApply(t, srv, token)
-	if resp.StatusCode != http.StatusBadGateway {
-		t.Errorf("status = %d, want 502 (cancelled by shutdown)", resp.StatusCode)
-	}
-	if time.Since(start) > 3*time.Second {
-		t.Errorf("apply took %v after shutdown hook", time.Since(start))
+	resp, code := postApply(t, srv, token)
+	if resp.StatusCode != http.StatusServiceUnavailable || code != "SERVER_SHUTTING_DOWN" {
+		t.Errorf("status = %d error = %q, want 503 SERVER_SHUTTING_DOWN", resp.StatusCode, code)
 	}
 }
 
@@ -702,8 +699,84 @@ func TestAdminAPI_ApplyUpdate_EndAppliesCancelsInFlight(t *testing.T) {
 func TestAdminAPI_ApplyUpdate_AfterEndAppliesIsCancelled(t *testing.T) {
 	srv, token := newApplyTestServer(t, 5*time.Second, 0)
 	admin.EndApplies(srv.Config)()
-	resp, _ := postApply(t, srv, token)
-	if resp.StatusCode != http.StatusBadGateway {
-		t.Errorf("status = %d, want 502 (apply after shutdown began)", resp.StatusCode)
+	resp, code := postApply(t, srv, token)
+	if resp.StatusCode != http.StatusServiceUnavailable || code != "SERVER_SHUTTING_DOWN" {
+		t.Errorf("status = %d error = %q, want 503 SERVER_SHUTTING_DOWN", resp.StatusCode, code)
+	}
+}
+
+// A shutdown that lands during the download/verify stage ends the apply with
+// SERVER_SHUTTING_DOWN, removes the staged file, releases the restart slot
+// and promises no restart. The real download needs a signed release manifest,
+// so the download stage is replaced by a stub that stages a file and then
+// trickles until its context ends, then reports success: this covers both the
+// cancel and the cancel-after-verify branch.
+func TestAdminAPI_ApplyUpdate_ShutdownDuringDownloadCleansUp(t *testing.T) {
+	t.Setenv("OWNCORD_CONTAINER", "0")
+	t.Cleanup(admin.SetInstallWritable(func() error { return nil }))
+	assets := []map[string]any{}
+	for _, n := range []string{"chatserver.exe", "chatserver-linux-amd64.tar.gz", "chatserver-linux-arm64.tar.gz", "checksums.sha256",
+		"chatserver.exe.sig", "server-update-manifest.json", "server-update-manifest.json.sig"} {
+		assets = append(assets, map[string]any{
+			"name":                 n,
+			"browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/" + n,
+		})
+	}
+	mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"tag_name": "v2.0.0",
+			"html_url": "https://github.com/J3vb/OwnCord/releases/tag/v2.0.0",
+			"assets":   assets,
+		})
+	}))
+	defer mockGH.Close()
+
+	exePath, err := updater.ExecutablePath()
+	if err != nil {
+		t.Fatalf("ExecutablePath: %v", err)
+	}
+	newPath := exePath + ".new"
+	t.Cleanup(func() { _ = os.Remove(newPath) })
+	started := make(chan struct{})
+	t.Cleanup(admin.SetDownloadAndVerify(func(_ *updater.Updater, ctx context.Context, _, _, _, _, _, _, dest string) (string, error) {
+		if err := os.WriteFile(dest, []byte("partial"), 0o600); err != nil {
+			return "", err
+		}
+		close(started)
+		<-ctx.Done()
+		return "stagedhash", nil
+	}))
+
+	u := updater.NewUpdater("1.0.0", "", "J3vb", "OwnCord")
+	u.SetBaseURL(mockGH.URL)
+	database := openAdminTestDB(t)
+	hub := &mockHub{}
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, u, nil, nil, nil, newTestServices(database))
+	token := createAdminUser(t, database)
+	srv := httptest.NewUnstartedServer(handler)
+	srv.EnableHTTP2 = true
+	srv.StartTLS()
+	defer srv.Close()
+
+	hook := admin.EndApplies(srv.Config)
+	go func() {
+		<-started
+		hook()
+	}()
+	resp, code := postApply(t, srv, token)
+	if resp.StatusCode != http.StatusServiceUnavailable || code != "SERVER_SHUTTING_DOWN" {
+		t.Fatalf("status = %d error = %q, want 503 SERVER_SHUTTING_DOWN", resp.StatusCode, code)
+	}
+	if _, statErr := os.Stat(newPath); !os.IsNotExist(statErr) {
+		t.Errorf("staged file still present: %v", statErr)
+	}
+	if len(hub.restartCalls) != 0 {
+		t.Errorf("restart broadcasts = %+v, want none", hub.restartCalls)
+	}
+	// The restart slot was released: a second apply is refused for shutdown
+	// (hook already ran), not as UPDATE_IN_PROGRESS.
+	_, code2 := postApply(t, srv, token)
+	if code2 == "UPDATE_IN_PROGRESS" || code2 == "RESTART_PENDING" {
+		t.Errorf("second apply error = %q, restart slot not released", code2)
 	}
 }

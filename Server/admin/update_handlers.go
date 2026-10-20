@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -68,6 +69,23 @@ func handleCheckUpdate(u *updater.Updater) http.HandlerFunc {
 // clients actually gets before the swap + restart request. A var so tests can
 // shrink it; the broadcast countdown below stays 5 to match this value.
 var applyRestartDelay = 5 * time.Second
+
+// downloadAndVerify is the updater's download stage; a var only so a test can
+// stand in for it (the real one needs a signed release manifest).
+var downloadAndVerify = (*updater.Updater).DownloadAndVerify
+
+// applyCancelled answers 503 SERVER_SHUTTING_DOWN and reports true when the
+// apply's context was cancelled (shutdown, via EndApplies) rather than timed
+// out. A deadline stays on the ordinary failure codes.
+func applyCancelled(ctx context.Context, w http.ResponseWriter) bool {
+	if !errors.Is(ctx.Err(), context.Canceled) {
+		return false
+	}
+	slog.Info("update apply cancelled: the server is shutting down", "cause", ctx.Err())
+	writeErr(w, http.StatusServiceUnavailable, "SERVER_SHUTTING_DOWN",
+		"The server is shutting down; try the update again once it is back")
+	return true
+}
 
 // applyBudget bounds one POST /updates/apply: the release check, the asset
 // download and its verification, together. It matches the transfer lifetime in
@@ -176,6 +194,9 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 			err = ctx.Err() // the check does not stop on cancel; the apply must
 		}
 		if err != nil {
+			if applyCancelled(ctx, w) {
+				return
+			}
 			slog.Error("update check failed during apply", "err", err)
 			writeErr(w, http.StatusBadGateway, "UPDATE_CHECK_FAILED", "failed to check for updates — see server logs")
 			return
@@ -208,7 +229,7 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 		// (bound to the signed release manifest). The apply goroutine below
 		// re-verifies the staged file against this hash through an open
 		// handle — never by path — before the rename.
-		stagedHash, err := u.DownloadAndVerify(ctx, info.Latest, info.DownloadURL, info.ChecksumURL, info.SignatureURL, info.ManifestURL, info.ManifestSignatureURL, newPath)
+		stagedHash, err := downloadAndVerify(u, ctx, info.Latest, info.DownloadURL, info.ChecksumURL, info.SignatureURL, info.ManifestURL, info.ManifestSignatureURL, newPath)
 		if err == nil && ctx.Err() != nil {
 			// Cancelled (shutdown) after verification but before the swap was
 			// promised: do not start it, and do not leave the staged file.
@@ -216,6 +237,9 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 		}
 		if err != nil {
 			_ = os.Remove(newPath)
+			if applyCancelled(ctx, w) {
+				return
+			}
 			slog.Error("update download/verify failed", "err", err)
 			writeErr(w, http.StatusBadGateway, "DOWNLOAD_FAILED", "download or verification failed — see server logs")
 			return

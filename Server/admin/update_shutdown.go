@@ -26,9 +26,11 @@ type applyEntry struct {
 // has its context cancelled, and one that starts on srv afterwards is
 // cancelled at once. Register it with http.Server.RegisterOnShutdown.
 //
-// Only the download and verification are cancellable. Once the handler has
-// answered "applying", the swap runs on a context detached from the request
-// and is never cut halfway.
+// The hook cuts the download and verification stage. The release-check stage
+// waits for its detached lookup (up to about 30 s) and then returns. Once the
+// handler has answered "applying", the swap runs on a context detached from
+// the request: the request's end does not cancel it (joining it at process
+// shutdown is WP 4.5b).
 func EndApplies(srv *http.Server) func() {
 	return func() {
 		appliesInFlight.mu.Lock()
