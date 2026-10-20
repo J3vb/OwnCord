@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
@@ -106,12 +105,4 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 	result.Reply = buildVoiceToken(channelID, token, "/livekit", d.TokenGen.URL(), isKeyHolder)
 	slog.Info("voice token refreshed (v2)", "user_id", userID, "channel_id", channelID)
 	return result
-}
-
-// voiceMicrophoneAllowed combines the role grant with the current session's
-// moderation flags for both token minting and active SFU permission updates.
-// Deafen only suppresses the microphone here: clients keep stream audio
-// available while deafened, so subscription and screen-share grants stay separate.
-func voiceMicrophoneAllowed(canSpeak bool, state *db.VoiceState) bool {
-	return canSpeak && state != nil && !state.ServerMuted && !state.ServerDeafened
 }

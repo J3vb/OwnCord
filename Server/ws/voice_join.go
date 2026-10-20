@@ -607,6 +607,14 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, txn *voiceTxn, c *Client, c
 	return true
 }
 
+// voiceMicrophoneAllowed combines the role grant with the current session's
+// moderation flags for both token minting and active SFU permission updates.
+// Deafen only suppresses the microphone here: clients keep stream audio
+// available while deafened, so subscription and screen-share grants stay separate.
+func voiceMicrophoneAllowed(canSpeak bool, state *db.VoiceState) bool {
+	return canSpeak && state != nil && !state.ServerMuted && !state.ServerDeafened
+}
+
 // rollbackVoiceJoin undoes a partially-completed voice join: clears the
 // client's voice channel ID, removes the DB voice state row, and broadcasts
 // voice_leave so other clients don't see a ghost participant.
