@@ -89,6 +89,12 @@ describe("pin row rendering", () => {
     expect(textOf(el)).toContain("You pinned a message to this channel.");
   });
 
+  it("keeps the links in place when the name carries a marker character", () => {
+    const el = render(pinRow({ user: { id: OTHER, username: "x\uE000y\uE001z", avatar: null } }));
+    expect(textOf(el)).toContain("xyz pinned a message to this channel. See all pinned messages.");
+    expect(el.querySelectorAll("button")).toHaveLength(2);
+  });
+
   it("draws the same wording in a DM", () => {
     const opts = makeOpts({ channelType: "dm" });
     expect(textOf(render(pinRow(), opts))).toContain("alice pinned a message to this channel.");

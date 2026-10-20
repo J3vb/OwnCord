@@ -15,6 +15,7 @@ import { messagingText } from "../../i18n/messaging";
 // sentence is formatted, so a future wording keeps its own word order.
 const MESSAGE_MARK = "";
 const PINS_MARK = "";
+const MARKS = new RegExp(`[${MESSAGE_MARK}${PINS_MARK}]`, "g");
 
 /** The message this row pinned, or null when it can no longer be jumped to. */
 export function pinRowTarget(msg: Message): number | null {
@@ -50,10 +51,12 @@ export function renderPinRowText(
   opts: MessageListOptions,
   signal: AbortSignal,
 ): HTMLSpanElement {
-  const author =
+  // A name carrying a marker would be split on too and move the links into it.
+  const author = (
     msg.user.id === opts.currentUserId
       ? messagingText("group.you")
-      : resolveDisplayName(resolveAuthor(msg.user));
+      : resolveDisplayName(resolveAuthor(msg.user))
+  ).replace(MARKS, "");
   const sentence = messagingText("pin.row", {
     author,
     message: MESSAGE_MARK,
