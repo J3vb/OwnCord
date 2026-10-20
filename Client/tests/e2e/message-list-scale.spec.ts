@@ -238,10 +238,10 @@ function pagedHistory(): void {
     const size = container.children.length + removed - added;
     if (removed >= 10 && removed >= size * 0.8) scale.rebuilds++;
     else if (added > 0) {
-      // A slide: only the rows that entered may be measured (+2 slack).
+      // A slide: only the rows that entered or left may be measured (+2 slack).
       scale.slides++;
-      scale.maxExtraReads = Math.max(scale.maxExtraReads, reads - added);
-      if (reads - added > 2) scale.overBudgetSlides++;
+      scale.maxExtraReads = Math.max(scale.maxExtraReads, reads - added - removed);
+      if (reads - added - removed > 2) scale.overBudgetSlides++;
     }
   }).observe(document, { childList: true, subtree: true });
   /* eslint-enable @typescript-eslint/no-explicit-any */
@@ -345,13 +345,13 @@ test.describe("Message list scrolling up through 600 messages", () => {
     expect(pages, "history pages that landed").toBeGreaterThanOrEqual(5);
     expect(rebuilds, "full window rebuilds while pages landed").toBe(0);
     // A scroll slide measures the rows that entered and nothing else
-    // (chat-scroll-perf PR f): offsetHeight reads <= rows entered + 2. A
+    // (chat-scroll-perf PR f): offsetHeight reads <= rows entered + rows departed + 2. A
     // history page landing is the one other slide, and it re-records the whole
     // window once (by design), so at most one over-budget slide per page.
     expect(done.slides, "window slides").toBeGreaterThan(done.pages);
     expect(
       done.overBudgetSlides - first.overBudgetSlides,
-      "slides that read offsetHeight beyond rows entered + 2, other than page landings",
+      "slides that read offsetHeight beyond rows entered + departed + 2, other than page landings",
     ).toBeLessThanOrEqual(pages);
 
     // Each distinct GIF is fetched through the broker at most once: a rebuilt

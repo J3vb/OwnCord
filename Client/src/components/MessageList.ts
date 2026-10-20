@@ -1298,10 +1298,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    *  rows that left, render only the rows that entered, keep the rest. */
   function shiftWindow(start: number, end: number): void {
     if (contentContainer === null) return;
-    // Rows that leave were measured when they entered or by the
-    // ResizeObserver pass, so only the rows that enter are measured below.
+    // Rows that stay were measured when they entered or by the ResizeObserver
+    // pass, so only the rows that leave (here, before they are released: one
+    // may have grown since the last pass) and the rows that enter (below) are
+    // measured.
     const prevStart = renderedStart;
     const prevEnd = renderedEnd;
+    measureRendered(prevStart, start);
+    measureRendered(end, prevEnd);
     const rows = [...contentContainer.children] as HTMLElement[];
     // Rows entering above the view keep the first row that stays in place on
     // screen; rows leaving above it are measured, so their spacer share is exact.

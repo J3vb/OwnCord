@@ -234,7 +234,7 @@ describe("MessageList incremental window shift", () => {
     return reads;
   }
 
-  it("measures only the rows that entered when the window slides", async () => {
+  it("measures only the rows that entered or left when the window slides", async () => {
     await scrollTo(ROW_H * 150);
     const before = new Set(content.children);
     // Synchronous slide: no ResizeObserver frame in the counted section.
@@ -247,9 +247,11 @@ describe("MessageList incremental window shift", () => {
     const readsAfterFrame = await countHeightReads(async () => {
       await nextFrame();
     });
-    const entered = [...content.children].filter((el) => !before.has(el)).length;
+    const after = new Set(content.children);
+    const entered = [...after].filter((el) => !before.has(el)).length;
+    const departed = [...before].filter((el) => !after.has(el)).length;
     expect(entered).toBeGreaterThan(0);
-    expect(reads + readsAfterFrame).toBeLessThanOrEqual(entered + 2);
+    expect(reads + readsAfterFrame).toBeLessThanOrEqual(entered + departed + 2);
   });
 
   it("measures every rendered row on a full rebuild", async () => {
@@ -258,5 +260,36 @@ describe("MessageList incremental window shift", () => {
       await scrollTo(0);
     });
     expect(reads).toBeGreaterThanOrEqual(content.children.length);
+  });
+
+  it("records a grown row's height when the window slides it out before the resize frame", async () => {
+    await scrollTo(ROW_H * 150);
+    const before = [...content.children];
+    const grown = before[0] as HTMLElement;
+    const topBefore = parseFloat(topSpacer.style.height);
+    const desc = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get() {
+        return this === grown ? ROW_H + 200 : ROW_H;
+      },
+    });
+    const styleSpy = vi
+      .spyOn(window, "getComputedStyle")
+      .mockReturnValue({ marginTop: "0px", marginBottom: "0px" } as CSSStyleDeclaration);
+    try {
+      await scrollTo(ROW_H * 153);
+    } finally {
+      styleSpy.mockRestore();
+      if (desc === undefined)
+        delete (HTMLElement.prototype as { offsetHeight?: number }).offsetHeight;
+      else Object.defineProperty(HTMLElement.prototype, "offsetHeight", desc);
+    }
+    const after = new Set(content.children);
+    expect(after.has(grown)).toBe(false);
+    const departed = before.filter((el) => !after.has(el)).length;
+    // The rows above the window now sum to their old share, the departed rows'
+    // estimates and the 200px the grown row gained while it was still drawn.
+    expect(parseFloat(topSpacer.style.height) - topBefore).toBeCloseTo(departed * ROW_H + 200, 0);
   });
 });
