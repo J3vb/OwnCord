@@ -137,10 +137,12 @@ func TestTimeoutExpiry_TimerLiftsTimeoutMuteButNotManualMute(t *testing.T) {
 	if matched, _, err := h.SetServerMuteLocked(ctx, manual, chID, true); err != nil || !matched {
 		t.Fatalf("manual mute: matched=%v err=%v", matched, err)
 	}
-	// A timer for the manually muted user too: it must find nothing of a
+	// The manually muted user's timer fires first (two seconds before the
+	// timed-out user's), so by the time the timeout's mute has lifted the
+	// manual user's callback has provably run and found nothing of a
 	// timeout's to lift.
+	h.scheduleTimeoutExpiryRefresh(manual, time.Now())
 	h.scheduleTimeoutExpiryRefresh(timedOut, expires)
-	h.scheduleTimeoutExpiryRefresh(manual, expires)
 
 	deadline := time.Now().Add(8 * time.Second)
 	for {
@@ -155,5 +157,65 @@ func TestTimeoutExpiry_TimerLiftsTimeoutMuteButNotManualMute(t *testing.T) {
 	}
 	if s, _ := h.voice.State(ctx, manual); s == nil || !s.ServerMuted {
 		t.Fatal("the expiry timer lifted a mute a moderator applied separately")
+	}
+}
+
+// A timeout that is superseded keeps the mute: when the older timeout's timer
+// fires, ownership has moved to the newer one, which is still active, so the
+// mute stays; it lifts only when the newer timeout runs out.
+func TestTimeoutExpiry_SupersededTimerKeepsMuteUntilNewTimeoutEnds(t *testing.T) {
+	ctx := context.Background()
+	database, chID := applyTimeoutMuteTestDB(t)
+	uid, err := database.CreateUser(ctx, "expiry-superseded", "hash", 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := newTestHubWith(t, HubOptions{DB: database})
+	prev := muteParticipantHookForTest
+	muteParticipantHookForTest = func(context.Context, int64, int64, string, bool) error { return nil }
+	defer func() { muteParticipantHookForTest = prev }()
+	if err := h.voice.Join(ctx, uid, chID, 0); err != nil {
+		t.Fatalf("Join: %v", err)
+	}
+	st, _ := h.voice.State(ctx, uid)
+	mod := modID(t, database)
+
+	expiresA := time.Now().Add(time.Second)
+	idA, _, err := database.TimeoutUser(ctx, uid, mod, nil, "first", expiresA)
+	if err != nil {
+		t.Fatalf("TimeoutUser A: %v", err)
+	}
+	if applied, owned := h.MuteForTimeout(ctx, uid, chID, idA, st.JoinedAt, nil); !applied || !owned {
+		t.Fatalf("MuteForTimeout A applied=%v owned=%v", applied, owned)
+	}
+	h.scheduleTimeoutExpiryRefresh(uid, expiresA)
+
+	// B supersedes A before A's timer fires; ownership moves A -> B.
+	expiresB := time.Now().Add(3 * time.Second)
+	idB, superseded, err := database.TimeoutUser(ctx, uid, mod, nil, "second", expiresB)
+	if err != nil {
+		t.Fatalf("TimeoutUser B: %v", err)
+	}
+	h.MuteForTimeout(ctx, uid, chID, idB, st.JoinedAt, superseded)
+	if s, _ := h.voice.State(ctx, uid); s == nil || s.ServerMutedBy == nil || *s.ServerMutedBy != idB {
+		t.Fatalf("ownership did not move to B (%d): %+v", idB, s)
+	}
+	h.scheduleTimeoutExpiryRefresh(uid, expiresB)
+
+	// Past A's timer (expiresA + 1s slack), B is still active.
+	time.Sleep(time.Until(expiresA) + timeoutExpiryRefreshSlack + 500*time.Millisecond)
+	if s, _ := h.voice.State(ctx, uid); s == nil || !s.ServerMuted || s.ServerMutedBy == nil || *s.ServerMutedBy != idB {
+		t.Fatalf("A's timer lifted or disturbed B's mute: %+v", s)
+	}
+
+	deadline := time.Now().Add(6 * time.Second)
+	for {
+		if s, _ := h.voice.State(ctx, uid); s != nil && !s.ServerMuted {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("B's expiry did not lift the mute")
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }

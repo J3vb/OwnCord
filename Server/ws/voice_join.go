@@ -604,8 +604,9 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "voice not configured"}}
 	}
 
-	// Re-run the join gate (permissions.CanJoinVoice, exactly as voice_join
-	// applies it) where the credential is minted. The channel comes from the
+	// Re-run the join gate where the credential is minted
+	// (permissions.CanStayInVoice: voice_join's CanJoinVoice minus the
+	// timeout, which only blocks a new join). The channel comes from the
 	// client's own session state, and voice_join used to be the only place
 	// the gate was checked — so a user whose CONNECT_VOICE was revoked
 	// mid-session kept minting fresh SFU room-join grants, and a block imposed

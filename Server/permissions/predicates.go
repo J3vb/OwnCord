@@ -243,8 +243,9 @@ func CanPinMessage(s Subject) error {
 // channel that has a room, for a DM membership plus no block, and no archive
 // for either kind — the admin
 // PATCH accepts `archived` for any channel type, and an evicted participant
-// must not rejoin the archived room. Applies at join, at token refresh, to
-// the target of a moderator move, and in the stale-voice sweep.
+// must not rejoin the archived room. Applies at join and to the target
+// of a moderator move; a member already in the room (token refresh, the
+// stale-voice sweep) is held to CanStayInVoice, which ignores the timeout.
 func CanJoinVoice(s Subject) error {
 	if s.TimedOut {
 		return ErrTimedOut
