@@ -175,10 +175,9 @@ func leaveVoiceChannelWithRetry(ctx context.Context, txn *voiceTxn, channelID in
 		return nil
 	}
 
-	// Synchronous first attempt — channel-conditional delete. deleteRow is
-	// scoped to this join instance, so the retries below may run it after the
-	// caller's lock is released (txn is the caller's handle; only the fields
-	// deleteRow reads are used after end).
+	// Synchronous first attempt — channel-conditional delete. The retries below
+	// call deleteJoinRow, which needs no lock handle, so the goroutine holds h
+	// and userID and never the caller's txn.
 	if _, err := txn.deleteRow(ctx, channelID, joinToken); err != nil {
 		slog.Warn("LeaveVoiceChannelIfMatch failed, retrying in background",
 			"err", err, "user_id", userID, "channel_id", channelID,
@@ -206,7 +205,7 @@ func leaveVoiceChannelWithRetry(ctx context.Context, txn *voiceTxn, channelID in
 				delay *= 2
 
 				attemptCtx, cancel := context.WithTimeout(retryCtx, attemptTimeout)
-				_, retryErr := txn.deleteRow(attemptCtx, channelID, joinToken)
+				_, retryErr := h.voiceReg.deleteJoinRow(attemptCtx, h, userID, channelID, joinToken)
 				cancel()
 				if retryErr != nil {
 					slog.Warn("LeaveVoiceChannelIfMatch retry failed",

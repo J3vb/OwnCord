@@ -114,7 +114,10 @@ func TestReadPump_ReconnectDuringVoiceCleanup_DoesNotMarkUserOffline(t *testing.
 	newClient := NewTestClient(h, uid, make(chan []byte, 8))
 	newClient.user = &db.User{ID: uid, Status: "online"}
 	// The old teardown holds the member lock for the whole window, so this
-	// registration borrows a lock-free handle to model the overlap.
+	// registration borrows a lock-free handle to model the overlap. In
+	// production the reconnect would block on begin(uid) here, and
+	// registerNowTest would deadlock this test, so the borrowed handle is
+	// deliberate: it keeps the shouldMarkOffline re-check pinned.
 	h.registerNow(newClient, map[int64]bool{}, h.heldTxn(uid))
 
 	// Let handleVoiceLeave's DB delete complete so the old defer resumes.

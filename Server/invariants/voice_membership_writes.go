@@ -46,8 +46,10 @@ var voiceTxnShared = map[string]bool{"clearIfChannel": true, "clearExact": true}
 
 // VoiceMutatorAllow is the shrink-only inventory of non-registry call sites of
 // the mutators above: file -> method -> exact call count. The E2EE announce setter
-// stores a key and not a membership, and heldTxn has one caller, the hub
-// goroutine's Register event. A count above
+// stores a key and not a membership, and heldTxn has one production caller, the hub
+// goroutine's Register event (onClientEvent, test-only via Hub.Register); the
+// reconnect-race test borrows it to model an interleaving the member lock now
+// forbids. A count above
 // the row is a new writer; a count below it, or a file that no longer exists,
 // is a stale row and fails too (TestVoiceMutatorAllowIsLive) -- delete it.
 var VoiceMutatorAllow = map[string]map[string]int{

@@ -23,7 +23,7 @@ package ws
 //
 // voiceMember (WP 1D-10) serializes every change to a user's voice
 // membership: the voice_states row, the slot's channel and join token, and
-// the grace entry. (The one exception: the leave retry goroutine's deleteRow
+// the grace entry. (The one exception: the leave retry goroutine's deleteJoinRow
 // drops only its own exact (channel, token) grace entry after the lock is
 // released, which is a no-op because the first attempt already took it.) Each
 // top-level path takes it once through Hub.begin (WP

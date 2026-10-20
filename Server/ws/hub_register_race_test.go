@@ -55,12 +55,15 @@ func TestRegisterNow_ReplacementNeverLosesAConcurrentGlobalBroadcast(t *testing.
 
 		done := make(chan struct{})
 		go func() {
-			// Mirrors serve.go's handleReconnect: registerNow runs inside
-			// h.seqMu, the same lock deliverBroadcast holds for its whole
-			// critical section, so the two can never interleave.
+			// Mirrors serve.go's handleReconnect: the voice member lock first,
+			// then registerNow inside h.seqMu, the same lock deliverBroadcast
+			// holds for its whole critical section, so the two can never
+			// interleave.
+			txn := h.begin(userID)
 			h.seqMu.Lock()
-			h.registerNowTest(replacement, nil)
+			h.registerNow(replacement, nil, txn)
 			h.seqMu.Unlock()
+			txn.end()
 			close(done)
 		}()
 		h.BroadcastToAll([]byte(payload))

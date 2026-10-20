@@ -162,7 +162,7 @@ connection keeps its own slot in `Client.voice` (channel, join token, completed
 flag, E2EE announce and any moderator mute stash). The durable half is the
 `voice_states` row.
 
-Writes go only through the `voiceTxn` handle. A path takes it once with
+Writes go only through the `voiceTxn` handle, with two exceptions: the lock-free `onClientEvent` handle (the test-only registration path) and the `setE2EE` key store. A path takes it once with
 `h.begin(uid)`, which locks that user's voice membership, and releases it with
 `txn.end()`. Helpers it calls take the handle as a parameter and never lock
 again. The handle's operations are:

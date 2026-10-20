@@ -43,10 +43,13 @@ func (h *Hub) begin(userID int64) *voiceTxn {
 	return &voiceTxn{h: h, userID: userID, unlock: h.voiceReg.voiceMember.lock(userID)}
 }
 
-// heldTxn returns a lock-free handle. Its only caller is onClientEvent
-// (hub_registry.go): the hub dispatch goroutine must never take the voice
-// member lock (voice_registry.go), and the test-only Register event it applies
-// has no concurrent voice path to exclude. Every other path passes the handle
+// heldTxn returns a lock-free handle. It has one production caller,
+// onClientEvent (hub_registry.go): the hub dispatch goroutine must never take
+// the voice member lock (voice_registry.go), and the test-only Register event
+// it applies (via Hub.Register) has no concurrent voice path to exclude.
+// serve_pumps_reconnect_race_test.go also borrows it to model an interleaving
+// the member lock now forbids, which keeps the shouldMarkOffline re-check
+// pinned. Every other path passes the handle
 // from begin. VoiceMutatorAllow lists the one call.
 func (h *Hub) heldTxn(userID int64) *voiceTxn {
 	return &voiceTxn{h: h, userID: userID}
@@ -157,11 +160,19 @@ func (t *voiceTxn) clearExact(c *Client, chID int64, token string) bool {
 // entry. The delete is scoped to one join instance, which is why the retry in
 // leaveVoiceChannelWithRetry may run it after the lock is released.
 func (t *voiceTxn) deleteRow(ctx context.Context, chID int64, joinedAt string) (bool, error) {
-	t.takeParked(chID, joinedAt)
-	if t.h.voice == nil {
+	return t.h.voiceReg.deleteJoinRow(ctx, t.h, t.userID, chID, joinedAt)
+}
+
+// deleteJoinRow is deleteRow without the handle. It is safe without the member
+// lock because the delete is scoped to one join instance (userID, chID,
+// joinedAt), so a late run cannot touch a newer join. It takes the hub for its
+// VoiceStore.
+func (r *voiceRegistry) deleteJoinRow(ctx context.Context, h *Hub, userID, chID int64, joinedAt string) (bool, error) {
+	r.voiceGrace.takeJoin(userID, chID, joinedAt)
+	if h.voice == nil {
 		return false, nil
 	}
-	deleted, err := t.h.voice.LeaveIfMatch(ctx, t.userID, chID, joinedAt)
+	deleted, err := h.voice.LeaveIfMatch(ctx, userID, chID, joinedAt)
 	if err != nil {
 		return false, fmt.Errorf("delete voice row: %w", err)
 	}
