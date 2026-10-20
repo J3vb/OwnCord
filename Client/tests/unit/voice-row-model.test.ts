@@ -12,9 +12,13 @@ import {
   type VoiceRowInputs,
   type VoiceUserContext,
 } from "../../src/features/channels/voiceRowModel";
-import { drawVoiceUserRow } from "../../src/features/channels/voiceRow.view";
+import {
+  drawVoiceUserRow,
+  patchVoiceUserRow,
+  VOICE_USER_PATCH_FIELDS,
+} from "../../src/features/channels/voiceRow.view";
 import { createAvatarElement } from "../../src/components/message-list/avatar";
-import { sameModel } from "../../src/lib/reconcile";
+import { reconcileModels, sameModel } from "../../src/lib/reconcile";
 import type { Channel } from "../../src/stores/channels.store";
 import type { Member } from "../../src/stores/members.store";
 import type { PeerVerification, VoiceUser } from "../../src/stores/voice.store";
@@ -268,5 +272,59 @@ describe("builders read no store", () => {
       }
       voiceChannelChrome(channel({ voiceMaxUsers: 3, nsfw: true, isPrivate: true }), snap);
     });
+  });
+});
+
+describe("voice rows through reconcileModels", () => {
+  function render(list: HTMLElement, snap: VoiceRowInputs, users: readonly VoiceUser[]): void {
+    reconcileModels(list, users, {
+      key: (u) => String(u.userId),
+      model: (u) => voiceUserModel(u, 10, snap, ctx),
+      patch: { fields: VOICE_USER_PATCH_FIELDS, apply: patchVoiceUserRow },
+      create: (m) => drawVoiceUserRow(m, createAvatarElement),
+    });
+  }
+  const row = (list: HTMLElement): Element => list.querySelector(`[data-voice-uid="${PEER}"]`)!;
+
+  it("rebuilds a verified row as mismatch, never patching the badge", () => {
+    const list = document.createElement("div");
+    const peer = user(PEER);
+    render(
+      list,
+      inputs({ peerVerifications: new Map([[PEER, verification(PEER, "verified", "123")]]) }),
+      [peer],
+    );
+    const before = row(list);
+    expect(before.querySelector(".vu-verify.verified")).not.toBeNull();
+    render(
+      list,
+      inputs({ peerVerifications: new Map([[PEER, verification(PEER, "mismatch", "123")]]) }),
+      [peer],
+    );
+    const after = row(list);
+    expect(after).not.toBe(before);
+    expect(after.querySelector(".vu-verify.mismatch")).not.toBeNull();
+    expect(after.querySelector(".vu-verify.verified")).toBeNull();
+  });
+
+  it("redraws the badge title when only the fingerprint changes", () => {
+    const list = document.createElement("div");
+    const peer = user(PEER);
+    const at = (fp: string): VoiceRowInputs =>
+      inputs({ peerVerifications: new Map([[PEER, verification(PEER, "unverified", null, fp)]]) });
+    render(list, at("aaaa"), [peer]);
+    const title = (): string | null => row(list).querySelector(".vu-verify")!.getAttribute("title");
+    const first = title();
+    render(list, at("bbbb"), [peer]);
+    expect(title()).not.toBe(first);
+  });
+
+  it("keeps the row node when only speaking changes", () => {
+    const list = document.createElement("div");
+    render(list, inputs(), [user(PEER)]);
+    const before = row(list);
+    render(list, inputs(), [user(PEER, { speaking: true })]);
+    expect(row(list)).toBe(before);
+    expect(before.classList.contains("speaking")).toBe(true);
   });
 });
