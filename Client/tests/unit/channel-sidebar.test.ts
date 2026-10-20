@@ -4424,6 +4424,97 @@ describe("ChannelSidebar text rows and groups on models (5.4d-1)", () => {
     );
   });
 
+  function setModeratorMask(permissions: number): void {
+    setRoles([{ id: 3, name: "Moderator", color: null, permissions }]);
+    channelsStore.flush();
+  }
+
+  function useModerator(): void {
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 3, username: "Mod", avatar: null, role: "moderator" },
+      serverName: "Test Server",
+      motd: null,
+      isAuthenticated: true,
+    }));
+  }
+
+  it("a MANAGE_INVITES-only role edit grants and revokes Invite People on text and voice rows", () => {
+    setRoles([{ id: 3, name: "Moderator", color: null, permissions: 0 }]);
+    useModerator();
+    sidebar = createChannelSidebar({
+      onVoiceJoin: vi.fn(),
+      onOpenCall: vi.fn(),
+      onInviteFromChannel: vi.fn(),
+    });
+    setChannels(testChannels);
+    sidebar.mount(container);
+    const invite = (): Element | null =>
+      document.querySelector('[data-testid="ctx-invite-people"]');
+
+    for (const id of [1, VOICE_CH]) {
+      ctxMenuFor(id);
+      expect(invite(), `no invite on ${id}`).toBeNull();
+    }
+
+    // Only the permission mask changes: no channel, voice or role-name event.
+    setModeratorMask(Permission.MANAGE_INVITES);
+    for (const id of [1, VOICE_CH]) {
+      expect(ctxMenuFor(id), `menu ${id}`).not.toBeNull();
+      expect(invite(), `invite on ${id}`).not.toBeNull();
+    }
+
+    setModeratorMask(0);
+    for (const id of [1, VOICE_CH]) {
+      ctxMenuFor(id);
+      expect(invite(), `invite gone on ${id}`).toBeNull();
+    }
+  });
+
+  it("losing MANAGE_CHANNELS while mounted strips drag and the Edit, Delete and Move entries", () => {
+    setRoles([{ id: 3, name: "Moderator", color: null, permissions: Permission.MANAGE_CHANNELS }]);
+    useModerator();
+    sidebar = createChannelSidebar({
+      onVoiceJoin: vi.fn(),
+      onOpenCall: vi.fn(),
+      onReorderChannel: vi.fn(),
+      onEditChannel: vi.fn(),
+      onDeleteChannel: vi.fn(),
+    });
+    setChannels(testChannels);
+    sidebar.mount(container);
+    const ids = [1, 2, VOICE_CH];
+    const testIds = [
+      "ctx-edit-channel",
+      "ctx-delete-channel",
+      "ctx-move-up",
+      "ctx-move-down",
+    ] as const;
+
+    for (const id of ids) {
+      if (id !== VOICE_CH) {
+        expect(row(id)!.classList.contains("channel-draggable"), `draggable ${id}`).toBe(true);
+        expect(row(id)!.hasAttribute("data-drag-channel-id"), `drag id ${id}`).toBe(true);
+      }
+      expect(ctxMenuFor(id), `menu ${id}`).not.toBeNull();
+      for (const t of testIds) {
+        expect(document.querySelector(`[data-testid="${t}"]`), `${t} on ${id}`).not.toBeNull();
+      }
+    }
+
+    // Only the permission mask changes: no channel, voice or role-name event.
+    setModeratorMask(0);
+
+    expect(container.querySelector(".channel-draggable")).toBeNull();
+    expect(container.querySelector("[data-drag-channel-id]")).toBeNull();
+    for (const id of ids) {
+      ctxMenuFor(id);
+      for (const t of testIds) {
+        expect(document.querySelector(`[data-testid="${t}"]`), `${t} gone on ${id}`).toBeNull();
+      }
+    }
+  });
+
   it("a voice capacity edit patches the label and keeps the wrapper", () => {
     sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn() });
     const withMax = (max: number): ReadyChannel[] =>

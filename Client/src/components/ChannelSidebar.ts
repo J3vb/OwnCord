@@ -934,13 +934,11 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     );
     unsubscribers.push(unsubAuth);
 
-    // canManageChannels()/canModerateVoice() read authStore.user.role and
-    // channelsStore.roles at render time, but nothing above re-renders when
-    // either changes on its own — a MEMBER_UPDATE for the signed-in user
-    // (dispatcher.ts's self-branch) or a ROLES_UPDATE permission-mask edit
-    // would otherwise leave the category "+", the channel context menu and
-    // the voice-moderation menu stale until an unrelated channel/voice event
-    // happened to fire renderChannels() (OC-0142).
+    // Rows take channelAccess(list) from readListInputs() (and canModerateVoice()
+    // is read only when the voice menu opens), but nothing above re-renders when
+    // the role or its mask changes on its own: a self MEMBER_UPDATE or a
+    // ROLES_UPDATE would leave the category "+", the channel menu and the
+    // voice-moderation menu stale until an unrelated event fired (OC-0142).
     const unsubRole = authStore.subscribeSelector(
       (s) => s.user?.role ?? "",
       () => renderChannels(),

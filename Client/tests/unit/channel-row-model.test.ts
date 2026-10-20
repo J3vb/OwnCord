@@ -14,6 +14,8 @@ import {
   type ChannelListContext,
   type ChannelListInputs,
 } from "../../src/features/channels/channelRowModel";
+import type { VoiceRowInputs } from "../../src/features/channels/voiceRowModel";
+import type { VoiceUser } from "../../src/stores/voice.store";
 import { drawTextChannelRow } from "../../src/features/channels/channelRow.view";
 import { shellText } from "../../src/i18n/shell";
 import { Permission } from "../../src/lib/types";
@@ -224,7 +226,19 @@ describe("visibleRows", () => {
   const active = ch(8);
   const all = [read, unread, mentioned, mutedUnread, mutedMention, emptyVoice, busyVoice, active];
   const g = group("Text", all);
-  const busy = { voiceUsers: new Map([[7, new Map([[1, {}]])]]), currentChannelId: null } as never;
+  const busyUser: VoiceUser = {
+    userId: 1,
+    username: "alice",
+    muted: false,
+    deafened: false,
+    speaking: false,
+    camera: false,
+    screenshare: false,
+  };
+  const busy: Pick<VoiceRowInputs, "voiceUsers" | "currentChannelId"> = {
+    voiceUsers: new Map([[7, new Map([[1, busyUser]])]]),
+    currentChannelId: null,
+  };
   const ids = (rows: readonly Channel[]): number[] => rows.map((c) => c.id);
 
   it("keeps the active row, any mention, an occupied voice channel and unmuted unread under a collapsed category", () => {
