@@ -1235,6 +1235,11 @@ If the restart never comes (the server is stopped by hand, or no supervisor
 restarts it), the staged restore waits and is applied at the next start. To
 cancel it before then, delete `<database>.restore-pending.json`.
 
+The check at the swap covers the file's integrity only. If the restored database
+then fails to migrate, the server does not start, and the way back is the
+`pre_restore_<time>.db` safety copy in the backups folder, not the automatic
+rollback.
+
 How it restarts depends on `server.restart_mode`. With `supervised`, which
 `auto` chooses under systemd, NSSM and containers, the server exits cleanly
 and the supervisor starts it again. The shipped `docker-compose.yml` sets

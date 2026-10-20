@@ -177,15 +177,18 @@ func changedSince(dbPath string, t time.Time) bool {
 }
 
 // recordRestoreResult reports the staged backup restore the boot-time apply
-// (db.ApplyStagedRestore, run by db.Open) handled: it consumes the result
-// file, writes one audit row into the now-open database and returns the
-// outcome for the attention panel. With no restore pending it returns the zero
-// outcome. The file is removed only after the audit row, so a crash between
-// the two repeats the row rather than losing the report.
+// (db.ApplyStagedRestore, run by db.Open) handled: it reads the result file,
+// writes one audit row into the now-open database, removes the file and
+// returns the outcome for the attention panel. With no restore pending it
+// returns the zero outcome. The file is removed only after the audit row, so
+// a crash between the two repeats the row rather than losing the report.
 func recordRestoreResult(log *slog.Logger, dbPath string, database *db.DB) service.RestoreOutcome {
-	res, found, err := db.TakeRestoreResult(dbPath)
+	res, found, err := db.ReadRestoreResult(dbPath)
 	if err != nil {
 		log.Error("staged restore result is unreadable", "error", err)
+		if clearErr := db.ClearRestoreResult(dbPath); clearErr != nil {
+			log.Warn("staged restore result could not be removed", "error", clearErr)
+		}
 		return service.RestoreOutcome{}
 	}
 	if !found {
@@ -204,6 +207,9 @@ func recordRestoreResult(log *slog.Logger, dbPath string, database *db.DB) servi
 	}
 	if err := database.LogAudit(context.Background(), res.ActorID, action, "server", 0, detail); err != nil {
 		log.Error("staged restore audit write failed", "action", action, "error", err)
+	}
+	if err := db.ClearRestoreResult(dbPath); err != nil {
+		log.Warn("staged restore result could not be removed", "error", err)
 	}
 	return service.RestoreOutcome{Recorded: true, Status: res.Status, Backup: res.Backup, At: res.AppliedAt, Reason: res.Error}
 }
