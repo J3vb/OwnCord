@@ -734,7 +734,7 @@ func (d *DB) UpdateReadState(ctx context.Context, userID, channelID, lastReadMes
 }
 
 // GetChannelUnreadCounts returns per-channel unread counts and last message IDs
-// for a given user. Text and announcement channels are included, with 0,0 for
+// for a given user. Text, announcement and voice channels are included, with 0,0 for
 // channels that have no messages. DM channels are included too, but only the
 // ones this user participates in; the ready payload's dm_channels[] takes its
 // mention_count from GetUserDMChannels instead, the same source as GET /dms.
