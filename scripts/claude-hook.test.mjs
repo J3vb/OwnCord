@@ -56,7 +56,7 @@ function cloudStart(setup) {
   const dir = mkdtempSync(join(tmpdir(), "claude-hook-"));
   spawnSync("git", ["init", "-q"], { cwd: dir });
   setup?.(dir);
-  const env = { ...process.env, CLAUDE_CODE_REMOTE: "true" };
+  const env = { ...process.env, CLAUDE_CODE_REMOTE: "true", HOME: dir };
   delete env.CLAUDE_ENV_FILE;
   const run = spawnSync("node", [hook, "session-start"], { cwd: dir, env, encoding: "utf8" });
   const hooksPath = spawnSync("git", ["config", "core.hooksPath"], {
