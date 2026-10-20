@@ -1,6 +1,14 @@
 -- name: InsertSession :execresult
+-- Sign-in is refused while an account deletion is being completed: no row is
+-- written for a user with a queued erasure job (zero rows affected).
 INSERT INTO sessions (user_id, token, device, ip_address, expires_at, unseen)
-VALUES (?, ?, ?, ?, ?, ?);
+SELECT CAST(sqlc.arg(user_id) AS INTEGER), CAST(sqlc.arg(token) AS TEXT),
+       sqlc.narg(device), sqlc.narg(ip_address),
+       CAST(sqlc.arg(expires_at) AS TEXT), CAST(sqlc.arg(unseen) AS INTEGER)
+WHERE NOT EXISTS (
+    SELECT 1 FROM erasure_jobs
+    WHERE erasure_jobs.user_id = ?1 AND erasure_jobs.state = 'queued'
+);
 
 -- name: EvictOldestSessions :exec
 DELETE FROM sessions WHERE id IN (

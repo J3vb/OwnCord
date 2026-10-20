@@ -110,6 +110,9 @@ func (d *DB) CreateMessageDelivery(ctx context.Context, p MessageDeliveryParams)
 	if p.CreatedAtMS < d.MessageDeliveryFloorMS() {
 		return nil, ErrMessageDeliveryBeforeRestore
 	}
+	if err := refuseWhileErasing(ctx, tx, p.UserID); err != nil {
+		return nil, fmt.Errorf("message delivery: %w", err)
+	}
 	r, err := q.CreateMessageForDelivery(ctx, dbgen.CreateMessageForDeliveryParams{
 		ChannelID: p.ChannelID, UserID: p.UserID, Content: p.Content,
 		ReplyTo: p.ReplyTo, MentionsEveryone: b2i64(p.MentionsEveryone),

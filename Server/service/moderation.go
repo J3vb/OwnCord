@@ -162,6 +162,10 @@ func (s *ModerationService) EraseUser(ctx context.Context, actorID, targetID int
 		case errors.Is(err, ErrErasureFilesPending):
 			// The account is gone; the journal finishes the files.
 			slog.Warn("admin erasure: files pending", "actor_id", actorID, "target_id", targetID, "err", err)
+		case errors.Is(err, ErrErasureInProgress):
+			// The account is locked and the erasure is committed to; the
+			// maintenance loop finishes it.
+			slog.Info("admin erasure: in progress", "actor_id", actorID, "target_id", targetID)
 		default:
 			slog.Error("admin erasure failed", "actor_id", actorID, "target_id", targetID, "err", err)
 			return fmt.Errorf("%w: failed to erase account", ErrInternal)

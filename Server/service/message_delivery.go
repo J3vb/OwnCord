@@ -159,6 +159,8 @@ func messageDeliveryError(err error) error {
 	switch {
 	case err == nil:
 		return nil
+	case errors.Is(err, db.ErrAccountErasing):
+		return fmt.Errorf("%w: account is being deleted", ErrForbidden)
 	case errors.Is(err, db.ErrMessageDeliveryConflict):
 		return fmt.Errorf("%w: client_message_id already used for another payload", ErrConflict)
 	case errors.Is(err, db.ErrMessageDeliveryDeleted):
@@ -181,7 +183,7 @@ func (s *MessageService) persistMessage(ctx context.Context, p SendMessageParams
 	if delivery == nil {
 		msg, err := s.st.CreateMessageWithMentions(ctx, p.ChannelID, p.UserID, content, p.ReplyTo, mentions.UserIDs, mentions.ReplyPingUserID, mentions.Everyone)
 		if err != nil {
-			return nil, nil, nil, false, fmt.Errorf("%w: failed to save message: %w", ErrInternal, err)
+			return nil, nil, nil, false, messageDeliveryError(err)
 		}
 		attachments, skipped, err := s.sendMessageLinkAttachments(ctx, p, msg.ID, content)
 		return msg, attachments, skipped, false, err

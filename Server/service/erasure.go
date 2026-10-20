@@ -31,13 +31,17 @@ type StorageLister interface {
 type ErasureHub interface {
 	BroadcastMemberBan(userID int64)
 	PurgeUserFromReplay(ctx context.Context, userID int64) error
+	// DisconnectRevokedUser drops the subject's live socket right after the
+	// lock stage revoked their sessions, so a half-erased account is not
+	// left connected while the drain runs.
+	DisconnectRevokedUser(userID int64)
 }
 
 // ErasureStore is the slice of Store the erasure runner needs.
 type ErasureStore interface {
 	db.Auditor
 	db.EntryAuditor
-	EraseAccount(ctx context.Context, userID int64, subjectToken string) (*db.ErasureJob, error)
+	ErasureStageStore
 	EraseAccountPreflight(ctx context.Context, userID int64) error
 	ReplayEraseAccount(ctx context.Context, userID int64, subjectToken string) (*db.ErasureJob, error)
 	FlushAudits(ctx context.Context) error
@@ -91,13 +95,25 @@ type ErasureService struct {
 	// db.SequenceFloorProbeCeiling and the tests lower it to reach the
 	// refusal without hashing their way to it.
 	floorProbeCeiling int64
+	// inFlightMu guards inFlight, the users an Erase or a Resume is driving
+	// right now, so a request and the maintenance loop never drive one user
+	// at once (erasure_resume.go). Lock order: a leaf. It is never held
+	// across I/O and never taken while mu is held.
+	inFlightMu syncutil.Mutex
+	inFlight   map[int64]struct{}
+	// wake carries one pending request for the maintenance loop to resume
+	// the erasure jobs now instead of at the next tick (buffered, size one).
+	wake chan struct{}
 }
 
 // NewErasureService wires the runner over st. Files are removed only once
 // SetFiles has installed the upload storage; until then jobs stay db_done
 // and are resumed later.
 func NewErasureService(st ErasureStore) *ErasureService {
-	return &ErasureService{st: st, floorProbeCeiling: db.SequenceFloorProbeCeiling}
+	return &ErasureService{
+		st: st, floorProbeCeiling: db.SequenceFloorProbeCeiling,
+		inFlight: map[int64]struct{}{}, wake: make(chan struct{}, 1),
+	}
 }
 
 // SetFiles installs the file remover. Call it at the composition root before
@@ -141,53 +157,6 @@ func (s *ErasureService) BroadcastsMemberBan() bool {
 	return s.hub != nil
 }
 
-// Erase erases userID: the database half, then this job's files. Errors from
-// the database half are the store's (db.ErrLastAdmin, db.ErrNotFound) and
-// mean nothing changed; ErrErasureFilesPending means the account is gone and
-// the journal holds the rest. Logs the id only, never a name.
-func (s *ErasureService) Erase(ctx context.Context, userID int64) error {
-	// The marker goes down first, pending, so a crash between the commit
-	// and the marker cannot leave an erasure that a restore could undo. A
-	// pending marker is applied on the next open whether or not the
-	// transaction committed (MarkerStore.ReplayAccounts — a restore reverts
-	// a commit, so the main database cannot say), which is why the
-	// refusals run before it is written: a refused erasure must leave no
-	// marker a crash could turn into an erasure. The users sequence goes
-	// down with it, the floor below which no id is handed out again.
-	var token string
-	created := false
-	if s.markers != nil {
-		if err := s.st.EraseAccountPreflight(ctx, userID); err != nil {
-			return err
-		}
-		seq, err := s.st.SequenceValue(ctx, db.SequenceFloorUsers)
-		if err != nil {
-			return fmt.Errorf("erasure: sequence: %w", err)
-		}
-		token, created, err = s.markers.RecordPendingAccount(ctx, userID, seq)
-		if err != nil {
-			return fmt.Errorf("erasure: marker: %w", err)
-		}
-	}
-	job, err := s.eraseBehindBarrier(ctx, userID, token, s.st.EraseAccount)
-	if err != nil {
-		if created {
-			if dErr := s.markers.DiscardPending(context.WithoutCancel(ctx), token); dErr != nil {
-				slog.Error("erasure: could not discard the pending marker", "user_id", userID, "err", dErr)
-			}
-		}
-		return err
-	}
-	if s.markers != nil {
-		if cErr := s.markers.ConfirmAccount(context.WithoutCancel(ctx), token); cErr != nil {
-			// The account is gone; a pending marker is applied on the next
-			// open either way, so this is loud but not fatal.
-			slog.Error("erasure: could not confirm the marker", "user_id", userID, "err", cErr)
-		}
-	}
-	return s.finishErasure(ctx, userID, job)
-}
-
 // eraseBehindBarrier runs one erasure transaction behind the audit
 // writer's barrier (db.FlushAudits): everything the writer holds is on
 // disk first, with its ids, so an entry about the subject queued before
@@ -197,6 +166,15 @@ func (s *ErasureService) Erase(ctx context.Context, userID int64) error {
 // (db.eraseAccount, AuditWriter.Unlink), read under the writer connection
 // at insert time.
 func (s *ErasureService) eraseBehindBarrier(ctx context.Context, userID int64, token string, erase func(context.Context, int64, string) (*db.ErasureJob, error)) (*db.ErasureJob, error) {
+	if err := s.barrier(ctx); err != nil {
+		return nil, err
+	}
+	return erase(ctx, userID, token)
+}
+
+// barrier is the flush-before-erase step shared by the live lock and the
+// marker replay.
+func (s *ErasureService) barrier(ctx context.Context) error {
 	// Flush queued mention-badge increments before the erasure transaction's
 	// reversal, so a message the subject sent inside the worker's coalesce
 	// window has its increment on disk and the reversal takes exactly it back
@@ -205,9 +183,9 @@ func (s *ErasureService) eraseBehindBarrier(ctx context.Context, userID int64, t
 		s.flushMentions(ctx)
 	}
 	if err := s.st.FlushAudits(ctx); err != nil {
-		return nil, fmt.Errorf("erasure: audit barrier: %w", err)
+		return fmt.Errorf("erasure: audit barrier: %w", err)
 	}
-	return erase(ctx, userID, token)
+	return nil
 }
 
 // eraseForReplay is Erase for a marker replay: the marker already exists
@@ -375,43 +353,15 @@ func (s *ErasureService) finishErasure(ctx context.Context, userID int64, job *d
 	return nil
 }
 
-// Resume runs every unfinished job once and reports how many are now done.
-// A job whose files still fail to go stays for the next call.
-//
-// It also pays any WAL checkpoint an erasure owes (B6-11 task 5). That debt is
-// not a job: the erasure's rows and files are gone either way, and what is
-// left is frames holding the erased bytes still sitting in the -wal because
-// the checkpoint behind the commit came back blocked. Nothing else would run
-// TRUNCATE again — SQLite's autocheckpoint is PASSIVE and never truncates the
-// log — so the erasure would leave those bytes on disk indefinitely.
-func (s *ErasureService) Resume(ctx context.Context) (int, error) {
-	jobs, err := s.st.ListUnfinishedErasureJobs(ctx)
-	if err != nil {
-		return 0, err
-	}
-	done := 0
-	var firstErr error
-	for i := range jobs {
-		if err := s.runJob(ctx, &jobs[i]); err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
-		}
-		done++
-	}
-	// Best effort, and after the jobs above so the frames they wrote are under
-	// the same TRUNCATE. Both outcomes are already reported where they happen
-	// and a debt that stays unpaid keeps its flag set, so the next tick tries
-	// again: a blocked checkpoint is not this tick's failure.
-	_, _ = s.st.FinishOwedErasureCheckpoint(ctx)
-	return done, firstErr
-}
-
 // runJob removes a job's files and marks it done, or records the attempt.
 // A missing file counts as removed — the previous attempt, or the
 // reconciliation pass, already took it.
 func (s *ErasureService) runJob(ctx context.Context, job *db.ErasureJob) error {
+	if job.State == db.ErasureStateQueued {
+		// The database half is not finished: the files are not all listed
+		// and the account is still there. Resume drives it first.
+		return fmt.Errorf("erasure: job %d is still queued", job.ID)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

@@ -249,6 +249,7 @@ and only when it changes something a contributor or fork holder must do
 - After a backup is restored from the admin panel or the restore command, connected apps now fetch everything fresh instead of resuming from older events. When you move a data folder by hand, copy the `.ws-seq-floor` file beside the database along with it.
 - After a backup is restored from the admin panel or the restore command, connected apps now fetch everything fresh instead of resuming from older events. When you move a data folder by hand, copy the `.ws-seq-floor` file beside the database along with it; the same goes when you restore another machine's backup to move a server.
 - "Update now" on a server whose install folder the service cannot write to failed with a vague download error after the download. The Updates page now says the server cannot replace its own program file and to install the release by hand, and nothing is downloaded or restarted.
+- Deleting an account with a long history held up every other message, login and reaction on the server until it finished (about 3 seconds at 100,000 messages, far longer on a slow disk). The history is now removed in short steps that let others through, the account is signed out and locked at the start, and a restart or the server's housekeeping finishes the job if it is interrupted. Whoever deletes an account still sees success; for a few seconds the account can show with part of its history gone. The last-administrator check also counts deletions already under way.
 
 **Login & connection**
 

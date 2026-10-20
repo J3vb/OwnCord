@@ -36,6 +36,10 @@ type maintenance struct {
 	// attention records each step's outcome for the admin attention panel
 	// (RI-07); nil-safe, so partial wirings skip it.
 	attention *service.AttentionService
+	// erasureCtx is cancelled when the loop is told to stop, so a resumed
+	// erasure drain ends between chunks instead of outliving the shutdown
+	// join; the queued job resumes at the next start. Nil: no cancellation.
+	erasureCtx context.Context
 	// stepsOverride replaces steps() when non-nil. A test seam: the shutdown
 	// tests need a step they can block and observe. Never set in production.
 	stepsOverride []maintenanceStep
@@ -87,7 +91,14 @@ func newMaintenance(log *slog.Logger, cfg *config.Config, database *db.DB, svc *
 // startMaintenanceLoop starts the periodic maintenance loop and returns the
 // stop step the maintenance stage registers with App.Close.
 func startMaintenanceLoop(bgCtx context.Context, log *slog.Logger, cfg *config.Config, database *db.DB, svc *service.Services) func() {
-	return runMaintenanceLoop(bgCtx, log, newMaintenance(log, cfg, database, svc))
+	m := newMaintenance(log, cfg, database, svc)
+	erasureCtx, cancelErasure := context.WithCancel(bgCtx)
+	m.erasureCtx = erasureCtx
+	stop := runMaintenanceLoop(bgCtx, log, m)
+	return func() {
+		cancelErasure()
+		stop()
+	}
 }
 
 // runMaintenanceLoop is startMaintenanceLoop over an already-built pass.
@@ -165,6 +176,13 @@ func (m *maintenance) loop(bgCtx context.Context, stopMaintenance, maintenanceDo
 	_ = m.runJob(bgCtx, "Push subscriptions")
 	ticker := time.NewTicker(15 * time.Minute)
 	defer ticker.Stop()
+	// An erasure that outran its inline budget, or failed after its lock,
+	// asks for a resume now instead of at the next tick (WP 4.1a). A nil
+	// channel (no erasure runner) never fires.
+	var erasureWake <-chan struct{}
+	if m.erasure != nil {
+		erasureWake = m.erasure.WakeCh()
+	}
 	consecutiveFailures := 0
 	const maxConsecutiveFailures = 5
 	for {
@@ -183,6 +201,8 @@ func (m *maintenance) loop(bgCtx context.Context, stopMaintenance, maintenanceDo
 			} else {
 				consecutiveFailures = 0
 			}
+		case <-erasureWake:
+			_ = m.runJob(bgCtx, "Account erasure")
 		case <-stopMaintenance:
 			return
 		}
@@ -399,6 +419,13 @@ func (m *maintenance) reconcileOrphanedVoiceMutes(ctx context.Context) error {
 func (m *maintenance) resumeErasure(ctx context.Context) error {
 	if m.erasure == nil {
 		return nil
+	}
+	if m.erasureCtx != nil {
+		// Ends the drain between chunks once the loop is told to stop.
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		defer cancel()
+		defer context.AfterFunc(m.erasureCtx, cancel)() //nolint:contextcheck // erasureCtx is the loop's own stop signal, derived from its lifecycle context
 	}
 	done, err := m.erasure.Resume(ctx)
 	if done > 0 {

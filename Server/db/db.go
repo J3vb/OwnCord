@@ -120,6 +120,8 @@ type DB struct {
 	// so the hook must not touch this DB's pools. Nil in production, no
 	// exported setter.
 	testEraseCommitHook func()
+	// testErasureChunkHook is a test seam (WP 4.1a), see erasure_chunks.go.
+	testErasureChunkHook func(stage string, n int) error
 }
 
 // filePragmas are the per-connection PRAGMAs applied to every file-backed

@@ -64,6 +64,9 @@ func (d *DB) CreateMessageWithMentions(ctx context.Context, channelID, userID in
 		return nil, fmt.Errorf("CreateMessageWithMentions begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
+	if err := refuseWhileErasing(ctx, tx, userID); err != nil {
+		return nil, fmt.Errorf("CreateMessageWithMentions: %w", err)
+	}
 
 	var m Message
 	var deleted, pinned, everyone int64
