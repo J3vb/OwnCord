@@ -35,7 +35,7 @@ export default defineConfig({
   // time. Abort after 20 failures instead so the job reports a
   // usable red quickly. 0 = unlimited (local runs see every failure).
   maxFailures: process.env.CI ? 20 : 0,
-  // Self-terminate before the workflow's timeout-minutes (35) SIGKILLs the
+  // Self-terminate before the workflow's timeout-minutes (40) SIGKILLs the
   // runner, so the HTML/JUnit report still gets written and uploaded. CI runs
   // only the smoke set from this config now; the ceiling stays as headroom
   // (the full dev-server suite once took about 20 minutes on 2 workers).
