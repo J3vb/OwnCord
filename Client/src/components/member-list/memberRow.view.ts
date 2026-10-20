@@ -148,7 +148,11 @@ export function patchMemberItem(el: Element, next: MemberItemModel): void {
     if (el.textContent !== next.text) setText(el, next.text);
     return;
   }
-  if (next.kind !== "row") return;
+  if (next.kind === "empty") {
+    const text = el.querySelector(".member-list-empty-text");
+    if (text !== null && text.textContent !== next.text) setText(text, next.text);
+    return;
+  }
   el.classList.toggle("offline", next.away);
   const dot = el.querySelector<HTMLDivElement>(".mi-status");
   if (dot !== null) {

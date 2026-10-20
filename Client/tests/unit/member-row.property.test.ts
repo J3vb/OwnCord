@@ -150,6 +150,7 @@ describe("member row view", () => {
       text,
     });
     await assertEveryFieldDraws(empty, drawMemberItem, (m) => ({ ...m, text: `${m.text}x` }), {
+      patch: { fields: ["text"], apply: patchMemberItem },
       bindingOnly: { kind: "discriminant" },
     });
   });
