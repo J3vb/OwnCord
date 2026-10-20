@@ -1303,7 +1303,7 @@ Before it touches the live database, the command checks that:
 
 It also keeps the message-retry cutoff and the event sequence floor
 (`chatserver.db.ws-seq-floor`, a file beside the database: carry it along if you
-move a data folder by hand), and uses the same `database.path` and
+move a data folder by hand, or restore another machine's backup to move a server), and uses the same `database.path` and
 `backup.dir` from `config.yaml` as the server.
 
 If the live database is too broken to copy, the command moves it aside with

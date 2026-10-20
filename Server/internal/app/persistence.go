@@ -164,12 +164,13 @@ func seedHubReplayState(ctx context.Context, hub *ws.Hub, database *db.DB, log *
 // seedHubSeqFloor reserves and persists a fresh block of the hub's sequence
 // space on every boot, independent of event persistence (OC-0210) — see
 // seedHubReplayState's doc for why this is what actually closes the bug. A
-// read or write failure against the settings table is logged and skipped
-// rather than fatal: it leaves this one boot with the pre-fix exposure
-// (plain Phase A ring-buffer behaviour) instead of blocking startup over a
-// heuristic safety net.
+// read or write failure against the settings table is logged rather than
+// fatal: the sidecar beside the database still carries the floor, and when
+// neither copy can be written this one boot keeps plain Phase A ring-buffer
+// behaviour instead of blocking startup over a heuristic safety net.
 func seedHubSeqFloor(ctx context.Context, hub *ws.Hub, database *db.DB, log *slog.Logger) {
 	var floor uint64
+	settingsReadable := true
 	raw, err := database.GetSetting(ctx, wsSeqFloorSettingKey)
 	switch {
 	case err == nil:
@@ -179,15 +180,15 @@ func seedHubSeqFloor(ctx context.Context, hub *ws.Hub, database *db.DB, log *slo
 			break
 		}
 		if parsed > db.MaxWSSeqFloor {
-			log.Warn("event persistence: stored ws seq floor is out of range, resetting to 0", "value", raw)
-			break
+			log.Error("event persistence: stored ws seq floor is above the limit, using the limit", "value", raw)
+			parsed = db.MaxWSSeqFloor
 		}
 		floor = parsed
 	case errors.Is(err, db.ErrNotFound):
 		// No prior boot has ever reserved a floor — start from 0.
 	default:
-		log.Warn("event persistence: failed to read persisted ws seq floor; hub seq not advanced this boot", "error", err)
-		return
+		log.Warn("event persistence: failed to read persisted ws seq floor", "error", err)
+		settingsReadable = false
 	}
 
 	// The sidecar beside the database survives a backup restore, which
@@ -203,15 +204,30 @@ func seedHubSeqFloor(ctx context.Context, hub *ws.Hub, database *db.DB, log *slo
 	if ok {
 		floor = max(floor, sidecar)
 	}
-
-	newFloor := floor + wsSeqFloorReserve
-	// Sidecar first: if the settings write then fails, the next boot still
-	// sees this block as taken.
-	if err := database.StoreWSSeqFloorSidecar(newFloor); err != nil {
-		log.Warn("event persistence: failed to persist ws seq floor sidecar", "error", err)
+	if !settingsReadable && !ok {
+		// Neither copy of the floor is known; leave the hub unseeded rather
+		// than guess a value that could sit below an earlier block.
+		return
 	}
-	if err := database.SetSetting(ctx, wsSeqFloorSettingKey, strconv.FormatUint(newFloor, 10)); err != nil {
-		log.Warn("event persistence: failed to persist advanced ws seq floor; hub seq not advanced this boot", "error", err)
+
+	// floor <= MaxWSSeqFloor, so the sum cannot wrap; it saturates at the limit.
+	newFloor := floor + wsSeqFloorReserve
+	if newFloor > db.MaxWSSeqFloor {
+		log.Error("event persistence: ws seq floor reached its limit, keeping the limit", "floor", floor)
+		newFloor = db.MaxWSSeqFloor
+	}
+	// Either durable copy keeps the next boot above this block, so the hub is
+	// seeded when at least one write lands. Sidecar first so a failed settings
+	// write still leaves the block recorded.
+	sidecarErr := database.StoreWSSeqFloorSidecar(newFloor)
+	if sidecarErr != nil {
+		log.Warn("event persistence: failed to persist ws seq floor sidecar", "error", sidecarErr)
+	}
+	settingsErr := database.SetSetting(ctx, wsSeqFloorSettingKey, strconv.FormatUint(newFloor, 10))
+	if settingsErr != nil {
+		log.Warn("event persistence: failed to persist advanced ws seq floor", "error", settingsErr)
+	}
+	if sidecarErr != nil && settingsErr != nil {
 		return
 	}
 	hub.SeedSeq(newFloor)

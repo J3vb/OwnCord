@@ -30,10 +30,11 @@ const WSSeqFloorSettingKey = "ws_seq_floor"
 // restart.
 const WSSeqFloorReserve = 1_000_000_000
 
-// MaxWSSeqFloor is the largest stored floor accepted. Anything above it is
-// treated as damaged, so floor+WSSeqFloorReserve can never wrap a uint64
-// (and every seq stays exactly representable in a JSON number, 2^53).
-const MaxWSSeqFloor uint64 = 1<<53 - WSSeqFloorReserve
+// MaxWSSeqFloor is the largest floor that is stored or accepted: 2^53, the
+// last point where every seq is still exactly representable in a JSON number.
+// A boot that would reserve past it stores MaxWSSeqFloor instead, so the floor
+// saturates and is never rejected or moved down by the next boot.
+const MaxWSSeqFloor uint64 = 1 << 53
 
 // WSSeqFloorSidecar reads the sequence floor recorded beside the database.
 // ok is false for an in-memory database, a missing file, or a file that does
@@ -152,7 +153,7 @@ func CarryWSSeqFloorForRestore(ctx context.Context, dbPath string) error {
 func readLiveWSSeqFloor(ctx context.Context, dbPath string) (uint64, error) {
 	p, err := dbFilePath(dbPath)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("resolving database file for ws seq floor: %w", err)
 	}
 	abs, err := filepath.Abs(p)
 	if err != nil {

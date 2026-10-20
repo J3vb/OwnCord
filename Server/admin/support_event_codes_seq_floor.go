@@ -10,6 +10,7 @@ func init() {
 	maps.Copy(supportEventCodes, map[string]string{
 		"event persistence: ws seq floor sidecar unreadable; using the settings value": "event_persistence_seq_floor_sidecar_unreadable",
 		"event persistence: failed to persist ws seq floor sidecar":                    "event_persistence_persist_seq_floor_sidecar_failed",
-		"event persistence: stored ws seq floor is out of range, resetting to 0":       "event_persistence_seq_floor_out_of_range",
+		"event persistence: stored ws seq floor is above the limit, using the limit":   "event_persistence_seq_floor_out_of_range",
+		"event persistence: ws seq floor reached its limit, keeping the limit":         "event_persistence_seq_floor_saturated",
 	})
 }

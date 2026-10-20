@@ -26,7 +26,8 @@ func openAndBoot(t *testing.T, path string) (*db.DB, uint64) {
 		t.Fatalf("db.Migrate: %v", err)
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	seedHubSeqFloor(context.Background(), &ws.Hub{}, database, log)
+	hub := &ws.Hub{}
+	seedHubSeqFloor(context.Background(), hub, database, log)
 	raw, err := database.GetSetting(context.Background(), wsSeqFloorSettingKey)
 	if err != nil {
 		t.Fatalf("GetSetting: %v", err)
@@ -35,13 +36,16 @@ func openAndBoot(t *testing.T, path string) (*db.DB, uint64) {
 	if err != nil {
 		t.Fatalf("parse floor %q: %v", raw, err)
 	}
+	if got := hub.CurrentSeq(); got != floor {
+		t.Fatalf("hub seq = %d, want the reserved floor %d", got, floor)
+	}
 	return database, floor
 }
 
 // restoreOver mirrors what both restore paths (admin panel and CLI) do to the
-// files: close the live database, advance the message cutoff, drop the WAL
-// files and copy the backup over the database. Neither path touches the seq
-// floor, so this is the whole file-level effect.
+// files: close the live database, carry the live seq floor into the sidecar,
+// advance the message cutoff, drop the WAL files and copy the backup over the
+// database.
 func restoreOver(t *testing.T, database *db.DB, path, backup string) {
 	t.Helper()
 	if err := database.Close(); err != nil {
@@ -135,24 +139,102 @@ func TestSeedHubSeqFloor_RestoreCarriesTheLiveFloorWithoutASidecar(t *testing.T)
 	}
 }
 
-// TestSeedHubSeqFloor_OutOfRangeValuesAreTreatedAsDamaged: a stored floor too
-// close to 2^53 must not wrap or be extended; boot falls back.
-func TestSeedHubSeqFloor_OutOfRangeValuesAreTreatedAsDamaged(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "chat.db")
-	first, _ := openAndBoot(t, path)
-	if err := first.SetSetting(context.Background(), wsSeqFloorSettingKey, strconv.FormatUint(db.MaxWSSeqFloor+1, 10)); err != nil {
-		t.Fatal(err)
+// TestSeedHubSeqFloor_OutOfRangeValuesSaturate: a stored floor within one
+// block of the limit saturates at the limit, and a stored value above it is
+// held at the limit; the floor never drops back to a single block, and the
+// value written is one the next boot accepts unchanged.
+func TestSeedHubSeqFloor_OutOfRangeValuesSaturate(t *testing.T) {
+	for name, stored := range map[string]uint64{
+		"within one block of the limit": db.MaxWSSeqFloor - wsSeqFloorReserve/2,
+		"above the limit":               db.MaxWSSeqFloor + 1,
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "chat.db")
+			first, _ := openAndBoot(t, path)
+			if err := first.SetSetting(context.Background(), wsSeqFloorSettingKey, strconv.FormatUint(stored, 10)); err != nil {
+				t.Fatal(err)
+			}
+			if err := first.Close(); err != nil {
+				t.Fatal(err)
+			}
+			booted, floor := openAndBoot(t, path)
+			if floor != db.MaxWSSeqFloor {
+				t.Fatalf("floor = %d, want the limit %d", floor, db.MaxWSSeqFloor)
+			}
+			if err := booted.Close(); err != nil {
+				t.Fatal(err)
+			}
+			again, floor2 := openAndBoot(t, path)
+			defer again.Close() //nolint:errcheck
+			if floor2 != db.MaxWSSeqFloor {
+				t.Fatalf("next boot moved the floor to %d, want the limit %d", floor2, db.MaxWSSeqFloor)
+			}
+		})
 	}
+}
+
+// TestSeedHubSeqFloor_FailedSidecarWriteStillBoots: a directory sits where the
+// sidecar goes, so the write fails; settings still advance and the hub seeds.
+func TestSeedHubSeqFloor_FailedSidecarWriteStillBoots(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "chat.db")
+	first, firstFloor := openAndBoot(t, path)
 	if err := first.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path+".ws-seq-floor", []byte(strconv.FormatUint(db.MaxWSSeqFloor+1, 10)+"\n"), 0o600); err != nil {
+	if err := os.Remove(path + ".ws-seq-floor"); err != nil {
 		t.Fatal(err)
 	}
-	booted, floor := openAndBoot(t, path)
-	defer booted.Close() //nolint:errcheck
-	if floor != wsSeqFloorReserve {
-		t.Fatalf("floor = %d, want a fresh single block %d", floor, uint64(wsSeqFloorReserve))
+	if err := os.Mkdir(path+".ws-seq-floor", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	booted, floor := openAndBoot(t, path) // asserts the hub seq equals floor
+	defer booted.Close()                  //nolint:errcheck
+	if want := firstFloor + wsSeqFloorReserve; floor != want {
+		t.Fatalf("settings floor = %d, want %d", floor, want)
+	}
+}
+
+// TestSeedHubSeqFloor_FailedSettingsWriteStillSeedsTheHub: the settings write
+// fails but the sidecar holds the block, so the hub is seeded from it.
+func TestSeedHubSeqFloor_FailedSettingsWriteStillSeedsTheHub(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "chat.db")
+	first, firstFloor := openAndBoot(t, path)
+	defer first.Close() //nolint:errcheck
+	if _, err := first.ExecContext(context.Background(),
+		`CREATE TRIGGER block_floor_update BEFORE UPDATE ON settings WHEN NEW.key = 'ws_seq_floor'
+		 BEGIN SELECT RAISE(ABORT, 'blocked'); END`); err != nil {
+		t.Fatal(err)
+	}
+	hub := &ws.Hub{}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	seedHubSeqFloor(context.Background(), hub, first, log)
+	want := firstFloor + wsSeqFloorReserve
+	if got := hub.CurrentSeq(); got != want {
+		t.Fatalf("hub seq = %d, want %d", got, want)
+	}
+	if got, ok, err := first.WSSeqFloorSidecar(); err != nil || !ok || got != want {
+		t.Fatalf("sidecar = %d ok=%v err=%v, want %d", got, ok, err, want)
+	}
+	raw, err := first.GetSetting(context.Background(), wsSeqFloorSettingKey)
+	if err != nil || raw != strconv.FormatUint(firstFloor, 10) {
+		t.Fatalf("settings = %q err=%v, want unchanged %d", raw, err, firstFloor)
+	}
+}
+
+// TestSeedHubSeqFloor_UnreadableSettingsUseTheSidecar: the settings read fails
+// (database handle closed); the sidecar value is used instead of giving up.
+func TestSeedHubSeqFloor_UnreadableSettingsUseTheSidecar(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "chat.db")
+	first, firstFloor := openAndBoot(t, path)
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	hub := &ws.Hub{}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	seedHubSeqFloor(context.Background(), hub, first, log)
+	want := firstFloor + wsSeqFloorReserve
+	if got := hub.CurrentSeq(); got != want {
+		t.Fatalf("hub seq = %d, want %d", got, want)
 	}
 }
 

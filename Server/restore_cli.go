@@ -117,7 +117,7 @@ func replaceLiveDatabase(source, dbPath, backupDir string) int {
 	// Carry the live event sequence floor across the replacement as well, so
 	// the next boot reserves above what the old database handed out. A
 	// missing or unreadable live database only warns; the restore goes on.
-	if err := db.CarryWSSeqFloorForRestore(context.Background(), dbPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := db.CarryWSSeqFloorForRestore(context.Background(), dbPath); err != nil && !onlyMissingFile(err) {
 		fmt.Fprintf(os.Stderr, "warning: could not carry the live event sequence floor across the restore (%v)\n", err)
 	}
 
@@ -237,4 +237,19 @@ the full archive's data/chatserver.db). Without --force the command makes no
 change; --force replaces the live database after taking a pre-restore safety
 copy. Stop the server first — it holds the database's process lock.
 `)
+}
+
+// onlyMissingFile reports whether every error joined into err is a missing
+// file, the case of a live database that is simply not there. Any other part,
+// such as a damaged sidecar report, still gets shown.
+func onlyMissingFile(err error) bool {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok { //nolint:errorlint // walking an errors.Join tree
+		for _, e := range joined.Unwrap() {
+			if !onlyMissingFile(e) {
+				return false
+			}
+		}
+		return true
+	}
+	return errors.Is(err, os.ErrNotExist)
 }
