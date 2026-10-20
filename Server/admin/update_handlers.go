@@ -205,6 +205,13 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 			return
 		}
 		claimed = false
+		// Shutdown can begin while the job is being admitted. The job then
+		// aborts its countdown, releases the slot and records update_failed
+		// itself, so the handler only has to stop claiming success.
+		if stop.stopping() {
+			refuseApplyShuttingDown(w)
+			return
+		}
 
 		// Respond to the client; the countdown broadcast and the swap
 		// continue in the background.
