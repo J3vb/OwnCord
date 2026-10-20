@@ -261,11 +261,11 @@ func normalizeSettingUpdates(updates map[string]string) (map[string]string, erro
 			}
 			normalized[key] = strings.Join(list, ",")
 		case AFKTimeoutKey:
-			secs, err := strconv.Atoi(strings.TrimSpace(value))
-			if err != nil || !slices.Contains(afkTimeoutChoices, secs) {
-				return nil, fmt.Errorf("%s: must be one of 60, 300, 900, 1800, 3600", key)
+			secs, err := normalizeAFKTimeout(key, value)
+			if err != nil {
+				return nil, err
 			}
-			normalized[key] = strconv.Itoa(secs)
+			normalized[key] = secs
 		case "backup_schedule":
 			schedule := strings.ToLower(strings.TrimSpace(value))
 			switch schedule {
@@ -277,6 +277,16 @@ func normalizeSettingUpdates(updates map[string]string) (map[string]string, erro
 		}
 	}
 	return normalized, nil
+}
+
+// normalizeAFKTimeout accepts only the choices in afkTimeoutChoices and
+// returns the value in canonical decimal form.
+func normalizeAFKTimeout(key, value string) (string, error) {
+	secs, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || !slices.Contains(afkTimeoutChoices, secs) {
+		return "", fmt.Errorf("%s: must be one of 60, 300, 900, 1800, 3600", key)
+	}
+	return strconv.Itoa(secs), nil
 }
 
 // normalizeRetentionDays accepts 0 (keep forever) or a day count in
