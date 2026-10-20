@@ -295,6 +295,16 @@ describe("renderConnect", () => {
       expect(uiStore.getState().updateRequiredHost).toBeNull();
     });
 
+    it("destroys the update notifier along with the route", async () => {
+      const [page] = mount();
+      setUpdateRequiredHost({ host: "s.example", serverEpoch: 5, clientEpoch: 3 });
+      await flushStore();
+      expect(hoisted.notifiers).toHaveLength(1);
+      expect(hoisted.notifiers[0]!.destroy).not.toHaveBeenCalled();
+      page.destroy();
+      expect(hoisted.notifiers[0]!.destroy).toHaveBeenCalledTimes(1);
+    });
+
     it("offers a refusal that was recorded before mount", () => {
       setUpdateRequiredHost({ host: "s.example", serverEpoch: 5, clientEpoch: 3 });
       mount();

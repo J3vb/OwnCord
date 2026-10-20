@@ -319,8 +319,9 @@ export function renderConnect(
 
   pageOwner.addCleanup(() => clearInterval(healthCheckInterval));
   pageOwner.addCleanup(unsubUpdateRequired);
-  // Page-owned checks and listeners cannot update a later connect screen.
-  // Wrap destroy to clear the interval
+  // Page-owned checks and listeners cannot update a later connect screen: the
+  // scope's cleanups clear the health interval and the store subscription, and
+  // destroy also tears down the update notifier and the page.
   const page = {
     destroy(): void {
       pageOwner.dispose();
