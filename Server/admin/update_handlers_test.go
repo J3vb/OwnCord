@@ -647,7 +647,15 @@ func newApplyTestServer(t *testing.T, writeTimeout, delay time.Duration) (*httpt
 	return srv, token
 }
 
-func postApply(t *testing.T, srv *httptest.Server, token string) (*http.Response, string) {
+func postApply(t *testing.T, srv *httptest.Server, token string) (int, string) {
+	t.Helper()
+	status, _, code := postApplyProto(t, srv, token)
+	return status, code
+}
+
+// postApplyProto returns the status code, the negotiated HTTP major version
+// and the error code, so no *http.Response escapes with a closed body.
+func postApplyProto(t *testing.T, srv *httptest.Server, token string) (int, int, string) {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, srv.URL+"/updates/apply", nil)
 	if err != nil {
@@ -661,7 +669,7 @@ func postApply(t *testing.T, srv *httptest.Server, token string) (*http.Response
 	defer resp.Body.Close() //nolint:errcheck
 	var body map[string]string
 	_ = json.NewDecoder(resp.Body).Decode(&body)
-	return resp, body["error"]
+	return resp.StatusCode, resp.ProtoMajor, body["error"]
 }
 
 // A slow release lookup that outlasts the server's WriteTimeout must still
@@ -669,12 +677,12 @@ func postApply(t *testing.T, srv *httptest.Server, token string) (*http.Response
 // slow stage stands in for the download, which sits under the same deadlines.
 func TestAdminAPI_ApplyUpdate_OutlastsServerWriteTimeout(t *testing.T) {
 	srv, token := newApplyTestServer(t, time.Second, 3*time.Second)
-	resp, code := postApply(t, srv, token)
-	if resp.ProtoMajor != 2 {
-		t.Fatalf("protocol = %s, want HTTP/2", resp.Proto)
+	status, protoMajor, code := postApplyProto(t, srv, token)
+	if protoMajor != 2 {
+		t.Fatalf("protocol major = %d, want HTTP/2", protoMajor)
 	}
-	if resp.StatusCode != http.StatusConflict || code != "NO_UPDATE" {
-		t.Errorf("status = %d error = %q, want 409 NO_UPDATE", resp.StatusCode, code)
+	if status != http.StatusConflict || code != "NO_UPDATE" {
+		t.Errorf("status = %d error = %q, want 409 NO_UPDATE", status, code)
 	}
 }
 
@@ -689,9 +697,9 @@ func TestAdminAPI_ApplyUpdate_EndAppliesCancelsInFlight(t *testing.T) {
 		time.Sleep(150 * time.Millisecond)
 		hook()
 	}()
-	resp, code := postApply(t, srv, token)
-	if resp.StatusCode != http.StatusServiceUnavailable || code != "SERVER_SHUTTING_DOWN" {
-		t.Errorf("status = %d error = %q, want 503 SERVER_SHUTTING_DOWN", resp.StatusCode, code)
+	status, code := postApply(t, srv, token)
+	if status != http.StatusServiceUnavailable || code != "SERVER_SHUTTING_DOWN" {
+		t.Errorf("status = %d error = %q, want 503 SERVER_SHUTTING_DOWN", status, code)
 	}
 }
 
@@ -699,9 +707,9 @@ func TestAdminAPI_ApplyUpdate_EndAppliesCancelsInFlight(t *testing.T) {
 func TestAdminAPI_ApplyUpdate_AfterEndAppliesIsCancelled(t *testing.T) {
 	srv, token := newApplyTestServer(t, 5*time.Second, 0)
 	admin.EndApplies(srv.Config)()
-	resp, code := postApply(t, srv, token)
-	if resp.StatusCode != http.StatusServiceUnavailable || code != "SERVER_SHUTTING_DOWN" {
-		t.Errorf("status = %d error = %q, want 503 SERVER_SHUTTING_DOWN", resp.StatusCode, code)
+	status, code := postApply(t, srv, token)
+	if status != http.StatusServiceUnavailable || code != "SERVER_SHUTTING_DOWN" {
+		t.Errorf("status = %d error = %q, want 503 SERVER_SHUTTING_DOWN", status, code)
 	}
 }
 
@@ -714,7 +722,7 @@ func TestAdminAPI_ApplyUpdate_AfterEndAppliesIsCancelled(t *testing.T) {
 func TestAdminAPI_ApplyUpdate_ShutdownDuringDownloadCleansUp(t *testing.T) {
 	t.Setenv("OWNCORD_CONTAINER", "0")
 	t.Cleanup(admin.SetInstallWritable(func() error { return nil }))
-	assets := []map[string]any{}
+	assets := make([]map[string]any, 0, 7)
 	for _, n := range []string{"chatserver.exe", "chatserver-linux-amd64.tar.gz", "chatserver-linux-arm64.tar.gz", "checksums.sha256",
 		"chatserver.exe.sig", "server-update-manifest.json", "server-update-manifest.json.sig"} {
 		assets = append(assets, map[string]any{
@@ -763,9 +771,9 @@ func TestAdminAPI_ApplyUpdate_ShutdownDuringDownloadCleansUp(t *testing.T) {
 		<-started
 		hook()
 	}()
-	resp, code := postApply(t, srv, token)
-	if resp.StatusCode != http.StatusServiceUnavailable || code != "SERVER_SHUTTING_DOWN" {
-		t.Fatalf("status = %d error = %q, want 503 SERVER_SHUTTING_DOWN", resp.StatusCode, code)
+	status, code := postApply(t, srv, token)
+	if status != http.StatusServiceUnavailable || code != "SERVER_SHUTTING_DOWN" {
+		t.Fatalf("status = %d error = %q, want 503 SERVER_SHUTTING_DOWN", status, code)
 	}
 	if _, statErr := os.Stat(newPath); !os.IsNotExist(statErr) {
 		t.Errorf("staged file still present: %v", statErr)

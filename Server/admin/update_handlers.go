@@ -189,28 +189,8 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 		}
 
 		// Check for available update.
-		info, err := u.CheckForUpdate(ctx)
-		if err == nil && ctx.Err() != nil {
-			err = ctx.Err() // the check does not stop on cancel; the apply must
-		}
-		if err != nil {
-			if applyCancelled(ctx, w) {
-				return
-			}
-			slog.Error("update check failed during apply", "err", err)
-			writeErr(w, http.StatusBadGateway, "UPDATE_CHECK_FAILED", "failed to check for updates — see server logs")
-			return
-		}
-		if !info.UpdateAvailable {
-			if semver.Compare(info.Current, info.Latest) < 0 && !info.RequiredAssetsPresent {
-				writeErr(w, http.StatusBadGateway, "MISSING_ASSETS", "release is missing required assets")
-				return
-			}
-			writeErr(w, http.StatusConflict, "NO_UPDATE", "server is already up to date")
-			return
-		}
-		if !info.RequiredAssetsPresent {
-			writeErr(w, http.StatusBadGateway, "MISSING_ASSETS", "release is missing required assets")
+		info, ok := checkApplyUpdate(ctx, w, u)
+		if !ok {
 			return
 		}
 
@@ -229,19 +209,8 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 		// (bound to the signed release manifest). The apply goroutine below
 		// re-verifies the staged file against this hash through an open
 		// handle — never by path — before the rename.
-		stagedHash, err := downloadAndVerify(u, ctx, info.Latest, info.DownloadURL, info.ChecksumURL, info.SignatureURL, info.ManifestURL, info.ManifestSignatureURL, newPath)
-		if err == nil && ctx.Err() != nil {
-			// Cancelled (shutdown) after verification but before the swap was
-			// promised: do not start it, and do not leave the staged file.
-			err = ctx.Err()
-		}
-		if err != nil {
-			_ = os.Remove(newPath)
-			if applyCancelled(ctx, w) {
-				return
-			}
-			slog.Error("update download/verify failed", "err", err)
-			writeErr(w, http.StatusBadGateway, "DOWNLOAD_FAILED", "download or verification failed — see server logs")
+		stagedHash, ok := stageApplyUpdate(ctx, w, u, &info, newPath)
+		if !ok {
 			return
 		}
 
@@ -289,6 +258,58 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 			"version": info.Latest,
 		})
 	})
+}
+
+// checkApplyUpdate runs the release check for an apply. It reports false after
+// writing the refusal (cancelled, check failed, missing assets, or no update).
+func checkApplyUpdate(ctx context.Context, w http.ResponseWriter, u *updater.Updater) (updater.UpdateInfo, bool) {
+	info, err := u.CheckForUpdate(ctx)
+	if err == nil && ctx.Err() != nil {
+		err = ctx.Err() // the check does not stop on cancel; the apply must
+	}
+	if err != nil {
+		if applyCancelled(ctx, w) {
+			return updater.UpdateInfo{}, false
+		}
+		slog.Error("update check failed during apply", "err", err)
+		writeErr(w, http.StatusBadGateway, "UPDATE_CHECK_FAILED", "failed to check for updates — see server logs")
+		return updater.UpdateInfo{}, false
+	}
+	if !info.UpdateAvailable {
+		if semver.Compare(info.Current, info.Latest) < 0 && !info.RequiredAssetsPresent {
+			writeErr(w, http.StatusBadGateway, "MISSING_ASSETS", "release is missing required assets")
+			return updater.UpdateInfo{}, false
+		}
+		writeErr(w, http.StatusConflict, "NO_UPDATE", "server is already up to date")
+		return updater.UpdateInfo{}, false
+	}
+	if !info.RequiredAssetsPresent {
+		writeErr(w, http.StatusBadGateway, "MISSING_ASSETS", "release is missing required assets")
+		return updater.UpdateInfo{}, false
+	}
+	return info, true
+}
+
+// stageApplyUpdate downloads and verifies the release into newPath and returns
+// its trusted hash (bound to the signed release manifest). It reports false
+// after writing the refusal, having removed the staged file.
+func stageApplyUpdate(ctx context.Context, w http.ResponseWriter, u *updater.Updater, info *updater.UpdateInfo, newPath string) (string, bool) {
+	stagedHash, err := downloadAndVerify(u, ctx, info.Latest, info.DownloadURL, info.ChecksumURL, info.SignatureURL, info.ManifestURL, info.ManifestSignatureURL, newPath)
+	if err == nil && ctx.Err() != nil {
+		// Cancelled (shutdown) after verification but before the swap was
+		// promised: do not start it, and do not leave the staged file.
+		err = ctx.Err()
+	}
+	if err != nil {
+		_ = os.Remove(newPath)
+		if applyCancelled(ctx, w) {
+			return "", false
+		}
+		slog.Error("update download/verify failed", "err", err)
+		writeErr(w, http.StatusBadGateway, "DOWNLOAD_FAILED", "download or verification failed — see server logs")
+		return "", false
+	}
+	return stagedHash, true
 }
 
 // applyAndRestart is POST /updates/apply's background tail: give clients the
