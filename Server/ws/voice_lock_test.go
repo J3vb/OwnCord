@@ -27,7 +27,7 @@ func holdJoinAfterCommit(t *testing.T, h *vmHarness, m *vmMember) (held <-chan s
 				return
 			default:
 			}
-			if h.hub.voiceMember.refsForTest(m.userID) >= 2 {
+			if h.hub.voiceReg.voiceMember.refsForTest(m.userID) >= 2 {
 				return
 			}
 			if time.Now().After(deadline) {
@@ -99,7 +99,7 @@ func TestSweepStaleVoiceStates_JoinSetsStateInsideRecheckDeleteWindow(t *testing
 		t.Error("sweep reached its delete for a join that completed under the voice lock; the recheck missed it")
 	}
 
-	gotCh, token := m.c.getVoiceState()
+	gotCh, token := m.c.voice.state()
 	if gotCh != ch || !m.c.voiceJoinCompletedForHarness() {
 		t.Fatalf("join did not complete: client in ch%d, completed=%v", gotCh, m.c.voiceJoinCompletedForHarness())
 	}
@@ -136,7 +136,7 @@ func TestVoiceMembership_ModeratorKickSerializesWithInFlightJoin(t *testing.T) {
 	if !kicked {
 		t.Fatal("kick during an in-flight join reported no eviction; the join then completed and kept the user in voice")
 	}
-	if gotCh, _ := m.c.getVoiceState(); gotCh != 0 {
+	if gotCh, _ := m.c.voice.state(); gotCh != 0 {
 		t.Fatalf("client still in ch%d after the kick", gotCh)
 	}
 	if row, err := h.db.GetVoiceState(context.Background(), m.userID); err != nil || row != nil {

@@ -85,8 +85,8 @@ func TestVoiceRegistry_TransferCarriesEveryField(t *testing.T) {
 	h := newEmitTestHub()
 	old := NewTestClient(h, 1, make(chan []byte, 8))
 	next := NewTestClient(h, 1, make(chan []byte, 8))
-	oldV := reflect.ValueOf(&old.voiceSlot).Elem()
-	nextV := reflect.ValueOf(&next.voiceSlot).Elem()
+	oldV := reflect.ValueOf(&old.voice).Elem()
+	nextV := reflect.ValueOf(&next.voice).Elem()
 
 	fields := slotFields(t)
 	want := map[int]any{}
@@ -132,23 +132,23 @@ func TestVoiceRegistry_TransferMovesMembershipOnlyOnCompletedResume(t *testing.T
 			h := newEmitTestHub()
 			old := NewTestClient(h, 1, make(chan []byte, 8))
 			next := NewTestClient(h, 1, make(chan []byte, 8))
-			old.setVoiceState(5, "tok")
+			old.voice.setState(5, "tok")
 			if tc.completed {
-				old.markVoiceJoinCompleteIfMatch(5, "tok")
+				old.voice.markCompletedIfMatch(5, "tok")
 			}
-			old.setPendingModFlags(true, false, nil)
+			old.voice.stashModFlags(true, false, nil)
 
 			txn := h.begin(1)
 			txn.transfer(old, next, tc.resume)
 			txn.end()
 
-			if ch := next.getVoiceChID(); ch != tc.wantChID {
+			if ch := next.voice.channel(); ch != tc.wantChID {
 				t.Errorf("new slot channel = %d, want %d", ch, tc.wantChID)
 			}
-			if ch := old.getVoiceChID(); ch != 0 {
+			if ch := old.voice.channel(); ch != 0 {
 				t.Errorf("old slot channel = %d, want it emptied", ch)
 			}
-			if muted, _, _ := next.takePendingModFlags(); !muted {
+			if muted, _, _ := next.voice.takeModFlags(); !muted {
 				t.Error("the moderator's pending mute did not move")
 			}
 		})
@@ -159,7 +159,7 @@ func TestVoiceRegistry_TransferMovesMembershipOnlyOnCompletedResume(t *testing.T
 func waitForWaiters(t *testing.T, h *Hub, userID int64, n int) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
-	for h.voiceMember.refsForTest(userID) < n {
+	for h.voiceReg.voiceMember.refsForTest(userID) < n {
 		if time.Now().After(deadline) {
 			t.Fatalf("lock for user %d never reached %d holders/waiters", userID, n)
 		}
@@ -170,7 +170,7 @@ func waitForWaiters(t *testing.T, h *Hub, userID int64, n int) {
 func waitForNoWaiters(t *testing.T, h *Hub, userID int64) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
-	for h.voiceMember.refsForTest(userID) > 0 {
+	for h.voiceReg.voiceMember.refsForTest(userID) > 0 {
 		if time.Now().After(deadline) {
 			t.Fatalf("lock for user %d still held", userID)
 		}
@@ -199,8 +199,8 @@ func TestVoiceRegistry_ModMoveStashSurvivesRacingSwitch(t *testing.T) {
 			t.Error("the stash became visible before the eviction could run")
 		}
 		// The switch completes: out of the old channel, into another.
-		f.h.handleVoiceLeave(ctx, f.c, voiceLeaveReasonSwitch)
-		f.c.setVoiceState(f.chID+1, "switched")
+		f.h.handleVoiceLeave(ctx, hold, f.c, voiceLeaveReasonSwitch)
+		f.c.voice.setState(f.chID+1, "switched")
 		hold.end()
 
 		if <-done {
@@ -209,7 +209,7 @@ func TestVoiceRegistry_ModMoveStashSurvivesRacingSwitch(t *testing.T) {
 		if muted, deafened := PeekClientPendingModFlagsForTest(f.c); muted || deafened {
 			t.Error("a refused move left a stash for the target's next unrelated join")
 		}
-		if ch := f.c.getVoiceChID(); ch != f.chID+1 {
+		if ch := f.c.voice.channel(); ch != f.chID+1 {
 			t.Errorf("the switch target lost its new channel: now %d", ch)
 		}
 	})
@@ -223,10 +223,10 @@ func TestVoiceRegistry_ModMoveStashSurvivesRacingSwitch(t *testing.T) {
 		if !f.h.EvictForModeratorMove(ctx, f.uid, f.chID, true, true, &by) {
 			t.Fatal("the move did not evict a target still in the channel")
 		}
-		if ch := f.c.getVoiceChID(); ch != 0 {
+		if ch := f.c.voice.channel(); ch != 0 {
 			t.Errorf("target still in channel %d after the eviction", ch)
 		}
-		muted, deafened, mutedBy := f.c.takePendingModFlags()
+		muted, deafened, mutedBy := f.c.voice.takeModFlags()
 		if !muted || !deafened || mutedBy == nil || *mutedBy != by {
 			t.Errorf("stash = (%v, %v, %v), want (true, true, %d)", muted, deafened, mutedBy, by)
 		}
@@ -247,38 +247,38 @@ func TestVoiceRegistry_CloseStopsGraceTimers(t *testing.T) {
 		t.Fatal("a completed membership was not parked")
 	}
 	txn.end()
-	if !f.h.voiceGrace.has(f.uid, f.chID) {
+	if !f.h.voiceReg.voiceGrace.has(f.uid, f.chID) {
 		t.Fatal("precondition: no grace entry after park")
 	}
 
 	f.h.GracefulStopContext(canceledContext(), RestartReasonShutdown)
-	if f.h.voiceGrace.get(f.uid) != nil {
+	if f.h.voiceReg.voiceGrace.get(f.uid) != nil {
 		t.Error("shutdown left a grace entry")
 	}
 
 	// A readPump parking after the sockets closed: the slot is cleared, no
 	// timer is armed and nothing is written.
-	f.c.setVoiceState(f.chID, token)
-	f.c.markVoiceJoinCompleteIfMatch(f.chID, token)
+	f.c.voice.setState(f.chID, token)
+	f.c.voice.markCompletedIfMatch(f.chID, token)
 	txn = f.h.begin(f.uid)
 	snap, handled := txn.park(f.c)
 	txn.end()
 	if !handled || snap.chID != f.chID {
 		t.Errorf("late park = (%+v, %v), want the membership handled", snap, handled)
 	}
-	if ch := f.c.getVoiceChID(); ch != 0 {
+	if ch := f.c.voice.channel(); ch != 0 {
 		t.Errorf("late park left the slot in channel %d", ch)
 	}
-	if f.h.voiceGrace.get(f.uid) != nil {
+	if f.h.voiceReg.voiceGrace.get(f.uid) != nil {
 		t.Error("late park armed a grace entry")
 	}
 
 	// An incomplete join and a kicked client are not parkable, but after close
 	// they are dropped the same way: handled, with no teardown and no write.
 	for _, kicked := range []bool{false, true} {
-		f.c.setVoiceState(f.chID, token)
+		f.c.voice.setState(f.chID, token)
 		if kicked {
-			f.c.markVoiceJoinCompleteIfMatch(f.chID, token)
+			f.c.voice.markCompletedIfMatch(f.chID, token)
 			f.c.markTerminalKick()
 		}
 		txn = f.h.begin(f.uid)
@@ -287,7 +287,7 @@ func TestVoiceRegistry_CloseStopsGraceTimers(t *testing.T) {
 		if !handled || snap.chID != f.chID {
 			t.Errorf("late park (kicked=%v) = (%+v, %v), want handled", kicked, snap, handled)
 		}
-		if f.h.voiceGrace.get(f.uid) != nil {
+		if f.h.voiceReg.voiceGrace.get(f.uid) != nil {
 			t.Errorf("late park (kicked=%v) armed a grace entry", kicked)
 		}
 	}
@@ -338,7 +338,7 @@ func TestVoiceRegistry_CloseWaitsForInFlightExpiry(t *testing.T) {
 	}
 	closed := make(chan struct{})
 	go func() {
-		f.h.voiceGrace.close()
+		f.h.voiceReg.voiceGrace.close()
 		close(closed)
 	}()
 	select {
@@ -399,7 +399,7 @@ func TestVoiceRegistry_GraceFireRacesReconnect(t *testing.T) {
 		if n := rec.leaves.Load(); n != 0 {
 			t.Errorf("the expiry tore down a membership the reconnect had inherited (%d deletes)", n)
 		}
-		if ch := resumed.getVoiceChID(); ch != f.chID {
+		if ch := resumed.voice.channel(); ch != f.chID {
 			t.Errorf("resumed slot channel = %d, want %d", ch, f.chID)
 		}
 	})

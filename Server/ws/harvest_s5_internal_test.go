@@ -86,7 +86,7 @@ func TestSweepStaleVoiceStates_EvictionIsScopedToCheckedChannel(t *testing.T) {
 	h.clients[uid] = c
 
 	for i := range 300 {
-		c.setVoiceState(chA, "tok-a")
+		c.voice.setState(chA, "tok-a")
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() {
@@ -96,14 +96,14 @@ func TestSweepStaleVoiceStates_EvictionIsScopedToCheckedChannel(t *testing.T) {
 			for range i % 50 {
 				runtime.Gosched()
 			}
-			c.setVoiceState(chB, "tok-b")
+			c.voice.setState(chB, "tok-b")
 		}()
 		go func() {
 			defer wg.Done()
 			h.sweepStaleVoiceStates(context.Background())
 		}()
 		wg.Wait()
-		if c.getVoiceChID() == 0 {
+		if c.voice.channel() == 0 {
 			t.Fatalf("iteration %d: the sweep evicted the client from channel %d, but the failed CONNECT_VOICE check was for channel %d", i, chB, chA)
 		}
 	}
@@ -147,7 +147,7 @@ func TestHandleVoiceJoin_AbortedSwitchDoesNotResurrectVoiceTopicSubscription(t *
 	c := NewTestClient(h, uid, make(chan []byte, 64))
 	c.user = user
 	h.clients[uid] = c
-	c.setVoiceState(chA, vs.JoinedAt)
+	c.voice.setState(chA, vs.JoinedAt)
 	h.pubsub.Subscribe(c, VoiceTopic(chA))
 	h.updateKeyHolder(chA)
 
@@ -161,7 +161,7 @@ func TestHandleVoiceJoin_AbortedSwitchDoesNotResurrectVoiceTopicSubscription(t *
 
 	h.handleVoiceJoin(ctx, c, json.RawMessage(fmt.Sprintf(`{"channel_id": %d}`, chB)), "")
 
-	if got := c.getVoiceChID(); got != 0 {
+	if got := c.voice.channel(); got != 0 {
 		t.Fatalf("aborted switch resurrected client voice state at channel %d, want 0 — voice_leave for channel %d was already broadcast to this client (OC-0034)", got, chA)
 	}
 	if h.SubscribedToVoiceTopicForTest(c, chA) {

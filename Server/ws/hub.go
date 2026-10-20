@@ -139,7 +139,7 @@ type Hub struct {
 	voiceReconcileInFlight atomic.Bool
 
 	voiceReconcile voiceReconcileState // RT-3 (voice_reconcile.go)
-	voiceRegistry                      // voice membership lock and grace window (voice_registry.go)
+	voiceReg       voiceRegistry       // voice membership lock and grace window (voice_registry.go)
 
 	voiceRejoinBlocks voiceRejoinBlockState // voice_rejoin_block.go
 
@@ -388,7 +388,7 @@ func (h *Hub) GracefulStopContext(ctx context.Context, reason RestartReason) {
 		h.closeClientsForStop()
 
 		// RT-8 grace timers stop; a late readPump park arms none.
-		h.voiceRegistry.close() //nolint:staticcheck // QF1008: named until 5.3d un-embeds the registry.
+		h.voiceReg.close()
 
 		// Stop LiveKit after the sockets, so clients see a close rather than a
 		// dead room. The voice rows stay for the next boot's wipe.

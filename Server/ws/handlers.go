@@ -23,7 +23,9 @@ func (h *Hub) HandleMessageForTest(c *Client, raw []byte) {
 // disconnect-triggered cleanup without an explicit voice_leave message.
 // Exported for ws_test package use only.
 func (h *Hub) HandleVoiceLeaveForTest(c *Client) {
-	h.handleVoiceLeave(context.Background(), c, voiceLeaveReasonDisconnect)
+	txn := h.begin(c.userID)
+	defer txn.end()
+	h.handleVoiceLeave(context.Background(), txn, c, voiceLeaveReasonDisconnect)
 }
 
 // handleMessage parses the envelope and dispatches to the appropriate handler.
@@ -81,7 +83,7 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		avatar = c.user.Avatar
 		displayName = c.user.DisplayName
 	}
-	voiceChID, voiceJoinTok := c.getVoiceState()
+	voiceChID, voiceJoinTok := c.voice.state()
 	info := ClientInfo{
 		UserID:         c.userID,
 		Username:       username,

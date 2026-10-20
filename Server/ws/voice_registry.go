@@ -4,17 +4,16 @@ package ws
 //
 // A user's voice membership has an in-memory half and a durable half. The
 // in-memory half is the per-user membership lock and the RT-8 grace window,
-// held by voiceRegistry (embedded in Hub), and the per-connection slot, held
-// by voiceSlot (embedded in Client). The durable half is the voice_states row,
-// written through VoiceStore.
+// held by voiceRegistry (Hub.voiceReg), and the per-connection slot, held by
+// voiceSlot (Client.voice). The durable half is the voice_states row, written
+// through VoiceStore.
 //
-// 5.3a moved the state here without changing who writes it or which lock
-// guards it: the fields keep their names, so every existing reader and test
-// reaches them unchanged through Go's field promotion, and the old Client
-// accessors stay as one-line delegators. 5.3b (voice_registry_txn.go) routes
-// every membership write through the lock handle Hub.begin returns. 5.3c moves
-// the whole slot on a hand-off (voiceTxn.transfer), owns the grace window
-// (park, inherit, takeParked) and stops it at shutdown (voiceRegistry.close).
+// Writes go only through the lock handle Hub.begin returns (voice_registry_txn.go):
+// 5.3b routed every membership write through it, 5.3c moves the whole slot on a
+// hand-off (voiceTxn.transfer), owns the grace window (park, inherit,
+// takeParked) and stops it at shutdown (voiceRegistry.close), and 5.3d dropped
+// the Client delegators. Callers read the slot with c.voice.channel() and
+// c.voice.state().
 //
 // Lock order (outermost first) — unchanged by the move; voiceSlot.voiceMu is
 // the old Client.voiceMu:
@@ -24,7 +23,7 @@ package ws
 //
 // voiceMember (WP 1D-10) serializes every change to a user's voice
 // membership: the voice_states row, the slot's channel and join token, and
-// the grace entry. (The one exception: the leave retry goroutine's deleteRow
+// the grace entry. (The one exception: the leave retry goroutine's deleteJoinRow
 // drops only its own exact (channel, token) grace entry after the lock is
 // released, which is a no-op because the first attempt already took it.) Each
 // top-level path takes it once through Hub.begin (WP
@@ -86,10 +85,10 @@ type voiceSlot struct {
 	// has passed for the current (voiceChID, voiceJoinToken) pair — i.e. the
 	// join actually reached the SFU handoff (token sent, voice topic
 	// subscribed, voice_state broadcast). It starts false the moment
-	// voiceJoinPersist calls setVoiceState (BUG-088, immediately after the DB
+	// voiceJoinPersist calls setState (BUG-088, immediately after the DB
 	// row commits but well before completion) and is reset to false by every
 	// state change, so it is true only while a real, deliverable membership
-	// is live. registerNow reads it (via clearVoiceState) to decide whether a
+	// is live. registerNow reads it (via clearState) to decide whether a
 	// network reconnect's replaced connection had a completed join to hand
 	// off, or only a persisted-but-not-yet-delivered one still racing its own
 	// supersession guards in voice_join.go — transferring the latter makes

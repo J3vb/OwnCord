@@ -58,7 +58,7 @@ func (h *Hub) handleReconnect(
 	var liveVoiceChID int64
 	old := h.GetClient(c.userID)
 	if old != nil {
-		liveVoiceChID = old.getVoiceChID()
+		liveVoiceChID = old.voice.channel()
 	}
 
 	events, replaySource, persistedTail, maxPersistedSeq := h.reconnectSelectReplay(ctx, c, lastSeq, allowedChannelIDs, nsfwReadableChannelIDs)
@@ -434,9 +434,9 @@ func (h *Hub) reconnectRegister(
 	ctx context.Context, c *Client, lastSeq uint64, allowedChannelIDs, nsfwReadableChannelIDs map[int64]bool,
 	replaySource string, persistedTail [][]byte, maxPersistedSeq uint64,
 ) (events [][]byte, ok, refused bool) {
-	// RT-8: drop a parked grace entry whose row is gone (a DB read, before
-	// h.seqMu); the voice lock spans that and registerNow.
-	defer h.begin(c.userID).end()
+	// RT-8: drop a parked grace entry whose row is gone (a DB read, before h.seqMu).
+	txn := h.begin(c.userID)
+	defer txn.end()
 	h.dropOrphanVoiceGrace(ctx, c.userID)
 	h.seqMu.Lock()
 	start := time.Now()
@@ -497,7 +497,7 @@ func (h *Hub) reconnectRegister(
 	if handleReconnectPostCheckPreRegisterRaceHook != nil {
 		handleReconnectPostCheckPreRegisterRaceHook()
 	}
-	refused = h.registerNow(c, allowedChannelIDs)
+	refused = h.registerNow(c, allowedChannelIDs, txn)
 	h.observeSeqMuHold(start)
 	h.seqMu.Unlock()
 	return events, !refused, refused

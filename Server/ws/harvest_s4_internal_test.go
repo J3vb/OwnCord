@@ -226,7 +226,7 @@ func TestFailedHandshake_MarksUserOfflineWhenNoReplacementRemains(t *testing.T) 
 	newClient := NewTestClient(h, userID, make(chan []byte, 8))
 	newClient.user = &db.User{ID: userID, Status: "online"}
 	newClient.lastSeq = 1
-	h.registerNow(newClient, nil)
+	h.registerNowTest(newClient, nil)
 	if replaced := h.unregisterNow(oldClient); !replaced {
 		t.Fatal("precondition: old client's defer must see itself replaced")
 	}

@@ -81,7 +81,7 @@ func TestRollbackVoiceJoin_BroadcastReachesLeaverWithoutReadAccess(t *testing.T)
 	//
 	// voiceJoinComplete also enqueues the joiner's own voice_state broadcast
 	// for this same channelID *before* the fault fires (voice_join.go:477),
-	// while c.getVoiceChID() still equals chID — so a recipient check keyed
+	// while c.voice.channel() still equals chID — so a recipient check keyed
 	// only on channelID would pass from that unrelated, earlier message even
 	// when the compensating voice_leave never reaches the victim. Decode each
 	// queued message and match on its voice_leave payload specifically.

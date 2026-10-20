@@ -41,8 +41,8 @@ func TestRegisterNow_ResyncsPeerE2EEKeyOnResume(t *testing.T) {
 	// re-announced on a LiveKit reconnect, while userID's socket was down).
 	peerSend := make(chan []byte, 8)
 	peer := &Client{userID: peerID, send: peerSend, sendHigh: peerSend, sendLow: peerSend}
-	peer.voiceChID = chanID
-	peer.e2ee.key = "peer-pub-key-b64"
+	peer.voice.voiceChID = chanID
+	peer.voice.e2ee.key = "peer-pub-key-b64"
 	hub.mu.Lock()
 	hub.clients[peerID] = peer
 	hub.mu.Unlock()
@@ -52,9 +52,9 @@ func TestRegisterNow_ResyncsPeerE2EEKeyOnResume(t *testing.T) {
 	// what registerNow transfers onto a resuming connection per OC-0270.
 	oldSend := make(chan []byte, 8)
 	old := &Client{userID: userID, send: oldSend, sendHigh: oldSend, sendLow: oldSend}
-	old.voiceChID = chanID
-	old.voiceJoinToken = "join-token"
-	old.voiceJoinCompleted = true
+	old.voice.voiceChID = chanID
+	old.voice.voiceJoinToken = "join-token"
+	old.voice.voiceJoinCompleted = true
 	hub.mu.Lock()
 	hub.clients[userID] = old
 	hub.mu.Unlock()
@@ -65,9 +65,9 @@ func TestRegisterNow_ResyncsPeerE2EEKeyOnResume(t *testing.T) {
 	newSend := make(chan []byte, 8)
 	newC := &Client{userID: userID, send: newSend, sendHigh: newSend, sendLow: newSend, lastSeq: 1}
 
-	hub.registerNow(newC, nil)
+	hub.registerNowTest(newC, nil)
 
-	if got := newC.getVoiceChID(); got != chanID {
+	if got := newC.voice.channel(); got != chanID {
 		t.Fatalf("precondition failed: resumed client's voice state was not transferred, got channel %d want %d", got, chanID)
 	}
 
@@ -84,7 +84,7 @@ func TestRegisterNow_ResyncsPeerE2EEKeyOnResume(t *testing.T) {
 		if err := json.Unmarshal(msg, &env); err != nil {
 			t.Fatalf("unmarshal message sent to resumed client: %v (raw=%s)", err, msg)
 		}
-		if env.Type == MsgTypeVoiceE2EEAnnounceBC && env.Payload.UserID == peerID && env.Payload.PublicKey == peer.e2ee.key {
+		if env.Type == MsgTypeVoiceE2EEAnnounceBC && env.Payload.UserID == peerID && env.Payload.PublicKey == peer.voice.e2ee.key {
 			gotAnnounce = true
 		}
 	}

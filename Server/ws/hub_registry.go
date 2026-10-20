@@ -43,9 +43,9 @@ func (h *Hub) Unregister(c *Client) {
 // serializes the two entirely, rather than merely narrowing the window. See
 // replay.go's handleReconnect, which re-reads the replay tail and calls
 // registerNow inside one h.seqMu section for exactly this reason.
-// The handshake callers hold Hub.begin(c.userID); the test-only Register
-// event path on the hub goroutine does not.
-func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) bool {
+// txn is the caller's Hub.begin(c.userID) handle. The one exception is the
+// test-only Register event path on the hub goroutine, which passes Hub.heldTxn.
+func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool, txn *voiceTxn) bool {
 	// Voice channel the replaced connection was in, if any. Re-elected below,
 	// after the hub lock is released.
 	var replacedVoiceChID int64
@@ -56,11 +56,6 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) bool {
 	// commitReadyTimeouts. A wrong true costs one own-only frame on the next
 	// role refresh; a wrong false would leave a demoted user the full list.
 	c.timeouts.full.Store(true)
-
-	// The handshake callers hold Hub.begin(c.userID) and txn borrows it; the
-	// test-only Register event path on the hub goroutine does not, and has no
-	// concurrent voice path of its own to exclude.
-	txn := h.heldTxn(c.userID)
 
 	h.mu.Lock()
 	if h.wakeBlockedLocked(c) {
@@ -151,7 +146,7 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) bool {
 	// If the client is already in a voice channel (e.g. reconnect), restore its
 	// subscriptions without a new voice_join (a same-channel rejoin is rejected
 	// with ALREADY_JOINED) or channel_focus.
-	if voiceChID := c.getVoiceChID(); voiceChID != 0 {
+	if voiceChID := c.voice.channel(); voiceChID != 0 {
 		// VoiceTopic is the only transport for voice_e2ee_announce relays and
 		// carries nothing else, for a channel the user already joined via the
 		// voice_join gate (permissions.CanJoinVoice) — so no separate READ gate.
@@ -197,11 +192,11 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) bool {
 	// (voice_join.go) only runs on a brand-new voice_join, never here, so
 	// without this call a resumed connection's peer-key map would silently
 	// and permanently desync from its (correctly replayed) voice roster.
-	// c.getVoiceChID() reflects the transfer above, so this covers a
+	// c.voice.channel() reflects the transfer above, so this covers a
 	// resumed connection as well as a client pre-set into a voice channel
 	// (e.g. NewTestClientWithChannel); it is a no-op whenever c is not
 	// currently in a voice channel, which is the common case (fresh login).
-	if voiceChID := c.getVoiceChID(); voiceChID != 0 {
+	if voiceChID := c.voice.channel(); voiceChID != 0 {
 		h.sendVoicePeerKeys(c, voiceChID)
 		// Re-relay THIS client's own stored key back onto VoiceTopic (OC-0316).
 		// voice_e2ee_offer (the room-key-bearing message) is a targeted,
@@ -366,5 +361,8 @@ func (h *Hub) onClientEvent(ev clientEvent) {
 	// subscription. A wake refusal cannot occur here: the handshake paths
 	// refuse before queueing a Register event, and the event path never
 	// carries wakeReconnect.
-	h.registerNow(ev.c, nil)
+	// The dispatch goroutine never takes the voice member lock (voice_registry.go),
+	// so it passes a lock-free handle; nothing else runs a voice path for a
+	// client that is only now registering.
+	h.registerNow(ev.c, nil, h.heldTxn(ev.c.userID))
 }

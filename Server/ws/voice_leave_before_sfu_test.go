@@ -88,10 +88,10 @@ func TestVoiceLeaveBeforeSFU_OneRemovalPerJoinLeavePair(t *testing.T) {
 	const pairs = 3
 	for i := 1; i <= pairs; i++ {
 		h.handleVoiceJoin(ctx, c, json.RawMessage(fmt.Sprintf(`{"channel_id": %d}`, chID)), "")
-		if c.getVoiceChID() != chID {
+		if c.voice.channel() != chID {
 			t.Fatalf("pair %d: voice_join did not complete", i)
 		}
-		h.handleVoiceLeave(ctx, c, voiceLeaveReasonClient)
+		h.handleVoiceLeaveTest(ctx, c, voiceLeaveReasonClient)
 		deadline := time.Now().Add(5 * time.Second)
 		for warnings() < i && time.Now().Before(deadline) {
 			time.Sleep(5 * time.Millisecond)

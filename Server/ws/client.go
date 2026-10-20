@@ -30,11 +30,10 @@ type Client struct {
 	userID    int64
 	user      *db.User
 	channelID int64 // currently viewed channel for channel-scoped broadcasts
-	// voiceSlot is this connection's voice membership (voice_registry.go):
+	// voice is this connection's voice membership (voice_registry.go):
 	// channel, join token, completed flag, E2EE announce and the moderator
-	// stash, all guarded by voiceSlot.voiceMu. Embedded so its fields keep
-	// their names (c.voiceChID, c.voiceMu) until 5.3d renames them.
-	voiceSlot
+	// stash, all guarded by voice.voiceMu.
+	voice     voiceSlot
 	roleName  string // cached role name for chat_message broadcasts
 	tokenHash string // SHA-256 hex of the session token; used for periodic revalidation
 	lastSeq   uint64 // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
@@ -174,43 +173,6 @@ func (c *Client) livePresence() livePresence {
 // setLivePresence records the presence this connection just stamped or chose.
 func (c *Client) setLivePresence(status string, customStatus *string, expiresAt string) {
 	c.presence.Store(&livePresence{status: status, customStatus: customStatus, customStatusExpiresAt: expiresAt})
-}
-
-// The voice accessors below are one-line delegators to the slot
-// (voice_registry.go), kept so existing callers and tests compile unchanged
-// (WP 5.3a); 5.3d removes them.
-
-// getVoiceChID returns the voice channel ID under voiceMu.
-func (c *Client) getVoiceChID() int64 { return c.channel() }
-
-// getVoiceState returns the voice channel ID and join token under voiceMu.
-func (c *Client) getVoiceState() (int64, string) { return c.state() }
-
-// setVoiceState starts a new join instance; see voiceSlot.setState.
-func (c *Client) setVoiceState(chID int64, joinToken string) { c.setState(chID, joinToken) }
-
-// markVoiceJoinCompleteIfMatch; see voiceSlot.markCompletedIfMatch.
-func (c *Client) markVoiceJoinCompleteIfMatch(chID int64, joinToken string) bool {
-	return c.markCompletedIfMatch(chID, joinToken)
-}
-
-// clearVoiceState; see voiceSlot.clearState.
-func (c *Client) clearVoiceState() (int64, string, bool) { return c.clearState() }
-
-// clearVoiceStateIfMatch; see voiceSlot.clearIfChannel.
-func (c *Client) clearVoiceStateIfMatch(chID int64) (string, bool) {
-	return c.clearIfChannel(chID)
-}
-
-// setPendingModFlags; see voiceSlot.stashModFlags.
-func (c *Client) setPendingModFlags(serverMuted, serverDeafened bool, serverMutedBy *int64) {
-	c.stashModFlags(serverMuted, serverDeafened, serverMutedBy)
-}
-
-// takePendingModFlags; see voiceSlot.takeModFlags.
-func (c *Client) takePendingModFlags() (serverMuted, serverDeafened bool, serverMutedBy *int64) {
-	serverMuted, serverDeafened, serverMutedBy = c.takeModFlags()
-	return serverMuted, serverDeafened, serverMutedBy
 }
 
 // sendMsg queues a normal-priority message (chat messages, reactions, channel events).

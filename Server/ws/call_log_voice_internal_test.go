@@ -55,7 +55,7 @@ func TestVoiceJoin_NotesJoinOnCompletion(t *testing.T) {
 	h.handleVoiceJoin(context.Background(), c, json.RawMessage(payload), "")
 	drainChan(send, 200*time.Millisecond)
 
-	if got := c.getVoiceChID(); got != chID {
+	if got := c.voice.channel(); got != chID {
 		t.Fatalf("join did not complete: voiceChID = %d, want %d", got, chID)
 	}
 	notes := rec.recorded()
@@ -80,7 +80,7 @@ func TestVoiceJoin_NotesJoinOnlyOnCompletion(t *testing.T) {
 	h.handleVoiceJoin(context.Background(), c, json.RawMessage(payload), "")
 	drainChan(send, 200*time.Millisecond)
 
-	if got := c.getVoiceChID(); got != 0 {
+	if got := c.voice.channel(); got != 0 {
 		t.Fatalf("join was expected to roll back, voiceChID = %d", got)
 	}
 	if notes := rec.recorded(); len(notes) != 0 {

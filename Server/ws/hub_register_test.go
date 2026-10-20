@@ -17,7 +17,7 @@ func TestRegisterNow_ResumeTransfersFocusedChannel(t *testing.T) {
 
 	replacement := NewTestClient(h, 1, make(chan []byte, 8))
 	replacement.lastSeq = 1 // network reconnect
-	h.registerNow(replacement, map[int64]bool{7: true})
+	h.registerNowTest(replacement, map[int64]bool{7: true})
 
 	if got := replacement.getChannelID(); got != 7 {
 		t.Errorf("focused channel not transferred on resume: got %d, want 7", got)
@@ -42,7 +42,7 @@ func TestRegisterNow_ResumeFocusedChannelStaysReadGated(t *testing.T) {
 
 	replacement := NewTestClient(h, 1, make(chan []byte, 8))
 	replacement.lastSeq = 1
-	h.registerNow(replacement, nil) // no READ_MESSAGES anywhere
+	h.registerNowTest(replacement, nil) // no READ_MESSAGES anywhere
 
 	if got := replacement.getChannelID(); got != 0 {
 		t.Errorf("focused channel transferred without READ_MESSAGES: got %d, want 0", got)
@@ -69,7 +69,7 @@ func TestSubscribe_RefusesReplacedClientWithClosedSend(t *testing.T) {
 
 	replacement := NewTestClient(h, 1, make(chan []byte, 8))
 	replacement.lastSeq = 1
-	h.registerNow(replacement, nil) // closes old's send channels
+	h.registerNowTest(replacement, nil) // closes old's send channels
 
 	// The old connection's handler completes its Subscribe late.
 	h.pubsub.Subscribe(old, ChannelTopic(7))
@@ -93,7 +93,7 @@ func TestRegisterNow_FreshConnectDoesNotInheritFocusedChannel(t *testing.T) {
 	h.pubsub.Subscribe(old, ChannelTopic(7))
 
 	replacement := NewTestClient(h, 1, make(chan []byte, 8))
-	h.registerNow(replacement, map[int64]bool{7: true})
+	h.registerNowTest(replacement, map[int64]bool{7: true})
 
 	if got := replacement.getChannelID(); got != 0 {
 		t.Errorf("fresh connect inherited a focused channel: got %d, want 0", got)
@@ -116,7 +116,7 @@ func TestRegisterNow_WakeReconnectAnotherSession_RefusedNotRegistered(t *testing
 	wake.tokenHash = "session-b"
 	wake.wakeReconnect = true
 
-	if refused := h.registerNow(wake, nil); !refused {
+	if refused := h.registerNowTest(wake, nil); !refused {
 		t.Fatal("wake reconnect from another session was not refused")
 	}
 	if h.clients[1] != live {
@@ -140,7 +140,7 @@ func TestRegisterNow_WakeReconnectSameSession_Replaces(t *testing.T) {
 	wake.tokenHash = "session-a"
 	wake.wakeReconnect = true
 
-	if refused := h.registerNow(wake, nil); refused {
+	if refused := h.registerNowTest(wake, nil); refused {
 		t.Fatal("wake reconnect for the same session was refused")
 	}
 	if h.clients[1] != wake {
@@ -157,21 +157,21 @@ func TestRegisterNow_WakeReconnectAnotherSessionGraced_Refused(t *testing.T) {
 	parked := NewTestClient(h, 1, make(chan []byte, 8))
 	parked.tokenHash = "session-a"
 	entry := &voiceGraceEntry{client: parked, snap: slotSnap{chID: 7, joinToken: "jt", completed: true}}
-	h.voiceGrace.put(1, entry, func() {})
-	t.Cleanup(func() { h.voiceGrace.take(1) })
+	h.voiceReg.voiceGrace.put(1, entry, func() {})
+	t.Cleanup(func() { h.voiceReg.voiceGrace.take(1) })
 
 	wake := NewTestClient(h, 1, make(chan []byte, 8))
 	wake.tokenHash = "session-b"
 	wake.wakeReconnect = true
 	wake.lastSeq = 5
 
-	if refused := h.registerNow(wake, nil); !refused {
+	if refused := h.registerNowTest(wake, nil); !refused {
 		t.Fatal("wake reconnect was not refused while another session's call was parked")
 	}
 	if _, ok := h.clients[1]; ok {
 		t.Fatal("refused wake was registered")
 	}
-	if h.voiceGrace.get(1) != entry {
+	if h.voiceReg.voiceGrace.get(1) != entry {
 		t.Fatal("refused wake took the other session's parked call")
 	}
 }
@@ -183,17 +183,17 @@ func TestRegisterNow_WakeReconnectSameSessionGraced_Inherits(t *testing.T) {
 
 	parked := NewTestClient(h, 1, make(chan []byte, 8))
 	parked.tokenHash = "session-a"
-	h.voiceGrace.put(1, &voiceGraceEntry{client: parked, snap: slotSnap{chID: 7, joinToken: "jt", completed: true}}, func() {})
+	h.voiceReg.voiceGrace.put(1, &voiceGraceEntry{client: parked, snap: slotSnap{chID: 7, joinToken: "jt", completed: true}}, func() {})
 
 	wake := NewTestClient(h, 1, make(chan []byte, 8))
 	wake.tokenHash = "session-a"
 	wake.wakeReconnect = true
 	wake.lastSeq = 5
 
-	if refused := h.registerNow(wake, nil); refused {
+	if refused := h.registerNowTest(wake, nil); refused {
 		t.Fatal("same-session wake with its own parked call was refused")
 	}
-	if got := wake.getVoiceChID(); got != 7 {
+	if got := wake.voice.channel(); got != 7 {
 		t.Fatalf("same-session wake did not inherit its parked call: voice channel %d", got)
 	}
 }

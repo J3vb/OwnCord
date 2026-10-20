@@ -9,25 +9,25 @@ import "testing"
 func TestVoiceSlot_ZeroValueIsNotInVoice(t *testing.T) {
 	c := &Client{}
 
-	if got := c.getVoiceChID(); got != 0 {
+	if got := c.voice.channel(); got != 0 {
 		t.Fatalf("zero client voice channel = %d, want 0", got)
 	}
-	if ch, tok := c.getVoiceState(); ch != 0 || tok != "" {
+	if ch, tok := c.voice.state(); ch != 0 || tok != "" {
 		t.Fatalf("zero client voice state = (%d, %q), want (0, \"\")", ch, tok)
 	}
-	if muted, deafened, by := c.takePendingModFlags(); muted || deafened || by != nil {
+	if muted, deafened, by := c.voice.takeModFlags(); muted || deafened || by != nil {
 		t.Fatalf("zero client mod stash = (%v, %v, %v), want none", muted, deafened, by)
 	}
 	if a := c.getE2EEAnnounce(); a.key != "" || a.sig != "" || a.videoDecode != nil {
 		t.Fatalf("zero client e2ee announce = %+v, want empty", a)
 	}
-	if c.markVoiceJoinCompleteIfMatch(1, "tok") {
+	if c.voice.markCompletedIfMatch(1, "tok") {
 		t.Fatal("zero client marked a join complete it never started")
 	}
-	if c.clearExact(1, "tok") {
+	if c.voice.clearExact(1, "tok") {
 		t.Fatal("zero client matched an exact-join clear")
 	}
-	if ch, tok, completed := c.clearVoiceState(); ch != 0 || tok != "" || completed {
+	if ch, tok, completed := c.voice.clearState(); ch != 0 || tok != "" || completed {
 		t.Fatalf("zero client clear returned (%d, %q, %v), want (0, \"\", false)", ch, tok, completed)
 	}
 

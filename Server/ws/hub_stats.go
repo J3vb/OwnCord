@@ -327,7 +327,7 @@ func (h *Hub) wakeBlockedLocked(c *Client) bool {
 	if old, ok := h.clients[c.userID]; ok && old.tokenHash != c.tokenHash {
 		return true
 	}
-	e := h.voiceGrace.get(c.userID)
+	e := h.voiceReg.voiceGrace.get(c.userID)
 	return e != nil && e.client.tokenHash != c.tokenHash
 }
 

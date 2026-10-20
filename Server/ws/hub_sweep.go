@@ -37,7 +37,7 @@ func (h *Hub) refreshTelemetryGauges() {
 	h.mu.RLock()
 	connected := len(h.clients)
 	for _, c := range h.clients {
-		if chID := c.getVoiceChID(); chID != 0 {
+		if chID := c.voice.channel(); chID != 0 {
 			participants++
 			rooms[chID] = struct{}{}
 		}
@@ -238,7 +238,7 @@ func (h *Hub) sweepStaleVoiceStates(ctx context.Context) {
 	}
 	for _, vs := range allStates {
 		c, ok := h.clients[vs.UserID]
-		if !ok || c.getVoiceChID() != vs.ChannelID {
+		if !ok || c.voice.channel() != vs.ChannelID {
 			stale = append(stale, struct {
 				userID    int64
 				channelID int64
@@ -253,7 +253,7 @@ func (h *Hub) sweepStaleVoiceStates(ctx context.Context) {
 	// resuming socket. Skip exactly the parked (user, channel) pairs; the
 	// grace timer owns their teardown. Snapshot the pairs first so this holds
 	// no grace lock while deleting rows.
-	parked := h.voiceGrace.snapshot()
+	parked := h.voiceReg.voiceGrace.snapshot()
 
 	for _, s := range stale {
 		if ctx.Err() != nil {
@@ -275,7 +275,7 @@ func (h *Hub) sweepStaleVoiceStates(ctx context.Context) {
 }
 
 // sweepStaleVoiceEntry removes one stale voice_states row under the user's
-// voice lock, so a join between its row commit and c.setVoiceState cannot
+// voice lock, so a join between its row commit and c.voice.setState cannot
 // interleave with the recheck and delete (ARCH-014). It reports whether the
 // row was removed; the caller does the SFU removal after the lock is released.
 func (h *Hub) sweepStaleVoiceEntry(ctx context.Context, userID, channelID int64, joinedAt string) (removed bool) {
@@ -283,7 +283,7 @@ func (h *Hub) sweepStaleVoiceEntry(ctx context.Context, userID, channelID int64,
 	defer txn.end()
 
 	// Re-check the live client immediately before deleting (OC-0017).
-	// voice_join.go commits the row before it calls c.setVoiceState
+	// voice_join.go commits the row before it calls c.voice.setState
 	// (BUG-088's ordering), so a join can commit and get snapshotted as a
 	// ghost above. Under the voice lock that join has finished by now; if the
 	// client's state agrees with the row, it is no longer stale.
@@ -291,13 +291,13 @@ func (h *Hub) sweepStaleVoiceEntry(ctx context.Context, userID, channelID int64,
 	liveClient, liveOK := h.clients[userID]
 	h.mu.RUnlock()
 	if liveOK {
-		if liveChID, liveJoinedAt := liveClient.getVoiceState(); liveChID == channelID && liveJoinedAt == joinedAt {
+		if liveChID, liveJoinedAt := liveClient.voice.state(); liveChID == channelID && liveJoinedAt == joinedAt {
 			return false
 		}
 	}
 	// A socket that dropped after the snapshot may have parked this exact
 	// membership in the grace window since; the grace timer owns it now.
-	if h.voiceGrace.has(userID, channelID) {
+	if h.voiceReg.voiceGrace.has(userID, channelID) {
 		return false
 	}
 
@@ -335,9 +335,9 @@ func (h *Hub) sweepStaleVoiceEntry(ctx context.Context, userID, channelID int64,
 // immediately before sweepStaleVoiceStates acts on it. Test-only (always nil
 // in production): it pins the BUG-088 follow-on window (OC-0017) where a
 // voice_join's DB commit (voice_join.go's JoinVoiceChannelIfCapacity) and its
-// c.setVoiceState call are not atomic — a join can commit its row, get
+// c.voice.setState call are not atomic — a join can commit its row, get
 // snapshotted as a ghost by the h.clients scan above (the joiner's client
-// still shows voiceChID 0 at that instant), and only call c.setVoiceState
+// still shows voiceChID 0 at that instant), and only call c.voice.setState
 // after the snapshot but before this loop deletes the row it just committed.
 // Too narrow a window to land reliably by staggering real goroutines, so
 // tests use this hook to reproduce it deterministically.

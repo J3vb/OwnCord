@@ -93,8 +93,8 @@ func TestVoiceToken_ModerationRestrictsMicrophoneGrant(t *testing.T) {
 					send := make(chan []byte, 8)
 					c := NewTestClient(h, 1, send)
 					c.user = &db.User{ID: 1, Username: "alice"}
-					c.setVoiceState(100, state.JoinedAt)
-					if !h.voiceJoinGrantToken(ctx, c, 100, state, "") {
+					c.voice.setState(100, state.JoinedAt)
+					if !h.voiceJoinGrantTokenTest(ctx, c, 100, state, "") {
 						t.Fatal("initial token mint refused")
 					}
 					reply = <-send

@@ -74,7 +74,7 @@ func TestVoiceJoin_GetChannelVoiceStatesError_UnsubscribesVoiceTopic(t *testing.
 
 	// Sanity: the in-memory voiceChID was rolled back (OC-0172 already pins
 	// this half of the cleanup).
-	if gotCh := c.getVoiceChID(); gotCh != 0 {
+	if gotCh := c.voice.channel(); gotCh != 0 {
 		t.Fatalf("client voiceChID = %d after GetChannelVoiceStates failed mid-join, want 0 (rolled back)", gotCh)
 	}
 

@@ -42,8 +42,8 @@ func TestRegisterNow_ReannouncesOwnKeyOnResume(t *testing.T) {
 	// subscribed to VoiceTopic like any real voice participant.
 	peerSend := make(chan []byte, 8)
 	peer := &Client{userID: peerID, send: peerSend, sendHigh: peerSend, sendLow: peerSend}
-	peer.voiceChID = chanID
-	peer.e2ee.key = "peer-pub-key-b64"
+	peer.voice.voiceChID = chanID
+	peer.voice.e2ee.key = "peer-pub-key-b64"
 	hub.mu.Lock()
 	hub.clients[peerID] = peer
 	hub.mu.Unlock()
@@ -54,10 +54,10 @@ func TestRegisterNow_ReannouncesOwnKeyOnResume(t *testing.T) {
 	// resuming connection per OC-0270.
 	oldSend := make(chan []byte, 8)
 	old := &Client{userID: userID, send: oldSend, sendHigh: oldSend, sendLow: oldSend}
-	old.voiceChID = chanID
-	old.voiceJoinToken = "join-token"
-	old.voiceJoinCompleted = true
-	old.e2ee = e2eeAnnounce{key: "user-pub-key-b64", sig: "user-sig"}
+	old.voice.voiceChID = chanID
+	old.voice.voiceJoinToken = "join-token"
+	old.voice.voiceJoinCompleted = true
+	old.voice.e2ee = e2eeAnnounce{key: "user-pub-key-b64", sig: "user-sig"}
 	hub.mu.Lock()
 	hub.clients[userID] = old
 	hub.mu.Unlock()
@@ -68,9 +68,9 @@ func TestRegisterNow_ReannouncesOwnKeyOnResume(t *testing.T) {
 	newSend := make(chan []byte, 8)
 	newC := &Client{userID: userID, send: newSend, sendHigh: newSend, sendLow: newSend, lastSeq: 1}
 
-	hub.registerNow(newC, nil)
+	hub.registerNowTest(newC, nil)
 
-	if got := newC.getVoiceChID(); got != chanID {
+	if got := newC.voice.channel(); got != chanID {
 		t.Fatalf("precondition failed: resumed client's voice state was not transferred, got channel %d want %d", got, chanID)
 	}
 

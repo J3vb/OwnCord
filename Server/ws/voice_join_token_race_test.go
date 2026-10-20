@@ -55,7 +55,7 @@ func TestVoiceJoin_SupersededDuringTokenGeneration_WithholdsToken(t *testing.T) 
 	var hookRan bool
 	voiceJoinPostTokenRaceHook = func(client *Client) {
 		hookRan = true
-		if _, cleared := client.clearVoiceStateIfMatch(chID); !cleared {
+		if _, cleared := client.voice.clearIfChannel(chID); !cleared {
 			t.Errorf("hook: client voice state did not match channel %d at hook time", chID)
 		}
 		state, err := database.GetVoiceState(context.Background(), uid)
@@ -99,7 +99,7 @@ func TestVoiceJoin_SupersededDuringTokenGeneration_WithholdsToken(t *testing.T) 
 	}
 
 	// The client's own in-memory voice state must also stay cleared.
-	if gotCh := c.getVoiceChID(); gotCh != 0 {
+	if gotCh := c.voice.channel(); gotCh != 0 {
 		t.Errorf("client voiceChID = %d after a join superseded mid-flight, want 0 (cleared by the eviction, not resurrected)", gotCh)
 	}
 }

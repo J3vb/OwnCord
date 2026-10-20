@@ -31,7 +31,7 @@ func voiceJoinCapacity(sub permissions.Subject, maxUsers int) int {
 // for the race; this is advisory, exactly as in the move path. On refusal it
 // has already sent the error frame and returns false.
 func (h *Hub) voiceJoinSwitchCapacityOK(ctx context.Context, c *Client, channelID int64, maxUsers int, reqID string) bool {
-	cur := c.getVoiceChID()
+	cur := c.voice.channel()
 	if cur <= 0 || cur == channelID || maxUsers <= 0 {
 		return true
 	}

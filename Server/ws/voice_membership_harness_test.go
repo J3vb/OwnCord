@@ -311,7 +311,7 @@ func (h *vmHarness) join(m *vmMember, chID int64) bool {
 		h.failf("%s: join with no live client", m.name)
 	}
 	h.hub.handleMessage(m.c, voiceFrame(h.t, "voice_join", fmt.Sprintf("join-%d", h.step), map[string]any{"channel_id": chID}))
-	ch, token := m.c.getVoiceState()
+	ch, token := m.c.voice.state()
 	completed := ch == chID && m.c.voiceJoinCompletedForHarness()
 	if completed {
 		h.sfu.add(RoomName(chID), participantIdentity(m.userID, token))
@@ -346,7 +346,7 @@ func (h *vmHarness) disconnect(m *vmMember, teardown bool) {
 	h.step++
 	h.t.Helper()
 	ctx := context.Background()
-	voiceChID := m.c.getVoiceChID()
+	voiceChID := m.c.voice.channel()
 	replaced := h.hub.unregisterNow(m.c)
 	if teardown && voiceChID != 0 && !replaced {
 		h.hub.leaveVoiceOnDisconnect(ctx, m.c, voiceLeaveReasonDisconnect)
@@ -361,7 +361,7 @@ func (h *vmHarness) disconnect(m *vmMember, teardown bool) {
 func (h *vmHarness) expireGrace(m *vmMember) {
 	h.step++
 	h.t.Helper()
-	h.hub.leaveParkedVoice(context.Background(), h.hub.voiceGrace.take(m.userID), voiceLeaveReasonGraceExpired)
+	h.hub.leaveParkedVoiceTest(context.Background(), m.userID, h.hub.voiceReg.voiceGrace.take(m.userID), voiceLeaveReasonGraceExpired)
 	h.note("expireGrace %s", m.name)
 	h.check()
 }
@@ -384,7 +384,7 @@ func (h *vmHarness) resume(m *vmMember) {
 	}
 	c.user = user
 	h.hub.dropOrphanVoiceGrace(context.Background(), m.userID)
-	h.hub.registerNow(c, nil)
+	h.hub.registerNowTest(c, nil)
 	m.c = c
 	h.note("resume %s", m.name)
 	h.check()
@@ -397,7 +397,7 @@ func (h *vmHarness) reconnect(m *vmMember) {
 	h.step++
 	h.t.Helper()
 	old := m.c
-	oldChID, _ := old.getVoiceState()
+	oldChID, _ := old.voice.state()
 
 	c := NewTestClient(h.hub, m.userID, make(chan []byte, 512))
 	c.lastSeq = 1 // a resume, not a fresh connect
@@ -406,7 +406,7 @@ func (h *vmHarness) reconnect(m *vmMember) {
 		h.t.Fatalf("GetUserByID(%d): %v", m.userID, err)
 	}
 	c.user = user
-	h.hub.registerNow(c, nil)
+	h.hub.registerNowTest(c, nil)
 	m.c = c
 
 	// The old socket's readPump defer: replaced, so it does NOT run the leave
@@ -414,7 +414,7 @@ func (h *vmHarness) reconnect(m *vmMember) {
 	// participant's identity carries the join token, which the transfer keeps.
 	h.hub.unregisterNow(old)
 
-	newCh, newToken := c.getVoiceState()
+	newCh, newToken := c.voice.state()
 	h.note("reconnect %s: ch%d -> ch%d token=%s", m.name, oldChID, newCh, newToken)
 	h.check()
 }
@@ -424,7 +424,7 @@ func (h *vmHarness) reconnect(m *vmMember) {
 func (h *vmHarness) evict(m *vmMember) {
 	h.step++
 	h.t.Helper()
-	ch, _ := m.c.getVoiceState()
+	ch, _ := m.c.voice.state()
 	if !h.hub.DisconnectFromVoiceInChannel(context.Background(), m.userID, ch, voiceLeaveReasonModerator) {
 		h.failf("%s: moderator eviction reported no eviction (in ch%d)", m.name, ch)
 	}
@@ -442,8 +442,8 @@ func (h *vmHarness) evict(m *vmMember) {
 func (h *vmHarness) rollback(m *vmMember, chID int64) {
 	h.step++
 	h.t.Helper()
-	_, token := m.c.getVoiceState()
-	h.hub.rollbackVoiceJoin(context.Background(), m.c, chID, token, true)
+	_, token := m.c.voice.state()
+	h.hub.rollbackVoiceJoinTest(context.Background(), m.c, chID, token, true)
 	h.sfu.remove(RoomName(chID), participantIdentity(m.userID, token))
 	if !drainHasVoiceLeave(m.c.send, chID, m.userID) {
 		h.failf("%s: rollback broadcast no voice_leave for ch%d to the leaver (OC-0267)", m.name, chID)
@@ -460,14 +460,14 @@ func (h *vmHarness) rollback(m *vmMember, chID int64) {
 func (h *vmHarness) abortedSwitch(m *vmMember, fromCh, toCh int64) {
 	h.step++
 	h.t.Helper()
-	ch, _ := m.c.getVoiceState()
+	ch, _ := m.c.voice.state()
 	if ch != fromCh {
 		h.failf("%s: abortedSwitch precondition: client in ch%d, want ch%d", m.name, ch, fromCh)
 	}
 	// Drop the join token but keep the channel: the delete short-circuits.
 	m.c.setVoiceStateForHarness(fromCh, "")
 	h.hub.handleMessage(m.c, voiceFrame(h.t, "voice_join", fmt.Sprintf("join-%d", h.step), map[string]any{"channel_id": toCh}))
-	if got := m.c.getVoiceChID(); got != 0 {
+	if got := m.c.voice.channel(); got != 0 {
 		h.failf("%s: aborted switch resurrected a phantom session: client ch%d, want 0 (OC-0034)", m.name, got)
 	}
 	h.note("abortedSwitch %s ch%d->ch%d (client cleared)", m.name, fromCh, toCh)
@@ -482,13 +482,13 @@ func (h *vmHarness) freshConnect(m *vmMember) {
 	h.step++
 	h.t.Helper()
 	old := m.c
-	oldCh, _ := old.getVoiceState()
+	oldCh, _ := old.voice.state()
 	oldRow, err := h.db.GetVoiceState(context.Background(), m.userID)
 	if err != nil || oldRow == nil {
 		h.failf("%s: freshConnect precondition: no row (%v, %v)", m.name, oldRow, err)
 	}
-	h.hub.freshConnectCleanStaleVoice(context.Background(), old, oldRow)
-	if got := old.getVoiceChID(); got != 0 {
+	h.hub.freshConnectCleanStaleVoiceTest(context.Background(), old, oldRow)
+	if got := old.voice.channel(); got != 0 {
 		h.failf("%s: fresh-connect cleanup left the old client in ch%d, want 0 (OC-0252)", m.name, got)
 	}
 	if h.hub.IsVoiceKeyHolder(oldCh, m.userID) {
@@ -520,10 +520,10 @@ func (h *vmHarness) reconnectIncomplete(m *vmMember, chID int64) {
 	c.lastSeq = 1
 	user, _ := h.db.GetUserByID(context.Background(), m.userID)
 	c.user = user
-	h.hub.registerNow(c, nil)
+	h.hub.registerNowTest(c, nil)
 	h.hub.unregisterNow(old)
 	m.c = c
-	if got := c.getVoiceChID(); got != 0 {
+	if got := c.voice.channel(); got != 0 {
 		h.failf("%s: reconnect transferred an incomplete voice join (ch%d) that its own supersession guard will strand (OC-0270)", m.name, got)
 	}
 	h.note("reconnectIncomplete %s (not transferred)", m.name)
@@ -546,7 +546,7 @@ func (h *vmHarness) staleRollback(m *vmMember, staleCh, newCh int64) {
 		h.failf("%s: staleRollback precondition: newer row missing", m.name)
 	}
 	// The stale rollback, with a token that matches nothing current.
-	h.hub.rollbackVoiceJoin(context.Background(), m.c, staleCh, "stale-token-matches-nothing", true)
+	h.hub.rollbackVoiceJoinTest(context.Background(), m.c, staleCh, "stale-token-matches-nothing", true)
 	got, err := h.db.GetVoiceState(context.Background(), m.userID)
 	if err != nil {
 		h.failf("%s: GetVoiceState: %v", m.name, err)
@@ -577,7 +577,7 @@ func (h *vmHarness) denyRead(chID int64) {
 func (h *vmHarness) stashSurvivesJoinFailure(m *vmMember, fullCh int64) {
 	h.step++
 	h.t.Helper()
-	m.c.setPendingModFlags(true, false, nil)
+	m.c.voice.stashModFlags(true, false, nil)
 	if !h.join(m, fullCh) {
 		// The join failed as arranged; the stash must still be there.
 		muted, _ := m.c.peekPendingModFlagsForHarness()
@@ -619,7 +619,7 @@ func (h *vmHarness) ghostRow() string {
 		if err != nil {
 			h.failf("%s: GetVoiceState: %v", m.name, err)
 		}
-		if row != nil && !h.hub.voiceGrace.has(m.userID, row.ChannelID) {
+		if row != nil && !h.hub.voiceReg.voiceGrace.has(m.userID, row.ChannelID) {
 			return fmt.Sprintf("%s has a voice_states row for ch%d but no live client", m.name, row.ChannelID)
 		}
 	}
@@ -658,7 +658,7 @@ func (h *vmHarness) attempt() string {
 		if m.c == nil {
 			continue
 		}
-		ch, token := m.c.getVoiceState()
+		ch, token := m.c.voice.state()
 		switch {
 		case ch == 0 && row != nil:
 			// The paths that deliberately leave such a row (OC-0034's aborted
@@ -701,7 +701,7 @@ func (h *vmHarness) attempt() string {
 		if m.c == nil {
 			continue
 		}
-		ch, token := m.c.getVoiceState()
+		ch, token := m.c.voice.state()
 		if ch == 0 || !m.c.voiceJoinCompletedForHarness() {
 			continue
 		}
@@ -718,7 +718,7 @@ func (h *vmHarness) attempt() string {
 		if m.c == nil {
 			continue
 		}
-		if ch, _ := m.c.getVoiceState(); ch == 0 {
+		if ch, _ := m.c.voice.state(); ch == 0 {
 			for _, other := range h.chanIDs {
 				if h.hub.SubscribedToVoiceTopicForTest(m.c, other) {
 					return fmt.Sprintf("%s: not in voice but still subscribed to ch%d's voice topic", m.name, other)
@@ -751,21 +751,21 @@ func (f *fakeSFU) snapshot() map[string][]string {
 // racing its supersession guards (OC-0270), or of a client whose token has
 // gone missing (OC-0034).
 func (c *Client) setVoiceStateForHarness(chID int64, token string) {
-	c.setVoiceState(chID, token)
+	c.voice.setState(chID, token)
 }
 
 // voiceJoinCompletedForHarness reads voiceJoinCompleted under voiceMu.
 func (c *Client) voiceJoinCompletedForHarness() bool {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	return c.voiceJoinCompleted
+	c.voice.voiceMu.Lock()
+	defer c.voice.voiceMu.Unlock()
+	return c.voice.voiceJoinCompleted
 }
 
 // peekPendingModFlagsForHarness reads the moderator stash without consuming it.
 func (c *Client) peekPendingModFlagsForHarness() (serverMuted, serverDeafened bool) {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	return c.pendingModServerMuted, c.pendingModServerDeafened
+	c.voice.voiceMu.Lock()
+	defer c.voice.voiceMu.Unlock()
+	return c.voice.pendingModServerMuted, c.voice.pendingModServerDeafened
 }
 
 // drainHasVoiceLeave reports whether ch holds a voice_leave broadcast for
@@ -895,9 +895,9 @@ func TestVoiceMembership_GraceWindowReconnect(t *testing.T) {
 
 	h.connect(alice)
 	h.join(alice, chA)
-	_, token := alice.c.getVoiceState()
+	_, token := alice.c.voice.state()
 	h.disconnect(alice, true)
-	if !h.hub.voiceGrace.has(alice.userID, chA) {
+	if !h.hub.voiceReg.voiceGrace.has(alice.userID, chA) {
 		t.Fatalf("a completed membership was not parked in the grace window")
 	}
 	// The parked row and SFU participant must still be exactly the join's.
@@ -912,10 +912,10 @@ func TestVoiceMembership_GraceWindowReconnect(t *testing.T) {
 	// A resuming socket inherits the parked session; the harness oracle then
 	// requires client, row and SFU to agree, which they now do with no rejoin.
 	h.resume(alice)
-	if gotCh, gotToken := alice.c.getVoiceState(); gotCh != chA || gotToken != token {
+	if gotCh, gotToken := alice.c.voice.state(); gotCh != chA || gotToken != token {
 		t.Fatalf("resume inherited %d/%s, want %d/%s", gotCh, gotToken, chA, token)
 	}
-	if h.hub.voiceGrace.has(alice.userID, chA) {
+	if h.hub.voiceReg.voiceGrace.has(alice.userID, chA) {
 		t.Fatalf("the parked entry survived inheritance")
 	}
 	h.leave(alice)
@@ -979,7 +979,7 @@ func TestVoiceMembership_GraceWindowIncompleteJoinsNotParked(t *testing.T) {
 	row, _ := h.db.GetVoiceState(context.Background(), alice.userID)
 	alice.c.setVoiceStateForHarness(chA, row.JoinedAt) // committed, not completed
 	h.disconnect(alice, true)
-	if h.hub.voiceGrace.has(alice.userID, chA) {
+	if h.hub.voiceReg.voiceGrace.has(alice.userID, chA) {
 		t.Fatalf("an incomplete join was parked in the grace window")
 	}
 	if row, err := h.db.GetVoiceState(context.Background(), alice.userID); err != nil || row != nil {
@@ -1031,12 +1031,12 @@ func TestVoiceMembership_GraceWindowHandshakeFailure(t *testing.T) {
 	h.hub.unregisterFailedHandshake(ctx, alice.c)
 	alice.c = nil
 	h.check()
-	if !h.hub.voiceGrace.has(alice.userID, chA) {
+	if !h.hub.voiceReg.voiceGrace.has(alice.userID, chA) {
 		t.Fatalf("a failed resume handshake did not park the inherited call")
 	}
 
 	h.resume(alice)
-	if ch := alice.c.getVoiceChID(); ch != chA {
+	if ch := alice.c.voice.channel(); ch != chA {
 		t.Fatalf("the redial after a failed handshake inherited ch%d, want ch%d", ch, chA)
 	}
 	alice.c.tokenHash = "revoked-during-handshake"
@@ -1045,7 +1045,7 @@ func TestVoiceMembership_GraceWindowHandshakeFailure(t *testing.T) {
 	}
 	alice.c = nil
 	h.check()
-	if h.hub.voiceGrace.has(alice.userID, chA) {
+	if h.hub.voiceReg.voiceGrace.has(alice.userID, chA) {
 		t.Fatalf("a session revoked during the handshake parked the call")
 	}
 	if row, err := h.db.GetVoiceState(ctx, alice.userID); err != nil || row != nil {
@@ -1067,13 +1067,13 @@ func TestVoiceMembership_GraceWindowConcurrentEvictNotParked(t *testing.T) {
 	h.join(alice, chA)
 	c := alice.c
 	h.hub.unregisterNow(c)
-	if !h.hub.handleVoiceLeaveIfStillIn(ctx, c, chA, voiceLeaveReasonModerator) {
+	if !h.hub.handleVoiceLeaveIfStillInTest(ctx, c, chA, voiceLeaveReasonModerator) {
 		t.Fatalf("precondition: the eviction did not clear the membership")
 	}
 	h.hub.leaveVoiceOnDisconnect(ctx, c, voiceLeaveReasonDisconnect)
 	alice.c = nil
 	h.check()
-	if h.hub.voiceGrace.get(alice.userID) != nil {
+	if h.hub.voiceReg.voiceGrace.get(alice.userID) != nil {
 		t.Fatalf("a membership already evicted was parked")
 	}
 }
@@ -1105,14 +1105,14 @@ func TestVoiceMembership_GraceWindowTerminalKickEjects(t *testing.T) {
 			h.check()
 
 			for _, m := range []*vmMember{alice, bob} {
-				if h.hub.voiceGrace.has(m.userID, chA) {
+				if h.hub.voiceReg.voiceGrace.has(m.userID, chA) {
 					t.Fatalf("%s: a terminal kick parked the membership", m.name)
 				}
 				if row, err := h.db.GetVoiceState(context.Background(), m.userID); err != nil || row != nil {
 					t.Fatalf("%s: a terminal kick left a row: row=%v err=%v", m.name, row, err)
 				}
 			}
-			if !h.hub.voiceGrace.has(carol.userID, chA) {
+			if !h.hub.voiceReg.voiceGrace.has(carol.userID, chA) {
 				t.Fatalf("an ordinary drop was not parked")
 			}
 		})
@@ -1139,7 +1139,7 @@ func TestVoiceMembership_GraceWindowModeratorKickWhileParked(t *testing.T) {
 		t.Fatalf("moderator kick left a parked row: row=%v err=%v", row, err)
 	}
 	h.resume(alice)
-	if ch := alice.c.getVoiceChID(); ch != 0 {
+	if ch := alice.c.voice.channel(); ch != 0 {
 		t.Fatalf("resume after a moderator kick inherited ch%d", ch)
 	}
 }
@@ -1156,11 +1156,11 @@ func TestVoiceMembership_GraceWindowRelaunchWithinWindow(t *testing.T) {
 
 	h.connect(alice)
 	h.join(alice, chA)
-	_, token := alice.c.getVoiceState()
+	_, token := alice.c.voice.state()
 	h.disconnect(alice, true)
 	h.sfu.remove(RoomName(chA), participantIdentity(alice.userID, token))
 	h.hub.HandleWebhookParticipantLeftWithContextForTest(context.Background(), alice.userID, chA, token)
-	if h.hub.voiceGrace.has(alice.userID, chA) {
+	if h.hub.voiceReg.voiceGrace.has(alice.userID, chA) {
 		t.Fatalf("participant_left kept a parked window over a deleted row")
 	}
 	h.check()
@@ -1169,7 +1169,7 @@ func TestVoiceMembership_GraceWindowRelaunchWithinWindow(t *testing.T) {
 	if !h.join(alice, chA) {
 		t.Fatalf("rejoin after relaunch did not complete")
 	}
-	if h.hub.voiceGrace.get(alice.userID) != nil {
+	if h.hub.voiceReg.voiceGrace.get(alice.userID) != nil {
 		t.Fatalf("a parked window survived the relaunch")
 	}
 	h.leave(alice)
@@ -1188,7 +1188,7 @@ func TestVoiceMembership_GraceWindowFreshConnectCancels(t *testing.T) {
 	h.join(alice, chA)
 	h.disconnect(alice, true)
 	h.connect(alice)
-	if h.hub.voiceGrace.get(alice.userID) != nil {
+	if h.hub.voiceReg.voiceGrace.get(alice.userID) != nil {
 		t.Fatalf("a fresh connect left the parked window running")
 	}
 }
@@ -1204,14 +1204,14 @@ func TestVoiceMembership_GraceWindowResumeNeedsRow(t *testing.T) {
 
 	h.connect(alice)
 	h.join(alice, chA)
-	_, token := alice.c.getVoiceState()
+	_, token := alice.c.voice.state()
 	h.disconnect(alice, true)
 	h.sfu.remove(RoomName(chA), participantIdentity(alice.userID, token))
 	if _, err := h.db.LeaveVoiceChannelIfMatch(context.Background(), alice.userID, chA, token); err != nil {
 		t.Fatalf("LeaveVoiceChannelIfMatch: %v", err)
 	}
 	h.resume(alice)
-	if ch := alice.c.getVoiceChID(); ch != 0 {
+	if ch := alice.c.voice.channel(); ch != 0 {
 		t.Fatalf("resume inherited ch%d whose row is gone", ch)
 	}
 }
@@ -1288,11 +1288,11 @@ func TestVoiceMembership_Acceptance(t *testing.T) {
 			h.join(m[1], ch[2])
 			// m[1]'s channel is capped at 1; m[0]'s switch must be refused and
 			// her ch[0] membership preserved.
-			beforeCh, beforeToken := m[0].c.getVoiceState()
+			beforeCh, beforeToken := m[0].c.voice.state()
 			if h.join(m[0], ch[2]) {
 				t.Fatal("join to a full channel unexpectedly completed")
 			}
-			if ch, token := m[0].c.getVoiceState(); ch != beforeCh || token != beforeToken {
+			if ch, token := m[0].c.voice.state(); ch != beforeCh || token != beforeToken {
 				t.Fatalf("refused switch changed membership from %d/%s to %d/%s (OC-0351)", beforeCh, beforeToken, ch, token)
 			}
 		}},

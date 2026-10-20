@@ -53,7 +53,7 @@ func (h *Hub) EvictForModeratorMove(ctx context.Context, userID, channelID int64
 	defer txn.end()
 	c := h.GetClient(userID)
 	if c == nil {
-		return h.leaveParkedVoice(ctx, txn.takeParked(channelID, ""), voiceLeaveReasonModerator)
+		return h.leaveParkedVoice(ctx, txn, txn.takeParked(channelID), voiceLeaveReasonModerator)
 	}
 	snap, ok := txn.clearIfChannel(c, channelID)
 	if !ok {
@@ -62,6 +62,6 @@ func (h *Hub) EvictForModeratorMove(ctx context.Context, userID, channelID int64
 	if serverMuted || serverDeafened {
 		txn.stashModFlags(c, serverMuted, serverDeafened, serverMutedBy)
 	}
-	h.finishVoiceLeave(ctx, c, channelID, snap.joinToken, voiceLeaveReasonModerator)
+	h.finishVoiceLeave(ctx, txn, c, channelID, snap.joinToken, voiceLeaveReasonModerator)
 	return true
 }

@@ -63,7 +63,7 @@ func (h *Hub) voiceEventAudience(ctx context.Context, channelID, subjectID int64
 	}
 	h.mu.RLock()
 	for uid, c := range h.clients {
-		if _, ok := seen[uid]; !ok && c.getVoiceChID() == channelID {
+		if _, ok := seen[uid]; !ok && c.voice.channel() == channelID {
 			audience = append(audience, uid)
 		}
 	}
@@ -170,7 +170,7 @@ func (h *Hub) VoiceSessionCount() int {
 	defer h.mu.RUnlock()
 	count := 0
 	for _, c := range h.clients {
-		if c.getVoiceChID() != 0 {
+		if c.voice.channel() != 0 {
 			count++
 		}
 	}

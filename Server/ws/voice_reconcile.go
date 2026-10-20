@@ -205,7 +205,7 @@ func (h *Hub) reconcileReap(ctx context.Context, channelID int64, userID int64, 
 		if txn.clearExact(c, channelID, joinedAt) {
 			tailCtx, cancelTail := h.sweepTailCtx(ctx)
 			defer cancelTail()
-			h.finishVoiceLeave(tailCtx, c, channelID, joinedAt, voiceLeaveReasonReconciled)
+			h.finishVoiceLeave(tailCtx, txn, c, channelID, joinedAt, voiceLeaveReasonReconciled)
 			return
 		}
 	}
