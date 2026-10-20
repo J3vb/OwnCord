@@ -40,6 +40,7 @@ func echoWSBackend(t *testing.T) string {
 			return
 		}
 		defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort
+		conn.SetReadLimit(1 << 20)                          // let large-frame tests reach the proxy's own limit
 
 		for {
 			typ, data, err := conn.Read(r.Context())
@@ -413,5 +414,61 @@ func TestHandleLiveKitHealth_NotConfigured(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "not configured") {
 		t.Errorf("body = %q, want it to name the missing configuration", rr.Body.String())
+	}
+}
+
+// The proxy documents a 256 KiB signaling limit, but the websocket library's
+// own 32 KiB default read limit used to close both legs first.
+func TestLiveKitProxy_WebSocket_LargeFrameLimit(t *testing.T) {
+	const kib = 1024
+	cases := []struct {
+		name    string
+		size    int
+		wantErr bool
+	}{
+		{"above library default passes", 100 * kib, false},
+		{"at proxy limit passes", 256 * kib, false},
+		{"above proxy limit rejected", 256*kib + 1, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := echoWSBackend(t)
+			proxy := httptest.NewServer(api.NewLiveKitProxy(backend, []string{"*"}))
+			t.Cleanup(proxy.Close)
+
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+
+			conn, dialResp, err := websocket.Dial(ctx, "ws://"+proxy.Listener.Addr().String()+"/rtc", nil)
+			if dialResp != nil && dialResp.Body != nil {
+				defer dialResp.Body.Close() //nolint:errcheck // best-effort close in test
+			}
+			if err != nil {
+				t.Fatalf("dial through proxy: %v", err)
+			}
+			defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort
+			conn.SetReadLimit(512 * kib)
+
+			payload := bytes.Repeat([]byte{0xab}, tc.size)
+			if err := conn.Write(ctx, websocket.MessageBinary, payload); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			_, got, err := conn.Read(ctx)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("read succeeded with %d bytes, want the connection closed", len(got))
+				}
+				if status := websocket.CloseStatus(err); status != websocket.StatusMessageTooBig {
+					t.Fatalf("close status = %v, want %v (err: %v)", status, websocket.StatusMessageTooBig, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("read: %v", err)
+			}
+			if !bytes.Equal(got, payload) {
+				t.Errorf("echoed %d bytes, want %d identical", len(got), len(payload))
+			}
+		})
 	}
 }

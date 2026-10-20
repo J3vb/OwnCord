@@ -271,6 +271,7 @@ and only when it changes something a contributor or fork holder must do
 - On Linux (X11), the Push to Talk key can now be F13 to F24, and a key synced from Windows fires.
 - On Linux, a ringing call's notification now goes away when the ring ends, clicking a notification opens its message however many have piled up, notifications no longer play the desktop's sound on top of OwnCord's, and the AppImage's notifications show the OwnCord icon.
 - Linux: screen-share audio now reaches viewers in stereo instead of mono.
+- Voice signaling through the server's built-in proxy dropped the call connection when a single message passed 32 KiB, which could happen in a busy room. Messages up to 256 KiB now pass through.
 
 ## v2.3.0-beta.1
 
