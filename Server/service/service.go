@@ -81,6 +81,10 @@ type Services struct {
 	NSFW *NSFWService
 	// GIFFavorites is the per-user saved-GIF list (migration 059).
 	GIFFavorites *GIFFavoriteService
+	// UserNotes is the private per-user profile note (migration 069). It is nil
+	// when the Store does not also satisfy UserNoteStore (a test double), and
+	// the profile routes then leave the note routes out.
+	UserNotes *UserNoteService
 	// PushDispatch is Web Push dispatch (B5-11, behind HP-5), nil unless
 	// the composition root constructed it — which it does only when both
 	// push.enabled and push.dispatch_enabled are true. Exists on Services
@@ -127,7 +131,12 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 	voice := NewVoiceService(st)
 	callLog := NewCallLogService(st, dms)
 	voice.SetCallLog(callLog)
+	var userNotes *UserNoteService
+	if ns, ok := st.(UserNoteStore); ok {
+		userNotes = NewUserNoteService(ns)
+	}
 	return &Services{
+		UserNotes:       userNotes,
 		CallLog:         callLog,
 		Erasure:         erasure,
 		Retention:       NewRetentionService(st),

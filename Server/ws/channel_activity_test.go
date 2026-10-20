@@ -26,6 +26,14 @@ type activityFixture struct {
 
 func newActivityFixture(t *testing.T) *activityFixture {
 	t.Helper()
+	return newActivityFixtureStore(t, func(d *db.DB) service.Store { return d }, true)
+}
+
+// newActivityFixtureStore builds the fixture over wrap(database) as the
+// services' store; inlineMentions runs the mention-count write inline, false
+// leaves the production mention path (the caller starts the worker).
+func newActivityFixtureStore(t *testing.T, wrap func(*db.DB) service.Store, inlineMentions bool) *activityFixture {
+	t.Helper()
 	database, err := db.Open(":memory:")
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
@@ -35,9 +43,11 @@ func newActivityFixture(t *testing.T) *activityFixture {
 		t.Fatalf("db.Migrate: %v", err)
 	}
 	limiter := auth.NewRateLimiter()
-	svc := service.New(database, limiter)
+	svc := service.New(wrap(database), limiter)
 	hub := newTestHub(t, database, limiter, svc)
-	hub.RunMentionCountsInlineForTest()
+	if inlineMentions {
+		hub.RunMentionCountsInlineForTest()
+	}
 
 	ctx := context.Background()
 	textID, err := database.CreateChannel(ctx, "general", "text", "", "", 0)

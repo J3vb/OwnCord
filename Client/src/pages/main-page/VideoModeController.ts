@@ -46,6 +46,8 @@ export interface VideoModeControllerOptions {
   readonly getCurrentUserId: () => number;
   /** The DM call panel, once it has loaded (it is a lazy chunk). */
   readonly panelHost?: () => VideoPanelHost | null;
+  /** The grid opened or closed (or went to a pop-out): callChat re-reads it. */
+  readonly onGridChange?: () => void;
 }
 
 export interface VideoModeController {
@@ -62,6 +64,8 @@ export interface VideoModeController {
   openCall(): void;
   /** Whether video grid is currently visible. */
   isVideoMode(): boolean;
+  /** The grid is up in this window (open and not popped out). */
+  isGridInWindow(): boolean;
   /** Set focus on a specific video tile (focus mode). */
   setFocus(tileId: number): void;
   /** Get the currently focused tile ID, or null if none. */
@@ -165,6 +169,7 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     slots.typingSlot.style.display = chat;
     slots.inputSlot.style.display = chat;
     slots.videoGridSlot.style.display = grid ? "block" : "none";
+    opts.onGridChange?.();
   }
 
   /** A chat column too narrow for both (the side panels count, not only the
@@ -433,6 +438,7 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     showVideoGrid,
     openCall,
     isVideoMode: isVideoModeActive,
+    isGridInWindow: () => videoMode && !poppedOut,
     setFocus,
     getFocusedTileId,
     setCallPoppedOut,

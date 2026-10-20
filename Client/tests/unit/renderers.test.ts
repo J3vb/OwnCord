@@ -363,6 +363,24 @@ describe("renderers", () => {
       ac.abort();
     });
 
+    it("explains a REQUEST_TIMEOUT failure as a busy server and keeps Retry (WP 4.1b)", () => {
+      const msg = makeMessage({
+        status: "failed",
+        correlationId: "c-busy",
+        id: 0,
+        errorCode: "REQUEST_TIMEOUT",
+      });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      expect(container.querySelector(".msg-send-failed-text")?.textContent).toBe(
+        "The server is busy — retry in a moment",
+      );
+      expect(container.querySelector('[data-testid="msg-retry-c-busy"]')).not.toBeNull();
+      ac.abort();
+    });
+
     it("renders a failed row with reason, retry, and discard", () => {
       const onRetry = vi.fn();
       const onDeleteDraft = vi.fn();

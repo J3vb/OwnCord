@@ -83,6 +83,10 @@ export type WsErrorCode =
   // A fresh connect refused while the server's ready builds are saturated;
   // carries retry_after_ms and is handled inside ws.ts (P5-S04).
   | "SERVER_BUSY"
+  // A command whose database work ran past the server's per-frame deadline. It
+  // was not applied, so Retry is safe. Unlike SERVER_BUSY it is an ordinary
+  // frame error and never ends the connection (WP 4.1b).
+  | "REQUEST_TIMEOUT"
   // A wake reconnect (auth frame `wake: true`) refused because another device
   // currently holds the account's one live socket. The client stays signed in
   // and does not reconnect until the user chooses "Use here" (U4).

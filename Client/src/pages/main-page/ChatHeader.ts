@@ -33,6 +33,10 @@ export interface ChatHeaderRefs {
    *  guild channel in the right-hand layout; `MemberColumn` is the only writer
    *  of its `hidden` and `aria-pressed`. */
   readonly memberListBtn: HTMLButtonElement;
+  /** The "Hide chat"/"Show chat" toggle of the call view (WP 6.1c). Hidden
+   *  unless the active channel is the joined voice channel with the grid open;
+   *  `setChatHeaderCallChat` is its only writer and the page wires the click. */
+  readonly callChatBtn: HTMLButtonElement;
   /** Holds the DM partner's avatar (or a group's stack) in place of the "@". */
   readonly avatarEl: HTMLSpanElement;
   /**
@@ -217,6 +221,16 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
     const toggle = opts.onToggleGuildMemberList;
     memberListBtn.addEventListener("click", () => toggle());
   }
+  const callChatBtn = createElement("button", {
+    type: "button",
+    class: "profile-btn call-chat-btn",
+    title: shellText("callChat.hide"),
+    "aria-label": shellText("callChat.hide"),
+    "aria-pressed": "true",
+    "data-testid": "call-chat-toggle",
+  });
+  callChatBtn.appendChild(createIcon("message-square", 18));
+  callChatBtn.hidden = true;
   const pinBtn = createElement("button", {
     type: "button",
     class: "pin-btn",
@@ -246,6 +260,7 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
     searchInput,
     callBtn,
     videoCallBtn,
+    callChatBtn,
     profileBtn,
     membersBtn,
     memberListBtn,
@@ -264,6 +279,7 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
       profileBtn,
       membersBtn,
       memberListBtn,
+      callChatBtn,
       avatarEl,
       sidebarToggle,
       nameGroupEl: nameGroup,
@@ -277,20 +293,35 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
 
 /**
  * The header glyph for a channel type: the sidebar's megaphone for an
- * announcement channel, "#" for every other text-style channel. Mirrors
+ * announcement channel, its speaker for a voice channel, "#" for every other text-style channel. Mirrors
  * `renderTextChannelItem` so the two cannot disagree.
  */
 export function setChatHeaderChannelType(
   refs: ChatHeaderRefs,
   type: ChannelType | undefined,
 ): void {
-  if (type === "announcement") {
-    refs.hashEl.dataset["channelType"] = "announcement";
-    refs.hashEl.replaceChildren(createIcon("megaphone", 18));
+  if (type === "announcement" || type === "voice") {
+    refs.hashEl.dataset["channelType"] = type;
+    refs.hashEl.replaceChildren(createIcon(type === "voice" ? "volume-2" : "megaphone", 18));
   } else {
     delete refs.hashEl.dataset["channelType"];
     setText(refs.hashEl, "#");
   }
+}
+
+/**
+ * The call view's chat toggle: shown only while the chat can sit beside the
+ * grid (`capable`); `open` is the user's choice, mirrored in `aria-pressed`.
+ */
+export function setChatHeaderCallChat(
+  refs: ChatHeaderRefs,
+  state: { readonly capable: boolean; readonly open: boolean },
+): void {
+  const label = shellText(state.open ? "callChat.hide" : "callChat.show");
+  refs.callChatBtn.hidden = !state.capable;
+  refs.callChatBtn.setAttribute("aria-pressed", String(state.open));
+  refs.callChatBtn.title = label;
+  refs.callChatBtn.setAttribute("aria-label", label);
 }
 
 /** Show a channel topic in the header and arm the click-to-read-in-full. */

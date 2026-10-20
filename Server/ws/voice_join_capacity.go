@@ -38,7 +38,7 @@ func (h *Hub) voiceJoinSwitchCapacityOK(ctx context.Context, c *Client, channelI
 	count, err := h.voice.CountInChannel(ctx, channelID)
 	if err != nil {
 		slog.Error("ws voice_join: capacity pre-check failed", "err", err, "channel_id", channelID)
-		c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "failed to check channel capacity", reqID))
+		voiceJoinFail(ctx, c, reqID, err, ErrCodeInternal, "failed to check channel capacity")
 		return false
 	}
 	if count >= maxUsers {
