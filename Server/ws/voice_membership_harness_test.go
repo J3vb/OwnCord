@@ -58,10 +58,11 @@ import (
 // silently no-op'd.
 type fakeSFU struct {
 	mu           sync.Mutex
-	participants map[string]map[string]struct{} // room -> identity set
-	unhandled    []string                       // RPC methods the fake does not implement
-	listFails    bool                           // when set, ListParticipants answers an error
-	onList       func()                         // when set, runs once at the next ListParticipants, before it answers
+	participants map[string]map[string]struct{}      // room -> identity set
+	unhandled    []string                            // RPC methods the fake does not implement
+	listFails    bool                                // when set, ListParticipants answers an error
+	onList       func()                              // when set, runs once at the next ListParticipants, before it answers
+	updates      []*lkproto.UpdateParticipantRequest // every UpdateParticipant the hub sent
 }
 
 // beforeNextList runs fn once, inside the next ListParticipants, before the
@@ -184,6 +185,9 @@ func (f *fakeSFU) handle(w http.ResponseWriter, r *http.Request) {
 	case "UpdateParticipant":
 		var req lkproto.UpdateParticipantRequest
 		_ = proto.Unmarshal(body, &req)
+		f.mu.Lock()
+		f.updates = append(f.updates, &req)
+		f.mu.Unlock()
 		marshal(&lkproto.ParticipantInfo{Identity: req.GetIdentity()})
 	case "ListRooms":
 		f.mu.Lock()

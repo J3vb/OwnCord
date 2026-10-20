@@ -99,3 +99,20 @@ func TestDBSetAFKChannel_GoneTargetKeepsPreviousFlag(t *testing.T) {
 		}
 	}
 }
+
+// Archiving the flagged channel clears the flag, so GetAFKChannel never hands
+// back a hidden channel (trigger trg_channels_archive_clears_afk).
+func TestMigration068_ArchivingClearsAFK(t *testing.T) {
+	ctx := context.Background()
+	database := openMigratedMemory(t)
+	a, _ := database.CreateChannel(ctx, "afk-a", "voice", "", "", 0)
+	if _, err := database.SetAFKChannel(ctx, &a); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE channels SET archived = 1 WHERE id = ?`, a); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := database.GetAFKChannel(ctx); err != nil || got != nil {
+		t.Fatalf("an archived channel must not stay the AFK channel: got=%+v err=%v", got, err)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
@@ -26,6 +27,43 @@ func (h *Hub) trySyncVoiceParticipantPermissions(ctx context.Context, userID, ch
 	}
 	defer unlock()
 	return h.updateVoiceParticipantPermissions(ctx, userID, channelID, joinToken)
+}
+
+// ReconcileChannelVoicePermissions re-applies the publish grants of everyone
+// currently in the channel. The admin AFK route calls it right after the flag
+// moves, so members already in the channel lose (or regain) the microphone,
+// camera and screen share now instead of at the next 60 s sweep. It is bounded
+// by sweepTimeout and by the hub's lifetime; a member whose LiveKit
+// participant is already gone is skipped, and a failure is left to the sweep.
+func (h *Hub) ReconcileChannelVoicePermissions(channelID int64) {
+	if h.livekit == nil {
+		return
+	}
+	h.mu.RLock()
+	members := make([]*Client, 0, 8)
+	for _, c := range h.clients {
+		if c.voice.channel() == channelID {
+			members = append(members, c)
+		}
+	}
+	h.mu.RUnlock()
+	if len(members) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(h.life, sweepTimeout)
+	defer cancel()
+	for _, c := range members {
+		if ctx.Err() != nil {
+			return
+		}
+		curCh, joinToken := c.voice.state()
+		if curCh != channelID || joinToken == "" {
+			continue
+		}
+		if err := h.syncVoiceParticipantPermissions(ctx, c.userID, channelID, joinToken); err != nil && !liveKitParticipantMissing(err) {
+			slog.Warn("voice permission reconciliation deferred", "user_id", c.userID, "channel_id", channelID, "err", err)
+		}
+	}
 }
 
 // updateVoiceParticipantPermissions requires the per-user moderation lock.

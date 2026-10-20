@@ -21,6 +21,13 @@ type afkChannelResponse struct {
 	ChannelID *int64 `json:"channel_id"`
 }
 
+// voicePermissionReconciler is implemented by the hub. It is asserted rather
+// than added to HubBroadcaster so the many HubBroadcaster test doubles stay
+// as they are.
+type voicePermissionReconciler interface {
+	ReconcileChannelVoicePermissions(channelID int64)
+}
+
 // handlePutAFKChannel serves PUT /admin/api/afk-channel (MANAGE_SERVER). The
 // service validates the channel and commits the swap in one transaction; the
 // handler then tells connected clients about both channels whose flag moved.
@@ -56,6 +63,14 @@ func handlePutAFKChannel(channels *service.ChannelService, hub HubBroadcaster) h
 			}
 			if change.Current != nil {
 				hub.BroadcastChannelUpdate(change.Current)
+			}
+			if rec, ok := hub.(voicePermissionReconciler); ok {
+				if change.Previous != nil {
+					rec.ReconcileChannelVoicePermissions(change.Previous.ID)
+				}
+				if change.Current != nil {
+					rec.ReconcileChannelVoicePermissions(change.Current.ID)
+				}
 			}
 		}
 		writeJSON(w, http.StatusOK, afkChannelResponse{ChannelID: channelID})
