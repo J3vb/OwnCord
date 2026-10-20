@@ -30,6 +30,17 @@ import { isSpoilerFilename } from "../../features/messaging/spoilerAttachment";
 import { messageStatusText } from "../../i18n/messageStatus";
 import { clearStillCache } from "../../features/messaging/emojiStill";
 import { registerSessionReset } from "@lib/sessionRegistry";
+import { sniffImageBlob } from "@lib/imageHeader";
+import {
+  ATTACHMENT_BOX_MAX_H,
+  blobImageSize,
+  fitImageBox,
+  getImageBox,
+  imageSizeGeneration,
+  rememberBlobSize,
+  setImageBox,
+  type ImageBox,
+} from "./image-sizes";
 import type { ImageMenuTarget } from "./image-menu";
 
 /** One image of a message's lightbox sequence. `url` is the resolved server URL. */
@@ -724,12 +735,21 @@ async function idbPut(scope: string, url: string, blob: Blob): Promise<void> {
   }
 }
 
+/** `sniff`: read the file's header for its size, for a caller that has no
+ *  dimensions of its own (a row reserving its box). Other callers skip the read. */
+export interface ImageLoadOptions {
+  readonly sniff?: boolean;
+}
+
 /** Fetch an image and return a `blob:` URL an `<img>` can show. Server images
  *  come through memory → IndexedDB → the TOFU proxy; an external image comes
  *  from the broker and never enters those two caches, which hold server
  *  content only (B7-16). */
-export function fetchImageAsObjectUrl(url: string): Promise<string | null> {
-  if (isExternalUrl(url)) return fetchExternalImage({ url });
+export function fetchImageAsObjectUrl(
+  url: string,
+  opts?: ImageLoadOptions,
+): Promise<string | null> {
+  if (isExternalUrl(url)) return fetchExternalImage({ url }, opts);
   const generation = attachmentCacheGeneration;
   const scope = cacheScope;
 
@@ -749,6 +769,13 @@ export function fetchImageAsObjectUrl(url: string): Promise<string | null> {
     if (blob === null || generation !== attachmentCacheGeneration) return null;
     const objectUrl = createObjectUrl(blob);
     if (objectUrl === null) return null;
+    if (opts?.sniff === true && stored === null) {
+      rememberBlobSize(objectUrl, await sniffImageBlob(blob));
+    }
+    if (generation !== attachmentCacheGeneration) {
+      revokeObjectUrl(objectUrl);
+      return null;
+    }
     imageCache.set(url, objectUrl, blob.size);
     if (stored === null && scope !== null) void idbPut(scope, url, blob);
     return objectUrl;
@@ -990,13 +1017,17 @@ export function recoverEvictedImage(
 /** An external image, fetched by the broker and handed back as a same-origin
  *  `blob:` URL (so the GIF-freeze canvas stays untainted), or null when the
  *  broker refused it or could not fetch it. */
-export function fetchExternalImage(source: ExternalImageSource): Promise<string | null> {
-  return loadExternalImage(source).then((result) => (result.ok ? result.value : null));
+export function fetchExternalImage(
+  source: ExternalImageSource,
+  opts?: ImageLoadOptions,
+): Promise<string | null> {
+  return loadExternalImage(source, opts).then((result) => (result.ok ? result.value : null));
 }
 
 /** `fetchExternalImage`, keeping the broker's failure class. */
 export function loadExternalImage(
   source: ExternalImageSource,
+  opts?: ImageLoadOptions,
 ): Promise<ExternalContentResult<string>> {
   const key = externalKey(source);
   // B9-8: nothing is fetched for an item the viewer has not consented to.
@@ -1020,6 +1051,9 @@ export function loadExternalImage(
     }
     const objectUrl = createObjectUrl(result.value);
     if (objectUrl === null) return { ok: false, failure: "unavailable" };
+    // The header's size, read once per fetch, so the renderer reserves the
+    // box before the first decode; callers sharing this fetch all see it.
+    if (opts?.sniff === true) rememberBlobSize(objectUrl, await sniffImageBlob(result.value));
     if (epoch !== externalEpoch) {
       revokeObjectUrl(objectUrl);
       return { ok: false, failure: "unavailable" };
@@ -1366,18 +1400,23 @@ function renderAttachmentContent(att: Attachment, gallery?: LightboxGallery): HT
     const inlineUrl = thumbnailUrl(resolvedUrl, att.mime);
 
     // Reserve space using server-provided dimensions to prevent layout shift.
-    if (att.width != null && att.height != null && att.width > 0 && att.height > 0) {
-      const maxW = 400,
-        maxH = 350;
-      const scale = Math.min(1, maxW / att.width, maxH / att.height);
-      const w = Math.round(att.width * scale);
-      const h = Math.round(att.height * scale);
-      wrap.style.width = `${w}px`;
-      wrap.style.height = `${h}px`;
-    } else {
-      // Fallback for old attachments without dimensions — use placeholder height.
-      wrap.style.minHeight = "200px";
-    }
+    // An old attachment has none: it takes the box remembered for its URL, or
+    // the size its header declares once the bytes arrive, or 200px until then.
+    const serverBox =
+      att.width != null && att.height != null
+        ? fitImageBox(att.width, att.height, ATTACHMENT_BOX_MAX_H)
+        : null;
+    const reserve = (box: ImageBox): void => {
+      wrap.style.minHeight = "";
+      wrap.style.width = `${box.w}px`;
+      wrap.style.height = `${box.h}px`;
+    };
+    // A reset between mount and load must not write this URL into the new session.
+    const generation = imageSizeGeneration();
+    const rememberedBox = serverBox === null ? getImageBox(inlineUrl) : undefined;
+    if (serverBox !== null) reserve(serverBox);
+    else if (rememberedBox !== undefined) reserve(rememberedBox);
+    else wrap.style.minHeight = "200px";
 
     function attachLightbox(img: HTMLImageElement): void {
       // Keyboard-operable like an inline image (B9-9): focus it and Enter or
@@ -1400,23 +1439,37 @@ function renderAttachmentContent(att: Attachment, gallery?: LightboxGallery): HT
 
     const isGif = att.mime === "image/gif";
 
-    // Clear min-height reservation and cache the natural height so virtual
-    // scroll rebuilds don't oscillate between estimated and actual heights.
-    // Measure synchronously to avoid rAF race with ResizeObserver.
-    const clearReservation = (): void => {
+    // Without server dimensions, settle the box on the real size once it is
+    // known (a header the sniffer could not read) so a rebuild starts there.
+    const clearReservation = (img: HTMLImageElement): void => {
+      if (serverBox !== null) return;
+      const actual = fitImageBox(img.naturalWidth, img.naturalHeight, ATTACHMENT_BOX_MAX_H);
+      const reserved = getImageBox(inlineUrl);
+      if (actual !== null) {
+        // Decoded and oriented by the browser: the measured box beats a sniffed one.
+        if (
+          reserved === undefined ||
+          reserved.measured !== true ||
+          reserved.w !== actual.w ||
+          reserved.h !== actual.h
+        ) {
+          reserve(actual);
+          setImageBox(inlineUrl, { ...actual, measured: true }, generation);
+        }
+        return;
+      }
+      if (reserved !== undefined) return;
+      // No intrinsic size reported: keep the measured height as the minimum.
       wrap.style.minHeight = "";
       const h = wrap.offsetHeight;
-      if (h > 0 && att.width == null) {
-        // Only cache for fallback path (no server-provided dimensions).
-        // Set min-height to prevent oscillation on virtual scroll rebuild.
-        wrap.style.minHeight = `${h}px`;
-      }
+      if (h > 0) wrap.style.minHeight = `${h}px`;
     };
 
     const buildImage = (objectUrl: string): HTMLImageElement => {
       const img = createElement("img", {
         src: objectUrl,
         alt: att.filename,
+        decoding: "async",
       });
       recoverEvictedImage(img, { url: inlineUrl });
       attachLightbox(img);
@@ -1430,7 +1483,7 @@ function renderAttachmentContent(att: Attachment, gallery?: LightboxGallery): HT
       img.addEventListener(
         "load",
         () => {
-          clearReservation();
+          clearReservation(img);
           if (isGif) observeMedia(img, img.src, wrap, !animateGifsPref);
         },
         { once: true },
@@ -1452,8 +1505,18 @@ function renderAttachmentContent(att: Attachment, gallery?: LightboxGallery): HT
       let current: Element = placeholder;
 
       const attempt = (): void => {
-        void fetchImageAsObjectUrl(inlineUrl).then((objectUrl) => {
+        void fetchImageAsObjectUrl(inlineUrl, { sniff: serverBox === null }).then((objectUrl) => {
           if (objectUrl !== null) {
+            const sniffed = serverBox === null ? blobImageSize(objectUrl) : undefined;
+            const exact =
+              sniffed === undefined
+                ? null
+                : fitImageBox(sniffed.width, sniffed.height, ATTACHMENT_BOX_MAX_H);
+            if (exact !== null) {
+              // A measured box from an earlier load wins over the header's reading.
+              const held = setImageBox(inlineUrl, exact, generation);
+              reserve(held ?? exact);
+            }
             const img = buildImage(objectUrl);
             current.replaceWith(img);
             current = img;
