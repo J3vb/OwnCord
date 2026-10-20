@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/config"
@@ -115,6 +117,19 @@ type Updater struct {
 	downloadStallTimeout time.Duration
 }
 
+var (
+	sharedTransportOnce sync.Once
+	sharedTransport     atomic.Pointer[http.Transport]
+)
+
+// CloseIdleConnections closes the idle connections of the transport every
+// Updater shares. It is safe to call before any Updater exists.
+func CloseIdleConnections() {
+	if t := sharedTransport.Load(); t != nil {
+		t.CloseIdleConnections()
+	}
+}
+
 // NewUpdater creates an Updater for the given repository.
 func NewUpdater(currentVersion, githubToken, repoOwner, repoName string) *Updater {
 	u := &Updater{
@@ -125,26 +140,32 @@ func NewUpdater(currentVersion, githubToken, repoOwner, repoName string) *Update
 		signingKeyText: defaultServerSignaturePublicKey,
 	}
 	// Each redirect hop passes the same host check as the first request.
-	// Clone the default transport, or build an equivalent one if the global
-	// default was replaced with another RoundTripper. Built here, in the
-	// inventoried egress site (invariants.EgressAllow), not in a helper.
-	var transport *http.Transport
-	if base, ok := http.DefaultTransport.(*http.Transport); ok {
-		transport = base.Clone()
-	} else {
-		transport = &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
-			DialContext: (&net.Dialer{
-				Timeout:   30 * time.Second,
-				KeepAlive: 30 * time.Second,
-			}).DialContext,
-			ExpectContinueTimeout: time.Second,
-			ForceAttemptHTTP2:     true,
-			TLSHandshakeTimeout:   10 * time.Second,
-			IdleConnTimeout:       90 * time.Second,
+	// One transport is shared by every Updater so its idle connections can be
+	// released together (CloseIdleConnections). Clone the default transport,
+	// or build an equivalent one if the global default was replaced with
+	// another RoundTripper. Built here, in the inventoried egress site
+	// (invariants.EgressAllow), not in a helper.
+	sharedTransportOnce.Do(func() {
+		var transport *http.Transport
+		if base, ok := http.DefaultTransport.(*http.Transport); ok {
+			transport = base.Clone()
+		} else {
+			transport = &http.Transport{
+				Proxy: http.ProxyFromEnvironment,
+				DialContext: (&net.Dialer{
+					Timeout:   30 * time.Second,
+					KeepAlive: 30 * time.Second,
+				}).DialContext,
+				ExpectContinueTimeout: time.Second,
+				ForceAttemptHTTP2:     true,
+				TLSHandshakeTimeout:   10 * time.Second,
+				IdleConnTimeout:       90 * time.Second,
+			}
 		}
-	}
-	transport.ResponseHeaderTimeout = responseHeaderTimeout
+		transport.ResponseHeaderTimeout = responseHeaderTimeout
+		sharedTransport.Store(transport)
+	})
+	transport := sharedTransport.Load()
 	u.httpClient = &http.Client{
 		Transport: transport,
 		Timeout:   metadataClientTimeout,
