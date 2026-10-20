@@ -274,8 +274,8 @@ type ServerConfig struct {
 	// goroutines and buffered send queues, so set a ceiling that matches the
 	// host's memory before pointing a large community at it.
 	MaxWSConnections int `yaml:"max_ws_connections"`
-	// MetricsAllowedCIDRs gates /api/v1/metrics and the Prometheus /metrics
-	// exporter separately from the human admin surface, so a central
+	// MetricsAllowedCIDRs gates /api/v1/metrics, /api/v1/metrics/prometheus
+	// and the otel build's Prometheus /metrics exporter separately from the human admin surface, so a central
 	// Prometheus scraper can be allowlisted without widening /admin to its
 	// network. Empty (default) falls back to AdminAllowedCIDRs.
 	MetricsAllowedCIDRs []string `yaml:"metrics_allowed_cidrs"`
