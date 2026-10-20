@@ -897,7 +897,16 @@ gh workflow run load-baseline.yml -f profile=scale-role-flip --ref dev
   every loadtest user holds, renaming it and flipping its ADD_REACTIONS bit.
   The second call is the one that touches every connected client: a
   `member_update` per holder and a visibility refresh of everyone. It stops
-  before the herd, so the herd's zero-kick gate stays about the herd.
+  before the herd, so the herd's zero-kick gate stays about the herd: the last
+  tick before it only restores, so the run ends with the default role, its mask
+  and the user as they started. Each PATCH has a 120 s timeout, so a slow
+  handler is a measurement, not a failed request.
+- **The flipped user may be offline.** VU ids come from a shared pool, so
+  `loadtest<K6_PEAK_VUS>` is not guaranteed to hold a socket. The fan-out to
+  everyone else is the same either way; only that one user's own revocation path
+  may go unexercised.
+- **Artifacts.** The workflow's artifact is named with a `-role-flip` suffix
+  for this variant, so the two runs sit side by side.
 - **Admin token.** The owner session token the workflow already obtains at setup
   is written to the run directory (mode 0600, never uploaded) only when the
   scenario is on, and read by k6 from that file, not from its environment.
@@ -908,10 +917,15 @@ gh workflow run load-baseline.yml -f profile=scale-role-flip --ref dev
   by the VU around the request), the user-role PATCH time, `bpQueueDisconnects`
   (`obs_backpressure{kind:queue_disconnects}`), `broadcastDrops`
   (`obs_broadcast_drops`) and dispatch lag (`obs_dispatch_lag_p99_ms` and
-  `_max_ms`, which are the server's cumulative distribution since boot, so read
-  the window's last value). `role_patches` must be at least 1 and
-  `role_flip_errors` must be 0; nothing else is a threshold, because the number
-  is recorded to be compared, not gated.
+  `_max_ms`, gauges whose last value in each window is published). The server's
+  figure covers everything since boot, seeding and ramp included, so a lag
+  caused by the role changes is diluted in it; a real effect may be larger
+  than it shows, so treat it as indicative, not a per-window measurement. `role_patches` must be at least 1 and
+  `role_flip_errors` must be 0. The scale budgets and gates (steady and burst
+  p95, population, login burst, herd) still apply, so a red run is a possible,
+  readable outcome: it says the role changes cost the rest of the server more
+  than the budgets allow. The role-change figures themselves are recorded to be
+  compared, not gated.
 - **How to read it.** Compare a run of `scale-role-flip` with a plain `scale`
   run at the same commit, and with the same run after WP 4.4b. A rise in the
   steady, burst or login latencies over the plain run is the cost of the role

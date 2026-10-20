@@ -1134,7 +1134,7 @@ test("role flip observer records broadcast drops and dispatch lag per phase, and
         values: { med: 30, "p(95)": 90, "p(99)": 120, count: 12 },
       },
       "obs_broadcast_drops{phase:steady}": { values: { count: 3 } },
-      "obs_dispatch_lag_p99_ms{phase:steady}": { values: { max: 9 } },
+      "obs_dispatch_lag_p99_ms{phase:steady}": { values: { value: 9 } },
     },
   }).load_measurement.role_flip;
   assert.equal(summary.every_s, 30);
@@ -1144,4 +1144,36 @@ test("role flip observer records broadcast drops and dispatch lag per phase, and
   assert.equal(steady.broadcast_drops, 3);
   assert.equal(steady.dispatch_lag_p99_ms, 9);
   assert.equal(steady.queue_disconnects, 0);
+});
+
+test("role flip uses a long PATCH timeout and stops before the herd with everything restored", () => {
+  const h = harness(flipEnv(), 1, flipFiles);
+  flipRoutes(h);
+  const until = h.evaluate("ROLE_FLIP_UNTIL_S");
+  const from = h.evaluate("ROLE_FLIP_FROM_S");
+  // Tick every 30 s of scenario time until well past the cutoff.
+  for (let t = 0; t < until - from + 60; t += 30) {
+    h.at(t);
+    h.evaluate("roleFlipScenario()");
+  }
+  for (const call of h.patches) assert.equal(call.params.timeout, "120s");
+  // The last PATCHed state is the original one, for the user and the role.
+  const users = h.patches.filter((p) => p.url.includes("/users/"));
+  const roles = h.patches.filter((p) => p.url.includes("/roles/"));
+  assert.deepEqual(users.at(-1).payload, { role_id: 4 });
+  assert.deepEqual(roles.at(-1).payload, { name: "Member", permissions: 1635 });
+  // No PATCH is sent once the next tick could not finish before the herd.
+  const count = h.patches.length;
+  h.at(until - from - 5);
+  h.evaluate("roleFlipScenario()");
+  assert.equal(h.patches.length, count);
+  // A flipped state is restored by the last tick, even if it is the only one after the flip.
+  const failing = harness(flipEnv(), 1, flipFiles);
+  flipRoutes(failing);
+  failing.at(0);
+  failing.evaluate("roleFlipScenario()");
+  failing.at(until - from - 5);
+  failing.evaluate("roleFlipScenario()");
+  assert.deepEqual(failing.patches.at(-2).payload, { role_id: 4 });
+  assert.deepEqual(failing.patches.at(-1).payload, { name: "Member", permissions: 1635 });
 });

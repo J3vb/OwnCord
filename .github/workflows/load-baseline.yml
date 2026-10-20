@@ -987,7 +987,7 @@ jobs:
         with:
           # capacity keeps B6-9's exact artifact name, so the published runs
           # stay findable; the other profiles name themselves.
-          name: ${{ env.PROFILE == 'capacity' && format('capacity-{0}', matrix.leg) || format('capacity-{0}-{1}{2}', env.PROFILE, matrix.leg, matrix.tls == 'off' && '-off' || '') }}
+          name: ${{ env.PROFILE == 'capacity' && format('capacity-{0}', matrix.leg) || format('capacity-{0}-{1}{2}{3}', env.PROFILE, matrix.leg, matrix.tls == 'off' && '-off' || '', env.SCALE_ROLE_FLIP_EVERY != '' && '-role-flip' || '') }}
           path: |
             ${{ runner.temp }}/loadtest/k6-summary.json
             ${{ runner.temp }}/loadtest/voice-load.txt
