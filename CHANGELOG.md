@@ -59,6 +59,10 @@ and only when it changes something a contributor or fork holder must do
 
 - Deleting someone's message request and later opening the conversation yourself now counts as accepting them, so their replies reach you instead of being held as a request you can no longer see.
 
+**Voice and video**
+
+- Switching to another voice channel while the first was still connecting could leave you stuck on "Securing" until the call dropped. The new channel's encryption keys are now kept, so it connects.
+
 ## v2.4.0-beta.1
 
 **OwnCord 2.4 beta 1** (the fifth public beta) is the community release of the self-hosted chat app with channels, direct messages, voice and video, and file sharing. It adds threads, forum channels, polls, message forwarding, several roles per member, nicknames, real channel categories, an AFK channel and much fuller group DMs. Chat, the member list and Settings work much more like Discord's, the Linux app catches up with Windows, and self-hosting gets sturdier: fewer ports for Docker, safer backup restores and Prometheus metrics.

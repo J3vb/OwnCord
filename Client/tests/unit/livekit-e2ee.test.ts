@@ -209,6 +209,97 @@ describe("E2EEManager", () => {
     expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(2);
   });
 
+  describe("announces held for a join queued behind the one in flight", () => {
+    it("replays them into the queued channel's exchange, which survives the queued join's clearState", async () => {
+      const ws = { send: vi.fn(), getState: () => "connected" };
+      const mgr = createManager(ws);
+      try {
+        mgr.holdAnnouncesForQueuedJoin(2);
+        await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+        expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
+
+        mgr.clearState({ keepHeldAnnounces: true });
+        await mgr.setupKeyExchange(true, 2);
+
+        expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(true);
+        expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(1);
+      } finally {
+        mgr.clearState();
+      }
+    });
+
+    it("never applies announces held for one channel to another channel's exchange", async () => {
+      const ws = { send: vi.fn(), getState: () => "connected" };
+      const mgr = createManager(ws);
+      try {
+        mgr.holdAnnouncesForQueuedJoin(2);
+        await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+
+        mgr.clearState({ keepHeldAnnounces: true });
+        await mgr.setupKeyExchange(true, 1);
+
+        expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
+        expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(0);
+      } finally {
+        mgr.clearState();
+      }
+    });
+
+    it("drops what was held for the previous channel when the queued join is retargeted", async () => {
+      const ws = { send: vi.fn(), getState: () => "connected" };
+      const mgr = createManager(ws);
+      try {
+        mgr.holdAnnouncesForQueuedJoin(2);
+        await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+        mgr.holdAnnouncesForQueuedJoin(3);
+        await mgr.handleAnnounce(99, "b3RoZXI=", "sig");
+
+        mgr.clearState({ keepHeldAnnounces: true });
+        await mgr.setupKeyExchange(true, 3);
+
+        expect([...mgr.peerPublicKeys.keys()]).toEqual([99]);
+      } finally {
+        mgr.clearState();
+      }
+    });
+
+    it("forgets a held announce whose peer leaves before the exchange starts", async () => {
+      const ws = { send: vi.fn(), getState: () => "connected" };
+      const mgr = createManager(ws);
+      try {
+        mgr.holdAnnouncesForQueuedJoin(2);
+        await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+        await mgr.handleParticipantLeft(PEER_ID);
+
+        mgr.clearState({ keepHeldAnnounces: true });
+        await mgr.setupKeyExchange(true, 2);
+
+        expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
+      } finally {
+        mgr.clearState();
+      }
+    });
+
+    it("drops them on a real leave, and lets live announces through once released", async () => {
+      const ws = { send: vi.fn(), getState: () => "connected" };
+      const mgr = createManager(ws);
+      try {
+        mgr.holdAnnouncesForQueuedJoin(2);
+        await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+        mgr.clearState();
+        await mgr.setupKeyExchange(true, 2);
+        expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
+
+        mgr.holdAnnouncesForQueuedJoin(3);
+        mgr.releaseHeldAnnounces();
+        await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+        expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(true);
+      } finally {
+        mgr.clearState();
+      }
+    });
+  });
+
   it("setupKeyExchange as non-key-holder resolves once the key holder's offer arrives", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
