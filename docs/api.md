@@ -4912,11 +4912,10 @@ works, and `apply_blocked` (present only then) says why:
 
 #### Errors
 
-| Status | Code                  | Cause                                                                                                                                                       |
-| ------ | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 503    | `UPDATE_UNAVAILABLE`  | Update checking is not configured                                                                                                                           |
-| 503    | `SHUTTING_DOWN`       | The server has begun shutting down, so the update was not downloaded or applied (checked before the download and again before the restart countdown starts) |
-| 502    | `UPDATE_CHECK_FAILED` | GitHub API failure                                                                                                                                          |
+| Status | Code                  | Cause                             |
+| ------ | --------------------- | --------------------------------- |
+| 503    | `UPDATE_UNAVAILABLE`  | Update checking is not configured |
+| 502    | `UPDATE_CHECK_FAILED` | GitHub API failure                |
 
 ---
 
@@ -4941,6 +4940,7 @@ re-verification against TOCTOU swaps), spawns the new process and shuts down.
 | 503    | `CONTAINER_DEPLOYMENT`                                       | Container deployment — the binary is image content; upgrade by pulling the new image (opt back in with `OWNCORD_CONTAINER=0` if the binary is bind-mounted) |
 | 503    | `INSTALL_READ_ONLY`                                          | The service cannot write to the folder that holds its program file; checked before any download. Install the new release by hand                            |
 | 503    | `UPDATE_UNAVAILABLE`                                         | Update checking is not configured                                                                                                                           |
+| 503    | `SHUTTING_DOWN`                                              | The server has begun shutting down, so the update was not downloaded or applied (checked before the download and again before the restart countdown starts) |
 | 409    | `RESTART_PENDING`                                            | A restart from an earlier apply/restore is already pending                                                                                                  |
 | 409    | `UPDATE_IN_PROGRESS`                                         | Another restart-sensitive operation (update apply or backup restore) is running                                                                             |
 | 409    | `NO_UPDATE`                                                  | Already up to date                                                                                                                                          |

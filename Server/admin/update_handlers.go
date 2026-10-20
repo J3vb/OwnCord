@@ -96,6 +96,14 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 			return
 		}
 
+		// A shutdown that has already begun refuses the request up front:
+		// before any outbound call, any slot claim and any long download,
+		// while the database is surely open.
+		if stop.stopping() {
+			refuseApplyShuttingDown(w)
+			return
+		}
+
 		// A read-only install directory cannot take the staged file or the
 		// backup name, so say so before any download or countdown rather than
 		// failing later as a download error.
@@ -152,13 +160,6 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 			return
 		}
 		newPath := exePath + ".new"
-
-		// A shutdown that has already begun refuses the request up front,
-		// while the database is surely open and before a long download.
-		if stop.stopping() {
-			refuseApplyShuttingDown(w)
-			return
-		}
 
 		// Download and verify.
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)

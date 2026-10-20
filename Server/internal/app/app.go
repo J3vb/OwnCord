@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
@@ -95,8 +96,9 @@ type App struct {
 	// apply tail's countdown and binary swap) to stop, long before the
 	// background group is drained. The group is deliberately not stopped
 	// early: handlers still running during the HTTP drain keep spawning jobs.
-	shutdown chan struct{}
-	markers  *db.MarkerStore
+	shutdown     chan struct{}
+	shutdownOnce sync.Once // Close's closed flag is not atomic; a second caller must not double-close
+	markers      *db.MarkerStore
 	// bootMarker is the current run's handle on boot.json (SRE-08); prevBoot
 	// is what the previous run left there, folded into the attention panel at
 	// start-up.
@@ -196,7 +198,7 @@ func (a *App) Close(ctx context.Context) error {
 	}
 	a.closed = true
 	if a.shutdown != nil {
-		close(a.shutdown)
+		a.shutdownOnce.Do(func() { close(a.shutdown) })
 	}
 
 	defaultBudget := a.closeStepBudget
