@@ -164,9 +164,30 @@ SELECT id, username, password, avatar, role_id, totp_secret, status,
 FROM users WHERE id = ?
 `
 
-func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
+type GetUserByIDRow struct {
+	ID                    int64   `json:"id"`
+	Username              string  `json:"username"`
+	Password              string  `json:"password"`
+	Avatar                *string `json:"avatar"`
+	RoleID                int64   `json:"roleId"`
+	TotpSecret            *string `json:"totpSecret"`
+	Status                string  `json:"status"`
+	CreatedAt             string  `json:"createdAt"`
+	LastSeen              *string `json:"lastSeen"`
+	Banned                int64   `json:"banned"`
+	BanReason             *string `json:"banReason"`
+	BanExpires            *string `json:"banExpires"`
+	IdentityPublicKey     *string `json:"identityPublicKey"`
+	DisplayName           *string `json:"displayName"`
+	About                 *string `json:"about"`
+	CustomStatus          *string `json:"customStatus"`
+	RegistrationStatus    string  `json:"registrationStatus"`
+	CustomStatusExpiresAt *string `json:"customStatusExpiresAt"`
+}
+
+func (q *Queries) GetUserByID(ctx context.Context, id int64) (GetUserByIDRow, error) {
 	row := q.db.QueryRowContext(ctx, getUserByID, id)
-	var i User
+	var i GetUserByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.Username,
@@ -197,9 +218,30 @@ SELECT id, username, password, avatar, role_id, totp_secret, status,
 FROM users WHERE username = ? COLLATE NOCASE
 `
 
-func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User, error) {
+type GetUserByUsernameRow struct {
+	ID                    int64   `json:"id"`
+	Username              string  `json:"username"`
+	Password              string  `json:"password"`
+	Avatar                *string `json:"avatar"`
+	RoleID                int64   `json:"roleId"`
+	TotpSecret            *string `json:"totpSecret"`
+	Status                string  `json:"status"`
+	CreatedAt             string  `json:"createdAt"`
+	LastSeen              *string `json:"lastSeen"`
+	Banned                int64   `json:"banned"`
+	BanReason             *string `json:"banReason"`
+	BanExpires            *string `json:"banExpires"`
+	IdentityPublicKey     *string `json:"identityPublicKey"`
+	DisplayName           *string `json:"displayName"`
+	About                 *string `json:"about"`
+	CustomStatus          *string `json:"customStatus"`
+	RegistrationStatus    string  `json:"registrationStatus"`
+	CustomStatusExpiresAt *string `json:"customStatusExpiresAt"`
+}
+
+func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUserByUsernameRow, error) {
 	row := q.db.QueryRowContext(ctx, getUserByUsername, username)
-	var i User
+	var i GetUserByUsernameRow
 	err := row.Scan(
 		&i.ID,
 		&i.Username,

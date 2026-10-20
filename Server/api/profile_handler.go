@@ -163,6 +163,12 @@ func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, st
 				Post("/avatar", handleUploadAvatar(svc, store, limiter, broadcaster))
 		}
 
+		if svc.UserNotes != nil {
+			r.Get("/notes/{userId}", handleGetUserNote(svc.UserNotes))
+			r.With(RateLimitMiddleware(limiter, "user_note:", userNoteRateLimitPerMinute, time.Minute, trustedProxies)).
+				Put("/notes/{userId}", handlePutUserNote(svc.UserNotes))
+		}
+
 		r.Get("/sessions", handleListSessions(svc))
 
 		r.With(RateLimitMiddleware(limiter, "own_moderation:", ownModerationRateLimitPerMinute, time.Minute, trustedProxies)).

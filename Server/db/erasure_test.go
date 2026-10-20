@@ -211,6 +211,14 @@ func eraseEveryInventoryClassIsZero(t *testing.T) {
 		`INSERT INTO message_group_events (message_id, target_user_id) VALUES (?, ?)`, evID, sub.id); err != nil {
 		t.Fatalf("seed group event target: %v", err)
 	}
+	// Private notes (migration 069): one the subject keeps about another user,
+	// one another user keeps about the subject, so class 16a is proved
+	// non-empty on both ids. A note between two other users must survive.
+	for _, n := range []struct{ owner, target int64 }{{sub.id, sub.other}, {sub.other, sub.id}, {sub.other, witness}} {
+		if ok, err := database.UpsertUserNote(ctx, n.owner, n.target, "private note"); err != nil || !ok {
+			t.Fatalf("seed note %d about %d: ok=%v err=%v", n.owner, n.target, ok, err)
+		}
+	}
 	before, err := database.TakeInventory(ctx, sub.id, sub.username)
 	if err != nil {
 		t.Fatalf("TakeInventory: %v", err)
@@ -290,6 +298,9 @@ func eraseEveryInventoryClassIsZero(t *testing.T) {
 	}
 	if n := count(`SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH 'needleword'`); n != 0 {
 		t.Errorf("FTS still finds the subject's text")
+	}
+	if n := count(`SELECT COUNT(*) FROM user_notes WHERE owner_id = ? AND target_id = ?`, sub.other, witness); n != 1 {
+		t.Errorf("a note between two other users = %d rows, want 1", n)
 	}
 	// The other user's reaction on the subject's message cascaded with it.
 	if n := count(`SELECT COUNT(*) FROM reactions`); n != 0 {
