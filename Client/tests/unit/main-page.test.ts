@@ -103,17 +103,17 @@ vi.mock("@lib/audioElements", () => ({
   setAudioVolumeHost: mockSetAudioVolumeHost,
 }));
 
-const { capturedAutoIdleOptions, autoIdleSetInCall } = vi.hoisted(() => ({
+const { capturedAutoIdleOptions, autoIdleController } = vi.hoisted(() => ({
   capturedAutoIdleOptions: {
-    current: null as null | { onStatusChange: (status: string) => void; inCall?: boolean },
+    current: null as null | { onStatusChange: (status: string) => void },
   },
-  autoIdleSetInCall: vi.fn(),
+  autoIdleController: { destroy: vi.fn() },
 }));
 
 vi.mock("@lib/autoIdle", () => ({
   startAutoIdle: (options: { onStatusChange: (status: string) => void }) => {
     capturedAutoIdleOptions.current = options;
-    return { destroy: vi.fn(), setInCall: autoIdleSetInCall };
+    return autoIdleController;
   },
 }));
 
@@ -3653,25 +3653,18 @@ describe("MainPage — presence", () => {
     localStorage.removeItem("owncord:settings:userStatusOrigin");
   });
 
-  it("pauses auto-idle while in a voice call and resumes it on leave (1A-7)", () => {
-    autoIdleSetInCall.mockClear();
+  it("does not tell auto-idle about voice calls: Idle still applies in a call", () => {
     page = createMainPage({ ws: fakeWs(), api: fakeApi() });
     page.mount(container);
-    expect(capturedAutoIdleOptions.current!.inCall).toBe(false);
+    const options = capturedAutoIdleOptions.current!;
+    expect(options).not.toHaveProperty("inCall");
+    expect(autoIdleController).not.toHaveProperty("setInCall");
 
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 7 }));
     voiceStore.flush();
-    expect(autoIdleSetInCall).toHaveBeenLastCalledWith(true);
-
-    // A channel switch is still a call: no new edge.
-    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 8 }));
-    voiceStore.flush();
-    expect(autoIdleSetInCall).toHaveBeenCalledOnce();
+    expect(authStore.getState().user?.status).toBe("online");
 
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: null }));
-    voiceStore.flush();
-    expect(autoIdleSetInCall).toHaveBeenLastCalledWith(false);
-    expect(autoIdleSetInCall).toHaveBeenCalledTimes(2);
   });
 
   it("retries the return-to-online presence_update once the limiter's window reopens instead of dropping it forever (OC-0111)", () => {

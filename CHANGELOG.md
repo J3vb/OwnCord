@@ -189,6 +189,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Voice and video**
 
+- Going Idle after ten quiet minutes now also happens while you are in a voice channel or a DM call, instead of staying Online. Activity still brings you back.
 - The Docker Compose stack now needs only three ports for chat and voice: `8443/TCP`, `7881/TCP` and `7882/UDP`. Voice media used to need the `50000-60000/UDP` range, and the LiveKit key and secret had to be typed in both `.env` and `livekit.yaml`; now they live only in `.env`. **For server owners using `docker compose`:**
   - Forward `7882/UDP` on your router instead of the `50000-60000` range, and close the old range.
   - Put the LiveKit key and secret only in `.env`, never using a `'` in either value (letters and digits, for example `openssl rand -hex 32`, are safest). `docker compose` now refuses to run any command, even `down` or `logs`, if `.env` is missing either value, and the message names the variable.

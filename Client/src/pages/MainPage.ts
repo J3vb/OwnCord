@@ -916,18 +916,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // (see @lib/autoIdle) — a manually chosen Idle, Do Not Disturb or
     // Invisible is never touched — so it is safe to leave running for the
     // whole session. The OS idle source makes input in other apps count too.
-    // No idle while in a voice call; leaving one restarts the delay.
     autoIdle = startAutoIdle({
       onStatusChange: (status) => applyPresence(status),
       systemIdleMs: () => desktop.systemIdle.idleMs(),
-      inCall: voiceStore.getState().currentChannelId !== null,
     });
-    unsubscribers.push(
-      voiceStore.subscribeSelector(
-        (s) => s.currentChannelId !== null,
-        (inCall) => autoIdle?.setInCall(inCall),
-      ),
-    );
 
     unsubscribers.push(
       ws.on("server_restart", (payload) => {
