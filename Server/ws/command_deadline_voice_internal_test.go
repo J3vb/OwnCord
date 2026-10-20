@@ -167,8 +167,10 @@ func TestHandleMessage_SpentDeadlineStillHonoursVoiceLeave(t *testing.T) {
 
 	called := false
 	h.ReplaceHandlerForTest("ping", func(context.Context) Result { called = true; return Result{} })
-	SetCommandDeadlineForTest(t, time.Nanosecond)
-	time.Sleep(time.Millisecond)
+	// A negative deadline is already past when the frame context is created, so
+	// Err() is DeadlineExceeded from the first check whatever the clock's
+	// resolution.
+	SetCommandDeadlineForTest(t, -time.Second)
 
 	h.handleMessage(c, voiceFrame(t, "ping", "req-ping", map[string]any{}))
 	if called {
