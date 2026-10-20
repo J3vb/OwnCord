@@ -209,6 +209,15 @@ func handleBackupDownload(database *db.DB) http.HandlerFunc {
 			return
 		}
 
+		// Armed before the headers go out and before the audit write, so the
+		// whole response is under the progress deadline, not the server's
+		// 30 s WriteTimeout. The token is already spent by now: a transfer
+		// that fails partway leaves the link spent, and the owner asks for a
+		// new one (unchanged behaviour).
+		deadline := startArchive(w, r, func() {}, archiveProgressTimeout, archiveMaxLifetime)
+		defer deadline.release()
+		deadline.touch()
+
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name}))
 		w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
@@ -219,7 +228,7 @@ func handleBackupDownload(database *db.DB) http.HandlerFunc {
 		db.WriteAudit(context.WithoutCancel(r.Context()), database, link.actorID, "backup_download", "server", 0,
 			fmt.Sprintf("downloaded backup %s (%d bytes)", name, info.Size()))
 
-		if _, err := io.Copy(w, f); err != nil {
+		if _, err := io.Copy(deadline, f); err != nil {
 			slog.Warn("backup download interrupted", "name", name, "err", err)
 		}
 	}
