@@ -205,6 +205,8 @@ export const shellText = defineCatalog("shell", {
   "members.heading": "MEMBERS",
   "members.region": "Member list",
   "members.toggle": "Member List",
+  "callChat.hide": "Hide chat",
+  "callChat.show": "Show chat",
   "members.resize": "Resize member list",
   "members.empty": "No members online",
   "members.groupHeader": "{role} — {count}",

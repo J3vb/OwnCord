@@ -81,6 +81,7 @@ import { setScreenSourcePicker } from "../features/voice/native/screenPickerSlot
 import { createQuickSwitcherManager } from "./main-page/OverlayManagers";
 import { attachGlobalKeybinds } from "./main-page/GlobalKeybinds";
 import { createVoiceWidgetCallbacks } from "./main-page/VoiceCallbacks";
+import { setChatHeaderCallChat } from "./main-page/ChatHeader";
 import { createCallChat, type CallChat } from "./main-page/callChat";
 import { createMessageController } from "./main-page/MessageController";
 import type { MessageController } from "./main-page/MessageController";
@@ -1027,9 +1028,15 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       // The DM call panel hosts the video of its own call (chat stays up).
       panelHost: () => callPanelHost,
       chatColumn: chatAreaResult.chatArea,
+      onGridChange: () => callChat?.refresh(),
     });
     // Opening the call view selects the voice channel; its chat sits beside the grid.
-    callChat = createCallChat({ videoModeCtrl });
+    const callChatBtn = chatAreaResult.chatHeaderRefs.callChatBtn;
+    callChat = createCallChat({
+      videoModeCtrl,
+      onStateChange: (state) => setChatHeaderCallChat(chatAreaResult.chatHeaderRefs, state),
+    });
+    callChatBtn.addEventListener("click", () => callChat?.toggleChat());
 
     // The composer of the channel on screen, else the header's menu button
     // (shown only at narrow width, where the closed sidebar is inert), else

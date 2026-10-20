@@ -319,6 +319,7 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
         callBtn: document.createElement("button"),
         profileBtn,
         memberListBtn: document.createElement("button"),
+        callChatBtn: document.createElement("button"),
         sidebarToggle: document.createElement("button"),
       },
       sidebarToggle: document.createElement("button"),

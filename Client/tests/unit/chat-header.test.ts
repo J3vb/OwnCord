@@ -3,6 +3,7 @@ import {
   buildChatHeader,
   updateChatHeaderForDm,
   setChatHeaderChannelType,
+  setChatHeaderCallChat,
   setChatHeaderTopic,
 } from "../../src/pages/main-page/ChatHeader";
 
@@ -462,5 +463,40 @@ describe("ChatHeader channel type icon and topic modal (N21)", () => {
     refs.topicEl.click();
     expect(document.querySelector('[data-testid="channel-topic-modal"]')).toBeNull();
     expect(refs.topicEl.textContent).toBe("online");
+  });
+
+  describe("call-chat toggle (WP 6.1c)", () => {
+    it("draws the speaker glyph for a voice channel", () => {
+      const { refs } = buildChatHeader({ onTogglePins: vi.fn() });
+      setChatHeaderChannelType(refs, "voice");
+      expect(refs.hashEl.querySelector("svg")).not.toBeNull();
+      expect(refs.hashEl.dataset["channelType"]).toBe("voice");
+      expect(refs.hashEl.textContent).toBe("");
+
+      setChatHeaderChannelType(refs, "text");
+      expect(refs.hashEl.querySelector("svg")).toBeNull();
+      expect(refs.hashEl.textContent).toBe("#");
+    });
+
+    it("toggle is hidden unless split-capable", () => {
+      const { refs } = buildChatHeader({ onTogglePins: vi.fn() });
+      expect(refs.callChatBtn.hidden).toBe(true);
+      setChatHeaderCallChat(refs, { capable: true, open: true });
+      expect(refs.callChatBtn.hidden).toBe(false);
+      setChatHeaderCallChat(refs, { capable: false, open: true });
+      expect(refs.callChatBtn.hidden).toBe(true);
+    });
+
+    it("toggle mirrors the choice in aria-pressed and its label", () => {
+      const { refs } = buildChatHeader({ onTogglePins: vi.fn() });
+      setChatHeaderCallChat(refs, { capable: true, open: true });
+      expect(refs.callChatBtn.getAttribute("aria-pressed")).toBe("true");
+      expect(refs.callChatBtn.getAttribute("aria-label")).toBe("Hide chat");
+
+      setChatHeaderCallChat(refs, { capable: true, open: false });
+      expect(refs.callChatBtn.getAttribute("aria-pressed")).toBe("false");
+      expect(refs.callChatBtn.getAttribute("aria-label")).toBe("Show chat");
+      expect(refs.callChatBtn.title).toBe("Show chat");
+    });
   });
 });

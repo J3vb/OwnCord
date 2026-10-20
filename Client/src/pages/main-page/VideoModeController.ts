@@ -46,6 +46,8 @@ export interface VideoModeControllerOptions {
   readonly getCurrentUserId: () => number;
   /** The DM call panel, once it has loaded (it is a lazy chunk). */
   readonly panelHost?: () => VideoPanelHost | null;
+  /** The grid opened or closed (or went to a pop-out): callChat re-reads it. */
+  readonly onGridChange?: () => void;
 }
 
 export interface VideoModeController {
@@ -165,6 +167,7 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     slots.typingSlot.style.display = chat;
     slots.inputSlot.style.display = chat;
     slots.videoGridSlot.style.display = grid ? "block" : "none";
+    opts.onGridChange?.();
   }
 
   /** A chat column too narrow for both (the side panels count, not only the
