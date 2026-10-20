@@ -79,3 +79,67 @@ func TestSummary_JSONShape(t *testing.T) {
 		t.Fatalf("json = %s, want %s", b, want)
 	}
 }
+
+func TestHistogram_CountsAndSum(t *testing.T) {
+	var h Histogram
+	h.Observe(0.25) // bucket 0
+	h.Observe(3)    // bound 5, index 3
+	h.Observe(9000) // +Inf
+	c := h.Counts()
+	if c.Buckets[0] != 1 || c.Buckets[3] != 1 || c.Buckets[len(c.Buckets)-1] != 1 {
+		t.Fatalf("buckets = %v", c.Buckets)
+	}
+	if c.SumMicros != 250+3000+9000000 {
+		t.Fatalf("sum = %d micros, want 9003250", c.SumMicros)
+	}
+}
+
+func TestHistogram_IntervalMaxResetsOnTake(t *testing.T) {
+	var h Histogram
+	h.Observe(40)
+	h.Observe(12)
+	if got := h.takeIntervalMax(); got != 40000 {
+		t.Fatalf("first take = %d, want 40000", got)
+	}
+	if got := h.takeIntervalMax(); got != 0 {
+		t.Fatalf("second take = %d, want 0", got)
+	}
+	h.Observe(7)
+	if got := h.takeIntervalMax(); got != 7000 {
+		t.Fatalf("take after reset = %d, want 7000", got)
+	}
+	if got := h.Snapshot().Max; got != 40 {
+		t.Fatalf("lifetime max = %v after takes, want 40", got)
+	}
+}
+
+func TestMaxGauge_IntervalMaxResetsOnTake(t *testing.T) {
+	var g MaxGauge
+	g.Observe(9)
+	if got := g.takeIntervalMax(); got != 9000 {
+		t.Fatalf("take = %d, want 9000", got)
+	}
+	if got := g.takeIntervalMax(); got != 0 {
+		t.Fatalf("second take = %d, want 0", got)
+	}
+	if got := g.Millis(); got != 9 {
+		t.Fatalf("lifetime max = %v, want 9", got)
+	}
+}
+
+// BenchmarkHistogramObserve pins that Observe stays allocation-free with the
+// sum and interval-max atomics added (WP 4.3a).
+func BenchmarkHistogramObserve(b *testing.B) {
+	var h Histogram
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		v := 0.0
+		for pb.Next() {
+			h.Observe(v)
+			v += 0.7
+			if v > 3000 {
+				v = 0
+			}
+		}
+	})
+}

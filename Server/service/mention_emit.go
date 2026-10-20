@@ -76,8 +76,8 @@ func (s *MessageService) dispatchMentionBadges(bgCtx context.Context, job mentio
 		w.enqueue(job)
 		return
 	}
-	ctx, cancel := context.WithTimeout(bgCtx, backgroundJobTimeout)
-	s.bg(func() {
+	s.runBackground(bgCtx, "mention write", func(ctx context.Context) {
+		ctx, cancel := context.WithTimeout(ctx, backgroundJobTimeout)
 		defer cancel()
 		entries := job.apply(ctx)
 		if len(entries) == 0 {

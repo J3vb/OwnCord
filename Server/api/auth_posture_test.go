@@ -55,10 +55,11 @@ var publicSurface = map[string]string{
 	"GET /admin/api/archive/download":        "the full-archive download, authenticated in-band by the single-use link token from the Owner-only POST /admin/api/archive/link; a missing, unknown, expired, consumed or revoked token answers a uniform 403 (Server/admin/archive_link.go, TestArchiveLink_*, docs/security.md)",
 	"GET /admin/api/backups/{name}/download": "one backup file, authenticated in-band by the single-use link token from the Owner-only POST /admin/api/backups/{name}/link, bound to that file; a missing, unknown, expired, consumed, revoked or other-file token answers a uniform 403 (Server/admin/archive_link.go, TestBackupLink_*, docs/security.md)",
 
-	"GET /api/v1/metrics":          "operational counters for a scraper, behind AdminIPRestrict (metrics_allowed_cidrs); no per-user data",
-	"GET /api/v1/livekit/health":   "LiveKit reachability, behind the webhook perimeter (livekit_webhook_allowed_cidrs)",
-	"POST /api/v1/livekit/webhook": "LiveKit's webhook; authenticated in-band by the LiveKit JWT signature, plus the same perimeter",
-	"* /livekit/*":                 "the LiveKit signalling proxy; authenticated in-band by the LiveKit access token the SFU validates, rate-limited (see router.go)",
+	"GET /api/v1/metrics":            "operational counters for a scraper, behind AdminIPRestrict (metrics_allowed_cidrs); no per-user data",
+	"GET /api/v1/metrics/prometheus": "the same counters in Prometheus text format, in every build, behind the same AdminIPRestrict (metrics_allowed_cidrs); no per-user data (TestPrometheusMetrics_*)",
+	"GET /api/v1/livekit/health":     "LiveKit reachability, behind the webhook perimeter (livekit_webhook_allowed_cidrs)",
+	"POST /api/v1/livekit/webhook":   "LiveKit's webhook; authenticated in-band by the LiveKit JWT signature, plus the same perimeter",
+	"* /livekit/*":                   "the LiveKit signalling proxy; authenticated in-band by the LiveKit access token the SFU validates, rate-limited (see router.go)",
 }
 
 // optionalPublicSurface holds public routes that exist only under a build

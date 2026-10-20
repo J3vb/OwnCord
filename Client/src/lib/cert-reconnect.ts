@@ -21,7 +21,7 @@ export interface CertReconnectRouter {
 /**
  * Reconnect after the user accepts a rotated certificate fingerprint.
  *
- * wirePostAuth's own onStateChange handler unsubscribes itself the moment it
+ * startSession's own onStateChange handler unsubscribes itself the moment it
  * sees "disconnected" (so a later transition can't fire it a second time) —
  * and the mismatch that triggered this retry is exactly the "disconnected"
  * transition that did so. A bare `ws.connect()` here would therefore

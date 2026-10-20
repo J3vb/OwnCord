@@ -18,6 +18,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/diskutil"
+	"github.com/J3vb/OwnCord/Server/metrics"
 	"github.com/J3vb/OwnCord/Server/netclass"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/plugin"
@@ -60,6 +61,11 @@ type Runtime struct {
 	// LogLevel backs the admin panel's runtime log-level card (SRE-07). Built
 	// by internal/app around the same *slog.LevelVar main's log sinks use.
 	LogLevel *admin.LogLevelController
+	// MetricsWindows is the sampled ring behind the metrics endpoint's
+	// "windows" block (WP 4.3a). StartRuntime builds it; the app starts its
+	// sampler (App.startHub) and stops it before the hub. Nil leaves it out.
+	MetricsWindows *metrics.Windows
+	Lifecycle      // the app's job group and shutdown signal (setup_options.go)
 }
 
 // warnOnServerConfig logs the settings that are legal but rarely what an
@@ -257,13 +263,13 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	r.With(RateLimitMiddleware(limiter, "ws_upgrade:", scaledAuthLimit(wsUpgradeRateLimitPerMinute), time.Minute, cfg.Server.TrustedProxies)).
 		Get("/api/v1/ws", ws.ServeWS(hub, cfg.Server.AllowedOrigins, cfg.Server.MaxWSConnections))
 
-	routerMetricsRoutes(r, cfg, database, svc, hub)
+	routerMetricsRoutes(r, cfg, database, svc, hub, rt.MetricsWindows)
 
 	// Admin panel: static files + REST API (Phase 6).
 	// Restrict /admin to configured CIDRs (default: private networks only).
 	u := updater.NewUpdater(ver, cfg.GitHub.Token, cfg.GitHub.Owner, cfg.GitHub.Repo)
 	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions, svc,
-		admin.SetupOptions{ConfigPath: config.DefaultPath, RunningCfg: cfg, SetupToken: rt.SetupToken, LogLevel: rt.LogLevel})
+		adminSetupOptions(cfg, rt))
 	// The client's member actions, reachable without the /admin prefix (see
 	// admin.NewMemberAPI). Deliberately outside the admin CIDR gate below: they
 	// accept only a session or API token issued by this server, plus the
@@ -547,40 +553,54 @@ func routerVoiceRoutes(r chi.Router, cfg *config.Config, limiter *auth.RateLimit
 		Handle("/livekit/*", http.StripPrefix("/livekit", NewLiveKitProxy(cfg.Voice.LiveKitURL, cfg.Server.AllowedOrigins)))
 }
 
-// routerMetricsRoutes mounts the JSON metrics endpoint and, when an OTel
-// Prometheus exporter is wired, the Prometheus handler beside it.
-func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc *service.Services, hub *ws.Hub) {
+// routerMetricsRoutes mounts the JSON metrics endpoint, its Prometheus text
+// twin (every build), and, when an OTel Prometheus exporter is wired, that
+// exporter's handler beside them.
+func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc *service.Services, hub *ws.Hub, windows *metrics.Windows) {
+	// A nil *Windows must not become a non-nil method value (nil = no source).
+	var windowSnapshot func(time.Duration) (metrics.WindowSnapshot, bool)
+	if windows != nil {
+		windowSnapshot = windows.Snapshot
+	}
 	// Metrics endpoint — IP-restricted by metrics_allowed_cidrs (falls back to
-	// admin_allowed_cidrs) so a central scraper can be admitted without
-	// widening /admin. The shape is documented in docs/deployment.md — keep
-	// the two in sync.
-	r.With(AdminIPRestrict("server.metrics_allowed_cidrs", cfg.Server.MetricsCIDRs(), cfg.Server.TrustedProxies)).
-		Get("/api/v1/metrics", handleMetrics(MetricsSources{
-			ConnectedUsers:      hub.ClientCount,
-			VoiceSessions:       hub.VoiceSessionCount,
-			BroadcastDrops:      hub.BroadcastDropCount,
-			TopicSheds:          hub.TopicShedCount,
-			BroadcastMs:         hub.BroadcastMs,
-			DispatchLagMs:       hub.DispatchLagMs,
-			ChatAckMs:           hub.ChatAckMs,
-			VoiceJoinMs:         hub.VoiceJoinMs,
-			BroadcastQueueDepth: hub.BroadcastQueueDepth,
-			SeqMuMaxHoldMs:      hub.SeqMuMaxHoldMs,
-			LiveKitHealth:       hub.LiveKitHealthCheck,
-			ReconnectTiers:      hub.ReconnectTierStats,
-			Backpressure:        hub.BackpressureStats,
-			PresenceDrops:       hub.PresenceDropCount,
-			LossMarks:           hub.LossMarkCount,
-			ConnRejects:         hub.ConnRejectCount,
-			PersisterStats:      hub.EventPersisterStats,
-			DBStats:             func() sql.DBStats { return database.SQLDb().Stats() },
-			DBReaderStats:       func() sql.DBStats { return database.SQLReaderDB().Stats() },
-			PermCache:           svc.Permissions.CacheStats,
-			DiskFree:            func() (uint64, error) { return diskutil.FreeBytes(cfg.Server.DataDir) },
-			DiskMinFree:         cfg.Server.MinFreeDiskBytes(),
-			UploadBytes:         database.TotalAttachmentBytes,
-			PushCounters:        pushCountersSource(svc),
-		}))
+	// admin_allowed_cidrs) so a central scraper can be admitted without widening
+	// /admin. The shape is documented in docs/deployment.md — keep the two in sync.
+	src := MetricsSources{
+		ConnectedUsers:      hub.ClientCount,
+		VoiceSessions:       hub.VoiceSessionCount,
+		BroadcastDrops:      hub.BroadcastDropCount,
+		TopicSheds:          hub.TopicShedCount,
+		BroadcastMs:         hub.BroadcastMs,
+		DispatchLagMs:       hub.DispatchLagMs,
+		ChatAckMs:           hub.ChatAckMs,
+		VoiceJoinMs:         hub.VoiceJoinMs,
+		BroadcastQueueDepth: hub.BroadcastQueueDepth,
+		SeqMuMaxHoldMs:      hub.SeqMuMaxHoldMs,
+		LiveKitHealth:       hub.LiveKitHealthCheck,
+		ReconnectTiers:      hub.ReconnectTierStats,
+		ReconnectRingMisses: hub.ReconnectRingMissCount,
+		Backpressure:        hub.BackpressureStats,
+		PresenceDrops:       hub.PresenceDropCount,
+		LossMarks:           hub.LossMarkCount,
+		ConnRejects:         hub.ConnRejectCount,
+		PersisterStats:      hub.EventPersisterStats,
+		DBStats:             func() sql.DBStats { return database.SQLDb().Stats() },
+		DBReaderStats:       func() sql.DBStats { return database.SQLReaderDB().Stats() },
+		PermCache:           svc.Permissions.CacheStats,
+		DiskFree:            func() (uint64, error) { return diskutil.FreeBytes(cfg.Server.DataDir) },
+		DiskMinFree:         cfg.Server.MinFreeDiskBytes(),
+		UploadBytes:         database.TotalAttachmentBytes,
+		WALBytes:            database.WALBytes,
+		PushCounters:        pushCountersSource(svc),
+		Windows:             windowSnapshot,
+		LatencyCounts:       hub.LatencyCounts,
+	}
+	perimeter := AdminIPRestrict("server.metrics_allowed_cidrs", cfg.Server.MetricsCIDRs(), cfg.Server.TrustedProxies)
+	r.With(perimeter).Get("/api/v1/metrics", handleMetrics(src))
+	// The same figures in Prometheus text format, in every build and behind the
+	// same perimeter (WP 4.3b); the OTel exporter below is the -tags otel
+	// alternative and stays where it was.
+	r.With(perimeter).Get("/api/v1/metrics/prometheus", handlePrometheusMetrics(src))
 
 	// Phase B Step 8 — OpenTelemetry Prometheus exporter. Mounted alongside
 	// the legacy JSON endpoint when a Prometheus exporter is wired (otel

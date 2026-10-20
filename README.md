@@ -135,11 +135,18 @@ cd Server
 cp .env.example .env
 cp livekit.yaml.example livekit.yaml
 cp config.yaml.example config.yaml
-# Edit .env and livekit.yaml first. They need the same LiveKit key and secret.
+# Edit .env first: set the LiveKit key and secret there, and only there.
+# Never use a ' in either value; letters and digits (for example
+# `openssl rand -hex 32`) are safest.
+# livekit.yaml is required (compose mounts it); editing it is optional, and it
+# holds no key or secret.
 # The compose file already connects the server to LiveKit,
 # so config.yaml needs no voice changes.
 docker compose up -d
 ```
+
+Compose publishes `8443/TCP`, `7881/TCP` and `7882/UDP`. Forward those three on
+your router for remote access.
 
 The full Docker guide is in [docs/deployment.md](docs/deployment.md#docker-linux).
 

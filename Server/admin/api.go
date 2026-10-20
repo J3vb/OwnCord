@@ -383,7 +383,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		ownerOnly(r, http.MethodGet, "/archive", handleArchive(database, setupOpts))
 		ownerOnly(r, http.MethodPost, "/archive/link", handleArchiveLink())
 		ownerOnly(r, http.MethodGet, "/updates", handleCheckUpdate(u))
-		ownerOnly(r, http.MethodPost, "/updates/apply", handleApplyUpdate(database, u, hub, version))
+		ownerOnly(r, http.MethodPost, "/updates/apply", handleApplyUpdate(database, u, hub, version, setupOpts.Background, setupOpts.Shutdown))
 	})
 
 	return r

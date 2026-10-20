@@ -49,6 +49,7 @@ import {
   uiStore,
 } from "../../src/stores/ui.store";
 import { membersStore, setMembers, setTyping } from "../../src/stores/members.store";
+import { hasMemberModelMemo, memberModelFor } from "../../src/components/MemberList";
 import { dmStore, setDmChannels } from "../../src/stores/dm.store";
 import type { DmChannel } from "../../src/stores/dm.store";
 import { safetyStore, setReadyNotices } from "../../src/features/safety/store";
@@ -237,6 +238,15 @@ const PROBES: readonly Probe[] = [
       vi.getTimerCount() === 0 &&
       (membersStore.getState().roleRevision ?? 0) > roleRevBefore &&
       (membersStore.getState().snapshotRevision ?? 0) > snapshotRevBefore,
+  },
+  {
+    // The virtual member list's reopen memo holds the roster's model.
+    name: "members:model-memo",
+    mutate: () => {
+      memberModelFor(new Map([[7, { ...member, id: 7 } as never]]), []);
+      expect(hasMemberModelMemo()).toBe(true);
+    },
+    isInitial: () => !hasMemberModelMemo(),
   },
   {
     name: "dm:store",

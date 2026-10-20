@@ -2,16 +2,22 @@
   "_doc": "Top-level per-server-looking state that registers no session reset (tests/unit/session-state-ownership.test.ts). This list only shrinks: the test fails an entry whose binding is gone or whose file now registers a reset. Keys are file + binding, never a line number. Categories: app-lifetime, host-keyed, dom-owned, pure-cache, transient, reset-elsewhere.",
   "entries": [
     {
+      "file": "app/serverHealth.ts",
+      "binding": "serverInfoByHost",
+      "category": "host-keyed",
+      "reason": "Advisory per-host server-info snapshot, rewritten or dropped by each probe of that host; moved verbatim from main.ts, whose registered reset never cleared it"
+    },
+    {
+      "file": "app/serverHealth.ts",
+      "binding": "serverInfoInFlight",
+      "category": "transient",
+      "reason": "Hosts with a probe in flight, removed in the probe's finally; moved verbatim from main.ts"
+    },
+    {
       "file": "components/ChannelSidebar.ts",
       "binding": "volumeMenuAttempts",
       "category": "dom-owned",
       "reason": "WeakMap keyed by the sidebar's lifetime AbortSignal; entries go with the destroyed sidebar"
-    },
-    {
-      "file": "components/MemberList.ts",
-      "binding": "ownPopupClosers",
-      "category": "dom-owned",
-      "reason": "Close callbacks of popups the list owns; each popup removes its own on close"
     },
     {
       "file": "components/channel-sidebar/drag-reorder.ts",
@@ -203,7 +209,7 @@
       "file": "lib/read-state.ts",
       "binding": "highestSeen",
       "category": "reset-elsewhere",
-      "reason": "Emptied by resetReadPointerState (pendingMarkUnread also by forgetPendingMarkUnread) in the dispatcher cleanup, which also runs when wirePostAuth retries"
+      "reason": "Emptied by resetReadPointerState (pendingMarkUnread also by forgetPendingMarkUnread) in the dispatcher cleanup, which also runs when startSession retries"
     },
     {
       "file": "lib/read-state.ts",
@@ -245,13 +251,13 @@
       "file": "lib/read-state.ts",
       "binding": "pendingMarkUnread",
       "category": "reset-elsewhere",
-      "reason": "Emptied by resetReadPointerState (pendingMarkUnread also by forgetPendingMarkUnread) in the dispatcher cleanup, which also runs when wirePostAuth retries"
+      "reason": "Emptied by resetReadPointerState (pendingMarkUnread also by forgetPendingMarkUnread) in the dispatcher cleanup, which also runs when startSession retries"
     },
     {
       "file": "lib/read-state.ts",
       "binding": "unreadHold",
       "category": "reset-elsewhere",
-      "reason": "Emptied by resetReadPointerState (pendingMarkUnread also by forgetPendingMarkUnread) in the dispatcher cleanup, which also runs when wirePostAuth retries"
+      "reason": "Emptied by resetReadPointerState (pendingMarkUnread also by forgetPendingMarkUnread) in the dispatcher cleanup, which also runs when startSession retries"
     },
     {
       "file": "lib/screenShare.ts",

@@ -106,7 +106,7 @@ func (v *userLocks) refsForTest(userID int64) int {
 func (h *Hub) leaveVoiceLocked(c *Client, reason string) {
 	txn := h.begin(c.userID)
 	defer txn.end()
-	h.handleVoiceLeave(c.ctx, c, reason)
+	h.handleVoiceLeave(c.ctx, txn, c, reason)
 }
 
 // leaveParkedVoiceLocked tears down userID's parked membership, if any, under
@@ -115,7 +115,7 @@ func (h *Hub) leaveVoiceLocked(c *Client, reason string) {
 func (h *Hub) leaveParkedVoiceLocked(userID int64, reason string) {
 	txn := h.begin(userID)
 	defer txn.end()
-	h.leaveParkedVoice(context.Background(), h.voiceGrace.take(userID), reason)
+	h.leaveParkedVoice(context.Background(), txn, txn.takeParked(0), reason)
 }
 
 // voiceJoinPostCommitRaceHook, when non-nil, runs in voiceJoinPersist after

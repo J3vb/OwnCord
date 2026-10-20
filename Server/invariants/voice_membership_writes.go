@@ -29,36 +29,32 @@ var voiceRowWriters = map[string]bool{
 	"LeaveIfMatch": true,
 }
 
-// voiceSlotMutators are the voiceSlot methods that change a membership, and
-// the Client delegators over them. Calling one outside the registry changes
-// a slot without the lock handle. clearIfChannel and clearExact also exist on
-// voiceTxn, so a call on a receiver named txn, or on a begin/heldTxn result,
-// is the handle's own and is not flagged.
+// voiceSlotMutators are the voiceSlot methods that change a membership.
+// Calling one outside the registry changes a slot without the lock handle.
+// clearIfChannel and clearExact also exist on voiceTxn, so a call on a
+// receiver named txn, or on a begin/heldTxn result, is the handle's own and is not
+// flagged.
 var voiceSlotMutators = map[string]bool{
 	"setState": true, "clearState": true, "clearIfChannel": true, "clearExact": true,
 	"markCompletedIfMatch": true, "setE2EE": true,
-	"setVoiceState": true, "clearVoiceState": true, "clearVoiceStateIfMatch": true,
-	"markVoiceJoinCompleteIfMatch": true,
-	"heldTxn":                      true, // the lock-free borrowed handle
+	"clearSnap": true, "clearSnapIfChannel": true, "drainAll": true, "adopt": true,
+	"heldTxn": true, // the lock-free handle for the hub goroutine's Register event
 }
 
 // voiceTxnShared are the mutator names voiceTxn also defines.
 var voiceTxnShared = map[string]bool{"clearIfChannel": true, "clearExact": true}
 
 // VoiceMutatorAllow is the shrink-only inventory of non-registry call sites of
-// the mutators above: file -> method -> exact call count. Each is a site WP
-// 5.3c/5.3d retires (registerNow's old-client clear, the grace inherit, the
-// Client delegators, the borrowed handle's callers). A count above the row is
-// a new writer; a count below it, or a file that no longer exists, is a stale
-// row and fails too (TestVoiceMutatorAllowIsLive) -- delete it.
+// the mutators above: file -> method -> exact call count. The E2EE announce setter
+// stores a key and not a membership, and heldTxn has one production caller, the hub
+// goroutine's Register event (onClientEvent, test-only via Hub.Register); the
+// reconnect-race test borrows it to model an interleaving the member lock now
+// forbids. A count above
+// the row is a new writer; a count below it, or a file that no longer exists,
+// is a stale row and fails too (TestVoiceMutatorAllowIsLive) -- delete it.
 var VoiceMutatorAllow = map[string]map[string]int{
-	"ws/client.go":              {"setState": 1, "clearState": 1, "clearIfChannel": 1, "markCompletedIfMatch": 1},
-	"ws/hub_registry.go":        {"clearVoiceState": 1, "setVoiceState": 1, "markVoiceJoinCompleteIfMatch": 1},
-	"ws/voice_grace.go":         {"setVoiceState": 1, "markVoiceJoinCompleteIfMatch": 1, "heldTxn": 1},
+	"ws/hub_registry.go":        {"heldTxn": 1},
 	"ws/voice_e2ee_announce.go": {"setE2EE": 1},
-	"ws/serve_ready.go":         {"heldTxn": 1},
-	"ws/voice_join.go":          {"heldTxn": 1},
-	"ws/voice_leave.go":         {"heldTxn": 3},
 }
 
 // isOwnTxnReceiver reports whether recv is a voiceTxn expression: an

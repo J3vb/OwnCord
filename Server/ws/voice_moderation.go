@@ -468,23 +468,22 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	if d.Mod == nil {
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "voice moderation unavailable"}}
 	}
-	// Stash the target's server_muted/server_deafened (already loaded by
-	// voiceModTarget above) on their live connection before the disconnect
-	// below deletes the voice_states row those flags live in — see
-	// voicePendingModFlagsSetter. The target's own re-join (handleVoiceJoin,
-	// via voiceJoinLeaveCurrent in voice_join.go) has no row left to read
-	// (currentChID == 0 by then) and takes this stash back out instead.
-	stashPendingModFlags(d.Mod, c.TargetID, state.ServerMuted, state.ServerDeafened, state.ServerMutedBy)
-	if !disconnectFromVoiceIn(ctx, d.Mod, c.TargetID, state.ChannelID) {
+	// Evict the target and, in the same membership transaction, stash their
+	// server_muted/server_deafened (already loaded by voiceModTarget above) on
+	// their live connection: the disconnect deletes the voice_states row those
+	// flags live in — see voiceMoveEvictor. The target's own re-join
+	// (handleVoiceJoin, via voiceJoinLeaveCurrent in voice_join.go) has no row
+	// left to read (currentChID == 0 by then) and takes this stash back out
+	// instead.
+	if !evictForMove(ctx, d.Mod, c.TargetID, state.ChannelID, state.ServerMuted, state.ServerDeafened, state.ServerMutedBy) {
 		// No live connection on this node — the voice_states row is a ghost the
 		// sweeper owns, and there is nobody to send voice_moved to — or the
 		// target left the checked channel while this handler was deciding, in
-		// which case the move must not follow them. Either way the eviction
-		// that would have justified the stash above never happened, so undo
-		// it (OC-0278): left in place, it has no expiry and no binding to
-		// this move, and the target's next unrelated voice_join would consume
-		// it as if a moderator had just muted them.
-		clearPendingModFlags(d.Mod, c.TargetID)
+		// which case the move must not follow them. Either way nobody was
+		// evicted, and evictForMove has left no stash behind (OC-0278): a
+		// stash with no expiry and no binding to this move would be consumed by
+		// the target's next unrelated voice_join as if a moderator had just
+		// muted them.
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not connected"}}
 	}
 	blockVoiceRejoin(d.Mod, c.TargetID, state.ChannelID)
@@ -625,9 +624,9 @@ func (h *Hub) DisconnectFromVoice(ctx context.Context, userID int64) bool {
 	defer txn.end()
 	c := h.GetClient(userID)
 	if c == nil {
-		return h.leaveParkedVoice(ctx, h.voiceGrace.take(userID), voiceLeaveReasonModerator)
+		return h.leaveParkedVoice(ctx, txn, txn.takeParked(0), voiceLeaveReasonModerator)
 	}
-	h.handleVoiceLeave(ctx, c, voiceLeaveReasonModerator)
+	h.handleVoiceLeave(ctx, txn, c, voiceLeaveReasonModerator)
 	return true
 }
 
@@ -645,22 +644,24 @@ func (h *Hub) DisconnectFromVoiceInChannel(ctx context.Context, userID, channelI
 	defer txn.end()
 	c := h.GetClient(userID)
 	if c == nil {
-		return h.leaveParkedVoice(ctx, h.voiceGrace.takeJoin(userID, channelID, ""), reason)
+		return h.leaveParkedVoice(ctx, txn, txn.takeParked(channelID), reason)
 	}
-	return h.handleVoiceLeaveIfStillIn(ctx, c, channelID, reason)
+	return h.handleVoiceLeaveIfStillIn(ctx, txn, c, channelID, reason)
 }
 
 // SetPendingVoiceModFlags stashes a moderator-imposed mute/deafen on
-// userID's live connection, satisfying voicePendingModFlagsSetter. Reports
-// false when the user has no connection on this node — the same "nothing to
-// do here" case DisconnectFromVoiceInChannel reports, since without a live
-// *Client there is nowhere to stash the flags and no re-join on this node to
-// consume them.
+// userID's live connection, satisfying voicePendingModFlagsSetter, under the
+// member lock. Reports false when the user has no connection on this node —
+// the same "nothing to do here" case DisconnectFromVoiceInChannel reports,
+// since without a live *Client there is nowhere to stash the flags and no
+// re-join on this node to consume them.
 func (h *Hub) SetPendingVoiceModFlags(userID int64, serverMuted, serverDeafened bool, serverMutedBy *int64) bool {
+	txn := h.begin(userID)
+	defer txn.end()
 	c := h.GetClient(userID)
 	if c == nil {
 		return false
 	}
-	c.setPendingModFlags(serverMuted, serverDeafened, serverMutedBy)
+	txn.stashModFlags(c, serverMuted, serverDeafened, serverMutedBy)
 	return true
 }

@@ -130,6 +130,9 @@ export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
   function cleanupMic(): void {
     stopMic();
     invalidateCameraPreviewRequest?.();
+    // Drop it too: it closes over the whole build, so keeping it would hold
+    // the discarded pane's DOM until the tab is next opened.
+    invalidateCameraPreviewRequest = null;
     // Also stop camera preview
     if (cameraPreviewStream !== null) {
       for (const track of cameraPreviewStream.getTracks()) track.stop();

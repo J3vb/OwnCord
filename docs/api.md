@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 197 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 198 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -170,6 +170,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/api/v1/livekit/health`                                             |
 | POST    | `/api/v1/livekit/webhook`                                            |
 | GET     | `/api/v1/metrics`                                                    |
+| GET     | `/api/v1/metrics/prometheus`                                         |
 | GET     | `/api/v1/moderation/appeals/`                                        |
 | GET     | `/api/v1/moderation/appeals/{id}`                                    |
 | POST    | `/api/v1/moderation/appeals/{id}/assign`                             |
@@ -3485,6 +3486,7 @@ Runtime server metrics. IP-restricted (not token-based): allowed CIDRs come from
   "reconnect_tier_buffer": 120,
   "reconnect_tier_db": 4,
   "reconnect_tier_full": 1,
+  "reconnect_ring_misses": 3,
   "backpressure_queue_disconnects": 0,
   "backpressure_high_fallbacks": 0,
   "backpressure_low_drops": 17,
@@ -3492,6 +3494,7 @@ Runtime server metrics. IP-restricted (not token-based): allowed CIDRs come from
   "delivery_loss_marks": 0,
   "ws_conn_rejects": 0,
   "disk_free_mb": 51200.5,
+  "db_wal_mb": 4.2,
   "db_writer_wait_count": 3,
   "db_writer_wait_seconds": 0.021,
   "db_reader_wait_count": 11,
@@ -3531,7 +3534,12 @@ it reached their queue: each such client sees a gap in `cseq` and its next
 resume takes the full-ready path. `reconnect_tier_*` counts resume
 attempts served from the in-memory ring buffer, the persisted event log, and
 full-resync fallback; a rising `full` share means the replay budget is too
-small for observed disconnect gaps. `db_writer_wait_count`/`_seconds`
+small for observed disconnect gaps. `reconnect_ring_misses` counts the resumes
+that passed the resync checks but fell behind the in-memory ring, the only ones
+the persisted event log can serve; it is not a tier, and a miss normally ends in `db` or
+`full` (a refused or revoked resume ends in neither). The log's hit rate is `reconnect_tier_db / reconnect_ring_misses`. A
+resume forced to a full ready by a visibility, content or presence change, a
+client already ahead of the ring and an empty ring are not counted. `db_writer_wait_count`/`_seconds`
 accumulate time requests spent queueing for SQLite's single write connection —
 the most direct saturation signal for the write path. `db_reader_wait_count`/
 `_seconds` are the same pair for the reader pool (`max_readers` connections);
@@ -3540,7 +3548,9 @@ pairs report one pool. `perm_cache_*` report
 permission-cache effectiveness (a miss is any lookup that repopulated from the
 database). `ws_conn_rejects` counts upgrades refused by the
 `server.max_ws_connections` cap, and `disk_free_mb` is free space on the data
-volume (omitted when the platform can't report it). `livekit_healthy` is
+volume (omitted when the platform can't report it). `db_wal_mb` is the size of
+the SQLite write-ahead log file, read on each request (omitted when it can't be
+read). `livekit_healthy` is
 omitted when no LiveKit health check is wired; `event_persister` is omitted
 when event persistence is disabled.
 
@@ -3561,16 +3571,161 @@ switch), `persist` (the `voice_states` write and moderator-flag restore),
 `token` (minting and sending `voice_token`), `complete` (the voice topic
 subscription, `voice_state` fan-out, existing states and `voice_config`) and
 `total`; a refused or rolled-back join is not counted. A
-`hub_seqmu_max_hold_ms` above ~100 ms is worth investigating. It is the
-longest hold since start, not a recent one; the replay purges run their
-database deletes outside `seqMu`.
+`hub_seqmu_max_hold_ms` above ~100 ms is worth investigating. The top-level
+figure is the longest hold since start, so it never falls; read the same key
+under `windows` for the longest hold in the last minute or fifteen. The replay
+purges run their database deletes outside `seqMu`.
 
-### GET /metrics (Prometheus)
+#### The `windows` block
 
-A Prometheus text-format exporter is mounted at `/metrics` **only** when the
-server was built with `-tags otel` and `telemetry.exporter` is set to
-`prometheus`. It is admin-IP-restricted like the JSON endpoint. In the default
-build the route does not exist (404).
+Every figure above is cumulative since boot, so after a day of uptime ten
+minutes of stall barely moves a lifetime `p95`. The `windows` key holds the
+same figures for the last minute (`1m`) and the last fifteen minutes (`15m`).
+Use it to see what is happening now; keep the top-level figures for scrapers
+that take their own deltas.
+
+```json
+{
+  "windows": {
+    "1m": {
+      "seconds": 60.0,
+      "as_of": "2026-10-17T12:00:00Z",
+      "ws_broadcast_ms": { "count": 52, "p50": 1, "p95": 5, "p99": 20, "max": 18.4 },
+      "ws_dispatch_lag_ms": { "count": 52, "p50": 0.5, "p95": 2, "p99": 5, "max": 6.1 },
+      "chat_send_ack_ms": { "count": 9, "p50": 2, "p95": 10, "p99": 10, "max": 9.7 },
+      "voice_join_ms": {
+        "precheck": { "count": 0, "p50": 0, "p95": 0, "p99": 0, "max": 0 },
+        "...": "five more phases"
+      },
+      "hub_seqmu_max_hold_ms": 3.1,
+      "broadcast_drops": 0,
+      "topic_sheds_total": 0,
+      "reconnect_tier_buffer": 2,
+      "reconnect_tier_db": 0,
+      "reconnect_tier_full": 0,
+      "reconnect_ring_misses": 0,
+      "backpressure_queue_disconnects": 0,
+      "backpressure_high_fallbacks": 0,
+      "backpressure_low_drops": 3,
+      "backpressure_presence_drops": 0,
+      "delivery_loss_marks": 0,
+      "ws_conn_rejects": 0,
+      "db_writer_wait_count": 0,
+      "db_writer_wait_seconds": 0,
+      "db_reader_wait_count": 0,
+      "db_reader_wait_seconds": 0
+    },
+    "15m": { "seconds": 900.0, "as_of": "2026-10-17T12:00:00Z", "...": "same keys" }
+  }
+}
+```
+
+- **Latency distributions** (`ws_broadcast_ms`, `ws_dispatch_lag_ms`,
+  `chat_send_ack_ms`, each `voice_join_ms` phase) use the same fields as the
+  lifetime ones, over the observations made inside the window. `max` is the
+  largest observation the window saw, to the microsecond; the percentiles are
+  the same coarse bucket bounds. Each observation is counted once, but at a
+  sample boundary its count and its `max` can land in adjacent windows. A
+  window with no observations reports `count: 0` and zero percentiles, and its
+  `max` can still show a value carried from an observation at the window's
+  edge.
+- **`hub_seqmu_max_hold_ms`** is the longest hold inside the window.
+- **Counters** (`broadcast_drops`, `topic_sheds_total`, the `reconnect_tier_*`
+  and `backpressure_*` counts, `reconnect_ring_misses`, `delivery_loss_marks`, `ws_conn_rejects` and the
+  `db_*_wait_*` pairs) are how much each grew during the window. They are never
+  negative: a counter that was reset counts as no change.
+- **`seconds`** is the time the window really covers. A server that started 40
+  seconds ago reports `seconds: 40` under `1m`, and a gap in sampling (missed
+  ticks) can make it longer than the nominal length.
+- **`as_of`** is the newest sample's time (UTC). A sampler takes one sample
+  every 10 seconds, so the figures can be up to 10 seconds old.
+- **Omitted when unknown.** Until two samples exist, the whole `windows` key is
+  absent, and a window that cannot be answered is left out, so a missing
+  window is never a reassuring zero. A restart resets the windows with the rest
+  of the process state.
+- Only the figures listed above are windowed. Gauges that already describe
+  now (`connected_users`, `hub_broadcast_queue_depth`, the disk and heap
+  figures) are unchanged and not repeated.
+
+### GET /api/v1/metrics/prometheus
+
+The same figures as `GET /api/v1/metrics`, in the Prometheus text exposition
+format (version 0.0.4). It exists in **every build**, with no build tag and no
+config key, and it is limited exactly like the JSON endpoint: the addresses in
+`server.metrics_allowed_cidrs`, falling back to `server.admin_allowed_cidrs`. A
+scraper outside a private network needs `metrics_allowed_cidrs` set. It serves
+only aggregates: no per-user label, no version string, no path or address.
+
+**Auth:** IP restriction (metrics CIDRs, admin fallback)
+
+**Content-Type:** `text/plain; version=0.0.4; charset=utf-8`
+
+```text
+# HELP owncord_connected_users Users with a live WebSocket connection.
+# TYPE owncord_connected_users gauge
+owncord_connected_users 8
+# HELP owncord_ws_dispatch_lag_seconds Time a frame waited for the dispatch goroutine.
+# TYPE owncord_ws_dispatch_lag_seconds histogram
+owncord_ws_dispatch_lag_seconds_bucket{le="0.0005"} 1180
+owncord_ws_dispatch_lag_seconds_bucket{le="0.001"} 1196
+owncord_ws_dispatch_lag_seconds_bucket{le="+Inf"} 1204
+owncord_ws_dispatch_lag_seconds_sum 0.412
+owncord_ws_dispatch_lag_seconds_count 1204
+# HELP owncord_latency_max_seconds Largest single observation of each latency over the last minute (1m), fifteen minutes (15m) or the process lifetime. The one figure rate() and histogram_quantile() cannot derive.
+# TYPE owncord_latency_max_seconds gauge
+owncord_latency_max_seconds{metric="ws_dispatch_lag",window="1m"} 0.0021
+owncord_latency_max_seconds{metric="ws_dispatch_lag",window="lifetime"} 0.09
+```
+
+Names carry the `owncord_` prefix and base units: seconds and bytes, where the
+JSON uses milliseconds and megabytes. Counters end in `_total`.
+Large values may print in exponent form (for example `5.305304e+06`), which
+Prometheus parses.
+
+| Family                                                                                                                             | Type      | Labels                                                                                                                                  | JSON field                                                                       |
+| ---------------------------------------------------------------------------------------------------------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `owncord_uptime_seconds`, `owncord_goroutines`, `owncord_connected_users`, `owncord_voice_sessions`                                | gauge     |                                                                                                                                         | `uptime_seconds`, `goroutines`, `connected_users`, `voice_sessions`              |
+| `owncord_heap_alloc_bytes`, `owncord_heap_sys_bytes`                                                                               | gauge     |                                                                                                                                         | `heap_alloc_mb`, `heap_sys_mb`                                                   |
+| `owncord_gc_cycles_total`                                                                                                          | counter   |                                                                                                                                         | `num_gc`                                                                         |
+| `owncord_broadcast_drops_total`, `owncord_topic_sheds_total`, `owncord_delivery_loss_marks_total`, `owncord_ws_conn_rejects_total` | counter   |                                                                                                                                         | `broadcast_drops`, `topic_sheds_total`, `delivery_loss_marks`, `ws_conn_rejects` |
+| `owncord_ws_broadcast_seconds`, `owncord_ws_dispatch_lag_seconds`, `owncord_chat_send_ack_seconds`                                 | histogram |                                                                                                                                         | `ws_broadcast_ms`, `ws_dispatch_lag_ms`, `chat_send_ack_ms`                      |
+| `owncord_voice_join_seconds`                                                                                                       | histogram | `phase`: `precheck`, `leave`, `persist`, `token`, `complete`, `total`                                                                   | `voice_join_ms`                                                                  |
+| `owncord_latency_max_seconds`                                                                                                      | gauge     | `metric`: `ws_broadcast`, `ws_dispatch_lag`, `chat_send_ack`, `hub_seqmu_hold`, `voice_join_<phase>`; `window`: `1m`, `15m`, `lifetime` | the `max` fields, `hub_seqmu_max_hold_ms`, and the same under `windows`          |
+| `owncord_hub_broadcast_queue_depth`                                                                                                | gauge     |                                                                                                                                         | `hub_broadcast_queue_depth`                                                      |
+| `owncord_reconnect_tier_total`                                                                                                     | counter   | `tier`: `buffer`, `db`, `full`                                                                                                          | `reconnect_tier_*`                                                               |
+| `owncord_reconnect_ring_misses_total`                                                                                              | counter   |                                                                                                                                         | `reconnect_ring_misses`                                                          |
+| `owncord_backpressure_total`                                                                                                       | counter   | `kind`: `queue_disconnect`, `high_fallback`, `low_drop`, `presence_drop`                                                                | `backpressure_*`                                                                 |
+| `owncord_db_wait_total`, `owncord_db_wait_seconds_total`                                                                           | counter   | `pool`: `writer`, `reader`                                                                                                              | `db_writer_wait_*`, `db_reader_wait_*`                                           |
+| `owncord_perm_cache_lookups_total`                                                                                                 | counter   | `result`: `hit`, `miss`                                                                                                                 | `perm_cache_hits`, `perm_cache_misses`                                           |
+| `owncord_push_total`                                                                                                               | counter   | `result`: `dispatched`, `failed`, `pruned`                                                                                              | `push_*`                                                                         |
+| `owncord_event_persister_total`                                                                                                    | counter   | `kind`: `persisted`, `dropped`, `flushes`, `errors`                                                                                     | `event_persister` (omitted while event persistence is off)                       |
+| `owncord_livekit_healthy`, `owncord_disk_low`                                                                                      | gauge 0/1 |                                                                                                                                         | `livekit_healthy`, `disk_low` (omitted when the JSON omits them)                 |
+| `owncord_disk_free_bytes`, `owncord_disk_min_free_bytes`, `owncord_upload_storage_used_bytes`                                      | gauge     |                                                                                                                                         | `disk_free_mb`, `disk_min_free_mb`, `upload_storage_used_mb`                     |
+| `owncord_db_wal_bytes`                                                                                                             | gauge     |                                                                                                                                         | `db_wal_mb` (omitted when the JSON omits it)                                     |
+
+Notes:
+
+- **Histogram buckets** are cumulative, in seconds (0.5 ms to 5 s, then `+Inf`).
+  `+Inf` and `_count` are the same number within one scrape. `_sum` is read
+  separately and can differ from the buckets by one observation still in flight.
+- **Windows are Prometheus's own.** Use `rate()`, `increase()` and
+  `histogram_quantile()` for deltas and quantiles; the JSON `windows` counter
+  deltas and the `p50`/`p95`/`p99` fields are not exported. The one figure a
+  query cannot derive is the worst single observation, so
+  `owncord_latency_max_seconds` carries a `window` label. A window the server
+  cannot answer yet (before its second sample) has no series, never a zero.
+- **Absent sources are omitted**, as in the JSON: no `owncord_livekit_healthy`
+  without a LiveKit probe, no `owncord_event_persister_total` with persistence
+  off, no disk or upload family when the figure is unavailable.
+- Each scrape runs the LiveKit health probe once, as each JSON read does.
+
+### GET /metrics (OpenTelemetry exporter)
+
+Only in a server built with `-tags otel` and `telemetry.exporter` set to
+`prometheus`: the OpenTelemetry SDK's own Prometheus exporter, mounted at
+`/metrics` and limited like the JSON endpoint. In the default build the route
+does not exist (404); use [`GET /api/v1/metrics/prometheus`](#get-apiv1metricsprometheus),
+which serves the built-in figures in every build.
 
 ---
 
@@ -4793,6 +4948,7 @@ re-verification against TOCTOU swaps), spawns the new process and shuts down.
 | 503    | `CONTAINER_DEPLOYMENT`                                       | Container deployment — the binary is image content; upgrade by pulling the new image (opt back in with `OWNCORD_CONTAINER=0` if the binary is bind-mounted) |
 | 503    | `INSTALL_READ_ONLY`                                          | The service cannot write to the folder that holds its program file; checked before any download. Install the new release by hand                            |
 | 503    | `UPDATE_UNAVAILABLE`                                         | Update checking is not configured                                                                                                                           |
+| 503    | `SHUTTING_DOWN`                                              | The server has begun shutting down, so the update was not downloaded or applied (checked before the download and again before the restart countdown starts) |
 | 409    | `RESTART_PENDING`                                            | A restart from an earlier apply/restore is already pending                                                                                                  |
 | 409    | `UPDATE_IN_PROGRESS`                                         | Another restart-sensitive operation (update apply or backup restore) is running                                                                             |
 | 409    | `NO_UPDATE`                                                  | Already up to date                                                                                                                                          |

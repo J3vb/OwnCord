@@ -150,6 +150,16 @@ func backupBeforePendingMigrations(log *slog.Logger, database *db.DB, dbPath str
 
 	log.Warn("pre-migration backup written before applying migrations",
 		"path", filepath.Base(path), "migrations", len(pending))
+
+	// The new copy is verified: trim older safety copies, never this one. A
+	// prune failure must not refuse the boot. The prune covers both prefixes
+	// and protects only the new pre_migrate_ copy, which already holds the
+	// live database.
+	if removed, pruneErr := admin.PruneSafetyCopies(backupDir, admin.SafetyCopiesKept, path); pruneErr != nil {
+		log.Warn("could not prune old safety copies", "dir", backupDir, "error", pruneErr)
+	} else if len(removed) > 0 {
+		log.Info("pruned old safety copies", "count", len(removed), "names", removed)
+	}
 	return filepath.Base(path), nil
 }
 

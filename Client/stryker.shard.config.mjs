@@ -89,13 +89,16 @@ export const shards = {
     "src/lib/audioPipeline.ts",
     "src/lib/virtualRange.ts",
     "src/features/members/memberModel.ts",
-  ], // ~513 mutants (estimated); 664 lines + virtualRange.ts and memberModel.ts (new)
+    "src/features/members/memberRow.view.ts",
+  ], // ~513 mutants (estimated); 664 lines + virtualRange.ts and memberModel.ts (new); ~1240 lines now
   "audio-media-3": [
     "src/lib/noise-suppression.ts",
     "src/lib/deviceManager.ts",
     "src/lib/ptt.ts",
     "src/lib/voiceTokenManager.ts",
-  ], // ~536 mutants (estimated); 692 lines. Split from audio-media-2, which hit the 90-minute job limit at 1003/1049 mutants.
+    "src/features/channels/voiceRow.view.ts",
+    "src/features/channels/voiceRowModel.ts",
+  ], // ~536 mutants (estimated); 692 lines, + voiceRow.view.ts and voiceRowModel.ts (new, ~500 lines). Split from audio-media-2, which hit the 90-minute job limit at 1003/1049 mutants.
   "transport-auth-1": ["src/lib/api.ts", "src/lib/permissions.ts", "src/lib/hostValidation.ts"], // ~1182 mutants (estimated)
   "transport-auth-2": [
     "src/lib/ws.ts",
@@ -152,6 +155,7 @@ export const shards = {
     "src/lib/preferences.ts",
     "src/lib/profiles.ts",
     "src/lib/reconcile.ts",
+    "src/lib/select.ts",
     "src/lib/timeFormat.ts",
     "src/features/whats-new/WhatsNewDialog.ts",
     "src/features/whats-new/whatsNewPrompt.ts",

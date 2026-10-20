@@ -24,7 +24,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/service"
-	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // closeStepBudget bounds each close step on its own, except the HTTP drain —
@@ -298,6 +297,13 @@ func (a *App) startHub() error {
 	a.onClose("hub", func(ctx context.Context) error {
 		return stopHub(ctx, a.runtime.Hub, a.deps.Restart.noticeReason())
 	})
+	// Windowed metrics sampler (WP 4.3a). Registered right after "hub", so the
+	// reverse walk joins it BEFORE the hub stops and the database closes: it
+	// reads hub atomics and both pools' Stats(), and must not outlive either.
+	// It runs on bgCtx and exits on ctx.Done().
+	if rt.MetricsWindows != nil {
+		a.startMetricsWindows(rt.MetricsWindows)
+	}
 	// Mention badges' single bounded worker (P5-O05). Its close step flushes
 	// every queued job and joins the loop, and the reverse walk runs it before
 	// the database closes because it registers here, after "database" but
@@ -315,28 +321,8 @@ func (a *App) startHub() error {
 			return nil
 		})
 	}
+	a.startBackgroundJobs(rt)
 	return nil
-}
-
-// dispatchHub is the slice of *ws.Hub the hub close step drives.
-type dispatchHub interface {
-	GracefulStopContext(ctx context.Context, reason ws.RestartReason)
-	Done() <-chan struct{}
-}
-
-// stopHub is the hub close step: GracefulStopContext, then wait for the
-// dispatch goroutine itself to exit. GracefulStopContext only signals the
-// loop, and on an early start failure the goroutine StartRuntime spawned may
-// not even have been scheduled yet — without the join, Run returned with the
-// loop still alive and Close went on to release what it reads.
-func stopHub(ctx context.Context, hub dispatchHub, reason ws.RestartReason) error {
-	hub.GracefulStopContext(ctx, reason)
-	select {
-	case <-hub.Done():
-		return nil
-	case <-ctx.Done():
-		return fmt.Errorf("hub dispatch did not exit: %w", ctx.Err())
-	}
 }
 
 // startRouter mounts the HTTP handler over the already-built collaborators.

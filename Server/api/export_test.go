@@ -202,3 +202,6 @@ func SetBackgroundWriteTimeoutForTest(tb testing.TB, d time.Duration) {
 	backgroundWriteTimeout = d
 	tb.Cleanup(func() { backgroundWriteTimeout = old })
 }
+
+// HandlePrometheusMetricsForTest exposes handlePrometheusMetrics for external tests.
+var HandlePrometheusMetricsForTest = handlePrometheusMetrics

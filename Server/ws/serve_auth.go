@@ -211,7 +211,7 @@ func (h *Hub) unregisterFailedHandshake(ctx context.Context, c *Client) {
 	// (serve_pumps.go): once unregisterNow removes c, there is no way to tell
 	// whether it still owned a (possibly just-transferred) voice session.
 	txn := h.begin(c.userID)
-	voiceChID := c.getVoiceChID()
+	voiceChID := c.voice.channel()
 	replaced := h.unregisterNow(c)
 	if !replaced {
 		cleanupCtx := context.WithoutCancel(ctx)
@@ -222,7 +222,7 @@ func (h *Hub) unregisterFailedHandshake(ctx context.Context, c *Client) {
 		// LiveKit participant, and a stale E2EE key-holder entry all survive
 		// this connection's death until the next sweep (up to 60s).
 		if voiceChID != 0 {
-			h.leaveVoiceOnDisconnect(cleanupCtx, c, voiceLeaveReasonHandshake)
+			h.disconnectVoice(cleanupCtx, txn, c, voiceLeaveReasonHandshake)
 		}
 	}
 	txn.end()

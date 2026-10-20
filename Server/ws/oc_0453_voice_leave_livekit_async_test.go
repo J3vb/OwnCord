@@ -60,11 +60,11 @@ func TestHandleVoiceLeave_DoesNotWaitOnLiveKitRemoval(t *testing.T) {
 
 	c := NewTestClient(h, uid, make(chan []byte, 8))
 	c.user = &db.User{ID: uid, Username: "quick-rejoin"}
-	c.setVoiceState(chID, "tok-leave")
+	c.voice.setState(chID, "tok-leave")
 
 	left := make(chan struct{})
 	go func() {
-		h.handleVoiceLeave(context.Background(), c, voiceLeaveReasonDisconnect)
+		h.handleVoiceLeaveTest(context.Background(), c, voiceLeaveReasonDisconnect)
 		close(left)
 	}()
 	select {

@@ -93,6 +93,16 @@ func readMessageDeliveryFloor(dbPath string) (int64, error) {
 }
 
 func messageDeliveryFloorPath(dbPath string) (string, error) {
+	p, err := dbFilePath(dbPath)
+	if err != nil {
+		return "", err
+	}
+	return p + ".message-retry-floor", nil
+}
+
+// dbFilePath is the on-disk file behind a database path or "file:" URI, for
+// the sidecar files that sit next to it.
+func dbFilePath(dbPath string) (string, error) {
 	if dbPath == "" || isMemoryPath(dbPath) {
 		return "", errors.New("message retry cutoff requires a database file")
 	}
@@ -115,5 +125,5 @@ func messageDeliveryFloorPath(dbPath string) (string, error) {
 	if dbPath == "" {
 		return "", errors.New("message retry cutoff requires a database path")
 	}
-	return filepath.FromSlash(dbPath) + ".message-retry-floor", nil
+	return filepath.FromSlash(dbPath), nil
 }

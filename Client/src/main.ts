@@ -12,74 +12,45 @@ import {
   safeMount,
   type RenderRecovery,
 } from "@lib/safe-render";
-import { createApiClient, ApiClientError, errorText, TLS_CERT_CODE } from "@lib/api";
-import { SessionScope } from "@lib/sessionScope";
-import { prefetchMainPage } from "@pages/mainPagePrefetch";
-import { setOwnedTimeout, wantsNativeMenu } from "@lib/dom";
+import { createApiClient } from "@lib/api";
 import { Disposable } from "@lib/disposable";
-import { installFileDropGuard } from "./features/messaging/fileDropGuard";
+import { installGlobalGuards } from "./app/globalGuards";
+import type { PageId } from "./app/context";
 
 import { deactivatePendingMessages } from "@lib/pendingMessages";
 import { openMessageTarget, openNotificationTarget } from "@lib/notifications";
 import { settleNotificationLevelDefault } from "@lib/notificationLevel";
-import {
-  bracketBareIPv6Host,
-  createWsClient,
-  isCertDeclined,
-  normalizeHostForCertCompare,
-  PREAUTH_BUSY_CAP_MS,
-  PREAUTH_CONNECT_TIMEOUT_MS,
-} from "@lib/ws";
-import { wireDispatcher, wireConnectionStatus } from "@lib/dispatcher";
-import { setLastChannelHost } from "@lib/last-channel";
+import { createWsClient } from "@lib/ws";
+import { wireConnectionStatus } from "@lib/dispatcher";
 import { markActiveChannelReadOnUnload } from "@lib/read-state";
 import { registerSessionReset } from "@lib/sessionRegistry";
 import { authStore, clearAuth } from "@stores/auth.store";
-import {
-  setTransientError,
-  uiStore,
-  setUpdateRequiredHost,
-  type UpdateRequired,
-} from "@stores/ui.store";
+import { setTransientError } from "@stores/ui.store";
 import { voiceStore, leaveVoiceChannel } from "@stores/voice.store";
-import { createConnectPage } from "@pages/ConnectPage";
 import { applyStoredAppearance } from "@lib/appearance";
 import { startZoom } from "./features/zoom/zoomKeys";
 import { migrateAutoInputSensitivity, migrateInputMode } from "@lib/inputMode";
-import { createConnectedOverlay } from "@components/ConnectedOverlay";
-import { createUpdateNotifier } from "@components/UpdateNotifier";
-import type { MountableComponent } from "@lib/safe-render";
-import type { ConnectedOverlayControl } from "@components/ConnectedOverlay";
+import {
+  abandonInFlight,
+  configureSession,
+  installLogoutTeardown,
+  sessionInFlight,
+  voiceSessionLeave,
+} from "./app/session";
 import { createLogger, applyStoredLogLevel } from "@lib/logger";
 import { initLogPersistence, flushLogs } from "@lib/logPersistence";
-import {
-  saveCredential,
-  loadCredential,
-  deleteCredential,
-  createUserUpdateCredentialSaver,
-  loginWithSavedPassword,
-  parseRelayedLogin,
-} from "@lib/credentials";
 import { initWindowState } from "@lib/window-state";
-import { reconnectAfterCertAccept } from "@lib/cert-reconnect";
-import {
-  createProfileManager,
-  createTauriBackend,
-  deriveCompatibility,
-  type Compatibility,
-} from "@lib/profiles";
-import { PROTOCOL_EPOCH } from "@lib/protocolTypes";
-import { parseRegistrationMode, retentionNotice } from "@lib/types";
-import type { ServerInfoResponse } from "@lib/types";
-import type { CertTofuEvent } from "@lib/ws";
-import type { AuthResponse } from "@lib/types";
+import { createProfileManager, createTauriBackend } from "@lib/profiles";
+import { retentionNotice } from "@lib/types";
 import { saveUserStatus } from "@lib/userStatus";
 import { getActivePresenceSender } from "@lib/presence";
 import { setInviteJoinHandler } from "@lib/invite-navigation";
 
 import { desktop } from "./platform/desktop";
 import { connectText } from "./i18n/connect";
-import { showToast } from "@lib/toast";
+import { installCertPrompts } from "./app/certPrompts";
+import { configureServerHealth, serverInfoFor } from "./app/serverHealth";
+import { renderConnect } from "./app/connectRoute";
 
 // First, while storage still holds only what earlier sessions wrote: that is
 // how an install from before the notification level is told from a new one.
@@ -93,68 +64,7 @@ applyStoredLogLevel(import.meta.env.DEV ? "debug" : "info");
 
 const log = createLogger("main");
 
-// livekitSession (and the ~1.3 MB livekit-client SDK behind it) is loaded
-// lazily so it stays out of the startup path. When a voice session exists the
-// module is necessarily already loaded, so this import resolves from the
-// module cache in a microtask.
-function voiceSessionLeave(sendWsLeave: boolean): void {
-  void import("@lib/livekitSession")
-    .then(({ leaveVoice }) => leaveVoice(sendWsLeave))
-    .catch((e) => log.warn("Failed to leave voice session", e));
-}
-
-// Disable the default browser context menu everywhere but text fields.
-document.addEventListener("contextmenu", (e) => {
-  if (!wantsNativeMenu(e.target)) e.preventDefault();
-});
-
-// F12 or Ctrl+Shift+I opens WebView2 DevTools in development builds only.
-// F5 and Ctrl+R are blocked to prevent accidental page reloads which cause
-// ghost voice state (user appears in channel with no LiveKit connection).
-document.addEventListener("keydown", (e) => {
-  // KeyboardEvent.key carries the shifted/CapsLock-cased character, so
-  // Ctrl+Shift+R (and Ctrl+R with CapsLock on) would fall through this guard
-  // as "R" without the lowercase compare.
-  if (e.key === "F5" || (e.ctrlKey && e.key.toLowerCase() === "r")) {
-    e.preventDefault();
-    return;
-  }
-  if (import.meta.env.DEV && (e.key === "F12" || (e.ctrlKey && e.shiftKey && e.key === "I"))) {
-    e.preventDefault();
-    desktop.devTools.open().catch((err: unknown) => log.warn("devtools open failed", err));
-  }
-});
-
-// A file dropped where no composer listens must not navigate the webview.
-installFileDropGuard(new Disposable().signal);
-
-// Open external links (target="_blank") in the user's default browser. A
-// masked link ([text](url): the visible text is not the address) asks first,
-// through a dialog loaded only when one is clicked.
-document.addEventListener("click", (e) => {
-  const link = (e.target as HTMLElement).closest("a[target='_blank']");
-  if (link === null) return;
-  e.preventDefault();
-  const href = (link as HTMLAnchorElement).href;
-  if (href && (href.startsWith("http://") || href.startsWith("https://"))) {
-    const open = (url: string): void => {
-      desktop.urlOpener
-        .open(url)
-        .catch((err: unknown) => log.warn("external link open failed", err));
-    };
-    if (!link.classList.contains("masked")) {
-      open(href);
-      return;
-    }
-    import("@components/MaskedLinkGuard").then(
-      (m) => m.guardMaskedLink(href, open),
-      (err: unknown) => {
-        log.warn("masked link warning failed to load", err);
-        showToast(connectText("link.openFailed"), "error");
-      },
-    );
-  }
-});
+installGlobalGuards();
 
 // Install global error handlers first
 installGlobalErrorHandlers();
@@ -185,10 +95,10 @@ if (!appEl) {
 
 // The active page. `currentPage` further down holds the mounted page
 // *component*, so the page id needs its own name.
-let activePage: "connect" | "main" = "connect";
+let activePage: PageId = "connect";
 
 /** Switch pages, re-rendering only when the page actually changed. */
-function navigate(page: "connect" | "main"): void {
+function navigate(page: PageId): void {
   if (page === activePage) return;
   activePage = page;
   void renderPage(page);
@@ -243,15 +153,8 @@ void registerSessionReset(
 // transition (the connected overlay below) stays on ws.onStateChange.
 wireConnectionStatus(ws);
 const profileManager = createProfileManager(createTauriBackend());
-let dispatcherCleanup: (() => void) | null = null;
-// Tears down the session-scoped WS listeners registered in wirePostAuth
-// (user_update, onStateChange, ready). dispatcherCleanup only clears
-// dispatcher-registered handlers, so these need their own teardown to avoid
-// accumulating across login/logout/retry cycles.
-let sessionCleanup: (() => void) | null = null;
-let connectedOverlay: ConnectedOverlayControl | null = null;
-let lastConnectHost = "";
-let lastConnectToken = "";
+configureSession(api, ws, appEl, () => activePage, navigate);
+configureServerHealth(api);
 // Re-run the connect page's health checks (set while the connect page is
 // mounted, cleared otherwise) — refreshes a server's status after its
 // certificate is trusted for the first time.
@@ -261,150 +164,12 @@ let rerunConnectHealth: (() => void) | null = null;
 let applyInviteToConnectPage: ((code: string, host?: string) => void) | null = null;
 let pendingInviteLink: { code: string; host?: string } | null = null;
 
-// Shared guard so the first-use and mismatch cert modals never stack.
-let certModalActive = false;
-
-// The modals only open on a cert event, so they load on demand and stay out of
-// the startup closure. A failed load (or a modal that throws while opening)
-// releases the guard so a later event retries, then runs `onFail`.
-function withCertModals(
-  open: (m: typeof import("@components/CertMismatchModal")) => void,
-  onFail: () => void,
-): void {
-  void import("@components/CertMismatchModal").then(open).catch((err: unknown) => {
-    log.error("Failed to open certificate modal", err);
-    certModalActive = false;
-    onFail();
-  });
-}
-
-// A mismatch the user never got to answer must fail closed. Only tear down the
-// live session when the mismatch is FOR that session's host — a rotated cert on
-// an unrelated saved profile must not disconnect and log out an unrelated
-// authenticated session.
-function dropSessionOnMismatch(host: string): void {
-  if (host === normalizeHostForCertCompare(lastConnectHost)) {
-    ws.disconnect();
-    clearAuth();
-    navigate("connect");
-  }
-}
-
-// First-use certificate confirmation (F4/F8). The Rust proxy REJECTS the first
-// connection to a server until the user confirms its fingerprint, so no
-// credential is ever sent to an unconfirmed host. This fires during the connect
-// page's health check (the first TLS contact), before login.
-ws.onCertFirstUse((evt: CertTofuEvent) => {
-  if (certModalActive) return;
-  certModalActive = true;
-  withCertModals(
-    ({ createCertFirstUseModal }) => {
-      const reject = (): void => {
-        modal.destroy?.();
-        certModalActive = false;
-      };
-
-      const modal = createCertFirstUseModal({
-        host: evt.host,
-        fingerprint: evt.fingerprint,
-        onAccept: () => {
-          // The guard stays set until the native confirmation settles, so a
-          // repeated event cannot mount a second modal behind the OS dialog.
-          modal.destroy?.();
-          void (async () => {
-            try {
-              await ws.acceptCertFingerprint(evt.host, evt.fingerprint);
-              // Refresh server health so the now-trusted host becomes reachable,
-              // and resume a pending connect if one was in flight — but only when
-              // it was pending for THIS host. Accepting a first-use cert for one
-              // profile must not force-reconnect (or churn) a session already
-              // live for a different host.
-              rerunConnectHealth?.();
-              if (
-                lastConnectHost &&
-                lastConnectToken &&
-                evt.host === normalizeHostForCertCompare(lastConnectHost)
-              ) {
-                ws.connect({ host: lastConnectHost, token: lastConnectToken });
-              }
-            } catch (err) {
-              if (isCertDeclined(err)) {
-                log.info("First-use certificate not accepted", { host: evt.host });
-                reject();
-                setTransientError(connectText("cert.notAccepted"));
-              } else {
-                log.error("Failed to trust first-use certificate", err);
-              }
-            } finally {
-              certModalActive = false;
-            }
-          })();
-        },
-        onReject: reject,
-      });
-      modal.mount(document.body);
-    },
-    () => {},
-  );
-});
-ws.onCertMismatch((evt: CertTofuEvent) => {
-  if (certModalActive) return;
-  certModalActive = true;
-  withCertModals(
-    ({ createCertMismatchModal }) => {
-      const reject = (): void => {
-        modal.destroy?.();
-        certModalActive = false;
-        dropSessionOnMismatch(evt.host);
-      };
-
-      const modal = createCertMismatchModal({
-        host: evt.host,
-        storedFingerprint: evt.storedFingerprint ?? connectText("common.unknown"),
-        newFingerprint: evt.fingerprint,
-        onAccept: () => {
-          // The guard stays set until the native confirmation settles, so a
-          // repeated event cannot mount a second modal behind the OS dialog.
-          modal.destroy?.();
-          void (async () => {
-            try {
-              await ws.acceptCertFingerprint(evt.host, evt.fingerprint);
-              if (
-                lastConnectHost &&
-                lastConnectToken &&
-                evt.host === normalizeHostForCertCompare(lastConnectHost)
-              ) {
-                reconnectAfterCertAccept(
-                  ws,
-                  { getCurrentPage: () => activePage, navigate },
-                  lastConnectHost,
-                  lastConnectToken,
-                );
-              }
-            } catch (err) {
-              if (isCertDeclined(err)) {
-                log.info("Certificate not accepted", { host: evt.host });
-                reject();
-                setTransientError(connectText("cert.notAccepted"));
-              } else {
-                log.error("Failed to accept cert fingerprint", err);
-              }
-            } finally {
-              certModalActive = false;
-            }
-          })();
-        },
-        onReject: reject,
-      });
-      modal.mount(document.body);
-    },
-    () => dropSessionOnMismatch(evt.host),
-  );
-});
-
-// Register the global cert-tofu listener now so first-use / mismatch prompts
-// are received during the connect page's health checks, before any WS connect.
-ws.startCertListener().catch((err: unknown) => log.warn("cert listener registration failed", err));
+installCertPrompts(
+  ws,
+  () => activePage,
+  navigate,
+  () => rerunConnectHealth?.(),
+);
 
 // Route the tray's Status submenu (Online/Idle/Do Not Disturb/Offline) into
 // the same path the in-app StatusPicker uses (UserBar.ts): persist through
@@ -435,116 +200,6 @@ desktop.trayStatus.onStatusChange((status) => {
 
 // Current page component reference for cleanup
 let currentPage: { destroy?(): void } | null = null;
-
-/**
- * Last `server-info` snapshot per host, fed by `runHealthChecks`. B7-12 reads
- * it for the advisory epoch badge and the incompatible notice; B7-15 reads the
- * same snapshot for `registration_mode` and the retention notice.
- */
-const serverInfoByHost = new Map<string, ServerInfoResponse>();
-/** Hosts with a `server-info` probe in flight, so a typed host is not probed twice. */
-const serverInfoInFlight = new Set<string>();
-
-/** The connect page's per-server health readouts. */
-interface HealthReadout {
-  updateHealthStatus(
-    host: string,
-    status: {
-      status: string;
-      latencyMs: number | null;
-      version: string | null;
-      onlineUsers: number | null;
-    },
-  ): void;
-  updateCompatibility(host: string, compatibility: Compatibility, serverEpoch: number | null): void;
-}
-
-/** Run health checks for a list of profiles and update the connect page. */
-function runHealthChecks(
-  connectPage: HealthReadout,
-  profiles: readonly { host: string }[],
-  owner: SessionScope,
-): void {
-  for (const profile of profiles) void checkHealth(connectPage, profile.host, owner);
-}
-
-/**
- * Advisory epoch preflight, beside the health probe and sharing its
- * timeout/dispose shape. Resolves whether `server-info` answered; a failed
- * probe is `unreachable` — no badge, never an error banner (the WebSocket
- * refusal stays authoritative). A degraded server (health 503) still answers it.
- */
-async function probeServerInfo(
-  connectPage: HealthReadout,
-  host: string,
-  owner: SessionScope,
-): Promise<boolean> {
-  let serverEpoch: number | null = null;
-  let compatibility: Compatibility = "unreachable";
-  serverInfoInFlight.add(host);
-  try {
-    const info = await api.getServerInfo(host, 3000, owner.signal);
-    owner.assertCurrent();
-    serverInfoByHost.set(host, info);
-    serverEpoch = info.protocol_epoch;
-    compatibility = deriveCompatibility(serverEpoch, PROTOCOL_EPOCH);
-  } catch (infoErr) {
-    if (!owner.isCurrent()) return false;
-    serverInfoByHost.delete(host);
-    log.debug("server-info preflight failed", {
-      host,
-      error: String(infoErr),
-    });
-  } finally {
-    serverInfoInFlight.delete(host);
-  }
-  connectPage.updateCompatibility(host, compatibility, serverEpoch);
-  return compatibility !== "unreachable";
-}
-
-/** Probe one server and update its row; resolves whether it answered. */
-async function checkHealth(
-  connectPage: HealthReadout,
-  host: string,
-  owner: SessionScope,
-): Promise<boolean> {
-  try {
-    owner.assertCurrent();
-    connectPage.updateHealthStatus(host, {
-      status: "checking",
-      latencyMs: null,
-      version: null,
-      onlineUsers: null,
-    });
-    const start = performance.now();
-    const health = await api.getHealth(host, 3000, owner.signal);
-    owner.assertCurrent();
-    const elapsed = Math.round(performance.now() - start);
-    connectPage.updateHealthStatus(host, {
-      status: elapsed > 1500 ? "slow" : "online",
-      latencyMs: elapsed,
-      version: health.version ?? null,
-      onlineUsers: health.online_users ?? null,
-    });
-    await probeServerInfo(connectPage, host, owner);
-    return true;
-  } catch (err) {
-    if (!owner.isCurrent()) return false;
-    // Record why the check failed (TLS/cert-pin/network) — otherwise a
-    // "can't connect" report has no logged cause to diagnose.
-    log.warn("health check failed", { host, error: String(err) });
-    connectPage.updateHealthStatus(host, {
-      status: "offline",
-      latencyMs: null,
-      version: null,
-      onlineUsers: null,
-    });
-    // A degraded server (503) fails the health call but may still answer
-    // server-info; the probe clears the badge itself when it fails too.
-    await probeServerInfo(connectPage, host, owner);
-    return false;
-  }
-}
 
 // Guards the async MainPage mount below against the destroy-before-mount race:
 // a stale mount is discarded when a newer navigation supersedes it.
@@ -605,7 +260,7 @@ const renderRecovery: RenderRecovery = {
 };
 
 // Render the appropriate page based on router state
-async function renderPage(pageId: "connect" | "main"): Promise<void> {
+async function renderPage(pageId: PageId): Promise<void> {
   const thisNavigation = ++navGeneration;
   const isCurrentNavigation = (): boolean => thisNavigation === navGeneration;
   log.info("Navigating to page", { pageId });
@@ -617,811 +272,19 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
   rerunConnectHealth = null;
   applyInviteToConnectPage = null;
 
-  // Shared helper for post-auth WS connect + overlay flow
-  function wirePostAuth(
-    host: string,
-    token: string,
-    username: string,
-    password?: string,
-    rememberPassword = true,
-    // Whether this login is the user's own explicit choice about being
-    // remembered. Only then may declining it delete an existing credential —
-    // the auto-login path passes false, because it is replaying a stored
-    // credential rather than expressing a preference, and deleting there would
-    // destroy the very credential it just used.
-    rememberIsUserChoice = false,
-    // Runs after the pre-auth deadline gives up; a stored-token resume uses it
-    // to keep waiting for a server that is still down.
-    onPreauthTimeout?: () => void,
-    // Stay-signed-in (Auto connect) keeps the session token even when
-    // Remember password is off; the password itself is saved only with
-    // `rememberPassword`.
-    autoConnect = false,
-  ): void {
-    log.info("Post-auth wiring", { host, username });
-    // Start downloading/parsing the MainPage chunk now so it overlaps the
-    // socket handshake; the import at "connected" and the mount hit the cache.
-    prefetchMainPage();
-    // Tear down any prior session wiring so listeners and the connected
-    // overlay never stack across a retry (a second wirePostAuth without an
-    // intervening logout).
-    sessionCleanup?.();
-    sessionCleanup = null;
-    dispatcherCleanup?.();
-    dispatcherCleanup = null;
-    connectedOverlay?.destroy();
-    connectedOverlay = null;
-    api.setConfig({ host, token });
-    const owner = api.getSession();
-    // Store token in authStore so the dispatcher's auth_ok handler has it
-    authStore.setState((prev) => ({ ...prev, token }));
-    lastConnectHost = host;
-    lastConnectToken = token;
-    // UX-8: scope the last-channel store to this server before the dispatcher
-    // wires, so the first `ready` (which restores it) reads the right key.
-    // It has to be here, not MainPage: the first ready arrives before MainPage
-    // mounts, and it is what restores the last channel.
-    setLastChannelHost(host);
-    ws.connect({ host, token });
-    dispatcherCleanup = wireDispatcher(ws, api);
-    owner.addCleanup(dispatcherCleanup);
-    log.info("Dispatcher wired, connecting WS");
-
-    // A stored-token resume (auto-login / quick switch) sends no REST preflight,
-    // so a server that is down leaves this handshake behind the "Auto-connecting…"
-    // overlay (or a manual login's spinner) while ws.ts retries forever. Bound the
-    // FIRST authentication with a deadline: a never-authenticated attempt returns
-    // to the form and says why, while a live session's later outages keep the
-    // in-app reconnect banner and its retry loop. Cleared on the first "connected"
-    // (auth_ok), a terminal disconnect, a first-use certificate prompt for this
-    // host, or when the session tears down. A SERVER_BUSY refusal restarts it,
-    // up to PREAUTH_BUSY_CAP_MS after this first attempt (P5-S04).
-    const preauthStartedAt = Date.now();
-    const onPreauthDeadline = (): void => {
-      if (!owner.isCurrent()) return;
-      log.warn("Pre-auth connection timed out", { host, timeoutMs: PREAUTH_CONNECT_TIMEOUT_MS });
-      // Stop the retry loop and tear the dead attempt down exactly as a
-      // cancelled auto-login does, then tell the user on the connect form.
-      api.endSession();
-      ws.disconnect();
-      sessionCleanup?.();
-      sessionCleanup = null;
-      dispatcherCleanup?.();
-      dispatcherCleanup = null;
-      lastConnectHost = "";
-      lastConnectToken = "";
-      // A dial that failed on the certificate is not an unreachable server:
-      // name it. `getConnectFailureCode` reads the distinct code the transport
-      // reported for the rejected connect (ws.ts).
-      setTransientError(
-        ws.getConnectFailureCode() === TLS_CERT_CODE
-          ? connectText("error.tlsFailed")
-          : connectText("session.connectTimeout"),
-      );
-      onPreauthTimeout?.();
-    };
-    let preauthTimer: ReturnType<typeof setTimeout> | null = setTimeout(
-      onPreauthDeadline,
-      PREAUTH_CONNECT_TIMEOUT_MS,
-    );
-    const clearPreauthDeadline = (): void => {
-      if (preauthTimer !== null) clearTimeout(preauthTimer);
-      preauthTimer = null;
-    };
-
-    // Session-scoped WS listeners — collected so they're all removed together
-    // on logout/disconnect (or the next wirePostAuth).
-    const sessionUnsubs: Array<() => void> = [clearPreauthDeadline];
-    // A first-use certificate prompt means the server answered: the user is
-    // deciding, not waiting on an offline host, and Accept resumes this login.
-    sessionUnsubs.push(
-      ws.onCertFirstUse((evt) => {
-        if (evt.host === normalizeHostForCertCompare(host)) clearPreauthDeadline();
-      }),
-    );
-    sessionUnsubs.push(
-      ws.onServerBusy(() => {
-        if (preauthTimer === null) return;
-        clearTimeout(preauthTimer);
-        preauthTimer = setTimeout(
-          onPreauthDeadline,
-          Math.min(PREAUTH_CONNECT_TIMEOUT_MS, preauthStartedAt + PREAUTH_BUSY_CAP_MS - Date.now()),
-        );
-      }),
-    );
-
-    // BUG-135: Only persist credentials when the user opted in. The token is
-    // kept when Auto connect OR Remember password is ticked; the password only
-    // when Remember is ticked. Declining both is an active instruction, not
-    // just an absence of one (OCV-022): a password stored under an earlier
-    // opt-in must not outlive the opt-out, so the whole credential goes. The
-    // username survives in the profile, so the form still prefills it.
-    const keepToken = rememberPassword || autoConnect;
-    if (!keepToken && rememberIsUserChoice) {
-      void (async () => {
-        // The store holds one credential per host (`login_account(host) =
-        // host`), and `save_credential` already overwrites it with no
-        // username check — a remembered login by a second account on this
-        // host would have clobbered it anyway. The stored username is a
-        // stale copy, not an account identity, so guarding the delete on it
-        // can't protect a second account; it can only leave the password the
-        // user just declined sitting on disk. Delete unconditionally for the
-        // host. Cost: if two accounts share a host, opting out as one
-        // removes the credential the other saved.
-        //
-        // A failed delete leaves that password on disk. Silence there would
-        // tell the user the opt-out took effect when it did not, so it is
-        // surfaced the same way a failed save is.
-        const removed = await deleteCredential(host);
-        if (!removed && owner.isCurrent()) {
-          log.warn("Credential delete failed — the saved password is still stored", {
-            host,
-          });
-          setTransientError(connectText("session.passwordRemoveFailed"));
-        }
-      })();
-    }
-    if (keepToken) {
-      // Auto connect without Remember: keep the token only. A user's own login
-      // also erases any password saved under an earlier Remember opt-in
-      // (clearPassword); a stored-token resume never clears anything.
-      const clearPassword = !rememberPassword && rememberIsUserChoice;
-      saveCredential(host, username, token, rememberPassword ? password : undefined, clearPassword)
-        .then((ok) => {
-          if (!ok && owner.isCurrent()) {
-            log.warn("Credential save failed — auto-login will not work for this server");
-            setTransientError(connectText("session.credentialsSaveFailed"));
-          }
-        })
-        .catch(() => {
-          // saveCredential already catches internally; this is defence-in-depth
-        });
-    }
-
-    // Update saved credentials when the current user changes their username.
-    // Guarded by the same remember-password opt-out as the initial save above
-    // (BUG-135). No password is passed: save_credential preserves the stored
-    // one when none is supplied, which is why the plaintext no longer has to
-    // make a round trip through JavaScript.
-    sessionUnsubs.push(ws.on("user_update", createUserUpdateCredentialSaver(host, keepToken)));
-
-    const unsubState = ws.onStateChange((wsState) => {
-      log.debug("WS state change", { state: wsState });
-      if (wsState === "connected") {
-        // Authenticated: the pre-auth deadline has nothing left to bound, and
-        // keeping it would bounce a live session out on its first later outage.
-        clearPreauthDeadline();
-        // Stop listening once connected so a later transition can't fire this
-        // handler again.
-        unsubState();
-        // Already prefetched at the top of wirePostAuth; this resolves from
-        // the module cache and covers a prefetch that failed transiently.
-        prefetchMainPage();
-      } else if (wsState === "disconnected") {
-        // Terminal non-connected transition (auth_error, cert-mismatch reject,
-        // or intentional disconnect before ever connecting): drop the handler
-        // so it doesn't linger and fire on a later connect. The pre-auth
-        // deadline goes with it: it bounds only the endless retry loop, and
-        // with this handler gone nothing would clear it on a later auth_ok
-        // (a certificate re-dial after a mismatch).
-        clearPreauthDeadline();
-        unsubState();
-      }
-    });
-    sessionUnsubs.push(unsubState);
-
-    // Build the connected overlay from the auth_ok payload itself, not
-    // authStore: ws.ts fires onStateChange("connected") synchronously BEFORE
-    // dispatching the auth_ok message that carries server_name/motd
-    // (setState() then dispatch() in the same handleMessage() call), so
-    // authStore.setAuth() — run by the dispatcher's own auth_ok handler —
-    // has not applied yet at that point. Reading straight from the payload
-    // sidesteps the race instead of racing it (OC-0063).
-    const unsubAuthOk = ws.on("auth_ok", (payload) => {
-      unsubAuthOk();
-      // Ensure exactly one overlay exists at a time.
-      connectedOverlay?.destroy();
-      connectedOverlay = createConnectedOverlay({
-        serverName: payload.server_name ?? host,
-        username: payload.user.username ?? username,
-        motd: payload.motd ?? "",
-        onReady: () => {
-          if (!owner.isCurrent()) return;
-          connectedOverlay?.destroy();
-          connectedOverlay = null;
-          // This handler's closures (the owner cleanup, the `ready` listener in
-          // sessionUnsubs) outlive the overlay until logout; drop their shared
-          // reference so the destroyed overlay's DOM can be collected.
-          ownedOverlay = null;
-          navigate("main");
-        },
-      });
-      let ownedOverlay: ConnectedOverlayControl | null = connectedOverlay;
-      owner.addCleanup(() => {
-        ownedOverlay?.destroy();
-        if (connectedOverlay === ownedOverlay) connectedOverlay = null;
-      });
-      appEl!.appendChild(connectedOverlay.element);
-      connectedOverlay.show();
-
-      const unsubReady = ws.on("ready", () => {
-        unsubReady();
-        connectedOverlay?.markReady();
-      });
-      sessionUnsubs.push(unsubReady);
-    });
-    sessionUnsubs.push(unsubAuthOk);
-
-    sessionCleanup = () => {
-      for (const unsub of sessionUnsubs) unsub();
-      sessionUnsubs.length = 0;
-    };
-    owner.addCleanup(sessionCleanup);
-  }
-
-  // Track partial auth state for TOTP flow
-  let pendingTotpHost = "";
-  let pendingTotpPartialToken = "";
-  let pendingTotpUsername = "";
-
   if (pageId === "connect") {
-    const pageOwner = new SessionScope({ host: "", generation: 0 });
-    // Helper to get the profile list for the ConnectPage
-    function getProfileList(): readonly {
-      name: string;
-      host: string;
-      id?: string;
-      username?: string;
-      synthetic?: boolean;
-    }[] {
-      const saved = profileManager.getAll();
-      if (saved.length > 0) return saved;
-      // Fallback: show a default local server entry
-      return [
-        { name: connectText("profiles.defaultName"), host: "localhost:8443", synthetic: true },
-      ];
-    }
-
-    // Persist a profile mutation, surfacing a failure instead of letting it
-    // silently revert on next launch: profiles.ts awaits invoke("save_settings"),
-    // which rejects when the store write fails (read-only file, disk full),
-    // and `void`-ing that rejection at each call site (as this used to) left
-    // the in-memory store as the only record of the change.
-    function persistProfiles(): void {
-      void profileManager.saveProfiles().catch(() => {
-        setTransientError(connectText("profiles.saveFailed"));
-      });
-    }
-
-    // Stay signed in is the only reason an auto-connect-only profile holds a
-    // token. When a change moves auto-connect off such a profile and nothing
-    // else on that host keeps a sign-in (neither flag on any profile there),
-    // the token would sit in the credential store with both flags off, so it
-    // goes. `skipHost` is the host of a login in flight, whose own save/delete
-    // already decides its credential.
-    function mutateAutoLogin(mutate: () => void, skipHost?: string): void {
-      const heldBefore = new Set(
-        profileManager
-          .getAll()
-          .filter((p) => p.autoConnect)
-          .map((p) => p.host),
-      );
-      mutate();
-      const after = profileManager.getAll();
-      for (const host of heldBefore) {
-        if (host === skipHost) continue;
-        if (after.some((p) => p.host === host && (p.autoConnect || p.rememberPassword))) continue;
-        void (async () => {
-          const removed = await deleteCredential(host);
-          if (!removed && pageOwner.isCurrent()) {
-            log.warn("Credential delete failed — the saved sign-in is still stored", { host });
-            setTransientError(connectText("session.passwordRemoveFailed"));
-          }
-        })();
-      }
-    }
-
-    // Auto-save a profile for a host after successful login (if not already saved)
-    function ensureProfileExists(
-      host: string,
-      username: string,
-      rememberPassword: boolean,
-      autoConnect: boolean,
-    ): void {
-      const existing = profileManager.getAll().find((p) => p.host === host);
-      if (existing) {
-        // Update username, rememberPassword preference, and lastConnected
-        profileManager.updateProfile(existing.id, { username, rememberPassword });
-        profileManager.setLastConnected(existing.id);
-      } else {
-        const created = profileManager.addProfile({
-          name: host.split(":")[0] ?? host,
-          host,
-          username,
-          autoConnect: false,
-          rememberPassword,
-          color: "#5865F2",
-        });
-        profileManager.setLastConnected(created.id);
-      }
-
-      // Re-find: the profile may have just been created above.
-      const profile = profileManager.getAll().find((p) => p.host === host);
-      if (profile) {
-        if (autoConnect) {
-          mutateAutoLogin(() => profileManager.setAutoLogin(profile.id), host);
-        } else if (profile.autoConnect) {
-          // Only clear when this profile is the current holder — setAutoLogin(null)
-          // clears auto-login on every profile, not just this one.
-          mutateAutoLogin(() => profileManager.setAutoLogin(null), host);
-        }
-      }
-      persistProfiles();
-    }
-
-    // Shared tail of both login paths: branch to the 2FA challenge, or wire the
-    // session. Structural rather than duplicated, so the saved-password path
-    // cannot drift from the typed-password one. `password` is undefined on the
-    // saved-password path — the plaintext never leaves the credential store,
-    // and save_credential preserves it when none is supplied.
-    function completeLogin(
-      host: string,
-      username: string,
-      result: AuthResponse,
-      password?: string,
-    ): void {
-      if (result.requires_2fa) {
-        pendingTotpHost = host;
-        pendingTotpPartialToken = result.partial_token ?? "";
-        pendingTotpUsername = username;
-        connectPage.showTotp();
-        return;
-      }
-      if (!result.token) return;
-      const remember = connectPage.getRememberPassword();
-      ensureProfileExists(host, username, remember, connectPage.getAutoConnect());
-      wirePostAuth(
-        host,
-        result.token,
-        username,
-        remember ? password : undefined,
-        remember,
-        true,
-        undefined,
-        connectPage.getAutoConnect(),
-      );
-    }
-
-    const connectPage = createConnectPage(
-      {
-        // The mode is read from the per-host snapshot `runHealthChecks` fills
-        // beside the health probe. Unknown (no snapshot / unrecognised value)
-        // returns null, which LoginForm treats as invite-required.
-        getRegistrationMode(host) {
-          const info = serverInfoByHost.get(host);
-          return parseRegistrationMode(info?.registration_mode);
-        },
-        getRetentionNotice: (host) => retentionNotice(serverInfoByHost.get(host)),
-        // A typed host has no health row; probe it so register mode can read its mode.
-        onHostSettled(host) {
-          if (!serverInfoByHost.has(host) && !serverInfoInFlight.has(host))
-            void probeServerInfo(connectPage, host, pageOwner);
-        },
-        async onLogin(host, username, password) {
-          api.endSession();
-          api.setConfig({ host });
-          const attempt = api.getSession();
-          const result = await api.login(username, password);
-          attempt.assertCurrent();
-          pageOwner.assertCurrent();
-          completeLogin(host, username, result, password);
-        },
-        async onLoginWithSavedPassword(host, username) {
-          api.endSession();
-          api.setConfig({ host });
-          const attempt = api.getSession();
-          // loginWithSavedPassword's own IPC await isn't cancellable, so a
-          // cancelled login would otherwise hang until the backend's own
-          // SAVED_LOGIN_TIMEOUT — route it through the scope so it rejects
-          // promptly instead.
-          const relayed = await attempt.run(loginWithSavedPassword(host, username));
-          attempt.assertCurrent();
-          pageOwner.assertCurrent();
-          if (!relayed) {
-            throw new Error(connectText("session.savedLoginUnavailable"));
-          }
-          // The relayed body is the same AuthResponse shape api.login returns,
-          // so from here the flow is literally the typed-password one.
-          let result;
-          try {
-            result = parseRelayedLogin(relayed);
-          } catch (err) {
-            // Run the same side effect `api.ts` runs for a 401 on any other
-            // request, so the two login paths cannot diverge on session state.
-            if (err instanceof ApiClientError && err.status === 401) {
-              handleUnauthorized();
-            }
-            throw err;
-          }
-          completeLogin(host, username, result);
-        },
-        async onRegister(host, username, password, inviteCode) {
-          api.endSession();
-          api.setConfig({ host });
-          const attempt = api.getSession();
-          const result = await api.register(username, password, inviteCode);
-          attempt.assertCurrent();
-          pageOwner.assertCurrent();
-          if (result.status === "pending_approval" || result.token === undefined) {
-            // Approval mode (B4-1): no session yet — an admin decides. This is
-            // an expected state, not a failure, so it is an informational
-            // notice rather than a red error (DP-54).
-            connectPage.showNotice(connectText("registration.pendingApproval"));
-            return;
-          }
-          const remember = connectPage.getRememberPassword();
-          const savedPassword = remember ? password : undefined;
-          ensureProfileExists(host, username, remember, connectPage.getAutoConnect());
-          wirePostAuth(
-            host,
-            result.token,
-            username,
-            savedPassword,
-            remember,
-            true,
-            undefined,
-            connectPage.getAutoConnect(),
-          );
-        },
-        async onRecover(host, username, secret, newPassword) {
-          api.endSession();
-          api.setConfig({ host });
-          const attempt = api.getSession();
-          const result = await api.recoverAccount(username, secret, newPassword);
-          attempt.assertCurrent();
-          pageOwner.assertCurrent();
-          // The login shape: sign the session in exactly as a login does.
-          completeLogin(host, username, result, newPassword);
-        },
-        async onTotpSubmit(code) {
-          if (!pendingTotpPartialToken) {
-            log.error("TOTP submit without pending partial token");
-            return;
-          }
-          const attempt = api.getSession();
-          const result = await api.verifyTotp(code, pendingTotpPartialToken);
-          attempt.assertCurrent();
-          pageOwner.assertCurrent();
-          if (result.token) {
-            // Clear the sensitive partial token now that it has been
-            // exchanged for a real session token. A rejected code must NOT
-            // clear it here — the TOTP *code* is single-use (the server
-            // 401s a replay), but the partial token is the short-lived 2FA
-            // challenge itself and stays valid for a retry. LoginForm keeps
-            // the TOTP overlay open across a failed verify for exactly that
-            // retry; clearing this unconditionally (the old `finally`) made
-            // every retry hit the guard above and silently do nothing.
-            pendingTotpPartialToken = "";
-            const remember = connectPage.getRememberPassword();
-            // "" when the saved-password placeholder was used — save_credential
-            // then keeps the stored password rather than clearing it.
-            const savedPassword = remember ? connectPage.getPassword() || undefined : undefined;
-            ensureProfileExists(
-              pendingTotpHost,
-              pendingTotpUsername,
-              remember,
-              connectPage.getAutoConnect(),
-            );
-            wirePostAuth(
-              pendingTotpHost,
-              result.token,
-              pendingTotpUsername,
-              savedPassword,
-              remember,
-              true,
-              undefined,
-              connectPage.getAutoConnect(),
-            );
-          }
-        },
-        onAddProfile(name, host) {
-          profileManager.addProfile({
-            name,
-            host,
-            username: "",
-            autoConnect: false,
-            rememberPassword: false,
-            color: "#5865F2",
-          });
-          persistProfiles();
-          connectPage.refreshProfiles(getProfileList());
-          // Check health for the new profile
-          runHealthChecks(connectPage, getProfileList(), pageOwner);
-        },
-        onDeleteProfile(profileId) {
-          // Look the host up before removal: deleting a saved profile must
-          // also drop its OS credential, or re-adding the same host resumes
-          // the old remembered password (F11). Credentials are keyed by host,
-          // so keep it while another profile still points at that server.
-          const host = profileManager.getAll().find((p) => p.id === profileId)?.host;
-          profileManager.removeProfile(profileId);
-          if (host && !profileManager.getAll().some((p) => p.host === host)) {
-            void deleteCredential(host);
-            if (serverWait?.host === host) serverWait.scope.dispose();
-          }
-          persistProfiles();
-          connectPage.refreshProfiles(getProfileList());
-        },
-        onToggleAutoLogin(profileId, enabled) {
-          mutateAutoLogin(() => profileManager.setAutoLogin(enabled ? profileId : null));
-          persistProfiles();
-          connectPage.refreshProfiles(getProfileList());
-        },
-        onAutoLoginCancel() {
-          autoLoginCancelled = true;
-          deactivatePendingMessages();
-          api.endSession();
-          // Every read of this flag below runs before the overlay carrying
-          // this Cancel button is ever painted, so by the time a click
-          // reaches here the session is already in flight (wirePostAuth has
-          // called ws.connect and registered listeners). Tear it down the
-          // same way the logout path does.
-          sessionCleanup?.();
-          sessionCleanup = null;
-          dispatcherCleanup?.();
-          dispatcherCleanup = null;
-          connectedOverlay?.destroy();
-          connectedOverlay = null;
-          ws.disconnect();
-          lastConnectHost = "";
-          lastConnectToken = "";
-        },
-        onUpdateClient(host) {
-          mountUpdateNotifier(host);
-        },
+    [currentPage, rerunConnectHealth, applyInviteToConnectPage] = renderConnect(
+      api,
+      profileManager,
+      appEl!,
+      renderRecovery,
+      handleUnauthorized,
+      () => {
+        const pending = pendingInviteLink;
+        pendingInviteLink = null;
+        return pending;
       },
-      getProfileList(),
     );
-
-    let autoLoginCancelled = false;
-    let serverWait: { readonly host: string; readonly scope: SessionScope } | null = null;
-
-    interface ResumableProfile {
-      readonly name: string;
-      readonly host: string;
-      readonly autoConnect: boolean;
-      readonly rememberPassword: boolean;
-    }
-
-    // A stored-token resume that timed out against a down server (a home
-    // server still booting after a power cut) keeps probing it, 5 s doubling to
-    // 30 s, and resumes once when it answers. The wait belongs to the API
-    // session the timeout left behind, so whatever ends that session ends the
-    // wait: a manual login, Cancel, typing or picking another server
-    // (onAutoLoginCancel), the resume itself (wirePostAuth's setConfig),
-    // deleting the server's last profile, or leaving this page.
-    function waitForServer(profile: ResumableProfile): void {
-      const wait = pageOwner.fork(api.getSession().signal);
-      serverWait = { host: profile.host, scope: wait };
-      wait.addCleanup(() => connectPage.hideServerWait());
-      connectPage.showServerWait(profile.name, profile.host);
-      const probeAfter = (delayMs: number): void => {
-        setOwnedTimeout(
-          wait.signal,
-          () => {
-            void checkHealth(connectPage, profile.host, wait).then((up) => {
-              if (!wait.isCurrent()) return;
-              const current = profileManager.getAll().find((p) => p.host === profile.host);
-              if (current === undefined) {
-                wait.dispose();
-                return;
-              }
-              if (!up) {
-                probeAfter(Math.min(delayMs * 2, 30_000));
-                return;
-              }
-              wait.dispose();
-              void resumeStoredSession(current, false);
-            });
-          },
-          delayMs,
-        );
-      };
-      probeAfter(5_000);
-    }
-
-    // Resume a profile's session from its stored token — startup auto-login
-    // and a quick switch back to a server share this path. No-op when the
-    // host has no stored token. A resume the wait itself started does not wait
-    // again: a server that answers but never signs in gets the offline error.
-    async function resumeStoredSession(
-      profile: ResumableProfile,
-      waitIfDown = true,
-    ): Promise<void> {
-      // The stored token outlives an opt-out whose delete failed, so the
-      // profile's own setting decides, not the credential's presence.
-      if (profile.rememberPassword !== true && profile.autoConnect !== true) return;
-      const attempt = api.getSession();
-      try {
-        const cred = await loadCredential(profile.host);
-        if (!pageOwner.isCurrent() || !attempt.isCurrent()) return;
-        if (cred?.username && cred?.token && !autoLoginCancelled) {
-          // Pass autoConnect so the checkbox still reads correctly if the
-          // user cancels and lands back on the form.
-          connectPage.selectServer(
-            profile.host,
-            cred.username,
-            profile.autoConnect,
-            profile.rememberPassword,
-          );
-          connectPage.showAutoConnecting(profile.name);
-
-          if (autoLoginCancelled) return;
-
-          // Use stored token directly for reconnection, preserving the
-          // profile's existing rememberPassword and autoConnect.
-          //
-          // The credential re-save no longer has to be suppressed here.
-          // save_credential used to treat an absent password as "erase it",
-          // so re-saving without one destroyed the password the user opted
-          // to remember; it now preserves the stored password unless asked
-          // to clear it, so this path can refresh the token normally.
-          api.setConfig({ host: profile.host });
-          ensureProfileExists(
-            profile.host,
-            cred.username,
-            profile.rememberPassword,
-            profile.autoConnect,
-          );
-          wirePostAuth(
-            profile.host,
-            cred.token,
-            cred.username,
-            undefined,
-            profile.rememberPassword,
-            false,
-            waitIfDown ? () => waitForServer(profile) : undefined,
-            profile.autoConnect,
-          );
-        }
-      } catch (err) {
-        // A superseded attempt (e.g. a manual login started while this
-        // credential read was still pending) must not paint an error over
-        // the login that superseded it.
-        if (!autoLoginCancelled && pageOwner.isCurrent() && attempt.isCurrent()) {
-          const message = errorText(err, connectText("session.autoLoginFailed"));
-          log.warn("Auto-login failed", { host: profile.host, error: message });
-          connectPage.showError(connectText("session.autoLoginFailedDetail", { message }));
-        }
-      }
-    }
-
-    safeMount(connectPage, appEl!, renderRecovery);
-
-    // A server refused this client's protocol epoch as too old: state the
-    // requirement on the connect page itself and offer the update there. The
-    // main page's notifier never mounts on a refusal, so without this the user
-    // would have to fetch the installer by hand. Subscribed, not read once:
-    // on a first login or a startup auto-login this page is already mounted
-    // when the refusal arrives and nothing re-renders it (no overlay exists
-    // before auth_ok, so the isAuthenticated subscriber below does not
-    // navigate).
-    let updateNotifier: MountableComponent | null = null;
-    const mountUpdateNotifier = (host: string): void => {
-      // A later refusal (another server tried from this same page) replaces
-      // the banner rather than being ignored.
-      updateNotifier?.destroy?.();
-      const notifier = createUpdateNotifier({ serverUrl: `https://${bracketBareIPv6Host(host)}` });
-      notifier.mount(appEl!);
-      updateNotifier = notifier;
-    };
-    const offerUpdate = (required: UpdateRequired | null): void => {
-      if (!required) return;
-      // Consume the fact: the next connect page must not re-offer it.
-      setUpdateRequiredHost(null);
-      connectPage.showIncompatible(required.host, required.serverEpoch, required.clientEpoch);
-      if (required.serverEpoch !== null && required.serverEpoch > required.clientEpoch) {
-        mountUpdateNotifier(required.host);
-      }
-    };
-    const unsubUpdateRequired = uiStore.subscribeSelector((s) => s.updateRequiredHost, offerUpdate);
-    offerUpdate(uiStore.getState().updateRequiredHost);
-
-    // Periodic health check — re-run every 15s so offline servers update when they come back
-    const healthCheckInterval = setInterval(() => {
-      runHealthChecks(connectPage, getProfileList(), pageOwner);
-    }, 15_000);
-
-    pageOwner.addCleanup(() => clearInterval(healthCheckInterval));
-    pageOwner.addCleanup(unsubUpdateRequired);
-    // Page-owned checks and listeners cannot update a later connect screen.
-    // Wrap destroy to clear the interval
-    currentPage = {
-      destroy() {
-        pageOwner.dispose();
-        updateNotifier?.destroy?.();
-        connectPage.destroy?.();
-      },
-    };
-
-    // Expose a health-refresh hook so trusting a first-use certificate can
-    // re-check the now-reachable server without a full page navigation.
-    rerunConnectHealth = () => runHealthChecks(connectPage, getProfileList(), pageOwner);
-
-    // Route deep-link invites into this connect page. Apply any that arrived
-    // before it mounted.
-    applyInviteToConnectPage = (code, host) => connectPage.applyInviteLink(code, host);
-    if (pendingInviteLink !== null) {
-      connectPage.applyInviteLink(pendingInviteLink.code, pendingInviteLink.host);
-      pendingInviteLink = null;
-    }
-
-    // Profile loading must not later start auto-login over a manual attempt.
-    // Capture ownership before its first await, not after credentials arrive.
-    const startupAttempt = api.getSession();
-    // Load saved profiles and kick off health checks
-    void (async () => {
-      try {
-        await profileManager.loadProfiles();
-        if (!pageOwner.isCurrent()) return;
-        const profiles = getProfileList();
-        connectPage.refreshProfiles(profiles);
-        runHealthChecks(connectPage, profiles, pageOwner);
-      } catch (err) {
-        if (!pageOwner.isCurrent()) return;
-        log.warn("Failed to load profiles, using defaults", err);
-        runHealthChecks(connectPage, getProfileList(), pageOwner);
-      }
-
-      // Consume any pending skip-auto-login flag on THIS mount regardless of
-      // which branch below returns early. It is the single source of truth
-      // for "an explicit logout just happened, don't auto-login" (set by the
-      // isAuthenticated subscriber further down), and every connect-page
-      // mount — quick-switch included — must clear it here or it survives in
-      // sessionStorage and goes on to suppress a later, unrelated
-      // auto-login (OC-0028).
-      const skipAutoLogin = sessionStorage.getItem("owncord:skip-auto-login") !== null;
-      sessionStorage.removeItem("owncord:skip-auto-login");
-
-      // Quick-switch: if the user switched servers via the overlay, auto-select
-      // the target server profile so they can reconnect with one click.
-      const quickSwitchTarget = sessionStorage.getItem("owncord:quick-switch-target");
-      if (quickSwitchTarget !== null) {
-        sessionStorage.removeItem("owncord:quick-switch-target");
-        const targetProfile = profileManager.getAll().find((p) => p.host === quickSwitchTarget);
-        connectPage.selectServer(
-          quickSwitchTarget,
-          targetProfile?.username ?? undefined,
-          targetProfile?.autoConnect,
-          targetProfile?.rememberPassword,
-        );
-        // A quick switch keeps each server's saved sign-in (B7-13), so
-        // switching back resumes with the stored token exactly as auto-login
-        // does. Without a stored credential the prefilled form stays up.
-        if (targetProfile !== undefined && startupAttempt.isCurrent()) {
-          await resumeStoredSession(targetProfile);
-        }
-        return; // Skip auto-login when switching servers
-      }
-
-      // A logout that deleted this host's credential is on its way out as a
-      // fire-and-forget delete_credential. Auto-login below would read the
-      // same account back concurrently, and the credential commands run off
-      // the IPC thread now (`#[tauri::command(async)]`), so a read that wins
-      // that race signs the user straight back into the server they just left.
-      // Suppressing the attempt removes the race instead of relying on the
-      // delete being dispatched early enough to win it — and an auto-login
-      // immediately after an explicit logout is wrong regardless of timing.
-      if (skipAutoLogin || !startupAttempt.isCurrent()) {
-        return;
-      }
-
-      // Auto-login: if a profile has autoConnect enabled, try to reconnect
-      // using the stored token (password is no longer returned from the
-      // credential store over IPC for security).
-      const autoProfile = profileManager.getAutoConnectProfile();
-      if (autoProfile) await resumeStoredSession(autoProfile);
-    })();
   } else {
     // MainPage (and the LiveKit voice stack it statically imports) loads
     // lazily so it stays out of the startup path. The chunk is pre-warmed as
@@ -1435,7 +298,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       const mainPage = createMainPage({
         ws,
         api,
-        getRetentionNotice: () => retentionNotice(serverInfoByHost.get(api.getConfig().host ?? "")),
+        getRetentionNotice: () => retentionNotice(serverInfoFor(api.getConfig().host ?? "")),
       });
       safeMount(mainPage, appEl!, renderRecovery);
       currentPage = mainPage;
@@ -1448,63 +311,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
   }
 }
 
-// Handle logout / disconnect. App-lifetime: never unsubscribed.
-void authStore.subscribeSelector(
-  (s) => s.isAuthenticated,
-  (isAuthenticated) => {
-    // The router only reaches "main" from the connected overlay's own
-    // onReady, a task after `ready` arrives — so a session that ends between
-    // auth_ok and ready (a ban, an auth_error on an intervening reconnect)
-    // flips isAuthenticated false while the router is still "connect". The synchronous session cleanup has already
-    // destroyed its overlay; lastConnectHost retains the transport ownership
-    // needed to finish teardown here. Otherwise the overlay (position:fixed, opaque,
-    // z-index 200, appended straight to #app in wirePostAuth's auth_ok
-    // handler) is orphaned over the connect page with no remaining owner —
-    // its only other teardown paths are its own onReady timer (never armed
-    // without `ready`), the next wirePostAuth, onAutoLoginCancel, and the
-    // invite deep-link handler, none of which this path takes (OC-0157).
-    if (!isAuthenticated && (activePage === "main" || lastConnectHost !== "")) {
-      // Leave voice channel before disconnecting so other clients see it
-      // immediately. Gated on clearAuth's logoutWasInVoice snapshot rather
-      // than the live voiceStore: clearAuth applies state (including this
-      // isAuthenticated flip) synchronously and already reset voiceStore in
-      // that same call, before this subscriber ever runs (store
-      // notifications are microtask-deferred) — voiceStore here would always
-      // read "idle".
-      if (authStore.getState().logoutWasInVoice === true) {
-        voiceSessionLeave(false); // false: we send voice_leave below
-        ws.send({ type: "voice_leave", payload: {} });
-        leaveVoiceChannel();
-      }
-      dispatcherCleanup?.();
-      dispatcherCleanup = null;
-      sessionCleanup?.();
-      sessionCleanup = null;
-      connectedOverlay?.destroy();
-      connectedOverlay = null;
-      ws.disconnect();
-      lastConnectToken = "";
-      lastConnectHost = "";
-      // Clear stored credential on logout. (A server restart never gets
-      // here: it keeps the session and reconnects.)
-      const host = api.getConfig().host;
-      const reason = authStore.getState().logoutReason;
-      if (host) {
-        // A protocol-epoch refusal keeps the credential: the token is
-        // still valid, and the update the connect page offers relaunches
-        // straight into auto-login with it (sessionStorage — and so the
-        // skip flag below — does not survive that relaunch).
-        // A quick switch keeps it as well: switching back resumes with it
-        // (B7-13), and the departed session is left for that return.
-        if (reason !== "protocol_epoch" && reason !== "server_switch") void deleteCredential(host);
-        // Whenever this session must not turn around and auto-login with the
-        // credential (removed, or just refused), say so.
-        sessionStorage.setItem("owncord:skip-auto-login", "1");
-      }
-      navigate("connect");
-    }
-  },
-);
+installLogoutTeardown();
 
 // Send voice_leave on window close (best-effort — server readPump defer is the safety net)
 window.addEventListener("beforeunload", () => {
@@ -1552,8 +359,8 @@ function handleInviteDeepLink(code: string, host?: string): void {
   }
   deactivatePendingMessages();
   api.endSession();
-  if (lastConnectHost !== "") {
-    // wirePostAuth already ran — a login/auto-login/register is connecting,
+  if (sessionInFlight()) {
+    // startSession already ran — a login/auto-login/register is connecting,
     // or reached auth_ok (isAuthenticated flipped true) but the connected
     // overlay's ready hand-off hasn't called navigate("main") yet, so
     // the branch above never triggered. The authStore subscriber only tears
@@ -1562,15 +369,7 @@ function handleInviteDeepLink(code: string, host?: string): void {
     // regardless, mounting MainPage on top of whatever this handler does to
     // authStore below. Tear the in-flight session down directly, the same
     // way onAutoLoginCancel does, before applying the invite below.
-    sessionCleanup?.();
-    sessionCleanup = null;
-    dispatcherCleanup?.();
-    dispatcherCleanup = null;
-    connectedOverlay?.destroy();
-    connectedOverlay = null;
-    ws.disconnect();
-    lastConnectHost = "";
-    lastConnectToken = "";
+    abandonInFlight();
     if (authStore.getState().isAuthenticated) {
       clearAuth();
     }
@@ -1606,7 +405,7 @@ function handleExternalInviteLink(code: string, host?: string): void {
   // Signed in, or signing in (the connect call is in flight, or the connected
   // overlay is still up before the main page mounts): taking the link ends
   // that session, so ask. Otherwise nothing is lost and it runs as before.
-  if (activePage !== "main" && !authStore.getState().isAuthenticated && lastConnectHost === "") {
+  if (activePage !== "main" && !authStore.getState().isAuthenticated && !sessionInFlight()) {
     handleInviteDeepLink(code, host);
     return;
   }

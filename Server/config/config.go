@@ -149,8 +149,9 @@ type EventPersistenceConfig struct {
 // TelemetryConfig (Phase B Step 8) controls the OpenTelemetry exporter.
 type TelemetryConfig struct {
 	// Enabled toggles the OTel SDK. When false the server uses no-op
-	// tracer/meter providers and the legacy /metrics endpoint stays the
-	// only metrics surface.
+	// tracer/meter providers. The built-in metrics surfaces, GET
+	// /api/v1/metrics (JSON) and GET /api/v1/metrics/prometheus (Prometheus
+	// text), exist in every build and do not depend on this switch.
 	Enabled bool `yaml:"enabled"`
 	// Exporter is "none" | "prometheus" | "otlp".
 	Exporter string `yaml:"exporter"`
@@ -273,8 +274,8 @@ type ServerConfig struct {
 	// goroutines and buffered send queues, so set a ceiling that matches the
 	// host's memory before pointing a large community at it.
 	MaxWSConnections int `yaml:"max_ws_connections"`
-	// MetricsAllowedCIDRs gates /api/v1/metrics and the Prometheus /metrics
-	// exporter separately from the human admin surface, so a central
+	// MetricsAllowedCIDRs gates /api/v1/metrics, /api/v1/metrics/prometheus
+	// and the otel build's Prometheus /metrics exporter separately from the human admin surface, so a central
 	// Prometheus scraper can be allowlisted without widening /admin to its
 	// network. Empty (default) falls back to AdminAllowedCIDRs.
 	MetricsAllowedCIDRs []string `yaml:"metrics_allowed_cidrs"`

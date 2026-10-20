@@ -43,6 +43,13 @@ type ConnWrites struct {
 	mu      syncutil.Mutex
 	touches map[string]struct{} // session token hashes touched since the last flush
 	stamps  map[int64]bool      // user ID -> connected; the latest stamp wins
+	// apiTouches are API-token hashes used since the last touch flush, and
+	// discards are expired-session hashes whose row the REST middleware wants
+	// deleted (ARCH-034). Both are queued from request goroutines, so no
+	// request spawns a goroutine or issues a write of its own; a hash queued
+	// a thousand times is written once per flush.
+	apiTouches map[string]struct{}
+	discards   map[string]struct{}
 }
 
 // BatchConnWrites installs one ConnWrites over the services' store into Users,
@@ -59,12 +66,27 @@ func (s *Services) BatchConnWrites() *ConnWrites {
 // NewConnWrites returns an empty batch writing through st. Run flushes it;
 // install it with SessionService.SetConnWrites and UserService.SetConnWrites.
 func NewConnWrites(st Store) *ConnWrites {
-	return &ConnWrites{st: st, touches: map[string]struct{}{}, stamps: map[int64]bool{}}
+	return &ConnWrites{
+		st: st, touches: map[string]struct{}{}, stamps: map[int64]bool{},
+		apiTouches: map[string]struct{}{}, discards: map[string]struct{}{},
+	}
 }
 
 func (w *ConnWrites) queueTouch(tokenHash string) {
 	w.mu.Lock()
 	w.touches[tokenHash] = struct{}{}
+	w.mu.Unlock()
+}
+
+func (w *ConnWrites) queueAPITouch(tokenHash string) {
+	w.mu.Lock()
+	w.apiTouches[tokenHash] = struct{}{}
+	w.mu.Unlock()
+}
+
+func (w *ConnWrites) queueDiscard(tokenHash string) {
+	w.mu.Lock()
+	w.discards[tokenHash] = struct{}{}
 	w.mu.Unlock()
 }
 
@@ -104,9 +126,15 @@ func (w *ConnWrites) Run(ctx context.Context) {
 			if err := w.flushStamps(ctx); err != nil {
 				slog.Warn("connection stamps flush failed, retrying next interval", "err", err)
 			}
+			if err := w.flushDiscards(ctx); err != nil {
+				slog.Warn("expired session discards flush failed, retrying next interval", "err", err)
+			}
 		case <-touches.C:
 			if err := w.flushTouches(ctx); err != nil {
 				slog.Warn("session touches flush failed, retrying next interval", "err", err)
+			}
+			if err := w.flushAPITouches(ctx); err != nil {
+				slog.Warn("api token touches flush failed, retrying next interval", "err", err)
 			}
 		}
 	}
@@ -116,7 +144,7 @@ func (w *ConnWrites) Run(ctx context.Context) {
 // the next flush. Not for use concurrently with Run: two flushes in flight
 // could land one user's stamps out of order.
 func (w *ConnWrites) Flush(ctx context.Context) error {
-	return errors.Join(w.flushStamps(ctx), w.flushTouches(ctx))
+	return errors.Join(w.flushStamps(ctx), w.flushDiscards(ctx), w.flushTouches(ctx), w.flushAPITouches(ctx))
 }
 
 func (w *ConnWrites) flushStamps(ctx context.Context) error {
@@ -173,4 +201,58 @@ func (w *ConnWrites) flushTouches(ctx context.Context) error {
 		return fmt.Errorf("%w: flushing session touches: %w", ErrInternal, err)
 	}
 	return nil
+}
+
+// flushAPITouches writes last_used for each distinct API-token hash queued
+// since the last flush, one store call per hash (there is no batched query,
+// and the minute throttle keeps the count at one per active token). A hash
+// whose write fails, or that the loop did not reach because ctx ended, is
+// queued again for the next flush.
+func (w *ConnWrites) flushAPITouches(ctx context.Context) error {
+	return w.flushHashes(ctx, &w.apiTouches, w.st.TouchAPIToken, "flushing api token touches")
+}
+
+// flushDiscards deletes each distinct expired-session hash queued since the
+// last flush, with the same re-queue rule as flushAPITouches. Deleting is
+// idempotent, so a hash the maintenance sweep already removed is not an error.
+func (w *ConnWrites) flushDiscards(ctx context.Context) error {
+	return w.flushHashes(ctx, &w.discards, w.st.DeleteSession, "flushing expired session discards")
+}
+
+// flushHashes swaps *set for an empty map, applies write to every hash in the
+// old one and re-queues the hashes that did not land.
+func (w *ConnWrites) flushHashes(ctx context.Context, set *map[string]struct{}, write func(context.Context, string) error, what string) error {
+	w.mu.Lock()
+	pending := *set
+	if len(pending) == 0 {
+		w.mu.Unlock()
+		return nil
+	}
+	*set = make(map[string]struct{}, len(pending))
+	w.mu.Unlock()
+
+	var failed []string
+	var errs []error
+	for hash := range pending {
+		if ctx.Err() != nil {
+			failed = append(failed, hash)
+			continue
+		}
+		if err := write(ctx, hash); err != nil {
+			failed = append(failed, hash)
+			errs = append(errs, err)
+		}
+	}
+	if len(failed) == 0 {
+		return nil
+	}
+	w.mu.Lock()
+	for _, hash := range failed {
+		(*set)[hash] = struct{}{}
+	}
+	w.mu.Unlock()
+	if len(errs) == 0 {
+		errs = append(errs, ctx.Err())
+	}
+	return fmt.Errorf("%w: %s: %w", ErrInternal, what, errors.Join(errs...))
 }

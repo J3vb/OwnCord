@@ -18,13 +18,13 @@ func setupVoiceRoom(t *testing.T) (*Hub, *Client, *Client) {
 	c2 := NewTestClient(h, 2, make(chan []byte, 8))
 	h.clients[1] = c1
 	h.clients[2] = c2
-	c1.setVoiceState(5, "join-token-1")
-	c2.setVoiceState(5, "join-token-2")
+	c1.voice.setState(5, "join-token-1")
+	c2.voice.setState(5, "join-token-2")
 	// Both represent settled, already-completed voice sessions (not a join
 	// still racing its own supersession guards) — see OC-0270 — so a network
 	// reconnect is expected to transfer them.
-	c1.markVoiceJoinCompleteIfMatch(5, "join-token-1")
-	c2.markVoiceJoinCompleteIfMatch(5, "join-token-2")
+	c1.voice.markCompletedIfMatch(5, "join-token-1")
+	c2.voice.markCompletedIfMatch(5, "join-token-2")
 
 	h.updateKeyHolder(5)
 	if !h.IsVoiceKeyHolder(5, 1) {
@@ -55,9 +55,9 @@ func TestRegisterNow_ReelectsKeyHolderWhenReplacedClientLeavesVoice(t *testing.T
 	h, _, _ := setupVoiceRoom(t)
 
 	replacement := NewTestClient(h, 1, make(chan []byte, 8))
-	h.registerNow(replacement, map[int64]bool{5: true})
+	h.registerNowTest(replacement, map[int64]bool{5: true})
 
-	if voiceChID := replacement.getVoiceChID(); voiceChID != 0 {
+	if voiceChID := replacement.voice.channel(); voiceChID != 0 {
 		t.Fatalf("pre-condition: fresh connect should not inherit voice state, got channel %d", voiceChID)
 	}
 	if h.IsVoiceKeyHolder(5, 1) {
@@ -75,9 +75,9 @@ func TestRegisterNow_KeepsKeyHolderWhenVoiceStateTransfers(t *testing.T) {
 
 	replacement := NewTestClient(h, 1, make(chan []byte, 8))
 	replacement.lastSeq = 1 // network reconnect — voice state is preserved
-	h.registerNow(replacement, map[int64]bool{5: true})
+	h.registerNowTest(replacement, map[int64]bool{5: true})
 
-	if voiceChID := replacement.getVoiceChID(); voiceChID != 5 {
+	if voiceChID := replacement.voice.channel(); voiceChID != 5 {
 		t.Fatalf("pre-condition: network reconnect should inherit voice state, got channel %d", voiceChID)
 	}
 	if !h.IsVoiceKeyHolder(5, 1) {
@@ -115,7 +115,7 @@ func TestRegisterNow_ResumeRestoresVoiceTopicAndE2EEKey(t *testing.T) {
 
 	replacement := NewTestClient(h, 1, make(chan []byte, 8))
 	replacement.lastSeq = 1 // network reconnect — voice state is preserved
-	h.registerNow(replacement, map[int64]bool{5: true})
+	h.registerNowTest(replacement, map[int64]bool{5: true})
 
 	h.pubsub.mu.RLock()
 	sub := h.pubsub.topics[VoiceTopic(5)][1]
@@ -138,7 +138,7 @@ func TestRegisterNow_ResumeVoiceTopicIgnoresReadGate(t *testing.T) {
 
 	replacement := NewTestClient(h, 1, make(chan []byte, 8))
 	replacement.lastSeq = 1
-	h.registerNow(replacement, nil) // no READ_MESSAGES anywhere
+	h.registerNowTest(replacement, nil) // no READ_MESSAGES anywhere
 
 	h.pubsub.mu.RLock()
 	voiceSub := h.pubsub.topics[VoiceTopic(5)][1]

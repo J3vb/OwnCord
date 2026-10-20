@@ -97,6 +97,15 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 		hub.SetPluginEventSink(sink)
 	}
 
+	// Windowed figures for /api/v1/metrics. Built here, started by startHub.
+	// Built before the LiveKit process starts, so an error return cannot leave
+	// that child running.
+	writerStats, readerStats := service.PoolStatsSources(database)
+	windows, err := newMetricsWindows(hub, writerStats, readerStats)
+	if err != nil {
+		return api.Runtime{}, err
+	}
+
 	// Start the supervised LiveKit process only once the hub holds it
 	// (OC-0019): the voice_join guard must be able to fail closed via
 	// IsRunning() == false the moment Start fails, never see a half-wired
@@ -117,7 +126,7 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 		slog.Error("boot: load active timeouts", "err", err)
 	}
 
-	return api.Runtime{Hub: hub, Limiter: limiter, Services: svc, VoiceEnabled: voiceEnabled}, nil
+	return api.Runtime{Hub: hub, Limiter: limiter, Services: svc, VoiceEnabled: voiceEnabled, MetricsWindows: windows}, nil
 }
 
 // storageLimits is B5-2's two bounds on the upload service: the per-user
@@ -218,4 +227,36 @@ func newAttention(cfg *config.Config, hub *ws.Hub, database *db.DB, settings *se
 			return service.VoiceHealth{Reachable: &reachable}
 		},
 	})
+}
+
+// dispatchHub is the slice of *ws.Hub the hub close step drives.
+type dispatchHub interface {
+	GracefulStopContext(ctx context.Context, reason ws.RestartReason)
+	Done() <-chan struct{}
+	JoinBackground(ctx context.Context) (stragglers int)
+}
+
+// stopHub is the hub close step: GracefulStopContext, then wait for the
+// dispatch goroutine itself to exit. GracefulStopContext only signals the
+// loop, and on an early start failure the goroutine StartRuntime spawned may
+// not even have been scheduled yet — without the join, Run returned with the
+// loop still alive and Close went on to release what it reads.
+func stopHub(ctx context.Context, hub dispatchHub, reason ws.RestartReason) error {
+	hub.GracefulStopContext(ctx, reason)
+	var err error
+	select {
+	case <-hub.Done():
+	case <-ctx.Done():
+		err = fmt.Errorf("hub dispatch did not exit: %w", ctx.Err())
+	}
+	// The hub's own background jobs (a voice leave's LiveKit removal and
+	// delete retries) get a short grace to finish, then are cancelled and
+	// joined, inside the step's budget and before the database closes
+	// (ARCH-034). Not in the dispatch goroutine's exit: a job may need a lock
+	// Run would be holding. After a dispatch timeout ctx is already spent, so
+	// the jobs are cancelled and counted, not waited for.
+	if n := hub.JoinBackground(ctx); n > 0 {
+		slog.Warn("hub background jobs still running at shutdown, abandoning them", "count", n)
+	}
+	return err
 }

@@ -57,9 +57,9 @@ func (f *txnFixture) subscribed() bool {
 }
 
 func slotCompleted(c *Client) bool {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	return c.voiceJoinCompleted
+	c.voice.voiceMu.Lock()
+	defer c.voice.voiceMu.Unlock()
+	return c.voice.voiceJoinCompleted
 }
 
 // The webhook's participant_left clear used to leave voiceJoinCompleted set, so
@@ -71,7 +71,7 @@ func TestVoiceRegistry_WebhookClearResetsCompleted(t *testing.T) {
 
 	f.h.HandleWebhookParticipantLeftForTest(f.uid, f.chID, token)
 
-	if ch, tok := f.c.getVoiceState(); ch != 0 || tok != "" {
+	if ch, tok := f.c.voice.state(); ch != 0 || tok != "" {
 		t.Fatalf("slot after the webhook clear = (%d, %q), want (0, \"\")", ch, tok)
 	}
 	if slotCompleted(f.c) {
@@ -99,7 +99,7 @@ func TestVoiceRegistry_WebhookLeftRacingSameChannelRejoin(t *testing.T) {
 		defer close(done)
 		f.h.HandleWebhookParticipantLeftForTest(f.uid, f.chID, oldToken)
 	}()
-	waitFor(t, "webhook queued on the member lock", func() bool { return f.h.voiceMember.refsForTest(f.uid) >= 2 })
+	waitFor(t, "webhook queued on the member lock", func() bool { return f.h.voiceReg.voiceMember.refsForTest(f.uid) >= 2 })
 
 	txn.clear(f.c)
 	if _, err := txn.deleteRow(ctx, f.chID, oldToken); err != nil {
@@ -118,7 +118,7 @@ func TestVoiceRegistry_WebhookLeftRacingSameChannelRejoin(t *testing.T) {
 	txn.end()
 	<-done
 
-	if ch, tok := f.c.getVoiceState(); ch != f.chID || tok != state.JoinedAt {
+	if ch, tok := f.c.voice.state(); ch != f.chID || tok != state.JoinedAt {
 		t.Fatalf("stale webhook changed the rejoined slot to (%d, %q), want (%d, %q)", ch, tok, f.chID, state.JoinedAt)
 	}
 	if !slotCompleted(f.c) {
@@ -133,7 +133,7 @@ func TestVoiceRegistry_WebhookLeftRacingSameChannelRejoin(t *testing.T) {
 
 	// The webhook for the live instance clears everything.
 	f.h.HandleWebhookParticipantLeftForTest(f.uid, f.chID, state.JoinedAt)
-	if ch, _ := f.c.getVoiceState(); ch != 0 {
+	if ch, _ := f.c.voice.state(); ch != 0 {
 		t.Fatalf("live webhook left channel %d in the slot", ch)
 	}
 	if slotCompleted(f.c) {
@@ -144,9 +144,9 @@ func TestVoiceRegistry_WebhookLeftRacingSameChannelRejoin(t *testing.T) {
 	resumed := NewTestClient(f.h, f.uid, make(chan []byte, 64))
 	resumed.lastSeq = 7
 	reg := f.h.begin(f.uid)
-	f.h.registerNow(resumed, nil)
+	f.h.registerNow(resumed, nil, reg)
 	reg.end()
-	if ch, tok := resumed.getVoiceState(); ch != 0 || tok != "" {
+	if ch, tok := resumed.voice.state(); ch != 0 || tok != "" {
 		t.Fatalf("resumed slot = (%d, %q), want empty", ch, tok)
 	}
 	if slotCompleted(resumed) {
@@ -173,8 +173,8 @@ func TestVoiceRegistry_DeleteRowErrorDropsGraceKeepsRow(t *testing.T) {
 	token := f.join(t)
 
 	// Park the membership as a dropped socket would.
-	f.h.voiceGrace.put(f.uid, &voiceGraceEntry{client: f.c, channelID: f.chID, joinToken: token}, func() {})
-	t.Cleanup(func() { f.h.voiceGrace.take(f.uid) })
+	f.h.voiceReg.voiceGrace.put(f.uid, &voiceGraceEntry{client: f.c, snap: slotSnap{chID: f.chID, joinToken: token}}, func() {})
+	t.Cleanup(func() { f.h.voiceReg.voiceGrace.take(f.uid) })
 
 	f.h.voice = failingLeaveStore{VoiceStore: real, err: errBoom}
 	txn := f.h.begin(f.uid)
@@ -187,7 +187,7 @@ func TestVoiceRegistry_DeleteRowErrorDropsGraceKeepsRow(t *testing.T) {
 	if deleted {
 		t.Error("deleteRow reported a delete that failed")
 	}
-	if f.h.voiceGrace.get(f.uid) != nil {
+	if f.h.voiceReg.voiceGrace.get(f.uid) != nil {
 		t.Error("a failed delete kept the grace entry")
 	}
 	row, rowErr := real.State(context.Background(), f.uid)
@@ -233,7 +233,7 @@ func TestVoiceRegistry_ClearAlwaysUnsubscribes(t *testing.T) {
 			if f.subscribed() {
 				t.Error("the clear left the client on the voice topic")
 			}
-			if ch, tok := f.c.getVoiceState(); ch != 0 || tok != "" || slotCompleted(f.c) {
+			if ch, tok := f.c.voice.state(); ch != 0 || tok != "" || slotCompleted(f.c) {
 				t.Errorf("slot after %s = (%d, %q, completed=%v), want empty", tc.name, ch, tok, slotCompleted(f.c))
 			}
 		})
@@ -249,7 +249,7 @@ func TestVoiceRegistry_SetJoinTokenKeepsCompletedAndCachedToken(t *testing.T) {
 	txn := f.h.begin(f.uid)
 	txn.setJoinToken(f.c, "other")
 	txn.end()
-	if _, tok := f.c.getVoiceState(); tok != token {
+	if _, tok := f.c.voice.state(); tok != token {
 		t.Fatalf("cached token overwritten: %q, want %q", tok, token)
 	}
 	if !slotCompleted(f.c) {
@@ -257,13 +257,13 @@ func TestVoiceRegistry_SetJoinTokenKeepsCompletedAndCachedToken(t *testing.T) {
 	}
 
 	// A slot in a channel with no token adopts it, still completed.
-	f.c.voiceMu.Lock()
-	f.c.voiceJoinToken = ""
-	f.c.voiceMu.Unlock()
+	f.c.voice.voiceMu.Lock()
+	f.c.voice.voiceJoinToken = ""
+	f.c.voice.voiceMu.Unlock()
 	txn = f.h.begin(f.uid)
 	txn.setJoinToken(f.c, "adopted")
 	txn.end()
-	if ch, tok := f.c.getVoiceState(); ch != f.chID || tok != "adopted" {
+	if ch, tok := f.c.voice.state(); ch != f.chID || tok != "adopted" {
 		t.Fatalf("slot = (%d, %q), want (%d, adopted)", ch, tok, f.chID)
 	}
 	if !slotCompleted(f.c) {

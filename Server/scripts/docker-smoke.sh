@@ -16,13 +16,18 @@
 #   7. recovery — the documented `config reset-overrides` command, run against
 #      the same volume: refused while the server runs (exit 1, file untouched),
 #      and with it stopped, drops the lockout-capable keys, keeps the tuning
-#      values, and the server comes back healthy (WP 4.7c).
+#      values, and the server comes back healthy (WP 4.7c);
+#   8. compose — the shipped Server/docker-compose.yml, run by
+#      compose-smoke.sh with this image: exactly three published ports, the
+#      one LiveKit secret in .env works (and a wrong one fails), and an old
+#      livekit.yaml cannot bring the port range back (WP 4.8b).
 #
 # Used by ci.yml, release.yml (before anything is signed or pushed) and
 # nightly-docker-smoke.yml, so a regression is caught pre-merge instead of at
 # tag time. Usage: docker-smoke.sh <image>
 #
-# No config mount and no env: that is the contract being tested. The image
+# Phases 1-7: no config mount and no env, that is the contract being tested
+# (phase 8 boots the compose stack, which mounts its config). The image
 # boots on its own, as uid 65532, writing its default config.yaml into the
 # /app skeleton the Dockerfile ships owned by that uid. The first
 # v1.2.0-alpha.3 release run died exactly there ("writing default config:
@@ -414,4 +419,10 @@ echo "recovery restart: the admin settings API answers"
 show_logs "$wiz"
 drain "recovery final drain" "$wiz"
 
-echo "docker smoke passed: boot, migrate, healthy, minimal privilege, drain, replace, wizard persists across a recreate, reset-overrides recovers"
+# --- Phase 8: the compose stack (WP 4.8b) -----------------------------------
+# Last, because it is the slowest and needs the host ports and images the
+# phases above do not. It tears its own project down; its own failure output
+# names the phase. Run as a child so its trap and `set -e` stay its own.
+bash "$(dirname "${BASH_SOURCE[0]}")/compose-smoke.sh" "$image"
+
+echo "docker smoke passed: boot, migrate, healthy, minimal privilege, drain, replace, wizard persists across a recreate, reset-overrides recovers, compose stack"

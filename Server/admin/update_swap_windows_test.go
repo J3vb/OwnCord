@@ -19,7 +19,7 @@ import (
 // the running binary aside.
 func TestApplyStagedUpdate_SecondUpdateWhileAnEarlierBinaryIsStillRunning(t *testing.T) {
 	exePath, newPath, stagedHash := stageFakeUpdate(t)
-	if !admin.ApplyStagedUpdate(nil, exePath, newPath, stagedHash) {
+	if !admin.ApplyStagedUpdate(nil, exePath, newPath, stagedHash, nil) {
 		t.Fatal("first ApplyStagedUpdate = false, want committed swap")
 	}
 	olds := oldBinaries(t, exePath)
@@ -41,7 +41,7 @@ func TestApplyStagedUpdate_SecondUpdateWhileAnEarlierBinaryIsStillRunning(t *tes
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(staged)
-	if !admin.ApplyStagedUpdate(nil, exePath, newPath, hex.EncodeToString(sum[:])) {
+	if !admin.ApplyStagedUpdate(nil, exePath, newPath, hex.EncodeToString(sum[:]), nil) {
 		t.Fatal("second ApplyStagedUpdate = false while the first update's binary is still running")
 	}
 	if got, err := os.ReadFile(exePath); err != nil || string(got) != "second release" {

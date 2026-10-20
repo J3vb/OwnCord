@@ -54,7 +54,7 @@ func TestFreshConnectCleanStaleVoice_ClearsOldClientVoiceState(t *testing.T) {
 
 	// The still-registered OLD client from the previous session.
 	old := NewTestClient(h, uid, make(chan []byte, 32))
-	old.setVoiceState(chID, vs.JoinedAt)
+	old.voice.setState(chID, vs.JoinedAt)
 	h.mu.Lock()
 	h.clients[uid] = old
 	h.mu.Unlock()
@@ -67,9 +67,9 @@ func TestFreshConnectCleanStaleVoice_ClearsOldClientVoiceState(t *testing.T) {
 	// registered — exactly the state handleFreshConnect calls this in.
 	c := NewTestClient(h, uid, make(chan []byte, 32))
 
-	h.freshConnectCleanStaleVoice(ctx, c, vs)
+	h.freshConnectCleanStaleVoiceTest(ctx, c, vs)
 
-	if got := old.getVoiceChID(); got != 0 {
+	if got := old.voice.channel(); got != 0 {
 		t.Errorf("old client's in-memory voiceChID = %d, want 0 (cleared alongside the DB row)", got)
 	}
 	if h.IsVoiceKeyHolder(chID, uid) {

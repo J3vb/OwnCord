@@ -52,7 +52,7 @@ func (h *Hub) updateKeyHolder(channelID int64) {
 	var minUserID int64
 	found := false
 	for uid, c := range h.clients {
-		if c.getVoiceChID() == channelID {
+		if c.voice.channel() == channelID {
 			if !found || uid < minUserID {
 				minUserID = uid
 				found = true
@@ -83,13 +83,13 @@ func (h *Hub) IsVoiceKeyHolder(channelID, userID int64) bool {
 
 // computeIsKeyHolder determines whether userID will become the key holder when
 // joining channelID. Returns true if no connected client in that channel has a
-// lower userID. This is used before calling setVoiceState so the result can be
+// lower userID. This is used before calling setState so the result can be
 // included in the voice_token message sent to the joiner.
 func (h *Hub) computeIsKeyHolder(channelID, userID int64) bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for uid, c := range h.clients {
-		if c.getVoiceChID() == channelID && uid < userID {
+		if c.voice.channel() == channelID && uid < userID {
 			return false
 		}
 	}
@@ -278,10 +278,10 @@ func (h *Hub) sendToUserIfInVoiceChannel(voiceChannelID, targetUserID int64, msg
 			"target_user_id", targetUserID, "voice_channel_id", voiceChannelID)
 		return
 	}
-	if target.getVoiceChID() != voiceChannelID {
+	if target.voice.channel() != voiceChannelID {
 		slog.Debug("e2ee: key offer dropped, target not in expected voice channel",
 			"target_user_id", targetUserID, "voice_channel_id", voiceChannelID,
-			"target_voice_channel_id", target.getVoiceChID())
+			"target_voice_channel_id", target.voice.channel())
 		return
 	}
 	target.sendMsg(msg)
@@ -329,7 +329,7 @@ func (h *Hub) voiceChannelPeerUserIDs(channelID, excludeUserID int64) []int64 {
 	defer h.mu.RUnlock()
 	var ids []int64
 	for uid, c := range h.clients {
-		if uid != excludeUserID && c.getVoiceChID() == channelID {
+		if uid != excludeUserID && c.voice.channel() == channelID {
 			ids = append(ids, uid)
 		}
 	}

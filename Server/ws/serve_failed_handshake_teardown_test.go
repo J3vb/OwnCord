@@ -72,22 +72,22 @@ func TestFailedHandshake_TearsDownTransferredVoiceSession(t *testing.T) {
 	// the replay-failure fallback (lastSeq > 0), inheriting the session.
 	oldClient := NewTestClient(h, userID, make(chan []byte, 64))
 	oldClient.user = &db.User{ID: userID, Status: "online"}
-	oldClient.setVoiceState(vcID, vs.JoinedAt)
+	oldClient.voice.setState(vcID, vs.JoinedAt)
 	// A settled, already-completed voice session (not a join still racing its
 	// own supersession guards) — see OC-0270 — so registerNow is expected to
 	// transfer it on this network reconnect.
-	oldClient.markVoiceJoinCompleteIfMatch(vcID, vs.JoinedAt)
+	oldClient.voice.markCompletedIfMatch(vcID, vs.JoinedAt)
 	h.clients[userID] = oldClient
 	h.updateKeyHolder(vcID)
 
 	newClient := NewTestClient(h, userID, make(chan []byte, 64))
 	newClient.user = &db.User{ID: userID, Status: "online"}
 	newClient.lastSeq = 1
-	h.registerNow(newClient, map[int64]bool{vcID: true})
+	h.registerNowTest(newClient, map[int64]bool{vcID: true})
 	if replaced := h.unregisterNow(oldClient); !replaced {
 		t.Fatal("precondition: old client's defer must see itself replaced")
 	}
-	if got := newClient.getVoiceChID(); got != vcID {
+	if got := newClient.voice.channel(); got != vcID {
 		t.Fatalf("precondition: registerNow must transfer the voice session, got voice_ch_id=%d", got)
 	}
 	if !h.IsVoiceKeyHolder(vcID, userID) {
@@ -98,10 +98,10 @@ func TestFailedHandshake_TearsDownTransferredVoiceSession(t *testing.T) {
 	// parks the completed session for a redial, so the teardown below is the
 	// one the grace window's expiry runs.
 	h.unregisterFailedHandshake(ctx, newClient)
-	if !h.voiceGrace.has(userID, vcID) {
+	if !h.voiceReg.voiceGrace.has(userID, vcID) {
 		t.Fatal("a failed handshake did not park the transferred session in the grace window")
 	}
-	h.leaveParkedVoice(ctx, h.voiceGrace.take(userID), voiceLeaveReasonGraceExpired)
+	h.leaveParkedVoiceTest(ctx, userID, h.voiceReg.voiceGrace.take(userID), voiceLeaveReasonGraceExpired)
 
 	if after, err := database.GetVoiceState(ctx, userID); err != nil {
 		t.Fatalf("GetVoiceState after teardown: %v", err)
@@ -145,7 +145,7 @@ func TestFailedHandshake_OfflineBroadcastDropsStaleCustomStatus(t *testing.T) {
 	stale := "On vacation"
 	c := NewTestClient(h, userID, make(chan []byte, 8))
 	c.user = &db.User{ID: userID, Status: "online", CustomStatus: &stale}
-	h.registerNow(c, nil)
+	h.registerNowTest(c, nil)
 
 	h.unregisterFailedHandshake(ctx, c)
 

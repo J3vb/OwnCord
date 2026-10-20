@@ -7,7 +7,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 )
 
-// Register queues a client for registration with the hub.
+// Register queues a client for registration with the hub. Test-only: it runs
+// registerNow without the member lock, which production callers hold.
 func (h *Hub) Register(c *Client) {
 	h.clientEvents <- clientEvent{c: c, add: true}
 }
@@ -42,9 +43,9 @@ func (h *Hub) Unregister(c *Client) {
 // serializes the two entirely, rather than merely narrowing the window. See
 // replay.go's handleReconnect, which re-reads the replay tail and calls
 // registerNow inside one h.seqMu section for exactly this reason.
-// The handshake callers hold Hub.begin(c.userID); the test-only Register
-// event path on the hub goroutine does not.
-func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) bool {
+// txn is the caller's Hub.begin(c.userID) handle. The one exception is the
+// test-only Register event path on the hub goroutine, which passes Hub.heldTxn.
+func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool, txn *voiceTxn) bool {
 	// Voice channel the replaced connection was in, if any. Re-elected below,
 	// after the hub lock is released.
 	var replacedVoiceChID int64
@@ -66,56 +67,17 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) bool {
 		return true
 	}
 	if old, exists := h.clients[c.userID]; exists {
-		oldE2EE := old.getE2EEAnnounce()
-		oldVoiceChID, oldVoiceJoinToken, oldVoiceJoinCompleted := old.clearVoiceState()
-		replacedVoiceChID = oldVoiceChID
-		// A moderator-imposed mute/deafen stashed by voice_mod_move
-		// (setPendingModFlags) lives ONLY on the old *Client between the
-		// target's eviction (which deletes the voice_states row that state
-		// normally lives in) and the target's own re-join, which consumes it
-		// via takePendingModFlags (voice_join.go). Any client replacement —
-		// reconnect or full resync alike — must carry it to the new *Client
-		// or it is silently destroyed and the mute is lost (OC-0302).
-		// Unlike the voice-state transfer below, this has none of the
-		// voiceJoinCompleted supersession concerns, so it is not gated on
-		// c.lastSeq > 0: take-and-clear leaves nothing behind for old to
-		// double-serve, and a stash nobody set is always (false, false).
-		if pendingMuted, pendingDeafened, pendingMutedBy := old.takePendingModFlags(); pendingMuted || pendingDeafened {
-			c.setPendingModFlags(pendingMuted, pendingDeafened, pendingMutedBy)
-		}
+		// The whole voice slot moves in one step (voiceTxn.transfer): a
+		// moderator's pending mute/deafen always (OC-0302), the membership
+		// only for a network reconnect (lastSeq > 0) whose replaced
+		// connection had a COMPLETED join (OC-0270); see transfer for why an
+		// incomplete one is left behind. Fresh connections (lastSeq == 0) do
+		// NOT take the membership: stale voice cleanup (DB + broadcast +
+		// LiveKit) is owned entirely by the handshake path in serve.go, which
+		// runs before registerNow. registerNow only handles in-memory client
+		// replacement.
+		replacedVoiceChID = txn.transfer(old, c, c.lastSeq > 0)
 		if c.lastSeq > 0 {
-			// Network reconnect — preserve voice state so the user stays
-			// in voice during brief WS drops.
-			//
-			// Gated on oldVoiceJoinCompleted (OC-0270): a join that
-			// voiceJoinPersist has merely committed to the DB and set on the
-			// old client, but that voiceJoinComplete has not yet finished, is
-			// still racing its own supersession guards in voice_join.go
-			// (voice_join.go:423, :470) — both compare the old client's live
-			// voiceChID/voiceJoinToken against the values captured when the
-			// join started. Clearing the old client's state above as part of
-			// this very transfer makes those guards read as "superseded" and
-			// abort the join (no token delivered, no voice_state broadcast,
-			// no VoiceTopic subscribe) — while the DB row and the new
-			// client's transferred state still agree, so sweepStaleVoiceStates
-			// never reaps it. Transferring only a completed join avoids
-			// resurrecting exactly that half-finished state; an incomplete
-			// one instead leaves the new client with voiceChID 0, so the
-			// still-committed row now disagrees with hub state and the next
-			// sweep tick reaps it, letting the user rejoin.
-			if c.getVoiceChID() == 0 && oldVoiceJoinCompleted {
-				c.setVoiceState(oldVoiceChID, oldVoiceJoinToken)
-				// c.setVoiceState above resets the fresh-join-in-progress flag
-				// it defaults to; restore it since we just verified the old
-				// client's join over this same (chID, token) had completed.
-				c.markVoiceJoinCompleteIfMatch(oldVoiceChID, oldVoiceJoinToken)
-				// The announced ECDH key must survive with the voice state:
-				// the client keeps its keypair across a WS blip and only
-				// re-announces on a LiveKit-room reconnect, so without the
-				// transfer voice_join replays nothing for this user and new
-				// joiners' key exchanges time out.
-				c.setE2EEAnnounce(oldE2EE)
-			}
 			// The focused channel must transfer too: the client never
 			// re-sends channel_focus on a resume (mountChannel early-returns
 			// on the same channel), so without it the ChannelTopic
@@ -129,10 +91,6 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) bool {
 				c.mu.Unlock()
 			}
 		}
-		// Fresh connections (lastSeq == 0): do NOT transfer voice state.
-		// Stale voice cleanup (DB + broadcast + LiveKit) is owned entirely
-		// by the handshake path in serve.go, which runs before registerNow.
-		// registerNow only handles in-memory client replacement.
 
 		// Kick the stale connection atomically before registering
 		// the new one — prevents TOCTOU races on duplicate login.
@@ -152,7 +110,7 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) bool {
 	}
 	h.clients[c.userID] = c
 
-	inheritedVoiceChID := h.inheritParkedVoice(c)
+	inheritedVoiceChID := txn.inherit(c)
 
 	// Subscribe the new client to its default pub/sub topics immediately
 	// after UnsubscribeAll(old) above, with nothing in between.
@@ -188,7 +146,7 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) bool {
 	// If the client is already in a voice channel (e.g. reconnect), restore its
 	// subscriptions without a new voice_join (a same-channel rejoin is rejected
 	// with ALREADY_JOINED) or channel_focus.
-	if voiceChID := c.getVoiceChID(); voiceChID != 0 {
+	if voiceChID := c.voice.channel(); voiceChID != 0 {
 		// VoiceTopic is the only transport for voice_e2ee_announce relays and
 		// carries nothing else, for a channel the user already joined via the
 		// voice_join gate (permissions.CanJoinVoice) — so no separate READ gate.
@@ -234,11 +192,11 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) bool {
 	// (voice_join.go) only runs on a brand-new voice_join, never here, so
 	// without this call a resumed connection's peer-key map would silently
 	// and permanently desync from its (correctly replayed) voice roster.
-	// c.getVoiceChID() reflects the transfer above, so this covers a
+	// c.voice.channel() reflects the transfer above, so this covers a
 	// resumed connection as well as a client pre-set into a voice channel
 	// (e.g. NewTestClientWithChannel); it is a no-op whenever c is not
 	// currently in a voice channel, which is the common case (fresh login).
-	if voiceChID := c.getVoiceChID(); voiceChID != 0 {
+	if voiceChID := c.voice.channel(); voiceChID != 0 {
 		h.sendVoicePeerKeys(c, voiceChID)
 		// Re-relay THIS client's own stored key back onto VoiceTopic (OC-0316).
 		// voice_e2ee_offer (the room-key-bearing message) is a targeted,
@@ -403,5 +361,8 @@ func (h *Hub) onClientEvent(ev clientEvent) {
 	// subscription. A wake refusal cannot occur here: the handshake paths
 	// refuse before queueing a Register event, and the event path never
 	// carries wakeReconnect.
-	h.registerNow(ev.c, nil)
+	// The dispatch goroutine never takes the voice member lock (voice_registry.go),
+	// so it passes a lock-free handle; nothing else runs a voice path for a
+	// client that is only now registering.
+	h.registerNow(ev.c, nil, h.heldTxn(ev.c.userID))
 }

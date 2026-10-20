@@ -178,7 +178,23 @@ and only when it changes something a contributor or fork holder must do
 
 - A viewer can tell the server which video codecs it can decode: `voice_e2ee_announce` takes an optional `video_decode` list, and the server passes it on with the voice key to everyone in the call, including people who join later or reconnect. A list that is malformed is dropped and the key still goes through. Older servers and apps behave as before. The desktop app uses it to pick a codec everyone in the call can play.
 
+**Server (operators)**
+
+- `GET /api/v1/metrics` gains a `windows` key with the latency, worst-hold and counter figures for the last minute and fifteen minutes, so a stall shows up and then clears instead of being buried in totals since boot; every existing key is unchanged.
+- `GET /api/v1/metrics/prometheus` serves the same figures in Prometheus text format in every build, with no setting to turn on; it is limited to the same addresses as `GET /api/v1/metrics` (`server.metrics_allowed_cidrs`).
+- The metrics gain the size of the database's write-ahead log (`db_wal_mb` in `GET /api/v1/metrics`, `owncord_db_wal_bytes` in the Prometheus output), and the server log now shows how long each database migration took when it runs at start-up.
+- The metrics gain `reconnect_ring_misses` (in `GET /api/v1/metrics`, also under `windows`, and as `owncord_reconnect_ring_misses_total` in the Prometheus output): resumes that fell behind the in-memory replay ring, the ones the persisted event log can serve. Divide `reconnect_tier_db` by it for the log's hit rate.
+
 ### Changed
+
+**Voice and video**
+
+- The Docker Compose stack now needs only three ports for chat and voice: `8443/TCP`, `7881/TCP` and `7882/UDP`. Voice media used to need the `50000-60000/UDP` range, and the LiveKit key and secret had to be typed in both `.env` and `livekit.yaml`; now they live only in `.env`. **For server owners using `docker compose`:**
+  - Forward `7882/UDP` on your router instead of the `50000-60000` range, and close the old range.
+  - Put the LiveKit key and secret only in `.env`, never using a `'` in either value (letters and digits, for example `openssl rand -hex 32`, are safest). `docker compose` now refuses to run any command, even `down` or `logs`, if `.env` is missing either value, and the message names the variable.
+  - An existing `livekit.yaml` keeps working: its port range and its `keys:` are overridden by compose.
+  - If `livekit.yaml` has a `webhook:` block whose `api_key` is not the key in `.env`, LiveKit will not start. Change it to the `.env` key.
+  - If `livekit.yaml` has a `key_file:`, it overrides the `.env` pair. Remove it.
 
 **Desktop UI**
 
@@ -199,6 +215,7 @@ and only when it changes something a contributor or fork holder must do
 **Login & connection**
 
 - New logins now stay signed in by default (Auto connect starts ticked). The password is saved only when Remember password is ticked; Auto connect alone keeps just the sign-in token.
+- The server's load test at 1,000 and 2,000 people online has now been run and published: 1,000 online holds steady chat and a burst of messages with room to spare on a 2 vCPU / 4 GB server, but a burst of 500 logins and a full reconnect of everyone are slower than their targets, and the 2,000 run was not valid, so 2,000 stays an estimate (see [Capacity](docs/capacity.md#scale-profile)).
 
 **Notifications**
 
@@ -211,6 +228,10 @@ and only when it changes something a contributor or fork holder must do
 - Upload File moved from Ctrl+U to Ctrl+Shift+U, as in Discord. Ctrl+U is now only Underline in the message box.
 - Compact mode now changes only the message list, as in Discord: the channel list, members, header, voice list and user bar keep their normal size.
 - On Linux the app's log now says why it closed: a window close, tray Quit, a signal and which program sent it, a frozen window or webview, rising memory, or (on the next start) a run that was killed without a trace. A support bundle carries all of it.
+
+**Accounts & admin**
+
+- The server now keeps only the newest 3 pre-restore and 3 pre-migration safety copies, so repeated upgrades and restores no longer fill the backup disk. Copy any older one you want to keep before upgrading.
 
 ### Fixed
 
@@ -253,6 +274,8 @@ and only when it changes something a contributor or fork holder must do
 - On Linux (X11), the Push to Talk key can now be F13 to F24, and a key synced from Windows fires.
 - On Linux, a ringing call's notification now goes away when the ring ends, clicking a notification opens its message however many have piled up, notifications no longer play the desktop's sound on top of OwnCord's, and the AppImage's notifications show the OwnCord icon.
 - Linux: screen-share audio now reaches viewers in stereo instead of mono.
+- Voice signaling through the server's built-in proxy dropped the call connection when a single message passed 32 KiB, which could happen in a busy room. Messages up to 256 KiB now pass through.
+- Timing out someone who was in a voice channel kicked them out of it within a minute, even when the moderator could not mute them. They now stay in the call (muted if the moderator could mute members), and the mute lifts the moment the timeout ends instead of up to 15 minutes later. They still cannot join a voice channel while timed out.
 
 ## v2.3.0-beta.1
 

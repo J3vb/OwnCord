@@ -72,7 +72,7 @@ func TestVoicePermissions_SweepReconcilesCurrentRole(t *testing.T) {
 		t.Fatalf("state: %v", err)
 	}
 	c := NewTestClient(h, 1, make(chan []byte, 8))
-	c.setVoiceState(100, state.JoinedAt)
+	c.voice.setState(100, state.JoinedAt)
 	h.clients[1] = c
 	for _, tc := range []struct {
 		role int64
@@ -93,7 +93,7 @@ func TestVoicePermissions_SweepReconcilesCurrentRole(t *testing.T) {
 		default:
 			t.Fatal("no active SFU permission update")
 		}
-		if c.getVoiceChID() != 100 {
+		if c.voice.channel() != 100 {
 			t.Fatal("media source revocation must preserve allowed room membership")
 		}
 	}
@@ -161,7 +161,7 @@ func TestVoicePermissions_SweepSkipsConcurrentModeration(t *testing.T) {
 		t.Fatalf("state: %v", err)
 	}
 	c := NewTestClient(h, 1, make(chan []byte, 8))
-	c.setVoiceState(100, state.JoinedAt)
+	c.voice.setState(100, state.JoinedAt)
 	h.clients[1] = c
 	unlock := h.voiceMod.lock(1)
 	finished := make(chan struct{})
@@ -207,7 +207,7 @@ func TestVoicePermissions_ModerationFailureRetainsDesiredStateForRetry(t *testin
 			}
 			send := make(chan []byte, 8)
 			c := NewTestClient(h, 1, send)
-			c.setVoiceState(100, initial.JoinedAt)
+			c.voice.setState(100, initial.JoinedAt)
 			h.clients[1] = c
 			go h.Run()
 			t.Cleanup(h.Stop)

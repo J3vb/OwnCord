@@ -60,11 +60,11 @@ func GetLastActivityForTest(c *Client) time.Time {
 // token when leaving (chID 0) — the same contract production keeps via
 // setVoiceState. Test-only: production has no set-channel-without-token path.
 func SetVoiceChIDForTest(c *Client, chID int64) {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	c.voiceChID = chID
+	c.voice.voiceMu.Lock()
+	defer c.voice.voiceMu.Unlock()
+	c.voice.voiceChID = chID
 	if chID == 0 {
-		c.voiceJoinToken = ""
+		c.voice.voiceJoinToken = ""
 	}
 }
 
@@ -109,11 +109,11 @@ func (h *Hub) ApplySetChannelIDForTest(c *Client, newChID int64) {
 // latter (e.g. to exercise those guards, or registerNow's OC-0270 transfer
 // gate) must not use this helper; use setVoiceState directly instead.
 func SetClientVoiceStateForTest(c *Client, channelID int64, joinToken string) {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	c.voiceChID = channelID
-	c.voiceJoinToken = joinToken
-	c.voiceJoinCompleted = true
+	c.voice.voiceMu.Lock()
+	defer c.voice.voiceMu.Unlock()
+	c.voice.voiceChID = channelID
+	c.voice.voiceJoinToken = joinToken
+	c.voice.voiceJoinCompleted = true
 }
 
 // SetClientE2EEPubKeyForTest sets the E2EE public key on a client (no signature).
@@ -206,19 +206,19 @@ func TouchForTest(c *Client) {
 // RollbackVoiceJoinForTest exposes Hub.rollbackVoiceJoin for external tests,
 // exercising the empty-joinedAt (re-read) path.
 func (h *Hub) RollbackVoiceJoinForTest(c *Client, channelID int64) {
-	h.rollbackVoiceJoin(context.Background(), c, channelID, "", true)
+	h.rollbackVoiceJoinTest(context.Background(), c, channelID, "", true)
 }
 
 // RollbackVoiceJoinWithTokenForTest exposes Hub.rollbackVoiceJoin with an
 // explicit join token, for external tests exercising the join-instance-scoped
 // delete (OC-0044).
 func (h *Hub) RollbackVoiceJoinWithTokenForTest(c *Client, channelID int64, joinedAt string) {
-	h.rollbackVoiceJoin(context.Background(), c, channelID, joinedAt, true)
+	h.rollbackVoiceJoinTest(context.Background(), c, channelID, joinedAt, true)
 }
 
 // LeaveVoiceChannelWithRetryForTest exposes leaveVoiceChannelWithRetry for external tests.
 func LeaveVoiceChannelWithRetryForTest(h *Hub, userID int64, channelID int64, joinToken string) error {
-	return leaveVoiceChannelWithRetry(context.Background(), h, userID, channelID, joinToken)
+	return h.leaveVoiceChannelWithRetryTest(context.Background(), userID, channelID, joinToken)
 }
 
 // ─── livekit process/webhook helpers ───────────────────────────────────────
@@ -369,14 +369,14 @@ func (h *Hub) GetCachedSettingsForTest() (string, string) {
 
 // GetClientVoiceChIDForTest exposes Client.getVoiceChID for external tests.
 func GetClientVoiceChIDForTest(c *Client) int64 {
-	return c.getVoiceChID()
+	return c.voice.channel()
 }
 
 // GetClientVoiceJoinTokenForTest reads the join token under voiceMu.
 func GetClientVoiceJoinTokenForTest(c *Client) string {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	return c.voiceJoinToken
+	c.voice.voiceMu.Lock()
+	defer c.voice.voiceMu.Unlock()
+	return c.voice.voiceJoinToken
 }
 
 // PeekClientPendingModFlagsForTest reads the moderator-stash flags
@@ -384,9 +384,9 @@ func GetClientVoiceJoinTokenForTest(c *Client) string {
 // unlike takePendingModFlags. Lets a test assert what a handler left behind
 // without also clearing it out from under a later assertion.
 func PeekClientPendingModFlagsForTest(c *Client) (serverMuted, serverDeafened bool) {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	return c.pendingModServerMuted, c.pendingModServerDeafened
+	c.voice.voiceMu.Lock()
+	defer c.voice.voiceMu.Unlock()
+	return c.voice.pendingModServerMuted, c.voice.pendingModServerDeafened
 }
 
 // ExpireSettingsCacheForTest forces the settings cache to appear stale so that
@@ -428,18 +428,18 @@ func WsToHTTPForTest(wsURL string) string {
 // visible immediately (no channel round-trip through hub.Run). No channels are
 // readable, matching the hub-loop registration path.
 func (h *Hub) RegisterNowForTest(c *Client) {
-	h.registerNow(c, nil)
+	h.registerNowTest(c, nil)
 }
 
 // RegisterNowWithReadableForTest exposes registerNow with an explicit
 // READ_MESSAGES channel set, as the handshake paths in serve.go supply it.
 func (h *Hub) RegisterNowWithReadableForTest(c *Client, readableChannelIDs map[int64]bool) {
-	h.registerNow(c, readableChannelIDs)
+	h.registerNowTest(c, readableChannelIDs)
 }
 
 // ClearVoiceStateForTest exposes clearVoiceState for external tests.
 func (c *Client) ClearVoiceStateForTest() {
-	c.clearVoiceState()
+	c.voice.clearState()
 }
 
 // QualityBitrateForTest exposes qualityBitrate for external tests.
@@ -651,10 +651,19 @@ func (h *Hub) CurrentSeqForTest() uint64 { return atomic.LoadUint64(&h.seq) }
 // unregister, then the voice step, which parks a completed membership in the
 // RT-8 grace window.
 func (h *Hub) DropSocketForTest(c *Client) {
-	chID := c.getVoiceChID()
+	chID := c.voice.channel()
 	if !h.unregisterNow(c) && chID != 0 {
 		h.leaveVoiceOnDisconnect(context.Background(), c, voiceLeaveReasonDisconnect)
 	}
+}
+
+// leaveVoiceOnDisconnect runs disconnectVoice for a test that drives the
+// socket-teardown voice step directly: it takes the member lock the pumps hold
+// around the real call.
+func (h *Hub) leaveVoiceOnDisconnect(ctx context.Context, c *Client, reason string) {
+	txn := h.begin(c.userID)
+	defer txn.end()
+	h.disconnectVoice(ctx, txn, c, reason)
 }
 
 // NoteChannelActivityForTest records a send with the channel_activity
@@ -679,4 +688,62 @@ func BuildChatSendOKForTest(requestID string, msgID int64, timestamp, clientMess
 // presence_update would.
 func SetLivePresenceForTest(c *Client, status string, customStatus *string, expiresAt string) {
 	c.setLivePresence(status, customStatus, expiresAt)
+}
+
+// The wrappers below take the voice membership lock the way the production
+// callers do, then call the txn-taking function. A test that already holds a
+// handle passes it to the real function instead.
+
+func (h *Hub) registerNowTest(c *Client, readableChannelIDs map[int64]bool) bool {
+	txn := h.begin(c.userID)
+	defer txn.end()
+	return h.registerNow(c, readableChannelIDs, txn)
+}
+
+func (h *Hub) handleVoiceLeaveTest(ctx context.Context, c *Client, reason string) {
+	txn := h.begin(c.userID)
+	defer txn.end()
+	h.handleVoiceLeave(ctx, txn, c, reason)
+}
+
+func (h *Hub) handleVoiceLeaveIfStillInTest(ctx context.Context, c *Client, chID int64, reason string) bool {
+	txn := h.begin(c.userID)
+	defer txn.end()
+	return h.handleVoiceLeaveIfStillIn(ctx, txn, c, chID, reason)
+}
+
+func (h *Hub) finishVoiceLeaveTest(ctx context.Context, c *Client, oldChID int64, oldJoinToken, reason string) {
+	txn := h.begin(c.userID)
+	defer txn.end()
+	h.finishVoiceLeave(ctx, txn, c, oldChID, oldJoinToken, reason)
+}
+
+func (h *Hub) freshConnectCleanStaleVoiceTest(ctx context.Context, c *Client, vs *db.VoiceState) {
+	txn := h.begin(c.userID)
+	defer txn.end()
+	h.freshConnectCleanStaleVoice(ctx, txn, c, vs)
+}
+
+func (h *Hub) rollbackVoiceJoinTest(ctx context.Context, c *Client, channelID int64, joinedAt string, broadcast bool) {
+	txn := h.begin(c.userID)
+	defer txn.end()
+	h.rollbackVoiceJoin(ctx, txn, c, channelID, joinedAt, broadcast)
+}
+
+func (h *Hub) voiceJoinGrantTokenTest(ctx context.Context, c *Client, channelID int64, state *db.VoiceState, reqID string) bool {
+	txn := h.begin(c.userID)
+	defer txn.end()
+	return h.voiceJoinGrantToken(ctx, txn, c, channelID, state, reqID)
+}
+
+func (h *Hub) leaveParkedVoiceTest(ctx context.Context, userID int64, e *voiceGraceEntry, reason string) bool {
+	txn := h.begin(userID)
+	defer txn.end()
+	return h.leaveParkedVoice(ctx, txn, e, reason)
+}
+
+func (h *Hub) leaveVoiceChannelWithRetryTest(ctx context.Context, userID, channelID int64, joinToken string) error {
+	txn := h.begin(userID)
+	defer txn.end()
+	return leaveVoiceChannelWithRetry(ctx, txn, channelID, joinToken)
 }

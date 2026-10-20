@@ -436,7 +436,7 @@ func TestApplyStagedUpdate_VerifyFails_BroadcastsAbort(t *testing.T) {
 	newPath := exePath + ".new" // deliberately never written
 
 	hub := &mockHub{}
-	admin.ApplyStagedUpdate(hub, exePath, newPath, "0000000000000000000000000000000000000000000000000000000000000000")
+	admin.ApplyStagedUpdate(hub, exePath, newPath, "0000000000000000000000000000000000000000000000000000000000000000", nil)
 
 	if len(hub.restartCalls) != 1 {
 		t.Fatalf("restartCalls = %d, want 1 (corrective broadcast after abort); got %+v", len(hub.restartCalls), hub.restartCalls)
@@ -469,7 +469,7 @@ func TestApplyStagedUpdate_RenameToOldFails_BroadcastsAbort(t *testing.T) {
 	stagedHash := hex.EncodeToString(sum[:])
 
 	hub := &mockHub{}
-	admin.ApplyStagedUpdate(hub, exePath, newPath, stagedHash)
+	admin.ApplyStagedUpdate(hub, exePath, newPath, stagedHash, nil)
 
 	if len(hub.restartCalls) != 1 {
 		t.Fatalf("restartCalls = %d, want 1 (corrective broadcast after abort); got %+v", len(hub.restartCalls), hub.restartCalls)
@@ -490,7 +490,7 @@ func TestApplyStagedUpdate_NilHub_NoPanic(t *testing.T) {
 	exePath := filepath.Join(dir, "chatserver")
 	newPath := exePath + ".new" // never written -> verification fails
 
-	admin.ApplyStagedUpdate(nil, exePath, newPath, "0000000000000000000000000000000000000000000000000000000000000000")
+	admin.ApplyStagedUpdate(nil, exePath, newPath, "0000000000000000000000000000000000000000000000000000000000000000", nil)
 }
 
 // ─── Install directory the service cannot write to ───────────────────────────

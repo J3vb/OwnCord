@@ -253,6 +253,61 @@ func (h *Hub) VoiceJoinMs() VoiceJoinPhases {
 	}
 }
 
+// LatencyCounts holds the raw cumulative counts of every shipped latency
+// histogram, keyed by its JSON name: "ws_broadcast_ms", "ws_dispatch_lag_ms",
+// "chat_send_ack_ms" and "voice_join_ms.<phase>" (the Prometheus exposition,
+// WP 4.3b). The names are the ones WindowSources registers.
+type LatencyCounts map[string]metrics.Counts
+
+// LatencyCounts reads every latency histogram's raw counts. Each read is a
+// handful of atomic loads and takes no hub lock.
+func (h *Hub) LatencyCounts() LatencyCounts {
+	hists, _, _ := h.WindowSources()
+	out := make(LatencyCounts, len(hists))
+	for _, nh := range hists {
+		out[nh.Name] = nh.H.Counts()
+	}
+	return out
+}
+
+// WindowSources lists every figure the windowed metrics block samples (WP
+// 4.3a). The names are the JSON keys under /api/v1/metrics "windows", and the
+// voice phases are "voice_join_ms.<phase>". Every counter is an atomic load, so
+// the sampler takes no hub lock. The returned slices are fresh and point at the
+// hub's own histograms, which live as long as the hub.
+func (h *Hub) WindowSources() ([]metrics.NamedHistogram, []metrics.NamedMaxGauge, []metrics.NamedCounter) {
+	v := &h.latency.voiceJoin
+	hists := []metrics.NamedHistogram{
+		{Name: "ws_broadcast_ms", H: &h.latency.broadcast},
+		{Name: "ws_dispatch_lag_ms", H: &h.latency.dispatchLag},
+		{Name: "chat_send_ack_ms", H: &h.latency.chatAck},
+		{Name: "voice_join_ms.precheck", H: &v.precheck},
+		{Name: "voice_join_ms.leave", H: &v.leave},
+		{Name: "voice_join_ms.persist", H: &v.persist},
+		{Name: "voice_join_ms.token", H: &v.token},
+		{Name: "voice_join_ms.complete", H: &v.complete},
+		{Name: "voice_join_ms.total", H: &v.total},
+	}
+	gauges := []metrics.NamedMaxGauge{
+		{Name: "hub_seqmu_max_hold_ms", G: &h.latency.seqMuHold},
+	}
+	counters := []metrics.NamedCounter{
+		{Name: "broadcast_drops", Read: h.BroadcastDropCount},
+		{Name: "topic_sheds_total", Read: h.TopicShedCount},
+		{Name: "reconnect_tier_buffer", Read: h.reconnectTierBuf.Load},
+		{Name: "reconnect_tier_db", Read: h.reconnectTierDB.Load},
+		{Name: "reconnect_tier_full", Read: h.reconnectTierFull.Load},
+		{Name: "reconnect_ring_misses", Read: h.reconnectRingMiss.Load},
+		{Name: "backpressure_queue_disconnects", Read: h.bpQueueDisconnects.Load},
+		{Name: "backpressure_high_fallbacks", Read: h.bpHighFallbacks.Load},
+		{Name: "backpressure_low_drops", Read: h.bpLowDrops.Load},
+		{Name: "backpressure_presence_drops", Read: h.PresenceDropCount},
+		{Name: "delivery_loss_marks", Read: h.LossMarkCount},
+		{Name: "ws_conn_rejects", Read: h.ConnRejectCount},
+	}
+	return hists, gauges, counters
+}
+
 // IsUserConnected returns true if a client with the given userID is already
 // registered in the hub. Safe to call from any goroutine.
 func (h *Hub) IsUserConnected(userID int64) bool {
@@ -282,7 +337,7 @@ func (h *Hub) wakeBlocked(c *Client) bool {
 // session: its live connection, or the call it parked in the RT-8 grace
 // window. A same-session match is this device's own stale socket or parked
 // call, not another device. Caller holds h.mu (h.mu -> voiceGrace.mu is the
-// order registerNow's inheritParkedVoice already takes).
+// order registerNow's voiceTxn.inherit already takes).
 func (h *Hub) wakeBlockedLocked(c *Client) bool {
 	if !c.wakeReconnect {
 		return false
@@ -290,7 +345,7 @@ func (h *Hub) wakeBlockedLocked(c *Client) bool {
 	if old, ok := h.clients[c.userID]; ok && old.tokenHash != c.tokenHash {
 		return true
 	}
-	e := h.voiceGrace.get(c.userID)
+	e := h.voiceReg.voiceGrace.get(c.userID)
 	return e != nil && e.client.tokenHash != c.tokenHash
 }
 

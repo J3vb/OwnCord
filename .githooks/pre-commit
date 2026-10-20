@@ -106,6 +106,17 @@ if printf '%s\n' "$staged" | grep -qE '^\.superpowers/(findings-ledger\.json|ren
     fi
 fi
 
+# check-doc-counts.mjs is Node-stdlib-only: it compares the counts stated in the
+# watched summaries (WATCHED in the script) with the findings ledger.
+if printf '%s\n' "$changed" | grep -qE '^(docs/|CHANGELOG\.md$|README\.md$|CLAUDE\.md$|\.superpowers/findings-ledger\.json$)'; then
+    if command -v node >/dev/null 2>&1; then
+        node scripts/check-doc-counts.mjs \
+            || fail "a doc states a ledger count the ledger contradicts — update the number named above (or the ledger) and re-stage; check with 'node scripts/check-doc-counts.mjs'"
+    else
+        printf 'pre-commit: WARNING: node not installed; skipping the doc-counts check. CI will run it.\n' >&2
+    fi
+fi
+
 # ---------- Inventories (added, changed or deleted files) ----------
 # The db-import table in docs/architecture/server-boundaries.md goes stale
 # when a Go file starts or stops importing db; CI fails on it.
@@ -134,7 +145,15 @@ elif [ -d node_modules ]; then
     # shellcheck disable=SC2086
     npx prettier --check --ignore-unknown $staged || fail "prettier (run: npm run format)"
 else
-    printf 'pre-commit: WARNING: node_modules missing at the repository root; skipping prettier.\n' >&2
+    # A git worktree has no root node_modules; the main checkout's install pins
+    # the same prettier as CI, so use its binary.
+    main_checkout=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
+    if [ -x "$main_checkout/node_modules/.bin/prettier" ]; then
+        # shellcheck disable=SC2086
+        "$main_checkout/node_modules/.bin/prettier" --check --ignore-unknown $staged || fail "prettier (run: npm run format)"
+    else
+        printf 'pre-commit: WARNING: node_modules missing at the repository root; skipping prettier.\n' >&2
+    fi
 fi
 
 # ---------- Client (TypeScript) ----------
