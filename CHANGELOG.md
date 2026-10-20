@@ -53,6 +53,10 @@ and only when it changes something a contributor or fork holder must do
 
 - A server can now name one voice channel as its AFK channel (`PUT /admin/api/afk-channel`, Manage Server) and set how long a member must be idle first (the `afk_timeout_seconds` setting: 1, 5, 15, 30 or 60 minutes, 5 by default). Nobody is moved yet and the admin panel has no card for it; this release only adds the setting, the channel flag everyone's client receives, and the rule that the AFK channel is listen-only, with no microphone, camera or screen sharing.
 
+**Voice**
+
+- Members who stay idle in a server voice channel are now moved to the AFK channel once it is set, after the AFK timeout on top of the client's own idle delay. A member who could not join the AFK channel, a DM or group call, and a member who comes back first are left alone. A moderator mute or deafen is kept through the move, and the member returns by joining a channel themselves. The client does not show why yet and the admin panel has no card for it.
+
 **Desktop UI**
 
 - Images and videos can now be sent as spoilers. A **Mark as spoiler** button on each pending attachment renames the file to `SPOILER_<name>` and uploads it again (press it again to undo), and a file you already named `SPOILER_...` shows as marked. In the chat a spoiler image or video, alone or inside an image grid, is blurred under a **Spoiler** cover that opens with a click, Enter or Space; until then it cannot be opened in the viewer, saved or copied, and it stays out of the viewer's previous/next sequence. It is covered again whenever the message is redrawn.
