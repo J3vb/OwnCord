@@ -153,6 +153,7 @@ export const shards = {
     "src/lib/preferences.ts",
     "src/lib/profiles.ts",
     "src/lib/reconcile.ts",
+    "src/lib/select.ts",
     "src/lib/timeFormat.ts",
     "src/features/whats-new/WhatsNewDialog.ts",
     "src/features/whats-new/whatsNewPrompt.ts",

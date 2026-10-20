@@ -6,20 +6,16 @@
 
 import { createElement, setOwnedTimeout } from "@lib/dom";
 import { reconcileModels } from "@lib/reconcile";
+import { select } from "@lib/select";
 import { buildOffsets, rangeFor } from "@lib/virtualRange";
 import { registerSessionReset } from "@lib/sessionRegistry";
 import type { MountableComponent } from "@lib/safe-render";
 import { Disposable } from "@lib/disposable";
 import { resolveDisplayName } from "@lib/avatar";
-import {
-  membersStore,
-  memberDisplayName,
-  type Member,
-  type MembersState,
-} from "@stores/members.store";
+import { membersStore, memberDisplayName, type Member } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { blocksStore } from "@stores/blocks.store";
-import { channelsStore, type ChannelsState } from "@stores/channels.store";
+import { channelsStore } from "@stores/channels.store";
 import { voiceStore, type VoiceUser } from "@stores/voice.store";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import { withMemberMenu } from "./member-menu-loader";
@@ -963,23 +959,15 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
     searchWrap.appendChild(search);
     render();
 
-    disposable.onStoreChange<MembersState, ReadonlyMap<number, Member>>(
-      membersStore,
-      (s) => s.members,
+    // Members and the server's role list (role management makes it mutable at
+    // runtime: a roles_update broadcast replaces it) both decide the groups.
+    select(
+      [membersStore, channelsStore],
+      (m, c) => ({ members: m.members, roles: c.roles }),
       () => {
         render();
       },
-    );
-
-    // Role groups, their labels and their colors all come from the server's
-    // role list, which role management makes mutable at runtime (a roles_update
-    // broadcast replaces it).
-    disposable.onStoreChange<ChannelsState, readonly ReadyRole[]>(
-      channelsStore,
-      (s) => s.roles,
-      () => {
-        render();
-      },
+      { signal: disposable.signal },
     );
 
     disposable.addCleanup(() => scrollBinding?.destroy());
