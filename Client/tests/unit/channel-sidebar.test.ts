@@ -62,7 +62,12 @@ import {
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { resetSafetyStore, safetyStore, setActiveTimeout } from "../../src/features/safety/store";
-import { voiceStore, updateVoiceState, setSpeakers } from "../../src/stores/voice.store";
+import {
+  voiceStore,
+  updateVoiceState,
+  setSpeakers,
+  removeVoiceUser,
+} from "../../src/stores/voice.store";
 import type { PeerVerification } from "../../src/stores/voice.store";
 import { membersStore } from "../../src/stores/members.store";
 import { Permission, type ReadyChannel, type VoiceStatePayload } from "../../src/lib/types";
@@ -3925,5 +3930,376 @@ describe("ChannelSidebar popovers survive unrelated re-renders (OC-0282)", () =>
     voiceStore.flush();
 
     expect(document.querySelector(".user-vol-menu")).not.toBeNull();
+  });
+});
+
+// ── Voice rows drawn from row models (5.4c-2) ──
+//
+// The voice rows reconcile from VoiceUserRowModel / VoiceChannelChromeModel,
+// kept current by one select over their stores. A row's node is kept unless
+// something it draws changed; these pin which changes keep or rebuild which
+// node, and where focus goes when its row goes.
+describe("ChannelSidebar voice rows on models (5.4c-2)", () => {
+  let container: HTMLDivElement;
+  let sidebar: ReturnType<typeof createChannelSidebar>;
+  let onVoiceJoin: Mock<(channelId: number) => void>;
+  let onOpenCall: Mock<() => void>;
+
+  const VOICE_CH = 3; // "voice-lobby" in testChannels
+
+  function member(id: number, username: string, displayName?: string) {
+    return {
+      id,
+      username,
+      ...(displayName !== undefined ? { displayName } : {}),
+      avatar: null,
+      role: "member",
+      status: "online" as const,
+    };
+  }
+
+  function setMembersMap(list: ReturnType<typeof member>[]): void {
+    membersStore.setState((prev) => ({
+      ...prev,
+      members: new Map(list.map((m) => [m.id, m] as const)),
+    }));
+  }
+
+  function userRow(userId: number): HTMLElement | null {
+    return container.querySelector<HTMLElement>(`.voice-user-item[data-voice-uid="${userId}"]`);
+  }
+
+  function wrapperOf(channelId: number): HTMLElement | null {
+    return (
+      container.querySelector<HTMLElement>(`.channel-item[data-channel-id="${channelId}"]`)
+        ?.parentElement ?? null
+    );
+  }
+
+  function leave(channelId: number, userId: number): void {
+    removeVoiceUser({ channel_id: channelId, user_id: userId });
+    voiceStore.flush();
+  }
+
+  it("a peer whose status flips to mismatch after mount gets a working badge click", async () => {
+    setChannels(testChannels);
+    addVoiceUser(VOICE_CH, 10, "Alice");
+    setPeerVerif(10, "verified", "AB12 CD34 EF56 7890");
+    sidebar.mount(container);
+    const before = userRow(10)!;
+    expect(before.querySelector(".vu-verify.verified")).not.toBeNull();
+
+    setPeerVerif(10, "mismatch", null);
+    voiceStore.flush();
+
+    const after = userRow(10)!;
+    expect(after).not.toBe(before);
+    expect(after.querySelector(".vu-verify.verified")).toBeNull();
+    (after.querySelector(".vu-verify.mismatch") as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(document.body.querySelector(".modal-overlay")).not.toBeNull();
+    });
+  });
+
+  beforeEach(() => {
+    resetStores();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    onVoiceJoin = vi.fn<(channelId: number) => void>();
+    onOpenCall = vi.fn<() => void>();
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall });
+  });
+
+  afterEach(() => {
+    sidebar.destroy?.();
+    container.remove();
+    mockGetUserLocalMute.mockImplementation(() => false);
+  });
+
+  it("rename mid-call updates the label (OC-0333)", () => {
+    setChannels(testChannels);
+    setMembersMap([member(10, "alice", "Alice"), member(11, "bob", "Bob")]);
+    addVoiceUser(VOICE_CH, 10, "alice");
+    addVoiceUser(VOICE_CH, 11, "bob");
+    sidebar.mount(container);
+    expect(userRow(10)!.querySelector(".vu-name")!.textContent).toBe("Alice");
+    const other = userRow(11);
+    const revision = membersStore.getState().roleRevision;
+
+    // A new display name in the member store alone: no roleRevision bump and
+    // no voice store change.
+    membersStore.setState((prev) => {
+      const members = new Map(prev.members);
+      members.set(10, member(10, "alice", "Alicia"));
+      return { ...prev, members };
+    });
+    membersStore.flush();
+
+    expect(membersStore.getState().roleRevision).toBe(revision);
+    expect(userRow(10)!.querySelector(".vu-name")!.textContent).toBe("Alicia");
+    expect(userRow(11)).toBe(other);
+  });
+
+  it("focused user row survives another user joining", () => {
+    setChannels(testChannels.map((c) => (c.id === VOICE_CH ? { ...c, voice_max_users: 5 } : c)));
+    addVoiceUser(VOICE_CH, 10, "alice");
+    addVoiceUser(VOICE_CH, 11, "bob");
+    sidebar.mount(container);
+    const wrapper = wrapperOf(VOICE_CH);
+    const focusedRow = userRow(11)!;
+    focusedRow.focus();
+    expect(document.activeElement).toBe(focusedRow);
+
+    addVoiceUser(VOICE_CH, 12, "carol");
+    voiceStore.flush();
+
+    // The capacity readout is a chrome patch: the wrapper and the focused row
+    // are kept, and focus never moves.
+    expect(
+      container.querySelector(`[data-testid="channel-capacity-${VOICE_CH}"]`)!.textContent,
+    ).toBe("3/5");
+    expect(wrapperOf(VOICE_CH)).toBe(wrapper);
+    expect(userRow(11)).toBe(focusedRow);
+    expect(document.activeElement).toBe(focusedRow);
+  });
+
+  it("focused user row survives a voice channel rename", () => {
+    setChannels(testChannels);
+    addVoiceUser(VOICE_CH, 10, "alice");
+    addVoiceUser(VOICE_CH, 11, "bob");
+    sidebar.mount(container);
+    const wrapper = wrapperOf(VOICE_CH);
+    userRow(11)!.focus();
+
+    setChannels(testChannels.map((c) => (c.id === VOICE_CH ? { ...c, name: "hangout" } : c)));
+    channelsStore.flush();
+
+    // The wrapper is rebuilt (its signature changed); focus follows the key
+    // path to the same participant in the replacement.
+    expect(wrapperOf(VOICE_CH)).not.toBe(wrapper);
+    expect(document.activeElement).toBe(userRow(11));
+  });
+
+  it("a focused user who leaves hands focus to the next participant, else the channel row", () => {
+    setChannels(testChannels);
+    addVoiceUser(VOICE_CH, 10, "alice");
+    addVoiceUser(VOICE_CH, 11, "bob");
+    addVoiceUser(VOICE_CH, 12, "carol");
+    sidebar.mount(container);
+
+    // The participant now at the leaver's position.
+    userRow(11)!.focus();
+    leave(VOICE_CH, 11);
+    expect(document.activeElement).toBe(userRow(12));
+
+    // The last one leaving: the participant before them.
+    leave(VOICE_CH, 12);
+    expect(document.activeElement).toBe(userRow(10));
+
+    // The channel empties: its own row.
+    leave(VOICE_CH, 10);
+    expect(container.querySelector(".voice-users-list")).toBeNull();
+    expect(document.activeElement).toBe(
+      container.querySelector(`.channel-item[data-channel-id="${VOICE_CH}"]`),
+    );
+  });
+
+  it("a focused participant whose channel stops showing hands focus to the category", () => {
+    setChannels(testChannels);
+    addVoiceUser(VOICE_CH, 10, "alice");
+    uiStore.setState((prev) => ({
+      ...prev,
+      collapsedCategories: new Set(["Voice Channels"]),
+    }));
+    sidebar.mount(container);
+    userRow(10)!.focus();
+
+    // Collapsed, the channel shows only while occupied: emptied, it hides.
+    leave(VOICE_CH, 10);
+
+    expect(container.querySelector(`.channel-item[data-channel-id="${VOICE_CH}"]`)).toBeNull();
+    const arrow = container.querySelector<HTMLElement>(
+      '.category[data-category="Voice Channels"] .category-arrow',
+    );
+    expect(document.activeElement).toBe(arrow);
+  });
+
+  it("local mute event redraws only that user's row", () => {
+    setChannels(testChannels);
+    addVoiceUser(VOICE_CH, 82, "loud");
+    addVoiceUser(VOICE_CH, 83, "quiet");
+    sidebar.mount(container);
+    const loud = userRow(82);
+    const quiet = userRow(83);
+
+    mockGetUserLocalMute.mockImplementation((id) => id === 82);
+    window.dispatchEvent(
+      new CustomEvent("owncord:user-local-mute-changed", { detail: { userId: 82 } }),
+    );
+
+    expect(userRow(82)).not.toBe(loud);
+    expect(userRow(82)!.querySelector(".vu-local-muted")).not.toBeNull();
+    expect(userRow(83)).toBe(quiet);
+    expect(userRow(83)!.querySelector(".vu-local-muted")).toBeNull();
+  });
+
+  it("connection drop disables the channel without rebuilding user rows", () => {
+    setChannels(testChannels);
+    addVoiceUser(VOICE_CH, 10, "alice");
+    addVoiceUser(VOICE_CH, 11, "bob");
+    sidebar.mount(container);
+    const wrapper = wrapperOf(VOICE_CH);
+    const rows = [userRow(10), userRow(11)];
+
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "reconnecting" as const }));
+    uiStore.flush();
+
+    const item = container.querySelector<HTMLElement>(
+      `.channel-item[data-channel-id="${VOICE_CH}"]`,
+    )!;
+    expect(item.classList.contains("disabled")).toBe(true);
+    expect(item.getAttribute("aria-disabled")).toBe("true");
+    expect(item.title).toBe("Reconnecting…");
+    expect(wrapperOf(VOICE_CH)).toBe(wrapper);
+    expect([userRow(10), userRow(11)]).toEqual(rows);
+    expect(userRow(10)).toBe(rows[0]);
+    expect(userRow(11)).toBe(rows[1]);
+  });
+
+  it("draggable follows connection status", () => {
+    sidebar.destroy?.();
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 99, username: "Me", avatar: null, role: "admin" },
+      serverName: "Test Server",
+      motd: null,
+      isAuthenticated: true,
+    }));
+    sidebar = createChannelSidebar({
+      onVoiceJoin,
+      onOpenCall,
+      onVoiceModerate: voiceModCallbacks(),
+    });
+    setChannels(testChannels.map((c) => ({ ...c, can_moderate_voice: true })));
+    addVoiceUser(VOICE_CH, 10, "alice");
+    addVoiceUser(VOICE_CH, 99, "Me");
+    sidebar.mount(container);
+    const draggable = (id: number) => userRow(id)!.classList.contains("voice-user-draggable");
+    expect(draggable(10)).toBe(true);
+    expect(draggable(99)).toBe(false);
+
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "reconnecting" as const }));
+    uiStore.flush();
+    expect(draggable(10)).toBe(false);
+
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" as const }));
+    uiStore.flush();
+    expect(draggable(10)).toBe(true);
+    expect(draggable(99)).toBe(false);
+  });
+
+  it("a click on the channel after joining opens the call", () => {
+    setChannels(testChannels);
+    sidebar.mount(container);
+    const item = () =>
+      container.querySelector<HTMLElement>(`.channel-item[data-channel-id="${VOICE_CH}"]`)!;
+    const first = item();
+    first.click();
+    expect(onVoiceJoin).toHaveBeenCalledWith(VOICE_CH);
+    expect(onOpenCall).not.toHaveBeenCalled();
+
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: VOICE_CH }));
+    voiceStore.flush();
+
+    // The wrapper is reused (joined is a chrome patch), so the click reads
+    // the joined channel when it fires, not when the row was built.
+    expect(item()).toBe(first);
+    expect(first.classList.contains("active")).toBe(true);
+    first.click();
+    expect(onOpenCall).toHaveBeenCalledTimes(1);
+    expect(onVoiceJoin).toHaveBeenCalledTimes(1);
+  });
+
+  it("presence change of a member not in voice keeps every voice row node", () => {
+    setChannels(testChannels);
+    setMembersMap([member(10, "alice"), member(11, "bob"), member(50, "away")]);
+    addVoiceUser(VOICE_CH, 10, "alice");
+    addVoiceUser(VOICE_CH, 11, "bob");
+    sidebar.mount(container);
+    const wrapper = wrapperOf(VOICE_CH);
+    const rows = [userRow(10), userRow(11)];
+
+    membersStore.setState((prev) => {
+      const members = new Map(prev.members);
+      members.set(50, { ...member(50, "away"), status: "idle" as const });
+      return { ...prev, members };
+    });
+    membersStore.flush();
+
+    expect(wrapperOf(VOICE_CH)).toBe(wrapper);
+    expect(userRow(10)).toBe(rows[0]);
+    expect(userRow(11)).toBe(rows[1]);
+  });
+
+  it("speaking toggle keeps the same row node, its focus and a class another module set", () => {
+    setChannels(testChannels);
+    addVoiceUser(VOICE_CH, 60, "talker");
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: VOICE_CH }));
+    sidebar.mount(container);
+    const row = userRow(60)!;
+    row.focus();
+    // dragMove marks the live row it is dragging.
+    row.classList.add("dragging");
+
+    setSpeakers({ channel_id: VOICE_CH, speakers: [60] });
+    voiceStore.flush();
+    expect(userRow(60)).toBe(row);
+    expect(row.classList.contains("speaking")).toBe(true);
+
+    setSpeakers({ channel_id: VOICE_CH, speakers: [] });
+    voiceStore.flush();
+    expect(userRow(60)).toBe(row);
+    expect(row.classList.contains("speaking")).toBe(false);
+    expect(row.classList.contains("dragging")).toBe(true);
+    expect(document.activeElement).toBe(row);
+  });
+
+  it("a reconnect replacing the voice state keeps unchanged rows and redraws a changed fingerprint", () => {
+    setChannels(testChannels);
+    addVoiceUser(VOICE_CH, 10, "alice");
+    addVoiceUser(VOICE_CH, 11, "bob");
+    setPeerVerif(10, "unverified", null, "AAAA 1111");
+    setPeerVerif(11, "unverified", null, "BBBB 2222");
+    sidebar.mount(container);
+    const alice = userRow(10);
+    const bob = userRow(11);
+
+    // ready replaces both maps with fresh objects; only bob's fingerprint differs.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      voiceUsers: new Map(
+        Array.from(prev.voiceUsers, ([ch, users]) => [
+          ch,
+          new Map(Array.from(users, ([uid, u]) => [uid, { ...u }] as const)),
+        ]),
+      ),
+      peerVerifications: new Map([
+        [
+          10,
+          { userId: 10, status: "unverified", safetyNumber: null, sessionFingerprint: "AAAA 1111" },
+        ],
+        [
+          11,
+          { userId: 11, status: "unverified", safetyNumber: null, sessionFingerprint: "CCCC 3333" },
+        ],
+      ]),
+    }));
+    voiceStore.flush();
+
+    expect(userRow(10)).toBe(alice);
+    expect(userRow(11)).not.toBe(bob);
+    const title = userRow(11)!.querySelector(".vu-verify")!.getAttribute("title") ?? "";
+    expect(title).toContain("CCCC 3333");
+    expect(title).not.toContain("BBBB 2222");
   });
 });

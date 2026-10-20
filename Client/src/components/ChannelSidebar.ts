@@ -2,11 +2,14 @@
  * ChannelSidebar component — channel list sidebar with categories,
  * unread indicators, and collapse/expand behavior.
  * Voice channels show connected users; a click joins, or opens the call once joined.
+ * The voice rows draw from row models (features/channels/voiceRow*.ts) that
+ * one `select` over their stores keeps current (5.4c-2).
  */
 
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
-import { reconcileChildren } from "@lib/reconcile";
+import { reconcileChildren, reconcileModels, sameModel } from "@lib/reconcile";
+import { select, eventSource, type Selection } from "@lib/select";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
@@ -14,13 +17,12 @@ import { channelsStore, getChannelsByCategory, categoryLabel } from "@stores/cha
 import { navigateToChannel } from "@lib/channel-navigation";
 import { isChannelMuted } from "@lib/channel-mutes";
 import { HIDE_MUTED_CHANNELS_KEY, hiddenByMute } from "@lib/hide-muted-channels";
-import type { Channel } from "@stores/channels.store";
-import { authStore, getCurrentUser } from "@stores/auth.store";
-import { uiStore, toggleCategory, isCategoryCollapsed } from "@stores/ui.store";
-import { safetyStore } from "../features/safety/store";
-import { formatUntil, safetyText } from "../i18n/safety";
-import { voiceStore, getChannelVoiceUsers, getPeerVerification } from "@stores/voice.store";
-import type { VoiceUser } from "@stores/voice.store";
+import type { Channel, ChannelsState } from "@stores/channels.store";
+import { authStore, getCurrentUser, type AuthState } from "@stores/auth.store";
+import { uiStore, toggleCategory, isCategoryCollapsed, type UiState } from "@stores/ui.store";
+import { safetyStore, type SafetyState } from "../features/safety/store";
+import { voiceStore } from "@stores/voice.store";
+import type { PeerVerification, VoiceState, VoiceUser } from "@stores/voice.store";
 import { SCREENSHARE_TILE_ID_OFFSET, USER_LOCAL_MUTE_CHANGED } from "@lib/constants";
 import { openMenuOnKeyboard } from "@lib/context-menu";
 import { createLazyScreen } from "./lazyScreen";
@@ -30,17 +32,34 @@ import { attachCategoryContextMenu } from "./channel-sidebar/category-menu";
 import { attachChannelContextMenu, CHANNEL_MUTE_CHANGED } from "./channel-sidebar/context-menu";
 import { attachDragHandlers } from "./channel-sidebar/drag-reorder";
 import { attachVoiceUserDrag, markVoiceDropTarget } from "../features/voice/dragMove";
-import { verifyPresentation, openIdentityMismatchModal } from "../features/voice/peerVerification";
+import { openIdentityMismatchModal } from "../features/voice/peerVerification";
 import { createAvatarElement, pickAvatarColor } from "@components/message-list/avatar";
-import { membersStore, memberDisplayName } from "@stores/members.store";
+import { membersStore, type Member, type MembersState } from "@stores/members.store";
 import { roleHasPermission, canManageChannels, currentUserPermissions } from "@lib/permissions";
 import { Permission } from "@lib/types";
 import { shellText } from "../i18n/shell";
 import { voiceText } from "../i18n/voice";
 import { joinRetryInMs } from "../features/voice/joinBackoff";
 import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup";
-// Shared with the voice row view until 5.4d moves the text rows onto models.
-import { nsfwIndicator, privateIndicator } from "../features/channels/voiceRow.view";
+// nsfwIndicator/privateIndicator: shared with the text rows until 5.4d moves them onto models.
+import {
+  drawVoiceChannelChrome,
+  drawVoiceUserRow,
+  nsfwIndicator,
+  patchVoiceChannelChrome,
+  patchVoiceUserRow,
+  privateIndicator,
+  VOICE_USER_PATCH_FIELDS,
+  type VoiceChannelChromeModel,
+  type VoiceUserRowModel,
+} from "../features/channels/voiceRow.view";
+import {
+  channelVoiceUsers,
+  voiceChannelChrome,
+  voiceUserModel,
+  type VoiceRowInputs,
+  type VoiceUserContext,
+} from "../features/channels/voiceRowModel";
 
 // The per-user volume menu loads on its first open (O-6b).
 const volumeMenuScreen = createLazyScreen(
@@ -97,21 +116,6 @@ export interface ChannelSidebarOptions {
   readonly onInviteFromChannel?: (channel: Channel) => void;
   /** Called when the user clicks a voice user row to watch their stream. */
   readonly onWatchStream?: (userId: number) => void;
-}
-
-/**
- * "3/5" for a voice channel that has a user limit, or null when it is
- * unlimited (0) — a count with no ceiling is already shown by the participant
- * rows underneath, and "3/0" would read as a bug.
- *
- * Purely a readout: the server owns capacity and refuses a join over the limit
- * with CHANNEL_FULL. The client never blocks the click, because its copy of
- * the participant list can lag and a join it refused locally would be a
- * mistake nobody could correct.
- */
-function voiceCapacityLabel(channel: Channel, connected: number): string | null {
-  if (channel.voiceMaxUsers <= 0) return null;
-  return `${connected}/${channel.voiceMaxUsers}`;
 }
 
 function renderTextChannelItem(
@@ -266,353 +270,82 @@ function rowVisibleWhenCollapsed(channel: Channel, activeChannelId: number | nul
   return rowIsUnread(channel) && !isChannelMuted(channel.id);
 }
 
-function renderVoiceChannelItem(
-  channel: Channel,
-  signal: AbortSignal,
-  lifetimeSignal: AbortSignal,
-  onVoiceJoin: (channelId: number) => void,
-  onOpenCall: () => void,
-  openProfile: (userId: number, anchor: HTMLElement) => void,
-  onWatchStream?: (userId: number) => void,
-  onVoiceModerate?: VoiceModerationCallbacks,
-): HTMLDivElement {
-  const voiceState = voiceStore.getState();
-  const isJoined = voiceState.currentChannelId === channel.id;
-  // Freeze the join/leave affordance while the WS socket is not live — the same
-  // disabled-with-reason pattern the VoiceWidget uses for its in-call controls
-  // (docs/architecture/ux/README.md §3). LiveKit keeps retrying underneath; we
-  // only gate the UI so the click isn't a silent no-op.
-  const connectionStatus = uiStore.getState().connectionStatus;
-  // A timeout refuses a join (TIMED_OUT) but never a leave (B9-15, Q4).
-  const timeout = isJoined ? null : safetyStore.getState().timeout;
-  const timeoutReason =
-    timeout === null ? null : safetyText("timeout.voice", { time: formatUntil(timeout.expiresAt) });
-  const frozen = connectionStatus !== "connected" || timeoutReason !== null;
-  let frozenReason = shellText(
-    connectionStatus === "reconnecting" ? "channel.reconnecting" : "channel.notConnected",
-  );
-  if (connectionStatus === "connected" && timeoutReason !== null) frozenReason = timeoutReason;
+/** A peer verification map for a voice state that has none yet: one shared
+ *  instance, so an absent map compares equal across projections. */
+const NO_VERIFICATIONS: ReadonlyMap<number, PeerVerification> = new Map();
 
-  const wrapper = createElement("div", {});
-  if (onVoiceModerate !== undefined) markVoiceDropTarget(wrapper, channel.id);
-
-  const classes = ["channel-item", "voice", isJoined ? "active" : "", frozen ? "disabled" : ""]
-    .filter(Boolean)
-    .join(" ");
-
-  const item = createElement("div", {
-    class: classes,
-    "data-testid": `channel-${channel.id}`,
-    // Roving list item: reachable by Tab once, then arrow-stepped (B9-21).
-    role: "button",
-    tabindex: "-1",
-  });
-  item.dataset.channelId = String(channel.id);
-  if (frozen) {
-    item.title = frozenReason;
-    item.setAttribute("aria-disabled", "true");
-  }
-
-  const prefix = createElement("span", { class: "ch-icon", "aria-hidden": "true" });
-  prefix.appendChild(createIcon("volume-2", 16));
-  const name = createElement("span", { class: "ch-name" }, channel.name);
-
-  appendChildren(item, prefix, name);
-
-  if (channel.nsfw) {
-    item.appendChild(nsfwIndicator(channel.id));
-  }
-  if (channel.isPrivate) {
-    item.appendChild(privateIndicator(channel.id));
-  }
-
-  const voiceUsers = getChannelVoiceUsers(channel.id);
-  const capacity = voiceCapacityLabel(channel, voiceUsers.length);
-  if (capacity !== null) {
-    const badge = createElement(
-      "span",
-      { class: "ch-capacity", "data-testid": `channel-capacity-${channel.id}` },
-      capacity,
-    );
-    badge.title = shellText("channel.voiceCapacity", {
-      connected: voiceUsers.length,
-      max: channel.voiceMaxUsers,
-    });
-    item.appendChild(badge);
-  }
-
-  item.addEventListener(
-    "click",
-    () => {
-      // Frozen while the WS socket is down or timed out — no-op; the reason is shown via title.
-      if (uiStore.getState().connectionStatus !== "connected") return;
-      if (!isJoined && safetyStore.getState().timeout !== null) return;
-      if (isJoined) {
-        // A repeat click while this join is still in progress (a double-click,
-        // or retrying a slow "securing") must not cancel it: toggling here
-        // cycled voice_join/voice_leave several times a second. The voice
-        // widget's Disconnect still ends a join in progress.
-        const status = voiceStore.getState().voiceStatus;
-        if (status === "joining" || status === "securing") return;
-        onOpenCall();
-      } else {
-        onVoiceJoin(channel.id);
-      }
-    },
-    { signal },
-  );
-
-  wrapper.appendChild(item);
-  if (timeoutReason !== null) {
-    wrapper.appendChild(
-      createElement(
-        "div",
-        { class: "ch-restriction", "data-testid": `voice-timeout-${channel.id}` },
-        timeoutReason,
-      ),
-    );
-  }
-
-  // Render connected voice users below the channel
-  if (voiceUsers.length > 0) {
-    const usersContainer = createElement("div", { class: "voice-users-list" });
-    for (const user of voiceUsers) {
-      const rowClasses = user.speaking ? "voice-user-item speaking" : "voice-user-item";
-      const row = createElement("div", {
-        class: rowClasses,
-        "data-voice-uid": String(user.userId),
-      });
-      // Every row is focusable (A11Y-01): Enter/Space does what a click does
-      // (watch or profile, below), and on a remote participant's row
-      // Shift+F10 opens the per-user volume/moderation menu.
-      row.tabIndex = 0;
-      row.setAttribute("role", "button");
-
-      // Render the same identity a rename shows everywhere else (member list,
-      // message rows, DM sidebar) — memberDisplayName prefers the nickname,
-      // falling back to the username. Security-sensitive surfaces (the E2EE
-      // mismatch modal, the moderation menu below) intentionally keep
-      // rendering user.username instead, since a nickname is user-settable.
-      const member = membersStore.getState().members.get(user.userId);
-      const resolved = member !== undefined ? memberDisplayName(member) : user.username;
-
-      const avatar = createAvatarElement(
-        { username: user.username, displayName: resolved, avatar: member?.avatar ?? null },
-        { className: "vu-avatar", background: pickAvatarColor(user.username) },
-      );
-      // The name follows, so the avatar's initial would only repeat it.
-      avatar.setAttribute("aria-hidden", "true");
-      row.appendChild(avatar);
-
-      const label = resolved || shellText("common.unknown");
-      const nameEl = createElement("span", { class: "vu-name" }, label);
-      row.appendChild(nameEl);
-
-      if (user.camera) {
-        const cameraIcon = createElement("span", { class: "vu-status" });
-        cameraIcon.appendChild(createIcon("camera", 14));
-        row.appendChild(cameraIcon);
-      }
-
-      if (user.screenshare) {
-        const screenIcon = createElement("span", { class: "vu-status" });
-        screenIcon.appendChild(createIcon("monitor", 14));
-        row.appendChild(screenIcon);
-
-        const liveBadge = createElement(
-          "span",
-          { class: "vu-live-badge" },
-          shellText("channel.live"),
-        );
-        row.appendChild(liveBadge);
-      }
-
-      // A moderator-imposed mute/deafen gets its own class and tooltip: the
-      // same mic-off glyph would otherwise read as an ordinary self-mute.
-      // Deafen implies mute, so a deafened user shows only headphones-off
-      // (Discord parity) rather than a duplicate mic-off beside it; that one
-      // icon still carries a moderator's mute.
-      if (user.deafened) {
-        const deafIcon = createElement("span", {
-          class:
-            user.serverDeafened === true || user.serverMuted === true
-              ? "vu-muted vu-server-muted"
-              : "vu-muted",
-          title:
-            user.serverDeafened === true
-              ? shellText("channel.deafenedByModerator")
-              : user.serverMuted === true
-                ? shellText("channel.mutedByModerator")
-                : shellText("channel.deafened"),
-        });
-        deafIcon.appendChild(createIcon("headphones-off", 14));
-        row.appendChild(deafIcon);
-      } else if (user.muted) {
-        const muteIcon = createElement("span", {
-          class: user.serverMuted === true ? "vu-muted vu-server-muted" : "vu-muted",
-        });
-        if (user.serverMuted === true) muteIcon.title = shellText("channel.mutedByModerator");
-        muteIcon.appendChild(createIcon("mic-off", 14));
-        row.appendChild(muteIcon);
-      }
-
-      // Muted for this client only (the volume menu's Mute, a tile mute, or
-      // an older build's volume of 0).
-      const currentUser = getCurrentUser();
-      const isSelf = currentUser !== null && currentUser.id === user.userId;
-      if (!isSelf && (getUserLocalMute(user.userId) || getUserVolume(user.userId) === 0)) {
-        const localMuteIcon = createElement("span", {
-          class: "vu-muted vu-local-muted",
-          title: shellText("channel.locallyMuted"),
-        });
-        localMuteIcon.appendChild(createIcon("volume-x", 14));
-        row.appendChild(localMuteIcon);
-      }
-
-      // The local user's own session fingerprint (OC-0003): what a peer who
-      // sees us as unverified compares against, so show it where it can be
-      // read out. The local user is never in peerVerifications.
-      const ownFingerprint = voiceStore.select((st) => st.localSessionFingerprint ?? null);
-      if (isSelf && ownFingerprint !== null) {
-        const own = createElement("span", { class: "vu-verify vu-session-fp" });
-        own.style.color = "var(--text-muted, #949ba4)";
-        own.title = shellText("channel.ownSessionFingerprint", { fingerprint: ownFingerprint });
-        own.appendChild(createIcon("shield", 14));
-        row.appendChild(own);
-      }
-
-      // E2EE identity verification badge (F3 TOFU). Absent until the peer's
-      // announce resolves; the local user is never in peerVerifications.
-      const verification = getPeerVerification(user.userId);
-      if (verification !== null) {
-        const {
-          icon: badgeIcon,
-          color: badgeColor,
-          title: badgeTitle,
-        } = verifyPresentation(verification);
-        const badge = createElement("span", { class: `vu-verify ${verification.status}` });
-        badge.style.color = badgeColor;
-        badge.title = badgeTitle;
-        badge.appendChild(createIcon(badgeIcon, 14));
-        if (verification.status === "mismatch") {
-          badge.style.cursor = "pointer";
-          badge.addEventListener(
-            "click",
-            (e) => {
-              e.stopPropagation();
-              // lifetimeSignal (not the per-render `signal`): the modal must
-              // survive an unrelated re-render, and must not be silently
-              // skipped by one landing during the async fingerprint compute
-              // (OC-0281). The click listener itself stays on the per-render
-              // `signal` so it dies with this row (OC-0229).
-              void openIdentityMismatchModal(
-                user.userId,
-                user.username || shellText("common.unknown"),
-                lifetimeSignal,
-              );
-            },
-            { signal },
-          );
-        }
-        row.appendChild(badge);
-      }
-
-      // Right-click for per-user volume (skip for own user)
-      if (currentUser === null || currentUser.id !== user.userId) {
-        const openVolumeMenu = (x: number, y: number): void => {
-          // The options snapshot is taken now, at click time; the menu code
-          // loads on its first open.
-          const mod = buildVoiceModOptions(channel.id, user, onVoiceModerate);
-          const username = user.username || shellText("common.unknown");
-          const attempt = (volumeMenuAttempts.get(lifetimeSignal) ?? 0) + 1;
-          volumeMenuAttempts.set(lifetimeSignal, attempt);
-          void volumeMenuScreen
-            .load(() => !lifetimeSignal.aborted)
-            .then((m) => {
-              // A newer open supersedes this one (so a double open mounts one
-              // menu), and a destroyed sidebar mounts nothing.
-              if (
-                m === null ||
-                attempt !== volumeMenuAttempts.get(lifetimeSignal) ||
-                lifetimeSignal.aborted
-              )
-                return;
-              // lifetimeSignal (not the per-render `signal`): the menu is
-              // mounted on document.body, independent of this row's render,
-              // and must not be torn down by an unrelated re-render (OC-0282).
-              m.showUserVolumeMenu(user.userId, username, x, y, lifetimeSignal, mod);
-              return;
-            });
-        };
-        row.addEventListener(
-          "contextmenu",
-          (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            openVolumeMenu(e.clientX, e.clientY);
-          },
-          { signal },
-        );
-        // Keyboard entry point (A11Y-01): Shift+F10 / Menu key on the focused
-        // participant row opens the same menu.
-        openMenuOnKeyboard(row, openVolumeMenu, signal);
-        // Drag onto another voice channel to move them; the menu's "Move to"
-        // is the keyboard path to the same command.
-        if (onVoiceModerate !== undefined) {
-          attachVoiceUserDrag(
-            row,
-            channel.id,
-            user.userId,
-            onVoiceModerate.onMove,
-            signal,
-            lifetimeSignal,
-          );
-        }
-      }
-
-      // A click watches their camera or stream; with nothing to watch it opens
-      // their profile, as in the member list.
-      const watchable = onWatchStream !== undefined && (user.camera || user.screenshare);
-      row.addEventListener(
-        "click",
-        (e) => {
-          // Don't trigger if the right-click menu is open
-          if (e.button !== 0) return;
-          e.stopPropagation();
-          if (!watchable) {
-            openProfile(user.userId, row);
-            return;
-          }
-          // Watching a stream needs a live LiveKit room -- join first.
-          if (voiceStore.getState().currentChannelId !== channel.id) {
-            // Read before the join: it refuses inside the wait, and an accepted switch arms one.
-            const refused = joinRetryInMs() > 0;
-            onVoiceJoin(channel.id);
-            if (refused) return;
-          }
-          if (voiceStore.getState().currentChannelId !== channel.id) return;
-          const tileId = user.screenshare ? user.userId + SCREENSHARE_TILE_ID_OFFSET : user.userId;
-          onWatchStream(tileId);
-        },
-        { signal },
-      );
-      row.addEventListener(
-        "keydown",
-        (e) => {
-          if (e.target !== row || (e.key !== "Enter" && e.key !== " ")) return;
-          e.preventDefault();
-          row.click();
-        },
-        { signal },
-      );
-      row.style.cursor = "pointer";
-
-      usersContainer.appendChild(row);
+/**
+ * The voice rows' inputs from the states the sidebar's `select` hands it
+ * (5.4c-2). Reads only its arguments; the optional voice fields an older
+ * state lacks are defaulted here, as the row builders expect.
+ */
+function projectVoiceInputs(
+  voice: VoiceState,
+  members: MembersState,
+  auth: AuthState,
+  channels: ChannelsState,
+  ui: UiState,
+  safety: SafetyState,
+  localMute: object,
+): VoiceRowInputs {
+  const voiceMembers = new Map<number, Member>();
+  for (const users of voice.voiceUsers.values()) {
+    for (const uid of users.keys()) {
+      const member = members.members.get(uid);
+      if (member !== undefined) voiceMembers.set(uid, member);
     }
-    wrapper.appendChild(usersContainer);
   }
+  const moderatable: number[] = [];
+  for (const ch of channels.channels.values()) {
+    if (ch.type === "voice" && ch.canModerateVoice === true) moderatable.push(ch.id);
+  }
+  return {
+    voiceUsers: voice.voiceUsers,
+    currentChannelId: voice.currentChannelId,
+    peerVerifications: voice.peerVerifications ?? NO_VERIFICATIONS,
+    localSessionFingerprint: voice.localSessionFingerprint ?? null,
+    voiceMembers,
+    selfId: auth.user?.id ?? null,
+    connectionStatus: ui.connectionStatus,
+    timeout: safety.timeout,
+    moderatable: moderatable.toSorted((a, b) => a - b),
+    localMute,
+  };
+}
 
-  return wrapper;
+/** `===` per field, except the two the projection builds fresh: the members
+ *  in voice (equal when every entry is the same object, so presence churn of
+ *  anyone else never reaches the voice rows) and the moderatable ids. */
+function sameVoiceInputs(a: VoiceRowInputs, b: VoiceRowInputs): boolean {
+  if (
+    a.voiceUsers !== b.voiceUsers ||
+    a.currentChannelId !== b.currentChannelId ||
+    a.peerVerifications !== b.peerVerifications ||
+    a.localSessionFingerprint !== b.localSessionFingerprint ||
+    a.selfId !== b.selfId ||
+    a.connectionStatus !== b.connectionStatus ||
+    a.timeout !== b.timeout ||
+    a.localMute !== b.localMute
+  ) {
+    return false;
+  }
+  if (a.voiceMembers.size !== b.voiceMembers.size) return false;
+  for (const [uid, member] of a.voiceMembers) {
+    if (b.voiceMembers.get(uid) !== member) return false;
+  }
+  return (
+    a.moderatable.length === b.moderatable.length &&
+    a.moderatable.every((id, i) => b.moderatable[i] === id)
+  );
+}
+
+/** The voice channels with at least one participant, as one comparable key. */
+function occupiedKey(inputs: VoiceRowInputs): string {
+  const ids: number[] = [];
+  for (const [channelId, users] of inputs.voiceUsers) {
+    if (users.size > 0) ids.push(channelId);
+  }
+  return ids.toSorted((a, b) => a - b).join(",");
 }
 
 function renderChannelItem(
@@ -620,35 +353,21 @@ function renderChannelItem(
   isActive: boolean,
   signal: AbortSignal,
   lifetimeSignal: AbortSignal,
-  onVoiceJoin: (channelId: number) => void,
-  onOpenCall: () => void,
-  openProfile: (userId: number, anchor: HTMLElement) => void,
+  /** Builds a voice channel's wrapper: its chrome, click and participant rows. */
+  createVoiceRow: (channel: Channel, signal: AbortSignal) => HTMLDivElement,
   onEditChannel?: (channel: Channel) => void,
   onDeleteChannel?: (channel: Channel) => void,
   containerEl?: HTMLElement,
   channels?: readonly Channel[],
   onReorderChannel?: (reorders: readonly ChannelReorderData[]) => void,
-  onWatchStream?: (userId: number) => void,
-  onVoiceModerate?: VoiceModerationCallbacks,
   onPurgeChannel?: (channel: Channel, count: number) => Promise<void>,
   menuChannels: readonly Channel[] | undefined = channels,
   onInviteFromChannel?: (channel: Channel) => void,
 ): HTMLDivElement {
-  let el: HTMLDivElement;
-  if (channel.type === "voice") {
-    el = renderVoiceChannelItem(
-      channel,
-      signal,
-      lifetimeSignal,
-      onVoiceJoin,
-      onOpenCall,
-      openProfile,
-      onWatchStream,
-      onVoiceModerate,
-    );
-  } else {
-    el = renderTextChannelItem(channel, isActive, signal);
-  }
+  const el =
+    channel.type === "voice"
+      ? createVoiceRow(channel, signal)
+      : renderTextChannelItem(channel, isActive, signal);
   attachChannelContextMenu(
     el,
     channel,
@@ -684,18 +403,14 @@ function renderChannelItem(
  * rows: each row's drag handler captures the ordered channel array at attach
  * time, and a reused node would otherwise drop against a stale order.
  *
- * A voice row is rebuilt on every render (`voiceTick`, below): it carries live
- * participant/stream/verification state whose changes already arrive through
- * this sidebar's voice and connection subscriptions, and those rows are few.
- * Text rows — the long list this milestone is about — keep their identity.
- * ponytail: voice rows intentionally stay unkeyed; key them too if a voice
- * roster ever grows large enough for the rebuild to matter.
+ * A voice row's participants and live state are not in it: they are drawn
+ * from row models (`updateVoiceRow`), which patch or rebuild only the part
+ * that changed, so a voice wrapper keeps its node like a text row.
  */
 function channelRowSignature(
   channel: Channel,
   activeChannelId: number | null,
   orderIds: string,
-  voiceTick: number,
 ): string {
   return [
     channel.id,
@@ -709,7 +424,6 @@ function channelRowSignature(
     channel.unreadCount,
     channel.mentionCount,
     orderIds,
-    channel.type === "voice" ? voiceTick : "",
   ].join("|");
 }
 
@@ -765,27 +479,27 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
 
   const unsubscribers: Array<() => void> = [];
 
-  /** Voice-user rows from the last render, keyed by user id — lets the
-   *  speaking-only subscription patch classes without per-user querySelector. */
+  /** Each participant row now in the list, by user id: the profile popup's
+   *  fallback focus. Set when a row is built; deleted when it is disposed,
+   *  only if the map still holds that row (a user moved between channels is
+   *  built in the new list before the old row goes). */
   const voiceRowByUserId = new Map<number, HTMLElement>();
 
-  /**
-   * Bumped by every refresh that can change a voice row's rendered state
-   * (voice membership/streams/E2EE, connection status, timeout). Voice rows
-   * fold it into their signature, so those refreshes rebuild them while text
-   * rows stay keyed (B9-21).
-   */
-  let voiceTick = 0;
-
-  function rebuildVoiceRowCache(): void {
-    voiceRowByUserId.clear();
-    if (channelList === null) return;
-    for (const row of channelList.querySelectorAll<HTMLElement>(
-      ".voice-user-item[data-voice-uid]",
-    )) {
-      voiceRowByUserId.set(Number(row.dataset.voiceUid), row);
-    }
-  }
+  /** The voice row inputs (5.4c-2), from the one `select` mount() creates. */
+  let voiceSel: Selection<VoiceRowInputs> | null = null;
+  /** Each voice channel's live wrapper, for the refreshes that skip the full
+   *  render. Set when the wrapper is built or updated; deleted when it is
+   *  disposed, only if the entry is still that element. */
+  const voiceWrappers = new Map<number, { el: Element; channel: Channel }>();
+  /** The chrome model each voice wrapper was last drawn or patched to. */
+  const chromeByEl = new WeakMap<Element, VoiceChannelChromeModel>();
+  const voiceCtx: VoiceUserContext = {
+    avatarColor: pickAvatarColor,
+    // Muted for this client only (the volume menu's Mute, a tile mute, or an
+    // older build's volume of 0); the select reruns on USER_LOCAL_MUTE_CHANGED.
+    localSilenced: (userId) => getUserLocalMute(userId) || getUserVolume(userId) === 0,
+    moderation: onVoiceModerate !== undefined,
+  };
 
   /**
    * Listener owners for every keyed group and row. A reused element keeps its
@@ -800,21 +514,282 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
    *  row shown next to it, not a channel a collapsed category hides. */
   const shownRowsByGroup = new Map<string, Channel[]>();
 
-  /** Abort a group's or row's owner and those of the rows inside it. */
+  /** Abort a group's or row's owner and those of the rows inside it,
+   *  participant rows included, and forget the ones the sidebar indexes. */
   function disposeOwned(el: Element): void {
-    for (const owned of [el, ...el.querySelectorAll(".category-channels-container > *")]) {
+    for (const owned of [
+      el,
+      ...el.querySelectorAll(".category-channels-container > *, .voice-users-list > *"),
+    ]) {
       ownerByEl.get(owned)?.destroy();
+      const uid = (owned as HTMLElement).dataset?.voiceUid;
+      if (uid !== undefined && voiceRowByUserId.get(Number(uid)) === owned) {
+        voiceRowByUserId.delete(Number(uid));
+      }
+      for (const [channelId, entry] of voiceWrappers) {
+        if (entry.el === owned) voiceWrappers.delete(channelId);
+      }
     }
   }
 
-  /** `voiceChanged` is true for the refreshes that can alter a voice row's
-   *  rendered state; they bump `voiceTick` so those rows rebuild. */
-  function renderChannels(voiceChanged = false): void {
+  /** Bind one participant row's handlers. Live data (the user's username,
+   *  streams and server mute, the joined channel) is read when an event fires,
+   *  through `atEvent`, never kept from the render. */
+  function createVoiceUserRow(
+    model: VoiceUserRowModel,
+    channelId: number,
+    atEvent: () => VoiceUser,
+  ): HTMLDivElement {
+    const row = drawVoiceUserRow(model, createAvatarElement);
+    const owner = new Disposable();
+    ownerByEl.set(row, owner);
+    const { signal } = owner;
+    // Sidebar-lifetime signal for anything mounted outside this row: a menu
+    // or modal on document.body must not be torn down by an unrelated
+    // re-render (OC-0281, OC-0282). Row listeners stay on the row's own
+    // signal, so they die with it (OC-0229).
+    const lifetimeSignal = disposable.signal;
+    voiceRowByUserId.set(model.userId, row);
+
+    // A blocked peer's shield opens the re-trust prompt. The modal shows the
+    // username, never the nickname: a nickname is user-settable.
+    if (model.verify?.cls === "mismatch") {
+      row.querySelector(":scope > .vu-verify.mismatch")?.addEventListener(
+        "click",
+        (e) => {
+          e.stopPropagation();
+          void openIdentityMismatchModal(
+            model.userId,
+            atEvent().username || shellText("common.unknown"),
+            lifetimeSignal,
+          );
+        },
+        { signal },
+      );
+    }
+
+    // Right-click (or Shift+F10 / the Menu key, A11Y-01) for the per-user
+    // volume and moderation menu; never on the local user's own row.
+    if (!model.self) {
+      const openVolumeMenu = (x: number, y: number): void => {
+        // The options snapshot is taken now, at click time; the menu code
+        // loads on its first open.
+        const user = atEvent();
+        const mod = buildVoiceModOptions(channelId, user, onVoiceModerate);
+        const username = user.username || shellText("common.unknown");
+        const attempt = (volumeMenuAttempts.get(lifetimeSignal) ?? 0) + 1;
+        volumeMenuAttempts.set(lifetimeSignal, attempt);
+        void volumeMenuScreen
+          .load(() => !lifetimeSignal.aborted)
+          .then((m) => {
+            // A newer open supersedes this one (so a double open mounts one
+            // menu), and a destroyed sidebar mounts nothing.
+            if (
+              m === null ||
+              attempt !== volumeMenuAttempts.get(lifetimeSignal) ||
+              lifetimeSignal.aborted
+            )
+              return;
+            m.showUserVolumeMenu(user.userId, username, x, y, lifetimeSignal, mod);
+            return;
+          });
+      };
+      row.addEventListener(
+        "contextmenu",
+        (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openVolumeMenu(e.clientX, e.clientY);
+        },
+        { signal },
+      );
+      openMenuOnKeyboard(row, openVolumeMenu, signal);
+      // Drag onto another voice channel to move them; the menu's "Move to" is
+      // the keyboard path to the same command. Bound only where the model
+      // draws the row as draggable, so the DOM is the model's draw.
+      if (model.draggable && onVoiceModerate !== undefined) {
+        attachVoiceUserDrag(
+          row,
+          channelId,
+          model.userId,
+          onVoiceModerate.onMove,
+          signal,
+          lifetimeSignal,
+        );
+      }
+    }
+
+    // A click watches their camera or stream; with nothing to watch it opens
+    // their profile, as in the member list.
+    row.addEventListener(
+      "click",
+      (e) => {
+        // Don't trigger if the right-click menu is open
+        if (e.button !== 0) return;
+        e.stopPropagation();
+        const user = atEvent();
+        if (onWatchStream === undefined || (!user.camera && !user.screenshare)) {
+          openProfile(user.userId, row);
+          return;
+        }
+        // Watching a stream needs a live LiveKit room -- join first.
+        if (voiceStore.getState().currentChannelId !== channelId) {
+          // Read before the join: it refuses inside the wait, and an accepted switch arms one.
+          const refused = joinRetryInMs() > 0;
+          onVoiceJoin(channelId);
+          if (refused) return;
+        }
+        if (voiceStore.getState().currentChannelId !== channelId) return;
+        const tileId = user.screenshare ? user.userId + SCREENSHARE_TILE_ID_OFFSET : user.userId;
+        onWatchStream(tileId);
+      },
+      { signal },
+    );
+    row.addEventListener(
+      "keydown",
+      (e) => {
+        if (e.target !== row || (e.key !== "Enter" && e.key !== " ")) return;
+        e.preventDefault();
+        row.click();
+      },
+      { signal },
+    );
+    return row;
+  }
+
+  /**
+   * Bring a voice wrapper to the current inputs: patch its chrome when the
+   * chrome model changed, then reconcile its participant rows by user id
+   * (speaking patches in place; any other drawn change rebuilds that row).
+   * `.voice-users-list` exists only while the channel has people in it.
+   */
+  function updateVoiceRow(el: Element, ch: Channel): void {
+    if (voiceSel === null) return;
+    const inputs = voiceSel.get();
+    const chrome = voiceChannelChrome(ch, inputs);
+    const prev = chromeByEl.get(el);
+    if (prev !== undefined && !sameModel(prev, chrome)) patchVoiceChannelChrome(el, chrome);
+    chromeByEl.set(el, chrome);
+    voiceWrappers.set(ch.id, { el, channel: ch });
+
+    const users = channelVoiceUsers(inputs, ch.id);
+    let list = el.querySelector<HTMLElement>(":scope > .voice-users-list");
+    if (users.length === 0 && list === null) return;
+    if (list === null) {
+      list = createElement("div", { class: "voice-users-list" });
+      el.appendChild(list);
+    }
+    reconcileModels<VoiceUser, VoiceUserRowModel>(list, users, {
+      key: (u) => String(u.userId),
+      model: (u) => voiceUserModel(u, ch.id, inputs, voiceCtx),
+      patch: { fields: VOICE_USER_PATCH_FIELDS, apply: patchVoiceUserRow },
+      create: (model, atEvent) => createVoiceUserRow(model, ch.id, atEvent),
+      dispose: disposeOwned,
+    });
+    if (users.length === 0) list.remove();
+  }
+
+  /** A voice channel's wrapper: the chrome, the drop target, the channel
+   *  click, then its participant rows, built now so the outer reconcile can
+   *  restore focus into them by key. */
+  function createVoiceRow(channel: Channel, signal: AbortSignal): HTMLDivElement {
+    // voiceSel exists from mount() on, before the first render.
+    const inputs = voiceSel?.get();
+    // i18n-exempt: developer-facing invariant error, never shown to a user
+    if (inputs === undefined) throw new Error("voice row built before the sidebar mounted");
+    const wrapper = drawVoiceChannelChrome(voiceChannelChrome(channel, inputs));
+    if (onVoiceModerate !== undefined) markVoiceDropTarget(wrapper, channel.id);
+    wrapper.querySelector(":scope > .channel-item")?.addEventListener(
+      "click",
+      () => {
+        // Frozen while the WS socket is down or timed out: a no-op, the reason
+        // is the row's title. Everything is read now, at click time: the
+        // wrapper is reused across joins and leaves.
+        const joined = voiceStore.getState().currentChannelId === channel.id;
+        if (uiStore.getState().connectionStatus !== "connected") return;
+        if (!joined && safetyStore.getState().timeout !== null) return;
+        if (joined) {
+          // A repeat click while this join is still in progress (a double-click,
+          // or retrying a slow "securing") must not cancel it: toggling here
+          // cycled voice_join/voice_leave several times a second. The voice
+          // widget's Disconnect still ends a join in progress.
+          const status = voiceStore.getState().voiceStatus;
+          if (status === "joining" || status === "securing") return;
+          onOpenCall();
+        } else {
+          onVoiceJoin(channel.id);
+        }
+      },
+      { signal },
+    );
+    updateVoiceRow(wrapper, channel);
+    return wrapper;
+  }
+
+  /** Where focus sits on a participant row, if it does: its channel, user and
+   *  position in that channel's list. */
+  interface VoiceFocus {
+    readonly channelId: number;
+    readonly userId: number;
+    readonly index: number;
+  }
+
+  function captureVoiceFocus(): VoiceFocus | null {
+    const active = document.activeElement;
+    if (!(active instanceof HTMLElement) || channelList === null) return null;
+    if (!channelList.contains(active)) return null;
+    const row = active.closest<HTMLElement>(".voice-users-list > .voice-user-item");
+    const list = row?.parentElement ?? null;
+    const item = list?.parentElement?.querySelector<HTMLElement>(":scope > .channel-item") ?? null;
+    if (row === null || list === null || item === null) return null;
+    return {
+      channelId: Number(item.dataset.channelId),
+      userId: Number(row.dataset.voiceUid),
+      index: Array.from(list.children).indexOf(row),
+    };
+  }
+
+  /**
+   * A focused participant who left or was moved hands focus to the
+   * participant now at their position, else to the channel's own row, never
+   * to the page. A kept or rebuilt row keeps focus by itself (the reconciler
+   * follows its key), and a wrapper that is gone is `reconcileRows`' case.
+   */
+  function restoreVoiceFocus(was: VoiceFocus | null): void {
+    if (was === null || channelList === null) return;
+    const entry = voiceWrappers.get(was.channelId);
+    if (entry === undefined || !channelList.contains(entry.el)) return;
+    const list = entry.el.querySelector(":scope > .voice-users-list");
+    const rows = list === null ? [] : Array.from(list.children);
+    if (rows.some((r) => (r as HTMLElement).dataset.voiceUid === String(was.userId))) return;
+    const next =
+      rows.length > 0
+        ? rows[Math.min(was.index, rows.length - 1)]
+        : entry.el.querySelector(":scope > .channel-item");
+    (next as HTMLElement | null | undefined)?.focus();
+  }
+
+  /** Run `updateVoiceRow` on every live voice wrapper: the cheap path for a
+   *  change that leaves which channels are occupied as it was. */
+  function refreshVoiceRows(): void {
+    if (channelList === null) return;
+    const focus = captureVoiceFocus();
+    for (const { el, channel } of Array.from(voiceWrappers.values())) {
+      if (channelList.contains(el)) updateVoiceRow(el, channel);
+    }
+    restoreVoiceFocus(focus);
+  }
+
+  function renderChannels(): void {
+    const focus = captureVoiceFocus();
+    drawChannels();
+    restoreVoiceFocus(focus);
+  }
+
+  function drawChannels(): void {
     if (channelList === null) {
       return;
     }
-    if (voiceChanged) voiceTick++;
-    voiceRowByUserId.clear();
 
     const grouped = getChannelsByCategory();
     const activeChannelId = channelsStore.getState().activeChannelId;
@@ -893,11 +868,20 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
       shown.splice(0, shown.length, ...rows);
       // A focused row a collapsed category stops showing (read, muted, emptied)
       // hands focus to the category's arrow instead of dropping it to the page.
+      // The row is the container's child holding focus, so a focused
+      // participant counts for its voice channel: it sits beside that
+      // channel's .channel-item, not inside it.
       const focused = document.activeElement;
+      const holder =
+        focused instanceof HTMLElement
+          ? Array.from(container.children).find((child) => child.contains(focused))
+          : undefined;
       const focusedRow =
-        focused instanceof HTMLElement && container.contains(focused)
-          ? focused.closest<HTMLElement>(".channel-item")
-          : null;
+        holder === undefined
+          ? null
+          : holder.matches(".channel-item")
+            ? (holder as HTMLElement)
+            : holder.querySelector<HTMLElement>(":scope > .channel-item");
       const losesFocus =
         focusedRow !== null && !rows.some((ch) => String(ch.id) === focusedRow.dataset.channelId);
       const lostIndex = losesFocus
@@ -905,7 +889,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
         : -1;
       reconcileChildren(container, rows, {
         key: (ch) => String(ch.id),
-        signature: (ch) => channelRowSignature(ch, activeChannelId, g.orderIds, voiceTick),
+        signature: (ch) => channelRowSignature(ch, activeChannelId, g.orderIds),
         create: (ch) => {
           const owner = new Disposable();
           const el = renderChannelItem(
@@ -917,22 +901,22 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
             // modal on document.body must not be torn down by an unrelated
             // re-render (OC-0281, OC-0282).
             disposable.signal,
-            onVoiceJoin,
-            onOpenCall,
-            openProfile,
+            createVoiceRow,
             onEditChannel,
             onDeleteChannel,
             container,
             g.channels,
             onReorderChannel,
-            onWatchStream,
-            onVoiceModerate,
             onPurgeChannel,
             shown,
             onInviteFromChannel,
           );
           ownerByEl.set(el, owner);
           return el;
+        },
+        // A reused voice wrapper brings its chrome and participants up to date.
+        update: (el, ch) => {
+          if (ch.type === "voice") updateVoiceRow(el, ch);
         },
         dispose: disposeOwned,
       });
@@ -970,7 +954,6 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     });
 
     setRovingTabindex(channelList, ".channel-item");
-    rebuildVoiceRowCache();
   }
 
   /** Build the header and rows for one category group. */
@@ -1064,11 +1047,6 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     renderChannels();
   }
 
-  /** A voice user's local Mute changed: rebuild the voice rows that show it. */
-  function handleUserLocalMuteChanged(): void {
-    renderChannels(true);
-  }
-
   /** Redraw when the Hide Muted Channels preference flips. */
   function handlePrefChanged(e: Event): void {
     const key = (e as CustomEvent<{ key?: string }>).detail?.key;
@@ -1083,9 +1061,6 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     // The event is dispatched on window by the mute store, so every writer
     // (context menu, Settings unmute) redraws the rows (F16).
     window.addEventListener(CHANNEL_MUTE_CHANGED, handleMuteChanged, { signal: disposable.signal });
-    window.addEventListener(USER_LOCAL_MUTE_CHANGED, handleUserLocalMuteChanged, {
-      signal: disposable.signal,
-    });
 
     // Header
     const header = createElement("div", { class: "channel-sidebar-header" });
@@ -1107,6 +1082,37 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
 
     appendChildren(root, header, channelList);
     container.appendChild(root);
+
+    // Everything the voice rows draw, as one selection over its sources
+    // (5.4c-2). Created before the first render, which reads it, and owned
+    // by the sidebar's lifetime signal, so destroy() releases it.
+    voiceSel = select(
+      [
+        voiceStore,
+        membersStore,
+        authStore,
+        channelsStore,
+        uiStore,
+        safetyStore,
+        // A fresh token per event: localSilenced answers may differ after it.
+        eventSource(USER_LOCAL_MUTE_CHANGED, () => ({})),
+      ],
+      projectVoiceInputs,
+      (next, prev) => {
+        // Collapsed and Hide Muted visibility follow occupancy, so a change
+        // to it takes the full render; everything else (speaking, mute,
+        // verification, connection, a rename) takes the cheap path.
+        if (
+          next.currentChannelId !== prev.currentChannelId ||
+          occupiedKey(next) !== occupiedKey(prev)
+        ) {
+          renderChannels();
+        } else {
+          refreshVoiceRows();
+        }
+      },
+      { signal: disposable.signal, equals: sameVoiceInputs },
+    );
 
     // Initial render
     renderChannels();
@@ -1158,72 +1164,6 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
       () => renderChannels(),
     );
     unsubscribers.push(unsubUi);
-
-    // Re-render voice rows when the WS connection status flips so the join/leave
-    // affordance freezes/unfreezes with a visible reason (§3 connection status).
-    const unsubConnStatus = uiStore.subscribeSelector(
-      (s) => s.connectionStatus,
-      () => renderChannels(true),
-    );
-    unsubscribers.push(unsubConnStatus);
-    unsubscribers.push(
-      safetyStore.subscribeSelector(
-        (s) => s.timeout,
-        () => renderChannels(true),
-      ),
-    );
-
-    // Subscribe to voice store, split in two:
-    //  (a) a structural selector (who is in which channel + mute/deafen/camera/
-    //      screenshare + E2EE verification, excluding `speaking`) that does a
-    //      full re-render;
-    //  (b) a speaking-only patcher that toggles CSS classes on rows cached at
-    //      render time, so a speaker event never destroys DOM elements (which
-    //      kills hover) and never pays a per-user querySelector.
-    const unsubVoiceStructure = voiceStore.subscribeSelector(
-      (state) => {
-        let structSig = `${state.currentChannelId ?? ""}#${state.localSessionFingerprint ?? ""}`;
-        for (const [chId, users] of state.voiceUsers) {
-          structSig += `|${chId}`;
-          for (const [uid, u] of users) {
-            // Include the E2EE verification status, safety number, and session
-            // fingerprint so a verified↔unverified↔mismatch flip *and* a
-            // same-status fingerprint/safety-number change (e.g. a reconnect that
-            // re-announces a fresh ephemeral key, OC-0208) both re-render the
-            // badge (it lives outside voiceUsers, in peerVerifications).
-            const verif = state.peerVerifications?.get(uid);
-            structSig += `:${uid}${u.muted ? "m" : ""}${u.deafened ? "d" : ""}${u.camera ? "c" : ""}${u.screenshare ? "s" : ""}${u.serverMuted === true ? "M" : ""}${u.serverDeafened === true ? "D" : ""}${verif ? `@${verif.status}/${verif.safetyNumber ?? ""}/${verif.sessionFingerprint ?? ""}` : ""}`;
-          }
-        }
-        return structSig;
-      },
-      () => renderChannels(true),
-    );
-    unsubscribers.push(unsubVoiceStructure);
-
-    // structSig above carries no identity field, so a rename (updateMemberProfile,
-    // which bumps roleRevision on every USER_UPDATE) leaves the voice roster's
-    // label stale until an unrelated structural event happens to re-render it
-    // (OC-0333). Re-render on roleRevision to pick up the new name/nickname.
-    const unsubMemberRevision = membersStore.subscribeSelector(
-      (s) => s.roleRevision ?? 0,
-      () => renderChannels(true),
-    );
-    unsubscribers.push(unsubMemberRevision);
-
-    // Registered after the structural subscription so a structural change in
-    // the same notification re-renders (and refreshes the row cache) first.
-    const unsubSpeaking = voiceStore.subscribe((state) => {
-      for (const [, users] of state.voiceUsers) {
-        for (const [uid, u] of users) {
-          const row = voiceRowByUserId.get(uid);
-          if (row !== undefined) {
-            row.classList.toggle("speaking", u.speaking);
-          }
-        }
-      }
-    });
-    unsubscribers.push(unsubSpeaking);
   }
 
   function destroy(): void {
@@ -1237,6 +1177,8 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     }
     unsubscribers.length = 0;
     voiceRowByUserId.clear();
+    voiceWrappers.clear();
+    voiceSel = null;
     if (root !== null) {
       root.remove();
       root = null;
