@@ -606,9 +606,9 @@ func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64,
 	if msg.Deleted {
 		return nil, fmt.Errorf("%w: cannot delete this message", ErrDeletedMessage)
 	}
-	// A call log or group event row is read-only for everyone, moderators
-	// included. It goes only with its channel, erasure or retention.
-	if msg.Kind != db.MessageKindUser {
+	// Call and group rows are read-only for everyone, moderators included. A
+	// pin row deletes like a message (WP 6.12).
+	if msg.Kind != db.MessageKindUser && msg.Kind != db.MessageKindPinAdd {
 		return nil, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
 	}
 

@@ -353,8 +353,8 @@ func TestDeleteChannel_CascadesCallTables(t *testing.T) {
 
 // Call rows and group event rows are read-only wherever messages are written.
 // This keeps them written only by the call log and the group events: no
-// statement outside call_log.sql and group_events.sql (and their Go callers)
-// may set the kind column, so a new insert or update cannot create or retype
+// statement outside call_log.sql, group_events.sql and message_pins.sql (and
+// their Go callers) may set the kind column, so a new insert or update cannot create or retype
 // one.
 func TestCallLog_OnlyWriterOfKind(t *testing.T) {
 	stmt := regexp.MustCompile(`(?is)(INSERT\s+(?:OR\s+\w+\s+)?INTO\s+messages\b[^;` + "`" + `]*|UPDATE\s+messages\s+SET\b[^;` + "`" + `]*)`)
@@ -371,7 +371,7 @@ func TestCallLog_OnlyWriterOfKind(t *testing.T) {
 	for _, f := range files {
 		base := filepath.Base(f)
 		if strings.HasSuffix(base, "_test.go") || base == "call_log.sql" || base == "call_log.go" ||
-			base == "group_events.sql" || base == "group_events.go" {
+			base == "group_events.sql" || base == "group_events.go" || base == "message_pins.sql" {
 			continue
 		}
 		raw, err := os.ReadFile(f)
@@ -438,7 +438,7 @@ func TestPurgeUserChannelMessagesSince_SkipsCallRows(t *testing.T) {
 func TestSetMessagePinned_CallRowNotFound(t *testing.T) {
 	f := newCallFixture(t)
 	row := f.startCall(t, f.alice)
-	if err := f.database.SetMessagePinned(context.Background(), row.Message.ID, true); !errors.Is(err, db.ErrNotFound) {
+	if _, err := f.database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: row.Message.ID, Pinned: true, UserID: 1}); !errors.Is(err, db.ErrNotFound) {
 		t.Fatalf("pin call row: err = %v, want ErrNotFound", err)
 	}
 	if got := count(t, f.database, `SELECT pinned FROM messages WHERE id = ?`, row.Message.ID); got != 0 {

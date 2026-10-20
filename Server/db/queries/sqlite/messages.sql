@@ -27,8 +27,9 @@ RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned
           mentions_everyone, pinned_at, kind;
 
 -- name: SoftDeleteMessage :execresult
--- kind = 0: a call log row (kind 1) is never soft-deleted by a user.
-UPDATE messages SET deleted = 1 WHERE id = ? AND deleted = 0 AND kind = 0;
+-- kind IN (0, 7): an ordinary message or a pin row (kind 7) may be deleted. A
+-- call log row (kind 1) or a group event row (kinds 2 to 6) never is.
+UPDATE messages SET deleted = 1 WHERE id = ? AND deleted = 0 AND kind IN (0, 7);
 
 -- name: SetMessagePinned :execresult
 -- pinned_at is the pin timestamp for ordering; the Go layer passes a stamp when

@@ -624,6 +624,13 @@ the owner removing one writes `group_remove`, a leave writes `group_leave`
 `group_rename`, and an icon set or removed writes `group_icon`, each in the same
 transaction as the change.
 
+Kind 7 is the pin row `pin_add` (WP 6.12, no migration). Its `reply_to` holds the
+pinned message id (`ON DELETE SET NULL`, so a purged target leaves the row with a
+null link), its author is the pinner and `content` is the English fallback. It is
+written by `SetMessagePinned` in the pin's own transaction, once per message per
+10 minutes and never for a re-pin. Unlike kinds 1 to 6 it is soft-deletable and
+purgeable like a message (`kind IN (0, 7)`).
+
 `channels.dm_owner_id` (migration 065) names a group DM's owner. A group with at
 least one member always has an owner who is a member: create sets it to the
 creator, a leave runs one statement that gives a missing or departed owner to

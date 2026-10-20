@@ -340,7 +340,7 @@ func TestGetPinnedMessages_ReturnsPinnedOnly(t *testing.T) {
 
 	id1, _ := database.CreateMessage(context.Background(), chID, userID, "pinned msg", nil)
 	_, _ = database.CreateMessage(context.Background(), chID, userID, "not pinned", nil)
-	_ = database.SetMessagePinned(context.Background(), id1, true)
+	_, _ = database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: id1, Pinned: true, UserID: 1})
 
 	msgs, err := database.GetPinnedMessages(context.Background(), chID, userID)
 	if err != nil {
@@ -366,7 +366,7 @@ func TestSetMessagePinned_Pin(t *testing.T) {
 
 	id, _ := database.CreateMessage(context.Background(), chID, userID, "to pin", nil)
 
-	if err := database.SetMessagePinned(context.Background(), id, true); err != nil {
+	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: id, Pinned: true, UserID: 1}); err != nil {
 		t.Fatalf("SetMessagePinned(true): %v", err)
 	}
 
@@ -382,8 +382,8 @@ func TestSetMessagePinned_Unpin(t *testing.T) {
 	chID := seedChannel(t, database, "unpin-ch")
 
 	id, _ := database.CreateMessage(context.Background(), chID, userID, "to unpin", nil)
-	_ = database.SetMessagePinned(context.Background(), id, true)
-	if err := database.SetMessagePinned(context.Background(), id, false); err != nil {
+	_, _ = database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: id, Pinned: true, UserID: 1})
+	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: id, Pinned: false, UserID: 1}); err != nil {
 		t.Fatalf("SetMessagePinned(false): %v", err)
 	}
 
@@ -396,7 +396,7 @@ func TestSetMessagePinned_Unpin(t *testing.T) {
 func TestSetMessagePinned_NotFound(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	err := database.SetMessagePinned(context.Background(), 99999, true)
+	_, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: 99999, Pinned: true, UserID: 1})
 	if err == nil {
 		t.Error("expected error for non-existent message")
 	}
@@ -410,7 +410,7 @@ func TestSetMessagePinned_DeletedMessage(t *testing.T) {
 	id, _ := database.CreateMessage(context.Background(), chID, userID, "deleted", nil)
 	_ = database.DeleteMessage(context.Background(), id, userID, false)
 
-	err := database.SetMessagePinned(context.Background(), id, true)
+	_, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: id, Pinned: true, UserID: 1})
 	if err == nil {
 		t.Error("expected error when pinning deleted message")
 	}
