@@ -90,7 +90,9 @@ export const shards = {
     "src/lib/virtualRange.ts",
     "src/features/members/memberModel.ts",
     "src/features/members/memberRow.view.ts",
-  ], // ~513 mutants (estimated); 664 lines + virtualRange.ts and memberModel.ts (new)
+    "src/features/channels/voiceRow.view.ts",
+    "src/features/channels/voiceRowModel.ts",
+  ], // ~513 mutants (estimated); 664 lines + virtualRange.ts and memberModel.ts (new), + voiceRow.view.ts and voiceRowModel.ts (new)
   "audio-media-3": [
     "src/lib/noise-suppression.ts",
     "src/lib/deviceManager.ts",
