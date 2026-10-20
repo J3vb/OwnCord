@@ -8,7 +8,7 @@
 // still pass. So each canary asserts that the real eslint.config.js ENABLES the
 // rule at the filePath of a real production module it is meant to cover, and
 // separately that the rule reports on the canary's code shape when run in
-// isolation (without that filePath).
+// isolation (the filePath is passed only so a path-scoped rule sees its module).
 //
 // Adding a rule to eslint-rules.js without a canary here fails the
 // "every rule has a canary" check at the bottom of this file.
@@ -29,6 +29,8 @@ const clientRoot = path.resolve(__dirname, "../..");
 const eslint = new ESLint({ cwd: clientRoot });
 const linter = new Linter({ configType: "flat" });
 const flatConfig = {
+  // The canary filenames are .ts paths, which a flat config only lints when it names them.
+  files: ["**/*.ts"],
   languageOptions: { ecmaVersion: 2022 as const, sourceType: "module" as const },
   plugins: { local: localRules },
 };
@@ -46,6 +48,8 @@ interface Canary {
   readonly shape?: string;
   /** The severity eslint.config.js sets: 2 (error, the default) or 1 (warn). */
   readonly severity?: 1 | 2;
+  /** True when eslint.config.js passes the rule an options object (a baseline). */
+  readonly hasOptions?: boolean;
 }
 
 const CANARIES: readonly Canary[] = [
@@ -184,6 +188,29 @@ const CANARIES: readonly Canary[] = [
     code: `this.ws.on("x", () => {});`,
     messageId: "discarded",
   },
+  {
+    rule: "local/layer-direction",
+    filePath: "src/lib/presence.ts",
+    code: `import { MainPage } from "@pages/MainPage";`,
+    messageId: "upwardImport",
+    hasOptions: true,
+  },
+  {
+    rule: "local/layer-direction",
+    shape: "relative",
+    filePath: "src/stores/voice.store.ts",
+    code: `import { x } from "../components/Foo";`,
+    messageId: "upwardImport",
+    hasOptions: true,
+  },
+  {
+    rule: "local/layer-direction",
+    shape: "dynamic import",
+    filePath: "src/lib/livekitSession.ts",
+    code: `async function f() { return import("@pages/MainPage"); }`,
+    messageId: "upwardImport",
+    hasOptions: true,
+  },
 ];
 
 describe("custom lint-rule canaries (ARCH-06)", () => {
@@ -193,14 +220,25 @@ describe("custom lint-rule canaries (ARCH-06)", () => {
       // Scope check: a rule that a refactor scoped away is disabled here, and
       // an inert rule is exactly the failure this canary exists to catch.
       const config = await eslint.calculateConfigForFile(path.join(clientRoot, canary.filePath));
-      expect(
-        config?.rules?.[canary.rule],
-        `${canary.rule} not enabled at ${canary.filePath}`,
-      ).toEqual([canary.severity ?? 2]);
+      const configured = config?.rules?.[canary.rule];
+      if (canary.hasOptions) {
+        expect(configured?.[0], `${canary.rule} not enabled at ${canary.filePath}`).toBe(
+          canary.severity ?? 2,
+        );
+        expect(configured?.[1], `${canary.rule} lost its options`).toBeDefined();
+      } else {
+        expect(configured, `${canary.rule} not enabled at ${canary.filePath}`).toEqual([
+          canary.severity ?? 2,
+        ]);
+      }
 
-      const fired = linter.verify(canary.code, [
-        { ...flatConfig, rules: { [canary.rule]: "error" } },
-      ]);
+      // The filename is passed so a path-scoped rule (layer-direction) sees
+      // the module it guards; the other rules ignore it.
+      const fired = linter.verify(
+        canary.code,
+        [{ ...flatConfig, rules: { [canary.rule]: "error" } }],
+        path.join(clientRoot, canary.filePath),
+      );
       expect(
         fired.map((m) => m.messageId),
         `${canary.rule} did not fire on its canary shape at ${canary.filePath}`,

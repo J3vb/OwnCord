@@ -1,6 +1,13 @@
+import { readFileSync } from "node:fs";
 import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
 import localRules from "./eslint-rules.js";
+
+// Upward imports that predate local/layer-direction; shrink-only
+// (tests/unit/layer-baseline.test.ts).
+const layerBaseline = JSON.parse(
+  readFileSync(new URL("./scripts/layer-baseline.json", import.meta.url), "utf8"),
+);
 
 export default tseslint.config(
   eslint.configs.recommended,
@@ -126,6 +133,16 @@ export default tseslint.config(
     plugins: { local: localRules },
     rules: {
       "local/no-store-write-in-ws-on": "error",
+    },
+  },
+  {
+    // Layers import downward or sideways only (rank list in eslint-rules.js).
+    // Tests are exempt; the baseline lists the pre-existing upward imports.
+    files: ["src/**/*.ts"],
+    ignores: ["src/**/*.test.ts"],
+    plugins: { local: localRules },
+    rules: {
+      "local/layer-direction": ["error", { baseline: layerBaseline }],
     },
   },
   {

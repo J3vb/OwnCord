@@ -375,6 +375,45 @@ writer's `Stats()`. OwnCord runs one writer and a separate reader pool, so both
 are reported side by side — "the reader never waited" is a claim a document can
 only make after looking.
 
+**Account erasure holds the writer for one chunk at a time (WP 4.1a).** The
+database half of an account erasure used to be one transaction, so every other
+write queued behind it for as long as the account's history took to delete.
+It is now a lock, a drain of short transactions and a finish
+(`docs/architecture/data-lifecycle.md`, O1), and the writer is handed back
+after every one. `BenchmarkEraseAccount` (`Server/db/erasure_bench_test.go`)
+erases a member with 10,000 and 100,000 messages from a file-backed WAL
+database — with a mention on every seventh, an attachment on every tenth,
+reactions on a third as many of another member's messages, and replay events
+naming the member — and reports how the work was cut up:
+
+```
+cd Server && go test -run '^$' -bench 'BenchmarkEraseAccount' -benchtime 1x ./db/
+```
+
+| Messages | Wall time (`ns/op`) | `chunks` | `max_chunk_ms` | Before: one transaction |
+| -------- | ------------------- | -------- | -------------- | ----------------------- |
+| 10,000   | 0.34-0.41 s         | 30       | 27-35 ms       | 0.31 s                  |
+| 100,000  | 4.16-4.22 s         | 228      | 61-97 ms       | 2.89 s                  |
+
+Machine: 4 vCPU Intel Xeon @ 2.1 GHz, 15 GB, ext4 on a virtual disk, Linux
+6.18, Go 1.27; five runs each, quiet host, the same seed in every run.
+`chunks` counts drain transactions; `max_chunk_ms` is the longest any one
+stage (lock, a drain chunk, finish, checkpoint) held the writer, measured
+between consecutive commits. **The gate is `max_chunk_ms` <= 250 at 100,000
+messages: met, with a factor of 2.5 to 4 to spare.** Wall time is recorded, not
+gated: chunking trades a longer erasure (about 1.4x here) for a writer that is
+never held longer than the slowest chunk, which is about 3% of what the single
+transaction held it. The slowest stage is the finish transaction, and a busy
+host or a slow disk moves every figure: an earlier run on the same box, with
+other test binaries running beside it, measured up to 184 ms. Nothing here has
+been measured on an SD card.
+
+Not yet measured: erasure under the `capacity` profile's load (a user seeded
+with 100,000-500,000 messages and erased mid-run, recording pong-timeout
+disconnects and `db_writer_wait_seconds`). `load-baseline.yml` has no erasure
+step, so that run needs a small harness addition; its result decides whether
+the per-connection command worker (4.1-F2) is needed.
+
 ### Message fan-out, to the ceiling
 
 `ceiling-search` steps connections by `K6_CEILING_STEP` (default 100) up to
@@ -1872,3 +1911,32 @@ to 500, passes the zero-shedding gate, and locates the last all-budget step at
 also queueing, and the message paths break at 500 on the **SQLite writer**. The 2026-09-16 table above remains historical single-channel evidence and is
 **not** comparable to the multi-channel shape — the new spread changes recipient
 fan-out at every step, including 100.
+
+### Event persistence ablation (WP 4.6c, 2026-10-20)
+
+**Question.** Does the persisted `events` table (every message is also written to it, for the `db` reconnect tier) cost enough writer time to matter, and does it serve enough resumes to earn that cost?
+
+**Method.** Four `ceiling-search` runs, `ceiling_max=500`, constrained leg, all dispatched within ten seconds of each other from `dev` commit `e6df78a6`, in the order on, off, on, off. Each run's metrics snapshot confirmed its arm (`event_persister` present with `persisted > 0` for `on`, absent for `off`). Runs: `on` [39454778655](https://github.com/J3vb/OwnCord/actions/runs/39454778655) and [39454792958](https://github.com/J3vb/OwnCord/actions/runs/39454792958); `off` [39454788891](https://github.com/J3vb/OwnCord/actions/runs/39454788891) and [39454797909](https://github.com/J3vb/OwnCord/actions/runs/39454797909). The runs shared one four-core runner type, but not one machine at one time, which matters below.
+
+Recipient delivery p95 / p99 in ms, from the k6 summary printed in each job log:
+
+| Step | on #1         | on #2         | off #1        | off #2        |
+| ---- | ------------- | ------------- | ------------- | ------------- |
+| 100  | 7 / 9         | 8 / 10        | 7 / 9         | 5 / 8         |
+| 200  | 17 / 25       | 20 / 29       | 19 / 29       | 10 / 16       |
+| 300  | 33 / 62       | 41 / 70       | 32 / 57       | 20 / 41       |
+| 400  | 118 / 191     | 167 / 271     | 129 / 199     | 83 / 140      |
+| 500  | 19388 / 25244 | 23034 / 27925 | 21216 / 26757 | 11517 / 16770 |
+
+Writer wait at step 500 (seconds waited / waits): on 324 s / 15,444 and 1,396 s / 17,079; off 383 s / 15,252 and 352 s / 14,111. Event persister in the `on` runs: 82,338 and 80,794 events persisted, 4,956 and 4,937 flushes, 0 dropped, 0 errors.
+
+**What the runs say.**
+
+- **Step 500 is a cliff in every run**, on or off, and step 400 holds in every run. The message paths break on the SQLite writer at 500, as in the earlier runs. Turning the table off did not move the last step that holds.
+- **The two arms do not separate.** The two `off` runs differ from each other (step 400 p95: 129 and 83 ms) by more than the mean `off` run differs from the mean `on` run (about 106 against 143 ms). One `on` run shows 1,396 s of writer wait at step 500 against 324 to 383 s in the others. The noise between runs on a shared runner is larger than any effect of the table that these runs can resolve. **No claim is made that the table costs, or does not cost, delivery latency at this load.**
+- **The load does not exercise the tier it is meant to judge.** In all four runs `reconnect_tier_buffer`, `reconnect_tier_db`, `reconnect_tier_full` and `reconnect_ring_misses` ended at 0: no client resumed. These runs measure the write cost of the table only. They cannot say how often it is read.
+- Run totals for context: 0 topic sheds and 0 connection rejects in all four runs.
+
+**Recommendation to the owner.** Keep the table for now; remove nothing. The removal rule set for this work package needs one of two facts: the table serves under 1% of resumes and under 10% of ring misses, or switching it off gains a ceiling step. The runs above show neither: there were no resumes to count, and no step gained. The second fact would need a quieter measurement than a shared runner gives. The first needs production data.
+
+**Next step, and what it needs.** Save `GET /api/v1/metrics` once a day for at least seven days on a build that includes WP 4.6a, before any restart, and record the daily growth of `reconnect_tier_buffer`, `reconnect_tier_db`, `reconnect_tier_full` and `reconnect_ring_misses`. The table's hit rate is `reconnect_tier_db / reconnect_ring_misses`. If that is under 10% and `reconnect_tier_db` is under 1% of all resumes, remove the table's reads and writes; otherwise keep it. `reconnect_tier_db` and `reconnect_tier_full` are readable on any build today.

@@ -18,6 +18,7 @@ import { createElement, appendChildren, setText } from "../../lib/dom";
 import { createIcon, type IconName } from "../../lib/icons";
 import { shellText } from "../../i18n/shell";
 import type { createAvatarElement } from "../../components/message-list/avatar";
+import { nsfwIndicator, privateIndicator } from "./channelRow.view";
 
 /** The avatar drawer, injected: a feature reaches the UI layer only lazily. */
 export type CreateAvatar = typeof createAvatarElement;
@@ -97,43 +98,6 @@ export const VOICE_CHROME_PATCH_FIELDS = [
   "timeoutReason",
   "capacity",
 ] as const;
-
-/**
- * The marker on an age-restricted channel row.
- *
- * A glyph plus a title rather than a coloured name: the flag is information
- * about the channel, and recolouring the name would collide with the unread
- * and mention states the row already encodes that way.
- */
-export function nsfwIndicator(channelId: number): HTMLSpanElement {
-  const badge = createElement("span", {
-    class: "ch-nsfw",
-    "data-testid": `channel-nsfw-${channelId}`,
-    "aria-label": shellText("channel.ageRestricted"),
-  });
-  badge.title = shellText("channel.ageRestrictedTitle");
-  badge.appendChild(createIcon("shield-alert", 13));
-  return badge;
-}
-
-/**
- * The lock over the bottom-right of a private channel's type glyph, as Discord
- * marks one. A sibling of the glyph rather than a child: the glyph span is
- * aria-hidden, and the lock must stay announced. Positioned by CSS against the
- * row, so it sits alongside the nsfw marker and the capacity badge.
- */
-export function privateIndicator(channelId: number): HTMLSpanElement {
-  const label = shellText("channel.private");
-  const badge = createElement("span", {
-    class: "ch-lock",
-    "data-testid": `channel-private-${channelId}`,
-    role: "img",
-    "aria-label": label,
-  });
-  badge.title = label;
-  badge.appendChild(createIcon("lock", 9));
-  return badge;
-}
 
 function iconSpan(cls: string, icon: IconName): HTMLSpanElement {
   const span = createElement("span", { class: cls });

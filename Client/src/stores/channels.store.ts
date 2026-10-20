@@ -453,32 +453,37 @@ export function getKnownCategories(): string[] {
  * Inside a category, text-type channels precede voice channels (N23).
  */
 export function getChannelsByCategory(): Map<string | null, Channel[]> {
-  return channelsStore.select((s) => {
-    const sorted = [...s.channels.values()]
-      // DM channels are shown in the DM sidebar, not the channel list
-      .filter((channel) => channel.type !== "dm")
-      .toSorted((a, b) => a.position - b.position || a.id - b.id);
-    const grouped = new Map<string | null, Channel[]>();
-    for (const channel of sorted) {
-      const category = displayCategoryOf(channel);
-      const existing = grouped.get(category);
-      if (existing !== undefined) {
-        existing.push(channel);
-      } else {
-        grouped.set(category, [channel]);
-      }
+  return channelsStore.select((s) => groupChannelsByCategory(s.channels));
+}
+
+/** `getChannelsByCategory` over a channel map the caller already holds. */
+export function groupChannelsByCategory(
+  channels: ReadonlyMap<number, Channel>,
+): Map<string | null, Channel[]> {
+  const sorted = [...channels.values()]
+    // DM channels are shown in the DM sidebar, not the channel list
+    .filter((channel) => channel.type !== "dm")
+    .toSorted((a, b) => a.position - b.position || a.id - b.id);
+  const grouped = new Map<string | null, Channel[]>();
+  for (const channel of sorted) {
+    const category = displayCategoryOf(channel);
+    const existing = grouped.get(category);
+    if (existing !== undefined) {
+      existing.push(channel);
+    } else {
+      grouped.set(category, [channel]);
     }
-    // Text-type channels (text, announcement) come before voice inside each
-    // category, each kind keeping its position order. A stable partition after
-    // grouping, so the categories keep the order the position sort gave them.
-    for (const [category, list] of grouped) {
-      grouped.set(
-        category,
-        list.toSorted((a, b) => Number(a.type === "voice") - Number(b.type === "voice")),
-      );
-    }
-    return grouped;
-  });
+  }
+  // Text-type channels (text, announcement) come before voice inside each
+  // category, each kind keeping its position order. A stable partition after
+  // grouping, so the categories keep the order the position sort gave them.
+  for (const [category, list] of grouped) {
+    grouped.set(
+      category,
+      list.toSorted((a, b) => Number(a.type === "voice") - Number(b.type === "voice")),
+    );
+  }
+  return grouped;
 }
 
 /**

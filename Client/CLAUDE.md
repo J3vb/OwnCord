@@ -77,6 +77,16 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   writer by hand. Every custom rule has a canary in
   `tests/unit/eslint-rules-canary.test.ts` that fails if its scope stops
   covering the module it guards (ARCH-06).
+- **Layers import downward or sideways only** (`local/layer-direction`, an
+  error on `src/**/*.ts` except tests): `main.ts` and `app/`, then `pages/`,
+  then `components/` and `features/`, then `stores/`, then `lib/`, `platform/`
+  and `i18n/`, then `styles/` and `assets/`. A static import, `export … from`
+  or dynamic `import()` of a higher layer fails lint; `import type` does not
+  count. The imports that predate the rule are listed in
+  `scripts/layer-baseline.json`, which only shrinks
+  (`tests/unit/layer-baseline.test.ts` fails on a stale entry): when you remove
+  one, delete its entry and lower the cap in that test. The rank list and the
+  alias map are in the rule's header in `eslint-rules.js`.
 - `src/` has **no import cycles**: `npm run lint:cycles` (oxlint `import/no-cycle`)
   runs at `--max-warnings=0`, so a new cycle fails `npm run lint`. When a
   lower-level module has to trigger a higher one, invert the edge rather than

@@ -270,6 +270,38 @@ describe("attachDragHandlers permission gate", () => {
 
     expect(rig.items.get(7)?.dataset.dragChannelId).toBe("7");
   });
+
+  it("an injected canManage overrides the store gate", () => {
+    const attach = (canManage: boolean): HTMLElement => {
+      const container = document.createElement("div");
+      document.body.appendChild(container);
+      const el = document.createElement("div");
+      container.appendChild(el);
+      const ac = new AbortController();
+      rigAborts.push(ac);
+      const channels = [makeCh(1, 0)];
+      attachDragHandlers(
+        el,
+        channels[0]!,
+        container,
+        channels,
+        ac.signal,
+        ac.signal,
+        vi.fn(),
+        canManage,
+      );
+      return el;
+    };
+
+    // The store says owner, the caller says no: not draggable.
+    signIn("owner");
+    expect(attach(false).classList.contains("channel-draggable")).toBe(false);
+    // The store says a plain member, the caller says yes: draggable.
+    signIn("member");
+    const yes = attach(true);
+    expect(yes.classList.contains("channel-draggable")).toBe(true);
+    expect(yes.dataset.dragChannelId).toBe("1");
+  });
 });
 
 // ── drag threshold ─────────────────────────────────────────────────────────

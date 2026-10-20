@@ -43,3 +43,32 @@ SET state = 'done',
     updated_at = datetime('now'),
     finished_at = datetime('now')
 WHERE id = ?;
+
+-- Chunked erasure (WP 4.1a). The lock stage writes a 'queued' row, each drain
+-- chunk appends the stored_as names it unlinked in the same transaction, and
+-- the finish stage turns the row into the db_done job above. At most one
+-- queued row exists per user while an erasure is under way.
+
+-- name: GetQueuedErasureJobForUser :one
+SELECT id, files
+FROM erasure_jobs
+WHERE user_id = ? AND state = 'queued'
+ORDER BY id ASC;
+
+-- name: InsertQueuedErasureJob :one
+INSERT INTO erasure_jobs (user_id, state, files, replay_purged)
+VALUES (?, 'queued', '[]', 0)
+RETURNING id;
+
+-- name: AppendErasureJobFiles :execrows
+UPDATE erasure_jobs
+SET files = ?,
+    updated_at = datetime('now')
+WHERE id = ? AND state = 'queued';
+
+-- name: MarkErasureJobDBDone :execrows
+UPDATE erasure_jobs
+SET state = 'db_done',
+    files = ?,
+    updated_at = datetime('now')
+WHERE id = ? AND state = 'queued';

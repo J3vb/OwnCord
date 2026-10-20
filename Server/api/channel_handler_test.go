@@ -55,6 +55,11 @@ CREATE TABLE IF NOT EXISTS users (
     custom_status TEXT,
     custom_status_expires_at TEXT
 );
+CREATE TABLE IF NOT EXISTS erasure_jobs (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    state   TEXT    NOT NULL
+);
 CREATE TABLE IF NOT EXISTS sessions (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

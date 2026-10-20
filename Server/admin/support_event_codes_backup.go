@@ -20,6 +20,8 @@ func init() {
 		"restore refused: the database is busy, the WAL checkpoint could not finish": "restore_refused_database_busy",
 		"restore refused: database connections did not close":                        "restore_refused_conns_open",
 		"restore refused: could not remove the database's WAL files":                 "restore_refused_wal_files",
+		"restore refused: could not preserve the event sequence floor":               "restore_refused_preserve_seq_floor_failed",
+		"restore: could not carry the live ws seq floor across the restore":          "restore_seq_floor_carry_failed",
 		"could not prune old safety copies":                                          "safety_copies_prune_failed",
 		"pruned old safety copies":                                                   "safety_copies_pruned",
 		"could not remove the unused pre-restore safety copy":                        "pre_restore_unused_copy_remove_failed",
