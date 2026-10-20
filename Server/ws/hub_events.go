@@ -23,6 +23,9 @@ func (h *Hub) ReplayBuffer() *EventRingBuffer {
 	return h.replayBuf
 }
 
+// CurrentSeq returns the hub's monotonic sequence counter (atomic).
+func (h *Hub) CurrentSeq() uint64 { return atomic.LoadUint64(&h.seq) }
+
 // SeedSeq sets the hub's monotonic sequence counter to seed (atomic). Used
 // at startup to align in-memory seqs with the persisted MAX(events.seq) so
 // wrapped-payload seqs stay monotonic across restarts. Calling SeedSeq with

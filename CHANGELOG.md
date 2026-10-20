@@ -246,6 +246,8 @@ and only when it changes something a contributor or fork holder must do
 **Accounts & admin**
 
 - Downloading a backup from the admin panel stopped partway through when it took longer than 30 seconds, leaving a failed download and a spent link. It now keeps going while data is flowing, and ends only if the browser stops receiving it.
+- After a backup is restored from the admin panel or the restore command, connected apps now fetch everything fresh instead of resuming from older events. When you move a data folder by hand, copy the `.ws-seq-floor` file beside the database along with it.
+- After a backup is restored from the admin panel or the restore command, connected apps now fetch everything fresh instead of resuming from older events. When you move a data folder by hand, copy the `.ws-seq-floor` file beside the database along with it; the same goes when you restore another machine's backup to move a server.
 - "Update now" on a server whose install folder the service cannot write to failed with a vague download error after the download. The Updates page now says the server cannot replace its own program file and to install the release by hand, and nothing is downloaded or restarted.
 
 **Login & connection**
