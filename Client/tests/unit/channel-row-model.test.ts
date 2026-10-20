@@ -126,24 +126,12 @@ describe("text channel row model", () => {
     expect(draggable(inputs({ selfRole: "member" }), ctx())).toBe(false);
   });
 
-  it("voice row carries mentionCount, never unread", () => {
-    const g = group(null, []);
-    const voice = ch(3, { type: "voice", unreadCount: 5, mentionCount: 2 });
-    const model = channelRowModel(voice, g, inputs(), ctx());
-    if (model.kind !== "voice") throw new Error("expected a voice row");
-    expect(model.mentionCount).toBe(2);
-    expect("unread" in model).toBe(false);
-    const quiet = channelRowModel(ch(3, { type: "voice", unreadCount: 5 }), g, inputs(), ctx());
-    if (quiet.kind !== "voice") throw new Error("expected a voice row");
-    expect(quiet.mentionCount).toBe(0);
-  });
-
   it("a voice channel model carries no active, muted or unread", () => {
     const g = group(null, []);
     const voice = ch(3, { type: "voice", unreadCount: 5, mentionCount: 2, voiceMaxUsers: 4 });
     const model = channelRowModel(voice, g, inputs({ activeChannelId: 3 }), ctx([3]));
     expect(model.kind).toBe("voice");
-    for (const field of ["active", "muted", "unread", "voiceMaxUsers"]) {
+    for (const field of ["active", "muted", "unread", "mentionCount", "voiceMaxUsers"]) {
       expect(field in model, field).toBe(false);
     }
     expect(Object.keys(model).toSorted()).toEqual([
@@ -151,7 +139,6 @@ describe("text channel row model", () => {
       "channelId",
       "draggable",
       "kind",
-      "mentionCount",
       "name",
       "nsfw",
       "orderIds",

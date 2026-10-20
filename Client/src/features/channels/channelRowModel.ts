@@ -56,9 +56,9 @@ export type ChannelGroup = {
   readonly orderIds: string;
 };
 
-/** A voice channel's wrapper: what rebuilds it. `active`, `muted` and
- *  `unread` are not drawn on it (the mention count is), and the capacity is a chrome
- *  patch (`updateVoiceRow`). */
+/** A voice channel's wrapper: what rebuilds it. `active`, `muted` and `unread`
+ *  are not drawn on it; the capacity and the mention badge are chrome patches
+ *  (`updateVoiceRow`), so a mention never rebuilds the roster. */
 export type VoiceChannelRowModel = {
   readonly kind: "voice";
   readonly channelId: number;
@@ -67,8 +67,6 @@ export type VoiceChannelRowModel = {
   readonly private: boolean;
   /** Drawn on the wrapper by the drag handlers. */
   readonly draggable: boolean;
-  /** Drawn as the mention badge; unread is never drawn on a voice row. */
-  readonly mentionCount: number;
   /** Not drawn: a reorder must rebind the drag and Move handlers. */
   readonly orderIds: string;
   /** Not drawn: decides which menu entries the wrapper binds. */
@@ -189,7 +187,6 @@ export function channelRowModel(
       name: channel.name,
       nsfw: channel.nsfw,
       private: channel.isPrivate,
-      mentionCount: channel.mentionCount,
       draggable,
       orderIds: g.orderIds,
       access,
