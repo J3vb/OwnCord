@@ -98,9 +98,9 @@ func requireUser(w http.ResponseWriter, r *http.Request) (*db.User, bool) {
 	return user, true
 }
 
-// backgroundWriteTimeout bounds AuthMiddleware's detached session writes
-// (the expired-session delete and the API-token touch), so a wedged DB cannot
-// park one goroutine per request forever. A var so tests can shorten it.
+// backgroundWriteTimeout bounds AuthMiddleware's session writes that run when
+// no connection-writes batch is installed (the expired-session delete and the
+// API-token touch), so a wedged DB cannot hold a request forever. A var so tests can shorten it.
 var backgroundWriteTimeout = 5 * time.Second
 
 // AuthMiddleware reads the "Authorization: Bearer <token>" header, validates
@@ -122,16 +122,17 @@ func AuthMiddleware(sessions *service.SessionService) func(http.Handler) http.Ha
 			user, role, sess, err := sessions.ResolveBearer(r.Context(), hash)
 			switch {
 			case errors.Is(err, auth.ErrTokenExpired):
-				// Clean up the expired login session in the background. The request
-				// ctx is cancelled once the 401 is written, so detach cancellation.
-				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), backgroundWriteTimeout)
-				go func(h string) {
-					defer cancel()
-					if err := sessions.DiscardSession(cleanupCtx, h); err != nil {
-						slog.WarnContext(cleanupCtx, "expired session cleanup failed", "error", err)
-					}
-				}(hash)
 				writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "session has expired")
+				// Clean up the expired login session. With the server's batch
+				// installed this only queues the delete for the connection-writes
+				// flush, so no goroutine is spawned (ARCH-034); without one
+				// (tests, the token CLI) it deletes inline, bounded. The ctx is
+				// detached: the delete must not die with the finished request.
+				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), backgroundWriteTimeout)
+				defer cancel()
+				if err := sessions.DiscardSession(cleanupCtx, hash); err != nil {
+					slog.WarnContext(cleanupCtx, "expired session cleanup failed", "error", err)
+				}
 				return
 			case errors.Is(err, auth.ErrUserNotFound):
 				writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "user not found")
@@ -163,7 +164,9 @@ func AuthMiddleware(sessions *service.SessionService) func(http.Handler) http.Ha
 			// throttled to once per sessionTouchInterval per session, so hot API
 			// traffic doesn't queue a write per request; an API-token principal
 			// (sess == nil) is touched off the hot path so it never adds latency
-			// to bot/CI traffic.
+			// to bot/CI traffic: with the server's batch installed the touch is
+			// only queued (one write per token per minute, no goroutine);
+			// without one it is written inline under backgroundWriteTimeout.
 			if sess != nil {
 				if touches.shouldTouch(hash, middlewareNow()) {
 					if err := sessions.TouchSession(r.Context(), hash); err != nil {
@@ -172,12 +175,10 @@ func AuthMiddleware(sessions *service.SessionService) func(http.Handler) http.Ha
 				}
 			} else {
 				touchCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), backgroundWriteTimeout)
-				go func(h string) {
-					defer cancel()
-					if err := sessions.TouchAPIToken(touchCtx, h); err != nil {
-						slog.WarnContext(touchCtx, "failed to touch api token", "error", err)
-					}
-				}(hash)
+				if err := sessions.TouchAPIToken(touchCtx, hash); err != nil {
+					slog.WarnContext(touchCtx, "failed to touch api token", "error", err)
+				}
+				cancel()
 			}
 
 			ctx := context.WithValue(r.Context(), UserKey, user)

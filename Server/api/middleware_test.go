@@ -3,6 +3,7 @@ package api_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
+	"go.uber.org/goleak"
 )
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -1655,5 +1657,82 @@ func TestAdminIPRestrict_NoForwardedPeerWarningWhenPeerRefused(t *testing.T) {
 	}
 	if strings.Contains(buf.String(), "trusted_proxies is empty") {
 		t.Errorf("warned although the allowlist refused the peer; log:\n%s", buf.String())
+	}
+}
+
+// With the server's connection-writes batch installed, an API-token touch and
+// an expired-session delete are only queued (ARCH-034): nothing is written
+// until the batch flushes, and the flush then lands both. That no request
+// spawns a goroutine is enforced by the invariants request-path-go rule, not
+// by the goleak check here, which cannot prove it.
+func TestAuthMiddleware_BatchedTouchAndDiscardAreQueuedUntilFlush(t *testing.T) {
+	database := newAPITestDB(t)
+	batch := service.NewConnWrites(database)
+	sessions := service.NewSessionService(database)
+	sessions.SetConnWrites(batch)
+
+	uid, _ := database.CreateUser(context.Background(), "batched-bot", "hash", 4)
+	apiToken, _ := auth.GenerateToken()
+	if _, err := database.CreateAPIToken(context.Background(), uid, auth.HashToken(apiToken), "ci", nil); err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+	expiredToken, _ := auth.GenerateToken()
+	pastTime := time.Now().Add(-time.Hour).UTC().Format("2006-01-02 15:04:05")
+	if _, err := database.ExecContext(context.Background(),
+		`INSERT INTO sessions (user_id, token, device, ip_address, expires_at) VALUES (?, ?, ?, ?, ?)`,
+		uid, auth.HashToken(expiredToken), "test", "127.0.0.1", pastTime,
+	); err != nil {
+		t.Fatalf("insert expired session: %v", err)
+	}
+
+	before := goleak.IgnoreCurrent()
+	h := api.AuthMiddleware(sessions)(http.HandlerFunc(ok))
+	for range 25 {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, withBearer(httptest.NewRequest(http.MethodGet, "/", nil), apiToken))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("api token request = %d, want 200", rec.Code)
+		}
+		rec = httptest.NewRecorder()
+		h.ServeHTTP(rec, withBearer(httptest.NewRequest(http.MethodGet, "/", nil), expiredToken))
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expired session request = %d, want 401", rec.Code)
+		}
+	}
+	goleak.VerifyNone(t, before)
+
+	var rows int
+	if err := database.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM sessions WHERE token = ?`, auth.HashToken(expiredToken)).Scan(&rows); err != nil {
+		t.Fatalf("count sessions: %v", err)
+	}
+	if rows != 1 {
+		t.Fatalf("expired session rows before the flush = %d, want 1 (the delete is queued, not written)", rows)
+	}
+	var lastUsed sql.NullString
+	tokenHash := auth.HashToken(apiToken)
+	if err := database.QueryRowContext(context.Background(),
+		`SELECT last_used_at FROM api_tokens WHERE token_hash = ?`, tokenHash).Scan(&lastUsed); err != nil {
+		t.Fatalf("read last_used_at: %v", err)
+	}
+	if lastUsed.Valid {
+		t.Fatalf("api_tokens.last_used_at = %q before the flush, want NULL (the touch is queued, not written)", lastUsed.String)
+	}
+	if err := batch.Flush(context.Background()); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+	if err := database.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM sessions WHERE token = ?`, auth.HashToken(expiredToken)).Scan(&rows); err != nil {
+		t.Fatalf("count sessions: %v", err)
+	}
+	if rows != 0 {
+		t.Fatalf("expired session rows after the flush = %d, want 0", rows)
+	}
+	if err := database.QueryRowContext(context.Background(),
+		`SELECT last_used_at FROM api_tokens WHERE token_hash = ?`, tokenHash).Scan(&lastUsed); err != nil {
+		t.Fatalf("read last_used_at: %v", err)
+	}
+	if !lastUsed.Valid {
+		t.Fatal("api_tokens.last_used_at is still NULL after the flush")
 	}
 }

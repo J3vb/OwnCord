@@ -322,6 +322,7 @@ func (a *App) startHub() error {
 			return nil
 		})
 	}
+	a.startBackgroundJobs(rt)
 	return nil
 }
 

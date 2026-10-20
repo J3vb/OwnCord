@@ -36,6 +36,9 @@ type maintenance struct {
 	// attention records each step's outcome for the admin attention panel
 	// (RI-07); nil-safe, so partial wirings skip it.
 	attention *service.AttentionService
+	// stepsOverride replaces steps() when non-nil. A test seam: the shutdown
+	// tests need a step they can block and observe. Never set in production.
+	stepsOverride []maintenanceStep
 }
 
 // maintenanceStep is one sweep: job is its name on the admin attention
@@ -84,17 +87,26 @@ func newMaintenance(log *slog.Logger, cfg *config.Config, database *db.DB, svc *
 // startMaintenanceLoop starts the periodic maintenance loop and returns the
 // stop step the maintenance stage registers with App.Close.
 func startMaintenanceLoop(bgCtx context.Context, log *slog.Logger, cfg *config.Config, database *db.DB, svc *service.Services) func() {
-	m := newMaintenance(log, cfg, database, svc)
+	return runMaintenanceLoop(bgCtx, log, newMaintenance(log, cfg, database, svc))
+}
 
+// runMaintenanceLoop is startMaintenanceLoop over an already-built pass.
+func runMaintenanceLoop(bgCtx context.Context, log *slog.Logger, m *maintenance) func() {
 	// The attention panel (RI-07) lists every job, in step order, before the
 	// loop's start-up runs record the first outcomes.
 	for _, step := range m.steps() {
 		m.attention.RegisterJob(step.job, step.failLog)
 	}
 
+	// The loop has a context of its own, so the stop step can cancel an
+	// in-flight tick (a long VACUUM INTO, an erasure pass) BEFORE its bounded
+	// join. bgCtx is cancelled only after that join, by event persistence or
+	// the first-registered background-context step, so a stop that merely
+	// closed a channel always waited out the whole 5 s on a busy tick (ARCH-034).
+	loopCtx, cancelLoop := context.WithCancel(context.WithoutCancel(bgCtx))
 	stopMaintenance := make(chan struct{})
 	maintenanceDone := make(chan struct{})
-	go m.loop(bgCtx, stopMaintenance, maintenanceDone)
+	go m.loop(loopCtx, stopMaintenance, maintenanceDone)
 
 	// The attention sampler samples on its own minute cadence, independent
 	// of a long tick.
@@ -116,6 +128,7 @@ func startMaintenanceLoop(bgCtx context.Context, log *slog.Logger, cfg *config.C
 		// and a bounded join so an in-flight tick (a scheduled backup's
 		// VACUUM INTO can run for seconds) isn't still using the database
 		// while the LIFO-later Close defer tears it down.
+		cancelLoop()
 		close(stopMaintenance)
 		select {
 		case <-maintenanceDone:
@@ -180,6 +193,9 @@ func (m *maintenance) loop(bgCtx context.Context, stopMaintenance, maintenanceDo
 // run: voice mute reconciliation precedes moderation action retention so a
 // mute owner is released before its row can be retired.
 func (m *maintenance) steps() []maintenanceStep {
+	if m.stepsOverride != nil {
+		return m.stepsOverride
+	}
 	return []maintenanceStep{
 		{job: "Expired sessions", failLog: "failed to delete expired sessions", run: m.sweepSessions},
 		{job: "Delivery receipts", failLog: "failed to delete expired message delivery receipts", run: m.sweepMessageDeliveryReceipts},
@@ -204,6 +220,11 @@ func (m *maintenance) steps() []maintenanceStep {
 func (m *maintenance) tick(ctx context.Context) bool {
 	failed := false
 	for _, step := range m.steps() {
+		// Once the loop is cancelled (shutdown), the remaining steps would
+		// only do wasted work before failing; stop walking.
+		if ctx.Err() != nil {
+			break
+		}
 		if m.runStep(ctx, step) != nil {
 			failed = true
 		}
@@ -216,7 +237,9 @@ func (m *maintenance) tick(ctx context.Context) bool {
 func (m *maintenance) runStep(ctx context.Context, step maintenanceStep) error {
 	err := step.run(ctx)
 	m.attention.RecordJob(step.job, err, time.Now())
-	if err != nil {
+	// A step cut short by the shutdown cancelling its context is expected, not
+	// a failure worth a Warn.
+	if err != nil && ctx.Err() == nil {
 		m.log.Warn(step.failLog, "error", err)
 	}
 	return err

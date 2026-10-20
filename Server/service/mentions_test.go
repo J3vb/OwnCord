@@ -515,7 +515,7 @@ func TestSendMessage_DirectMentionIncrementsCount(t *testing.T) {
 func TestSendMessage_MentionCountsWrittenInBackground(t *testing.T) {
 	svc, _, database := newMentionFixture(t)
 	// Undo the fixture's inline seam so bg is the production `go fn()` again.
-	svc.bg = func(fn func()) { go fn() }
+	svc.bgInline = false
 
 	sendAs(t, svc, 1, "@Bob ping")
 
