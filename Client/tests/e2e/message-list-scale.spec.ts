@@ -49,7 +49,18 @@ function pagedHistory(): void {
   const gifEvery = 12;
   const internals = (window as any).__TAURI_INTERNALS__;
   const orig = internals.invoke;
-  const scale = { pages: 0, rebuilds: 0, rows: 0, imageLoads: 0, imageLoadShifts: 0 };
+  const scale = {
+    pages: 0,
+    rebuilds: 0,
+    rows: 0,
+    imageLoads: 0,
+    imageLoadShifts: 0,
+    phase: "first",
+    firstLoads: 0,
+    firstMountShifts: 0,
+    revisitLoads: 0,
+    revisitMountShifts: 0,
+  };
   (window as any).__scale = scale;
   const mine: Record<number, Uint8Array | { status: number; headers: string[][]; url: string }> =
     {};
@@ -115,9 +126,27 @@ function pagedHistory(): void {
   };
 
   // An image's box must already be its final size when the pixels arrive
-  // (chat-scroll-perf PR e): the wrapper's height just before `load` fires and
-  // a frame after it must match. `load` does not bubble, so listen in capture,
-  // which runs before the app's own handler for that image.
+  // (chat-scroll-perf PR e). Two measures: the wrapper's height just before
+  // `load` fires against a frame after it (the sniffed box is in place), and
+  // the height when the wrapper was first mounted against a frame after
+  // `load`, which a revisit (box cached from the first sighting) must keep.
+  // `load` does not bubble, so listen in capture, which runs before the app's
+  // own handler for that image.
+  const mountedHeight = new WeakMap<Element, number>();
+  new MutationObserver((records) => {
+    for (const r of records) {
+      for (const node of r.addedNodes) {
+        if (!(node instanceof HTMLElement)) continue;
+        const wraps = node.classList.contains("msg-image")
+          ? [node]
+          : [...node.querySelectorAll(".msg-image")];
+        for (const wrap of wraps) {
+          if (!mountedHeight.has(wrap))
+            mountedHeight.set(wrap, wrap.getBoundingClientRect().height);
+        }
+      }
+    }
+  }).observe(document, { childList: true, subtree: true });
   document.addEventListener(
     "load",
     (event) => {
@@ -125,10 +154,18 @@ function pagedHistory(): void {
       const wrap = img instanceof HTMLImageElement ? img.closest(".msg-image") : null;
       if (wrap === null) return;
       const before = wrap.getBoundingClientRect().height;
+      const mounted = mountedHeight.get(wrap) ?? before;
+      const revisit = scale.phase === "revisit";
       scale.imageLoads++;
+      if (revisit) scale.revisitLoads++;
+      else scale.firstLoads++;
       requestAnimationFrame(() => {
-        if (wrap.isConnected && Math.abs(wrap.getBoundingClientRect().height - before) > 0.5) {
-          scale.imageLoadShifts++;
+        if (!wrap.isConnected) return;
+        const after = wrap.getBoundingClientRect().height;
+        if (Math.abs(after - before) > 0.5) scale.imageLoadShifts++;
+        if (Math.abs(after - mounted) > 0.5) {
+          if (revisit) scale.revisitMountShifts++;
+          else scale.firstMountShifts++;
         }
       });
     },
@@ -187,6 +224,10 @@ interface Scale {
   readonly rebuilds: number;
   readonly imageLoads: number;
   readonly imageLoadShifts: number;
+  readonly firstLoads: number;
+  readonly firstMountShifts: number;
+  readonly revisitLoads: number;
+  readonly revisitMountShifts: number;
 }
 
 function scale(page: Page): Promise<Scale> {
@@ -244,7 +285,7 @@ test.describe("Message list scrolling up through 600 messages", () => {
     );
     test.info().annotations.push({
       type: "message-list-scale",
-      description: `pages=${pages} rebuilds=${rebuilds} brokerImageCalls=${brokerCalls.length - brokerBefore} imageLoads=${done.imageLoads} imageLoadShifts=${done.imageLoadShifts} longTasksOver50ms=${longTasks.filter((d) => d > 50).length} (soft report)`,
+      description: `pages=${pages} rebuilds=${rebuilds} brokerImageCalls=${brokerCalls.length - brokerBefore} imageLoads=${done.imageLoads} imageLoadShifts=${done.imageLoadShifts} firstSightingMountShifts=${done.firstMountShifts}/${done.firstLoads} longTasksOver50ms=${longTasks.filter((d) => d > 50).length} (soft report)`,
     });
 
     expect(pages, "history pages that landed").toBeGreaterThanOrEqual(5);
@@ -253,8 +294,28 @@ test.describe("Message list scrolling up through 600 messages", () => {
     // window would ask for the ones it had already drawn again.
     expect(brokerCalls.length, "broker image calls").toBeLessThanOrEqual(new Set(brokerCalls).size);
     // Every image box is reserved from its header before the pixels arrive, so
-    // no load changes its row's height (chat-scroll-perf PR e).
+    // no load changes its row's height (chat-scroll-perf PR e). A first
+    // sighting still moves from the 200px guess to the sniffed box when the
+    // broker answers (reported above, not asserted).
     expect(done.imageLoads, "images that loaded").toBeGreaterThan(0);
     expect(done.imageLoadShifts, "image loads that changed their box's height").toBe(0);
+
+    // Back down to the newest rows: every image box is remounted from the
+    // cached size, so from mount to after load it must not move at all.
+    await page.evaluate(() => {
+      (window as unknown as { __scale: { phase: string } }).__scale.phase = "revisit";
+    });
+    for (let tick = 0; tick < 400; tick++) {
+      await page.mouse.wheel(0, 900);
+      await page.waitForTimeout(25);
+      if ((await scale(page)).revisitLoads >= 3) break;
+    }
+    await page.waitForTimeout(500);
+    const revisited = await scale(page);
+    expect(revisited.revisitLoads, "images remounted on the way back").toBeGreaterThan(0);
+    expect(
+      revisited.revisitMountShifts,
+      "remounted images whose box moved between mount and load",
+    ).toBe(0);
   });
 });

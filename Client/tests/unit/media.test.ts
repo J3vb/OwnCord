@@ -88,7 +88,11 @@ import {
   renderUrlEmbeds,
   clearMediaCaches,
 } from "../../src/components/message-list/media";
-import { clearExternalImageCache } from "../../src/components/message-list/attachments";
+import {
+  clearExternalImageCache,
+  fetchExternalImage,
+} from "../../src/components/message-list/attachments";
+import { blobImageSize } from "../../src/components/message-list/image-sizes";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -714,6 +718,75 @@ describe("media.ts", () => {
 
       expect(wrap.style.aspectRatio).toBe("175 / 350");
       expect(renderInlineImage(url).style.aspectRatio).toBe("175 / 350");
+    });
+
+    it("an orientation-swapped image keeps its measured box on the second mount", async () => {
+      // Header says 800x400 (landscape); the browser decodes it rotated, 400x800.
+      imageMock.mockResolvedValue(pngResponse(800, 400));
+      const url = "https://example.com/exif.jpg";
+      const first = renderInlineImage(url);
+      document.body.appendChild(first);
+      await awaitImgSrc(first);
+      const img = first.querySelector("img") as HTMLImageElement;
+      Object.defineProperty(img, "naturalWidth", { value: 400, configurable: true });
+      Object.defineProperty(img, "naturalHeight", { value: 800, configurable: true });
+      fireImgLoad(first);
+      expect(first.style.aspectRatio).toBe("175 / 350");
+
+      // Second mount: the cached measured box is reserved up front, and the
+      // header's landscape reading does not flip it back when the broker answers.
+      clearExternalImageCache();
+      imageMock.mockResolvedValue(pngResponse(800, 400));
+      const second = renderInlineImage(url);
+      expect(second.style.aspectRatio).toBe("175 / 350");
+      document.body.appendChild(second);
+      await awaitImgSrc(second);
+      expect(second.style.aspectRatio).toBe("175 / 350");
+      expect(second.style.width).toBe("175px");
+      // And the third mount still reads the measured box from the cache.
+      expect(renderInlineImage(url).style.aspectRatio).toBe("175 / 350");
+    });
+
+    it("does not store a size for a load that finished after the session reset", async () => {
+      imageMock.mockResolvedValue(pngResponse(300, 200));
+      const url = "https://example.com/late.png";
+      const wrap = renderInlineImage(url);
+      document.body.appendChild(wrap);
+      const src = await awaitImgSrc(wrap);
+      expect(src).toMatch(/^blob:/);
+      clearMediaCaches(); // server switch while the image was still on screen
+      const img = wrap.querySelector("img") as HTMLImageElement;
+      Object.defineProperty(img, "naturalWidth", { value: 300, configurable: true });
+      Object.defineProperty(img, "naturalHeight", { value: 200, configurable: true });
+
+      fireImgLoad(wrap);
+
+      expect(renderInlineImage(url).style.minHeight).toBe("200px");
+      expect(JSON.stringify(localStorage)).not.toContain("late.png");
+    });
+
+    it("clamps the measured fallback to the inline ceiling", async () => {
+      const url = "https://example.com/measured-big.png";
+      const wrap = renderInlineImage(url);
+      document.body.appendChild(wrap);
+      await awaitImgSrc(wrap);
+      Object.defineProperty(wrap, "offsetWidth", { value: 2000, configurable: true });
+      Object.defineProperty(wrap, "offsetHeight", { value: 1000, configurable: true });
+
+      fireImgLoad(wrap);
+
+      expect(renderInlineImage(url).style.aspectRatio).toBe("400 / 200");
+    });
+
+    it("reads the header only for a caller that asks for it", async () => {
+      imageMock.mockResolvedValue(pngResponse(50, 40));
+      const asked = await fetchExternalImage(
+        { url: "https://example.com/asked.png" },
+        { sniff: true },
+      );
+      const skipped = await fetchExternalImage({ url: "https://example.com/skipped.png" });
+      expect(blobImageSize(asked!)).toEqual({ width: 50, height: 40 });
+      expect(blobImageSize(skipped!)).toBeUndefined();
     });
 
     it("a later render of the same URL reserves the sniffed box before the fetch", async () => {

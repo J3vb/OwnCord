@@ -35,6 +35,7 @@ import {
   blobImageSize,
   fitImageBox,
   getImageBox,
+  imageSizeGeneration,
   rememberBlobSize,
   setImageBox,
   type ImageBox,
@@ -733,12 +734,21 @@ async function idbPut(scope: string, url: string, blob: Blob): Promise<void> {
   }
 }
 
+/** `sniff`: read the file's header for its size, for a caller that has no
+ *  dimensions of its own (a row reserving its box). Other callers skip the read. */
+export interface ImageLoadOptions {
+  readonly sniff?: boolean;
+}
+
 /** Fetch an image and return a `blob:` URL an `<img>` can show. Server images
  *  come through memory → IndexedDB → the TOFU proxy; an external image comes
  *  from the broker and never enters those two caches, which hold server
  *  content only (B7-16). */
-export function fetchImageAsObjectUrl(url: string): Promise<string | null> {
-  if (isExternalUrl(url)) return fetchExternalImage({ url });
+export function fetchImageAsObjectUrl(
+  url: string,
+  opts?: ImageLoadOptions,
+): Promise<string | null> {
+  if (isExternalUrl(url)) return fetchExternalImage({ url }, opts);
   const generation = attachmentCacheGeneration;
   const scope = cacheScope;
 
@@ -758,7 +768,9 @@ export function fetchImageAsObjectUrl(url: string): Promise<string | null> {
     if (blob === null || generation !== attachmentCacheGeneration) return null;
     const objectUrl = createObjectUrl(blob);
     if (objectUrl === null) return null;
-    rememberBlobSize(objectUrl, await sniffImageBlob(blob));
+    if (opts?.sniff === true && stored === null) {
+      rememberBlobSize(objectUrl, await sniffImageBlob(blob));
+    }
     if (generation !== attachmentCacheGeneration) {
       revokeObjectUrl(objectUrl);
       return null;
@@ -1004,13 +1016,17 @@ export function recoverEvictedImage(
 /** An external image, fetched by the broker and handed back as a same-origin
  *  `blob:` URL (so the GIF-freeze canvas stays untainted), or null when the
  *  broker refused it or could not fetch it. */
-export function fetchExternalImage(source: ExternalImageSource): Promise<string | null> {
-  return loadExternalImage(source).then((result) => (result.ok ? result.value : null));
+export function fetchExternalImage(
+  source: ExternalImageSource,
+  opts?: ImageLoadOptions,
+): Promise<string | null> {
+  return loadExternalImage(source, opts).then((result) => (result.ok ? result.value : null));
 }
 
 /** `fetchExternalImage`, keeping the broker's failure class. */
 export function loadExternalImage(
   source: ExternalImageSource,
+  opts?: ImageLoadOptions,
 ): Promise<ExternalContentResult<string>> {
   const key = externalKey(source);
   // B9-8: nothing is fetched for an item the viewer has not consented to.
@@ -1036,7 +1052,7 @@ export function loadExternalImage(
     if (objectUrl === null) return { ok: false, failure: "unavailable" };
     // The header's size, read once per fetch, so the renderer reserves the
     // box before the first decode; callers sharing this fetch all see it.
-    rememberBlobSize(objectUrl, await sniffImageBlob(result.value));
+    if (opts?.sniff === true) rememberBlobSize(objectUrl, await sniffImageBlob(result.value));
     if (epoch !== externalEpoch) {
       revokeObjectUrl(objectUrl);
       return { ok: false, failure: "unavailable" };
@@ -1392,6 +1408,8 @@ function renderAttachmentContent(att: Attachment, gallery?: LightboxGallery): HT
       wrap.style.width = `${box.w}px`;
       wrap.style.height = `${box.h}px`;
     };
+    // A reset between mount and load must not write this URL into the new session.
+    const generation = imageSizeGeneration();
     const rememberedBox = serverBox === null ? getImageBox(inlineUrl) : undefined;
     if (serverBox !== null) reserve(serverBox);
     else if (rememberedBox !== undefined) reserve(rememberedBox);
@@ -1425,9 +1443,15 @@ function renderAttachmentContent(att: Attachment, gallery?: LightboxGallery): HT
       const actual = fitImageBox(img.naturalWidth, img.naturalHeight);
       const reserved = getImageBox(inlineUrl);
       if (actual !== null) {
-        if (reserved === undefined || reserved.w !== actual.w || reserved.h !== actual.h) {
+        // Decoded and oriented by the browser: the measured box beats a sniffed one.
+        if (
+          reserved === undefined ||
+          reserved.measured !== true ||
+          reserved.w !== actual.w ||
+          reserved.h !== actual.h
+        ) {
           reserve(actual);
-          setImageBox(inlineUrl, actual);
+          setImageBox(inlineUrl, { ...actual, measured: true }, generation);
         }
         return;
       }
@@ -1478,13 +1502,14 @@ function renderAttachmentContent(att: Attachment, gallery?: LightboxGallery): HT
       let current: Element = placeholder;
 
       const attempt = (): void => {
-        void fetchImageAsObjectUrl(inlineUrl).then((objectUrl) => {
+        void fetchImageAsObjectUrl(inlineUrl, { sniff: serverBox === null }).then((objectUrl) => {
           if (objectUrl !== null) {
             const sniffed = serverBox === null ? blobImageSize(objectUrl) : undefined;
             const exact = sniffed === undefined ? null : fitImageBox(sniffed.width, sniffed.height);
             if (exact !== null) {
-              reserve(exact);
-              setImageBox(inlineUrl, exact);
+              // A measured box from an earlier load wins over the header's reading.
+              const held = setImageBox(inlineUrl, exact, generation);
+              reserve(held ?? exact);
             }
             const img = buildImage(objectUrl);
             current.replaceWith(img);

@@ -70,6 +70,7 @@ import {
 } from "@lib/formatting";
 import {
   isAudioMime,
+  isGalleryImage,
   isVideoAttachment,
   resolveServerUrl,
   thumbnailUrl,
@@ -261,6 +262,20 @@ function knownAttachmentHeight(att: Message["attachments"][number]): number | un
   return knownImageHeight(thumbnailUrl(resolveServerUrl(att.url), att.mime));
 }
 
+/** Height of the mosaic `.msg-image-grid` makes for `count` tiles (messages.css):
+ *  140 px rows, 200 px for exactly two, 4 px gaps and the 4 px margin above.
+ *  The first row holds one tile (7, 10), two (the default) or fills the width. */
+function galleryGridHeight(count: number): number {
+  let rows: number;
+  if (count === 2) rows = 1;
+  else if (count === 3 || count === 4) rows = 2;
+  else if (count === 6 || count === 9) rows = Math.ceil(count / 3);
+  else if (count === 7 || count === 10) rows = 1 + Math.ceil((count - 1) / 3);
+  else rows = 1 + Math.ceil((count - 2) / 3);
+  const rowHeight = count === 2 ? 200 : 140;
+  return rows * rowHeight + (rows - 1) * 4 + MEDIA_MARGIN;
+}
+
 export function estimateItemHeight(
   item: VirtualItem,
   listWidth: number = DEFAULT_LIST_WIDTH,
@@ -276,7 +291,12 @@ export function estimateItemHeight(
 
   // Media attachments. Video shares the image box, so it reserves the same
   // space; the audio player is a chip-height row.
+  // Two or more images share one mosaic, whatever their own sizes are.
+  const tiles = item.message.attachments.filter(isGalleryImage);
+  const gridded = tiles.length >= 2;
+  if (gridded) height += galleryGridHeight(tiles.length);
   for (const att of item.message.attachments) {
+    if (gridded && tiles.includes(att)) continue;
     if (isVideoAttachment(att)) {
       height += 220;
     } else if (isAudioMime(att.mime)) {
@@ -289,8 +309,9 @@ export function estimateItemHeight(
 
   // Inline image URLs in content: the box measured for each URL, else 220.
   if (IMAGE_URL_RE.test(content)) {
-    const urls = content.match(IMAGE_URLS_RE) ?? [];
-    if (urls.length === 0) height += 220;
+    // One embed per distinct URL, as renderUrlEmbeds draws them.
+    const urls = new Set(content.match(IMAGE_URLS_RE) ?? []);
+    if (urls.size === 0) height += 220;
     for (const url of urls) {
       const known = knownImageHeight(url);
       height += known === undefined ? 220 : known + MEDIA_MARGIN;
@@ -1467,6 +1488,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     seedTree();
   }
 
+  /** Estimate again every row that has no measured height, leaving measured
+   *  rows (and so the rendered window) as they are. */
+  function reseedUnmeasured(): void {
+    if (tree === null) return;
+    for (let i = 0; i < virtualItems.length; i++) {
+      if (!heightCache.has(itemKey(i)))
+        tree.set(i, estimateItemHeight(virtualItems[i]!, estimateWidth));
+    }
+  }
+
   /** Build the Fenwick tree from measured heights, estimating the rest. */
   function seedTree(): void {
     tree = new FenwickTree(virtualItems.length);
@@ -2315,7 +2346,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       resizeRafId = requestAnimationFrame(() => {
         resizeRafId = 0;
         if (root === null || contentContainer === null) return;
-        if (root.clientWidth > 0) estimateWidth = root.clientWidth;
+        // The text estimates wrap at the list's width: when it changes, the
+        // rows nothing has measured yet are estimated again (below).
+        const width = root.clientWidth;
+        const widthChanged = width > 0 && width !== (estimateWidth ?? DEFAULT_LIST_WIDTH);
+        if (widthChanged) estimateWidth = width;
 
         const jumpIdx =
           jumpTarget !== null && Date.now() < jumpTarget.until
@@ -2324,6 +2359,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
               )
             : -1;
         if (jumpIdx !== -1) {
+          if (widthChanged) reseedUnmeasured();
           measureRendered();
           updateSpacers();
           centreOnIndex(jumpIdx);
@@ -2335,6 +2371,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         // Capture anchor: topmost visible item and its offset from viewport top
         const anchorIdx = offsetToIndex(root.scrollTop);
         const anchorOffset = root.scrollTop - offsetBefore(anchorIdx);
+
+        // The anchor above was read against the old estimates; the restore
+        // below reads the new ones, so the reading position holds.
+        if (widthChanged) reseedUnmeasured();
 
         // Re-measure rendered elements
         measureRendered();

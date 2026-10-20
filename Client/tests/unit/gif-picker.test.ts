@@ -985,10 +985,8 @@ describe("GifPicker", () => {
       };
     }
 
-    // The broker answer now passes through the header sniff (a few more
-    // microtasks) before the image gets its blob: src.
     const settle = async (): Promise<void> => {
-      for (let i = 0; i < 12; i++) await Promise.resolve();
+      for (let i = 0; i < 6; i++) await Promise.resolve();
     };
 
     beforeEach(() => resetGifFavorites());

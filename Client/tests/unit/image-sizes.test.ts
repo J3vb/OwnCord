@@ -5,6 +5,7 @@ import {
   clearImageSizes,
   fitImageBox,
   getImageBox,
+  imageSizeGeneration,
   knownImageHeight,
   rememberBlobSize,
   setImageBox,
@@ -58,7 +59,7 @@ describe("image box cache", () => {
     setImageBox("https://a.test/1.png", { w: 10, h: 20 });
     setImageBox("https://a.test/2.png", { w: 30, h: 40 });
     expect(write).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(1000);
+    vi.advanceTimersByTime(3000);
     expect(write).toHaveBeenCalledTimes(1);
     expect(stored()).toEqual([
       ["https://a.test/1.png", 10, 20],
@@ -74,10 +75,10 @@ describe("image box cache", () => {
 
   it("writes nothing for a repeat of the stored value", () => {
     setImageBox("https://a.test/1.png", { w: 10, h: 20 });
-    vi.advanceTimersByTime(1000);
+    vi.advanceTimersByTime(3000);
     const write = vi.spyOn(Storage.prototype, "setItem");
     setImageBox("https://a.test/1.png", { w: 10, h: 20 });
-    vi.advanceTimersByTime(1000);
+    vi.advanceTimersByTime(3000);
     expect(write).not.toHaveBeenCalled();
     write.mockRestore();
     vi.useRealTimers();
@@ -87,7 +88,7 @@ describe("image box cache", () => {
     for (let i = 0; i < 501; i++) setImageBox(`https://a.test/${i}.png`, { w: 5, h: 5 });
     expect(getImageBox("https://a.test/0.png")).toBeUndefined();
     expect(getImageBox("https://a.test/1.png")).toEqual({ w: 5, h: 5 });
-    vi.advanceTimersByTime(1000);
+    vi.advanceTimersByTime(3000);
     expect((stored() as unknown[]).length).toBe(500);
     vi.useRealTimers();
   });
@@ -109,16 +110,100 @@ describe("image box cache", () => {
     });
     const store = createImageBoxStore();
     store.set("https://a.test/2.png", { w: 3, h: 4 });
-    expect(() => vi.advanceTimersByTime(1000)).not.toThrow();
+    expect(() => vi.advanceTimersByTime(3000)).not.toThrow();
     expectConsole("warn", "Failed to save preference");
     expect(store.get("https://a.test/2.png")).toEqual({ w: 3, h: 4 });
     broken.mockRestore();
     vi.useRealTimers();
   });
 
+  it("does not cache or persist a URL longer than 1 KB", () => {
+    const long = `https://a.test/${"x".repeat(1100)}.png`;
+    expect(setImageBox(long, { w: 10, h: 10 })).toBeUndefined();
+    expect(getImageBox(long)).toBeUndefined();
+    setImageBox("https://a.test/short.png", { w: 10, h: 10 });
+    vi.advanceTimersByTime(3000);
+    expect(JSON.stringify(stored())).not.toContain("xxxx");
+    vi.useRealTimers();
+  });
+
+  it("caps the persisted copy at 96 KB by dropping the oldest entries", () => {
+    // 500 entries of ~1000 bytes each would serialize to ~500 KB.
+    for (let i = 0; i < 500; i++) {
+      setImageBox(`https://a.test/${i}/${"p".repeat(950)}.png`, { w: 10, h: 10 });
+    }
+    expect(getImageBox(`https://a.test/0/${"p".repeat(950)}.png`)).toBeDefined(); // memory keeps all
+    vi.advanceTimersByTime(3000);
+    const raw = localStorage.getItem(KEY)!;
+    expect(raw.length).toBeLessThanOrEqual(96 * 1024 + 64);
+    const rows = stored() as Array<[string, number, number]>;
+    expect(rows.length).toBeGreaterThan(50);
+    expect(rows.length).toBeLessThan(500);
+    // The newest survive, the oldest went.
+    expect(rows[rows.length - 1]![0]).toContain("/499/");
+    expect(rows[0]![0]).not.toContain("/0/");
+    vi.useRealTimers();
+  });
+
+  it("rejects stored boxes outside the 400x350 ceiling or not whole pixels", () => {
+    localStorage.setItem(
+      KEY,
+      JSON.stringify([
+        ["wide", 401, 10],
+        ["tall", 10, 351],
+        ["frac", 10.5, 10],
+        ["neg", -1, 10],
+        ["big", 9000, 9000],
+        ["ok", 400, 350],
+        ["m", 20, 30, 1],
+      ]),
+    );
+    const fresh = createImageBoxStore();
+    for (const url of ["wide", "tall", "frac", "neg", "big"]) {
+      expect(fresh.get(url), url).toBeUndefined();
+    }
+    expect(fresh.get("ok")).toEqual({ w: 400, h: 350 });
+    expect(fresh.get("m")).toEqual({ w: 20, h: 30, measured: true });
+  });
+
+  it("refuses a box outside the ceiling", () => {
+    expect(setImageBox("https://a.test/huge.png", { w: 800, h: 100 })).toBeUndefined();
+    expect(getImageBox("https://a.test/huge.png")).toBeUndefined();
+    vi.useRealTimers();
+  });
+
+  it("never lets a sniffed box replace a measured one, and a measured one replaces a sniffed one", () => {
+    const url = "https://a.test/rotated.jpg";
+    setImageBox(url, { w: 400, h: 200 });
+    expect(setImageBox(url, { w: 175, h: 350, measured: true })).toEqual({
+      w: 175,
+      h: 350,
+      measured: true,
+    });
+    // The header still reads landscape on the next mount: the cache stays put.
+    expect(setImageBox(url, { w: 400, h: 200 })).toEqual({ w: 175, h: 350, measured: true });
+    expect(getImageBox(url)).toEqual({ w: 175, h: 350, measured: true });
+    vi.advanceTimersByTime(3000);
+    expect(stored()).toEqual([[url, 175, 350, 1]]);
+    vi.useRealTimers();
+  });
+
+  it("drops a write from before the session reset", () => {
+    const before = imageSizeGeneration();
+    clearImageSizes();
+    expect(imageSizeGeneration()).toBe(before + 1);
+    expect(setImageBox("https://a.test/old.png", { w: 10, h: 10 }, before)).toBeUndefined();
+    expect(getImageBox("https://a.test/old.png")).toBeUndefined();
+    expect(setImageBox("https://a.test/new.png", { w: 10, h: 10 }, imageSizeGeneration())).toEqual({
+      w: 10,
+      h: 10,
+    });
+    vi.useRealTimers();
+  });
+
   it("is cleared, in memory and in storage, by the session reset", () => {
     setImageBox("https://a.test/1.png", { w: 10, h: 20 });
-    vi.advanceTimersByTime(1000);
+    vi.advanceTimersByTime(3000);
     expect(stored()).not.toEqual([]);
     runSessionResets("user");
     expect(getImageBox("https://a.test/1.png")).toBeUndefined();

@@ -105,6 +105,37 @@ describe("estimateItemHeight", () => {
     expect(estimateItemHeight(item("", { attachments: [attachment()] }))).toBe(61 + 150 + 4);
   });
 
+  it("estimates two or more image attachments as the mosaic, not the sum of their tiles", () => {
+    const tile = (n: number) =>
+      attachment({ id: `a${n}`, url: `https://img.test/f${n}.png`, width: 1200, height: 800 });
+    const grid = (n: number) =>
+      estimateItemHeight(item("", { attachments: Array.from({ length: n }, (_, i) => tile(i)) }));
+    expect(grid(2)).toBe(61 + 200 + 4); // one 200px row
+    expect(grid(3)).toBe(61 + 2 * 140 + 4 + 4); // two 140px rows, 4px gap
+    expect(grid(4)).toBe(grid(3));
+    expect(grid(6)).toBe(61 + 2 * 140 + 4 + 4);
+    expect(grid(5)).toBe(61 + 2 * 140 + 4 + 4);
+    expect(grid(7)).toBe(61 + 3 * 140 + 2 * 4 + 4);
+    expect(grid(9)).toBe(61 + 3 * 140 + 2 * 4 + 4);
+    // A lone image is still its own box.
+    expect(grid(1)).toBe(61 + 267 + 4);
+  });
+
+  it("adds a file chip or audio row beside the mosaic", () => {
+    const tile = (n: number) => attachment({ id: `a${n}`, url: `https://img.test/g${n}.png` });
+    const audio = attachment({ id: "au", mime: "audio/mpeg", url: "https://img.test/s.mp3" });
+    expect(estimateItemHeight(item("", { attachments: [tile(0), tile(1), audio] }))).toBe(
+      61 + 200 + 4 + 96,
+    );
+  });
+
+  it("counts a repeated inline image URL once", () => {
+    setImageBox("https://img.test/a.png", { w: 400, h: 100 });
+    expect(estimateItemHeight(item("https://img.test/a.png\nhttps://img.test/a.png"))).toBe(
+      61 + LINE + (100 + 4),
+    );
+  });
+
   it("still reserves the YouTube and audio rows", () => {
     expect(estimateItemHeight(item("https://youtu.be/abc"))).toBe(61 + 320);
     expect(

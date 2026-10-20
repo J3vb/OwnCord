@@ -47,6 +47,7 @@ import {
   clearImageSizes,
   fitImageBox,
   getImageBox,
+  imageSizeGeneration,
   setImageBox,
   type ImageBox,
 } from "./image-sizes";
@@ -334,6 +335,8 @@ export function renderInlineImage(url: string): HTMLDivElement {
   const reserve = (box: ImageBox): void => {
     wrap.style.cssText = `width: ${box.w}px; max-width: 100%; aspect-ratio: ${box.w} / ${box.h};`;
   };
+  // A reset between mount and load must not write this URL into the new session.
+  const generation = imageSizeGeneration();
   const cachedBox = getImageBox(url);
   if (cachedBox !== undefined) reserve(cachedBox);
   else reserveFallback();
@@ -410,16 +413,22 @@ export function renderInlineImage(url: string): HTMLDivElement {
     const actual = fitImageBox(img.naturalWidth, img.naturalHeight);
     const reserved = getImageBox(url);
     if (actual !== null) {
-      if (reserved === undefined || reserved.w !== actual.w || reserved.h !== actual.h) {
+      // The decoded size is oriented by the browser: it is the measured box,
+      // and replaces a sniffed one (an EXIF-rotated header reads swapped).
+      if (
+        reserved === undefined ||
+        reserved.measured !== true ||
+        reserved.w !== actual.w ||
+        reserved.h !== actual.h
+      ) {
         reserve(actual);
-        setImageBox(url, actual);
+        setImageBox(url, { ...actual, measured: true }, generation);
       }
     } else if (reserved === undefined) {
       // No intrinsic size (a host that does not report one): measure the box.
       wrap.style.minHeight = "";
-      const h = wrap.offsetHeight;
-      const w = wrap.offsetWidth;
-      if (h > 0 && w > 0) setImageBox(url, { w, h });
+      const measured = fitImageBox(wrap.offsetWidth, wrap.offsetHeight);
+      if (measured !== null) setImageBox(url, { ...measured, measured: true }, generation);
     }
     if (refocus) img.focus();
   };
@@ -473,7 +482,7 @@ export function renderInlineImage(url: string): HTMLDivElement {
     retry.setAttribute("aria-disabled", "true");
     if (img.hasAttribute("src")) img.removeAttribute("src");
     img.addEventListener("load", onLoad, { once: true });
-    void loadExternalImage({ url }).then((result) => {
+    void loadExternalImage({ url }, { sniff: true }).then((result) => {
       if (!result.ok) {
         showFailure(result.failure);
         return;
@@ -482,8 +491,9 @@ export function renderInlineImage(url: string): HTMLDivElement {
       const sniffed = blobImageSize(result.value);
       const exact = sniffed === undefined ? null : fitImageBox(sniffed.width, sniffed.height);
       if (exact !== null) {
-        reserve(exact);
-        setImageBox(url, exact);
+        // A measured box from an earlier load wins over the header's reading.
+        const held = setImageBox(url, exact, generation);
+        reserve(held ?? exact);
       }
       img.src = result.value;
     });
