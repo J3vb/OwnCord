@@ -179,7 +179,7 @@ vi.mock("@pages/ConnectPage", () => ({
 }));
 
 // MainPage.ts pulls in the whole chat/voice UI stack. OC-0028 needs a real
-// "main" -> "connect" round trip through the router (main.ts only navigates
+// "main" -> "connect" round trip through the router (the router only navigates
 // away from "connect" via the connected overlay's onReady -> router.navigate
 // ("main") callback), but doesn't care what MainPage renders, so stand in
 // with the same lightweight shape main-page.test.ts's own mocks return.
