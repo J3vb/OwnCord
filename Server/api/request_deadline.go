@@ -210,3 +210,12 @@ func (w *deadlineWriter) Flush() {
 	}
 	_ = http.NewResponseController(w.ResponseWriter).Flush()
 }
+
+// truncateForLog bounds a client-controlled string before it becomes a log
+// attribute, so it cannot inflate the retained ring-buffer entries.
+func truncateForLog(s string, max int) string { //nolint:unparam // callers share one bound today; kept generic
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "...(truncated)"
+}
