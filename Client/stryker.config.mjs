@@ -25,6 +25,7 @@ const config = {
     "src/stores/**/*.ts",
     "src/features/**/*.ts",
     "src/components/message-list/avatar.ts",
+    "src/features/members/memberRow.view.ts",
     "!src/lib/types.ts",
     "!src/features/messaging/emojiData.ts", // generated data, no logic to mutate
     "!src/**/*.d.ts",

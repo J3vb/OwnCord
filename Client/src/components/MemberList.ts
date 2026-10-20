@@ -4,12 +4,13 @@
  * Right-click context menu for admin actions (force logout, ban, role change).
  */
 
-import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/dom";
-import { reconcileChildren } from "@lib/reconcile";
+import { createElement, setOwnedTimeout } from "@lib/dom";
+import { reconcileModels } from "@lib/reconcile";
 import { buildOffsets, rangeFor } from "@lib/virtualRange";
 import { registerSessionReset } from "@lib/sessionRegistry";
 import type { MountableComponent } from "@lib/safe-render";
 import { Disposable } from "@lib/disposable";
+import { resolveDisplayName } from "@lib/avatar";
 import {
   membersStore,
   memberDisplayName,
@@ -22,16 +23,21 @@ import { channelsStore, type ChannelsState } from "@stores/channels.store";
 import { voiceStore, type VoiceUser } from "@stores/voice.store";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import { withMemberMenu } from "./member-menu-loader";
+import { createAvatarElement, pickAvatarColor } from "./message-list/avatar";
 import { assignableRoleNames, outranksPosition } from "../features/moderation/roleAssignment";
 import { memberTimeoutsStore } from "../features/moderation/store";
 import { canMention, mentionInComposer } from "../features/messaging/activeComposer";
 import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup";
 import { openMenuOnKeyboard } from "@lib/context-menu";
-import { Permission, type ReadyRole, type UserStatus } from "@lib/types";
+import { Permission, type ReadyRole } from "@lib/types";
 import { positionForRole, roleHasPermission } from "@lib/permissions";
-import { createAvatarElement, pickAvatarColor } from "./message-list/avatar";
-import { readableRoleColor } from "@lib/themes";
-import { shellText, statusLabel } from "../i18n/shell";
+import {
+  MEMBER_PATCH_FIELDS,
+  drawMemberItem,
+  patchMemberItem,
+  type MemberItemModel,
+} from "../features/members/memberRow.view";
+import { shellText } from "../i18n/shell";
 import {
   buildModel,
   flattenModel,
@@ -122,22 +128,6 @@ function timeoutStateOf(userId: number): "active" | "none" | "unknown" {
   return map.has(userId) ? "active" : "none";
 }
 
-function statusColor(status: UserStatus): string {
-  switch (status) {
-    case "online":
-      return "var(--green)";
-    case "idle":
-      return "var(--yellow)";
-    case "dnd":
-      return "var(--red)";
-    case "invisible":
-    case "offline":
-      return "var(--text-micro)";
-    default:
-      return "var(--text-micro)";
-  }
-}
-
 let activeMenu: { element: HTMLDivElement; destroy(): void } | null = null;
 
 /** Bumped by every open, close and list teardown. The menu module loads lazily
@@ -207,6 +197,13 @@ function kindOf(item: ListItem): number {
   return typeof custom === "string" && custom.length > 0 ? ROW_STATUS : ROW;
 }
 
+/** `kindOf` for a drawn child: the same height kind, read from its model. */
+function kindOfModel(model: MemberItemModel): number {
+  if (model.kind === "header") return HEADER;
+  if (model.kind === "empty") return EMPTY;
+  return model.customStatus === null ? ROW : ROW_STATUS;
+}
+
 /** The last model the virtual list built, so a reopened column resumes from it
  *  instead of sorting again. Model only: it holds no DOM. */
 let modelMemo: MemberModel | null = null;
@@ -255,83 +252,49 @@ const NAV_KEYS: ReadonlySet<string> = new Set([
   "PageDown",
 ]);
 
-/** What a row reads at event time: the live member, and the status its dot shows. */
-interface MemberRowRef {
-  member: Member;
-  shownStatus: UserStatus;
+/** The member a row draws, resolved into plain data for `reconcileModels`. */
+function itemModel(item: ListItem): MemberItemModel {
+  if (item.kind === "header") return { kind: "header", text: item.text, offline: item.offline };
+  if (item.kind === "empty") return { kind: "empty", text: item.text };
+  const { member } = item;
+  const custom = member.customStatus;
+  return {
+    kind: "row",
+    id: member.id,
+    name: memberDisplayName(member),
+    avatarName: resolveDisplayName({ username: member.username, displayName: member.displayName }),
+    avatarColor: pickAvatarColor(member.username),
+    avatarUrl: member.avatar,
+    customStatus: typeof custom === "string" && custom.length > 0 ? custom : null,
+    colorVar: item.colorVar,
+    status: member.status,
+    away: isAwayStatus(member.status),
+  };
 }
 
+/** Add a drawn row's behaviour. Handlers read the member through `atEvent`
+ *  at event time, never from the render-time model: the row is reused across
+ *  store updates. */
 function createMemberItem(
-  ref: MemberRowRef,
-  colorVar: string,
+  item: HTMLElement,
+  atEvent: () => ListItem,
   opts: MemberListOptions,
   hooks: RowHooks,
   signal: AbortSignal,
-): HTMLDivElement {
-  const shown = ref.member;
-  const item = createElement("div", {
-    class: isAwayStatus(shown.status) ? "member-item offline" : "member-item",
-    "data-testid": `member-${shown.id}`,
-    role: "button",
-    tabindex: "0",
-    "aria-haspopup": "dialog",
-    "aria-label": memberDisplayName(shown),
-  });
-  const statusId = `mi-status-${shown.id}`;
-  const customId = `mi-custom-status-${shown.id}`;
-
-  const avatar = createAvatarElement(
-    { username: shown.username, displayName: shown.displayName, avatar: shown.avatar },
-    {
-      className: "mi-avatar",
-      background: pickAvatarColor(shown.username),
-      deferUntilVisible: true,
-    },
-  );
-
-  const statusDot = createElement("div", {
-    class: "mi-status",
-    id: statusId,
-    style: `background: ${statusColor(shown.status)}`,
-    "aria-label": statusLabel(shown.status),
-    title: statusLabel(shown.status),
-  });
-  avatar.appendChild(statusDot);
-
-  // Name + custom status stack. The custom status is only rendered when there
-  // is one, so a member without it keeps the single-line row it always had.
-  const nameWrap = createElement("div", { class: "mi-text" });
-  const name = createElement("span", {
-    class: "mi-name",
-    style: `color: ${readableRoleColor(colorVar)}`,
-    "data-role-color": colorVar,
-  });
-  setText(name, memberDisplayName(shown));
-  nameWrap.appendChild(name);
-  const custom = shown.customStatus;
-  if (typeof custom === "string" && custom.length > 0) {
-    const customEl = createElement("span", {
-      class: "mi-custom-status",
-      "data-testid": `member-custom-status-${shown.id}`,
-      id: customId,
-    });
-    setText(customEl, custom);
-    nameWrap.appendChild(customEl);
-    item.setAttribute("aria-describedby", `${customId} ${statusId}`);
-  } else {
-    item.setAttribute("aria-describedby", statusId);
-  }
-
-  appendChildren(item, avatar, nameWrap);
+): HTMLElement {
+  const liveMember = (): Member => {
+    const live = atEvent();
+    // i18n-exempt: developer diagnostic for a programming error, never shown
+    if (live.kind !== "row") throw new Error("member row bound to a non-row item");
+    return live.member;
+  };
 
   // Left-click, Enter or Space opens the profile popup (previously dead code —
   // built and tested but never mounted from anywhere). The row is a button so
   // the profile, and its Report action, is reachable from the keyboard.
   const openProfile = (anchorX: number, anchorY: number): void => {
     closeActiveMenu();
-    // The row is reused across store updates, so the member is read from the
-    // ref at event time, never from the render-time snapshot.
-    const member = ref.member;
+    const member = liveMember();
     const close = openUserProfilePopup({
       userId: member.id,
       anchorX,
@@ -369,7 +332,7 @@ function createMemberItem(
       if (e.target !== item || !NAV_KEYS.has(e.key)) return;
       if (e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
       e.preventDefault();
-      hooks.navigate(e.key, ref.member.id, item);
+      hooks.navigate(e.key, liveMember().id, item);
     },
     { signal },
   );
@@ -378,7 +341,7 @@ function createMemberItem(
   // coordinates; the keyboard path (Shift+F10 / the Menu key) anchors to the
   // row's own edge instead of a pointer position.
   const openContextMenu = (clientX: number, clientY: number): void => {
-    const member = ref.member;
+    const member = liveMember();
     const isSelf = member.id === (authStore.getState().user?.id ?? 0);
 
     // Moderation actions are permission-gated per item (a role name told us
@@ -565,7 +528,7 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
   // destroy() disposes the rest. Per-row state lives in WeakMaps keyed by the
   // row element.
   const ownerByEl = new WeakMap<Element, Disposable>();
-  const refByEl = new WeakMap<Element, MemberRowRef>();
+  const idByEl = new WeakMap<Element, number>();
 
   // Virtual mode (more than VIRTUAL_ABOVE members): rows are absolutely
   // positioned inside `root`, whose height is the whole list, and only the
@@ -589,19 +552,6 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
   let scroller: HTMLElement | null = null;
   let observer: ResizeObserver | null = null;
   let scrollBinding: Disposable | null = null;
-
-  function patchStatus(el: Element, ref: MemberRowRef): void {
-    const { status } = ref.member;
-    if (status === ref.shownStatus) return;
-    ref.shownStatus = status;
-    el.classList.toggle("offline", isAwayStatus(status));
-    const dot = el.querySelector<HTMLDivElement>(".mi-status");
-    if (dot !== null) {
-      dot.style.background = statusColor(status);
-      dot.setAttribute("aria-label", statusLabel(status));
-      dot.title = statusLabel(status);
-    }
-  }
 
   function rowEl(id: number): HTMLElement | null {
     return root?.querySelector<HTMLElement>(`[data-testid="member-${id}"]`) ?? null;
@@ -712,74 +662,37 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
     const focused = document.activeElement;
     const focusedId =
       focused instanceof HTMLElement && focused.parentElement === root
-        ? refByEl.get(focused)?.member.id
+        ? idByEl.get(focused)
         : undefined;
-    const build = (item: ListItem): Element => {
-      if (item.kind === "header") {
-        return createElement(
-          "div",
-          {
-            class: "member-role-group",
-            ...(item.offline ? { "data-testid": "member-group-offline" } : {}),
-          },
-          item.text,
-        );
-      }
-      if (item.kind === "empty") {
-        const emptyState = createElement("div", { class: "member-list-empty" });
-        emptyState.appendChild(createElement("p", { class: "member-list-empty-text" }, item.text));
-        return emptyState;
-      }
-      const owner = new Disposable();
-      const ref: MemberRowRef = { member: item.member, shownStatus: item.member.status };
-      const row = createMemberItem(ref, item.colorVar, opts, hooks, owner.signal);
-      ownerByEl.set(row, owner);
-      refByEl.set(row, ref);
-      return row;
-    };
-    reconcileChildren<ListItem>(root, list, {
+    reconcileModels<ListItem, MemberItemModel>(root, list, {
       key: (item) => item.key,
-      // A header's text is patched in `update`, not part of its signature.
-      // Status is not here: it patches the dot in place without a rebuild.
+      model: itemModel,
+      // Status is a patch field: it changes the dot in place without a rebuild.
       // A row rebuilt while its context menu is open drops focus to the page
       // when the menu closes (accepted; only its own name, avatar, custom
       // status or role colour changing does this).
-      signature: (item) =>
-        item.kind === "row"
-          ? [
-              item.member.username,
-              item.member.displayName ?? "",
-              item.member.avatar ?? "",
-              item.member.customStatus ?? "",
-              item.colorVar,
-            ].join("\u0001")
-          : item.kind === "empty"
-            ? item.text
-            : "",
-      create: (item) => {
-        const el = build(item);
-        kindByEl.set(el, kindOf(item));
-        place(el, item.key);
-        return el;
-      },
-      update: (el, item) => {
-        place(el, item.key);
-        // A header keeps its node when only its count changes.
-        if (item.kind === "header") {
-          if (el.textContent !== item.text) setText(el, item.text);
-          return;
+      patch: { fields: MEMBER_PATCH_FIELDS, apply: patchMemberItem },
+      create: (drawn, atEvent) => {
+        const el = drawMemberItem(drawn, createAvatarElement);
+        if (drawn.kind === "row") {
+          const owner = new Disposable();
+          createMemberItem(el, atEvent, opts, hooks, owner.signal);
+          ownerByEl.set(el, owner);
+          idByEl.set(el, drawn.id);
         }
-        if (item.kind !== "row") return;
-        const ref = refByEl.get(el);
-        if (ref === undefined) return;
-        ref.member = item.member;
-        patchStatus(el, ref);
+        kindByEl.set(el, kindOfModel(drawn));
+        return el;
       },
       dispose: (el) => {
         ownerByEl.get(el)?.destroy();
         ownerByEl.delete(el);
-        refByEl.delete(el);
+        idByEl.delete(el);
       },
+    });
+    // The container holds exactly one child per item, in order.
+    list.forEach((item, i) => {
+      const el = root?.children[i];
+      if (el !== undefined) place(el, item.key);
     });
     if (
       focusedId !== undefined &&
@@ -900,7 +813,7 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
     const active = document.activeElement;
     const focusedId =
       active instanceof HTMLElement && active.parentElement === root
-        ? refByEl.get(active)?.member.id
+        ? idByEl.get(active)
         : undefined;
     const out: number[] = [];
     for (const key of [focusedId === undefined ? null : `u:${focusedId}`, menuRowKey, revealKey]) {
