@@ -167,15 +167,28 @@ func (s *SessionService) TouchSession(ctx context.Context, tokenHash string) err
 func (s *SessionService) SetConnWrites(w *ConnWrites) { s.batch = w }
 
 // TouchAPIToken records that an API token was used. The REST middleware calls
-// it off the hot path so bot and CI traffic pays no latency for it.
+// it off the hot path so bot and CI traffic pays no latency for it. With a
+// batch installed it only queues the touch, which lands on the next touch
+// flush (at most TouchFlushInterval later), so a busy token costs one write a
+// minute instead of one per request; without one it writes at once.
 func (s *SessionService) TouchAPIToken(ctx context.Context, tokenHash string) error {
+	if s.batch != nil {
+		s.batch.queueAPITouch(tokenHash)
+		return nil
+	}
 	return s.st.TouchAPIToken(ctx, tokenHash)
 }
 
 // DiscardSession deletes a session row by token hash. The REST middleware
-// calls it in the background after answering 401 to an expired session, so the
-// dead row does not sit there until the maintenance sweep.
+// calls it after answering 401 to an expired session, so the dead row does
+// not sit there until the maintenance sweep. With a batch installed it only
+// queues the delete, which lands on the next stamp flush (at most
+// StampFlushInterval later); without one it deletes at once.
 func (s *SessionService) DiscardSession(ctx context.Context, tokenHash string) error {
+	if s.batch != nil {
+		s.batch.queueDiscard(tokenHash)
+		return nil
+	}
 	return s.st.DeleteSession(ctx, tokenHash)
 }
 

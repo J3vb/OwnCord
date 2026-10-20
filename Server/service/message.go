@@ -209,10 +209,14 @@ type MessageService struct {
 	limiter *auth.RateLimiter
 	// bg runs the deferred bookkeeping that has no dedicated worker off the send
 	// path: Web Push dispatch, and the fallback mention write used when no
-	// mention worker is running. Defaults to `go fn()`; tests swap it for an
-	// inline runner via RunBackgroundInlineForTest so they can read the results
+	// mention worker is running. It runs on bg, the lifecycle-owned group the
+	// composition root installs with SetBackground so shutdown joins it before
+	// the database closes (ARCH-034); a nil bg runs each job on a fresh
+	// unowned group (the old `go fn()`). Tests switch to inline via
+	// RunBackgroundInlineForTest so they can read the results
 	// deterministically right after a send.
-	bg func(fn func())
+	bg       *syncutil.Group
+	bgInline bool
 	// mentionWorker is the single bounded worker that owns every mention-badge
 	// write (P5-O05). It is nil until the composition root starts it
 	// (app.startHub); with no worker, SendMessage resolves and writes mentions
@@ -310,7 +314,6 @@ func NewMessageService(st Store, perms *PermissionService, limiter *auth.RateLim
 		st:      st,
 		perms:   perms,
 		limiter: limiter,
-		bg:      func(fn func()) { go fn() },
 	}
 }
 
@@ -319,7 +322,7 @@ func NewMessageService(st Store, perms *PermissionService, limiter *auth.RateLim
 // calling goroutine, so tests can assert on the results right after
 // SendMessage returns. Test-only.
 func (s *MessageService) RunBackgroundInlineForTest() {
-	s.bg = func(fn func()) { fn() }
+	s.bgInline = true
 }
 
 // StartMentionWorker creates and starts the single bounded mention-badge

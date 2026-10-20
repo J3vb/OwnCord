@@ -131,10 +131,10 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 		if isDM {
 			candidates = participantIDs
 		}
-		pushCtx, cancel := context.WithTimeout(bgCtx, backgroundJobTimeout)
-		s.bg(func() {
+		s.runBackground(bgCtx, "push dispatch", func(ctx context.Context) {
+			ctx, cancel := context.WithTimeout(ctx, backgroundJobTimeout)
 			defer cancel()
-			s.pushNotifier.Notify(pushCtx, channelID, authorID, candidates)
+			s.pushNotifier.Notify(ctx, channelID, authorID, candidates)
 		})
 	}
 

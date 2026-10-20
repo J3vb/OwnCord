@@ -8,6 +8,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // blockingMentionStore is the real DB with the no-worker mention write held
@@ -57,5 +58,40 @@ func TestSendMessage_BackgroundJobsAreBounded(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatalf("background job %d of 2 never ended: its ctx has no deadline", i+1)
 		}
+	}
+}
+
+// A push dispatch runs on the group the composition root installs, so the
+// shutdown's Stop reaches it: past the grace the group cancels Notify's ctx
+// and Stop returns once Notify has (ARCH-034).
+func TestSendMessage_PushRunsOnInstalledGroup(t *testing.T) {
+	_, _, database := newMentionFixture(t)
+	svc := NewMessageService(database,
+		NewPermissionService(database, permissions.NewChecker(database)), nil)
+	notifier := &blockingPushNotifier{ended: make(chan error, 1)}
+	svc.SetPushNotifier(notifier)
+	group := syncutil.NewGroup(context.Background())
+	svc.SetBackground(group)
+
+	sendAs(t, svc, 1, "hello")
+
+	if n := group.Stop(context.Background(), 20*time.Millisecond); n != 0 {
+		t.Fatalf("Stop stragglers = %d, want 0 (Notify honours its ctx)", n)
+	}
+	select {
+	case err := <-notifier.ended:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("Notify ended with %v, want context.Canceled from the group's Stop", err)
+		}
+	default:
+		t.Fatal("Stop returned before Notify finished: the push is not joined")
+	}
+
+	// After the drain a send spawns nothing and does not fail.
+	sendAs(t, svc, 1, "after the drain")
+	select {
+	case err := <-notifier.ended:
+		t.Errorf("a push ran after the drain began: %v", err)
+	case <-time.After(50 * time.Millisecond):
 	}
 }

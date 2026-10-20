@@ -18,6 +18,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/plugin"
 	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
@@ -84,7 +85,12 @@ type App struct {
 	persister   *ws.EventPersister
 	prunerDone  <-chan struct{}
 	auditWriter *db.AuditWriter
-	markers     *db.MarkerStore
+	// background owns the request-path jobs that outlive their request (Web
+	// Push dispatch, the no-worker mention write). startHub creates it and
+	// its close step joins or abandons them before the database closes
+	// (ARCH-034).
+	background *syncutil.Group
+	markers    *db.MarkerStore
 	// bootMarker is the current run's handle on boot.json (SRE-08); prevBoot
 	// is what the previous run left there, folded into the attention panel at
 	// start-up.
