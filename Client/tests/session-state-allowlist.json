@@ -8,12 +8,6 @@
       "reason": "WeakMap keyed by the sidebar's lifetime AbortSignal; entries go with the destroyed sidebar"
     },
     {
-      "file": "components/MemberList.ts",
-      "binding": "ownPopupClosers",
-      "category": "dom-owned",
-      "reason": "Close callbacks of popups the list owns; each popup removes its own on close"
-    },
-    {
       "file": "components/channel-sidebar/drag-reorder.ts",
       "binding": "listenerOwners",
       "category": "dom-owned",
