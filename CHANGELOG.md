@@ -236,6 +236,7 @@ and only when it changes something a contributor or fork holder must do
 
 - New logins now stay signed in by default (Auto connect starts ticked). The password is saved only when Remember password is ticked; Auto connect alone keeps just the sign-in token.
 - The server's load test at 1,000 and 2,000 people online has now been run and published: 1,000 online holds steady chat and a burst of messages with room to spare on a 2 vCPU / 4 GB server, but a burst of 500 logins and a full reconnect of everyone are slower than their targets, and the 2,000 run was not valid, so 2,000 stays an estimate (see [Capacity](docs/capacity.md#scale-profile)).
+- When the server's database is stuck behind a long write, an ordinary request now gives up after 15 seconds and answers "service unavailable" with a short retry hint, instead of hanging until the connection drops. Uploads, downloads, the live connection, voice, backups and account deletion are not cut short.
 
 **Notifications**
 
