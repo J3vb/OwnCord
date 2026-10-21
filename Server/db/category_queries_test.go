@@ -217,3 +217,54 @@ func TestChannelCategories_UnknownCategoryIDWritesNothing(t *testing.T) {
 		t.Fatalf("update into a missing category: err = %v, want ErrNotFound", err)
 	}
 }
+
+// A category made by the legacy name is reported through CreatedCategory, on
+// create and on update, and only when the write actually made one.
+func TestChannelCategories_LegacyNameReportsTheCategoryItCreated(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+
+	var created int64
+	id, err := database.CreateChannelIn(ctx, db.NewChannel{Name: "a", Type: "text", CategoryName: "Fresh", CreatedCategory: &created})
+	if err != nil || created == 0 {
+		t.Fatalf("create by new name: id %d, created %d, err %v; want a reported category", id, created, err)
+	}
+	first := created
+	created = 0
+	if _, err := database.CreateChannelIn(ctx, db.NewChannel{Name: "b", Type: "text", CategoryName: "fresh", CreatedCategory: &created}); err != nil || created != 0 {
+		t.Fatalf("create by existing name: created %d, err %v; want none reported", created, err)
+	}
+
+	name := "Second"
+	u := db.ChannelUpdate{Name: "a", CategoryName: &name, CreatedCategory: &created}
+	if err := database.AdminUpdateChannel(ctx, id, u); err != nil || created == 0 || created == first {
+		t.Fatalf("update by new name: created %d, err %v; want a new reported category", created, err)
+	}
+}
+
+// CategoryIfExists turns a vanished carried category into "none"; without it
+// the same write is ErrNotFound.
+func TestChannelCategories_IfExistsFallsBackToNone(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	cat, err := database.CreateChannelCategory(ctx, "Doomed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := database.CreateChannelIn(ctx, db.NewChannel{Name: "a", Type: "text", CategoryID: cat.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DeleteChannelCategory(ctx, cat.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.AdminUpdateChannel(ctx, id, db.ChannelUpdate{Name: "a", CategoryID: cat.ID}); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("vanished category: err = %v, want ErrNotFound", err)
+	}
+	if err := database.AdminUpdateChannel(ctx, id, db.ChannelUpdate{Name: "a", CategoryID: cat.ID, CategoryIfExists: true}); err != nil {
+		t.Fatalf("with CategoryIfExists: %v", err)
+	}
+	if ch, _ := database.GetChannel(ctx, id); ch == nil || ch.CategoryID != 0 {
+		t.Fatalf("channel = %+v, want uncategorized", ch)
+	}
+}

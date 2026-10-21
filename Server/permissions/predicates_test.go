@@ -169,6 +169,17 @@ func TestCanModerate(t *testing.T) {
 	})
 }
 
+func TestCanManageChannels(t *testing.T) {
+	runPredicate(t, "CanManageChannels", CanManageChannels, []predicateCase{
+		{"holder allowed", Subject{RolePerms: ManageChannels}, nil},
+		{"administrator without the bit allowed", Subject{RolePerms: Administrator}, nil},
+		{"no bit refused", Subject{RolePerms: memberBits}, ErrPermissionDenied},
+		{"zero subject refused", Subject{}, ErrPermissionDenied},
+		{"channel override cannot grant it", Subject{RolePerms: memberBits, Override: allow(ManageChannels), Channel: text(false)}, ErrPermissionDenied},
+		{"channel override cannot strip it", Subject{RolePerms: ManageChannels, Override: deny(ManageChannels), Channel: text(false)}, nil},
+	})
+}
+
 // TestCanAddReaction pins the reaction gate (B5-9): ADD_REACTIONS with
 // READ_MESSAGES, timed out refused unconditionally, and the same DM
 // membership/block rule every other channel predicate applies.

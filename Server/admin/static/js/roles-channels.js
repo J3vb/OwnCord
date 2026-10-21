@@ -102,7 +102,7 @@ function openChannelEditModal(id){
     +'<div class="modal-body">'
     +'<div class="form-group"><label class="form-label" for="chEditName">Name</label><input class="form-input" id="chEditName" value="'+esc(name)+'"></div>'
     +'<div class="form-group"><label class="form-label" for="chEditTopic">Topic</label><input class="form-input" id="chEditTopic" value="'+esc(topic)+'"></div>'
-    +'<div class="form-group"><label class="form-label" for="chEditCat">Category</label><input class="form-input" id="chEditCat" list="chEditCatList" value="'+esc(cat)+'" autocomplete="off">'+categoryDatalist('chEditCatList')+'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Move the channel to another category, or blank it to leave it uncategorized.</div></div>'
+    +'<div class="form-group"><label class="form-label" for="chEditCat">Category</label><input class="form-input" id="chEditCat" list="chEditCatList" value="'+esc(cat)+'" data-orig="'+esc(cat.trim())+'" autocomplete="off">'+categoryDatalist('chEditCatList')+'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Move the channel to another category, or blank it to leave it uncategorized.</div></div>'
     +'<div class="form-group"><label class="form-label" for="chEditSlow">Slow mode (seconds, 0 = off)</label><input class="form-input" id="chEditSlow" type="number" min="0" value="'+esc(slow)+'"></div>'
     +'<div class="form-group"><label class="form-label" for="chEditPos">Position</label><input class="form-input" id="chEditPos" type="number" min="0" value="'+esc(pos)+'"></div>'
     +voiceRows
@@ -118,12 +118,17 @@ async function saveChannelEdit(id){
   const body={
     name,
     topic:document.getElementById('chEditTopic').value.trim(),
-    category:document.getElementById('chEditCat').value.trim(),
     slow_mode:parseInt(document.getElementById('chEditSlow').value,10)||0,
     position:parseInt(document.getElementById('chEditPos').value,10)||0,
     archived:document.getElementById('chEditArchived').classList.contains('on'),
     nsfw:document.getElementById('chEditNsfw').classList.contains('on'),
   };
+  /* Send category only when the input differs from what the modal opened
+     with. The row's name can be stale (a category renamed since the list
+     loaded), and echoing it back would recreate the old name. */
+  const catEl=document.getElementById('chEditCat');
+  const catNow=catEl.value.trim();
+  if(catNow!==(catEl.dataset.orig||'')){body.category=catNow}
   /* Only present for a voice channel. Omitting them entirely (rather than
      sending 0) is what keeps a text-channel edit from clobbering limits a
      channel might carry from an earlier life as a voice channel — the handler

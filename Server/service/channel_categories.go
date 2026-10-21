@@ -318,3 +318,42 @@ func (s *ChannelService) resolveCategoryTarget(ctx context.Context, categoryID i
 	}
 	return categoryTarget{id: found.ID, name: &clean}, nil
 }
+
+// auditCreatedCategory covers a category a channel write created through the
+// legacy category string, which bypassed the category routes: it writes the
+// category_create audit row those routes would have and returns the fresh
+// category list for the caller to broadcast to managers. It returns nil when
+// created is 0 (no category was made). The channel write already committed,
+// so a failure here is logged and the list is dropped rather than failing the
+// request.
+func (s *ChannelService) auditCreatedCategory(tail context.Context, actorID, created int64) []db.ChannelCategory {
+	if created == 0 || s.cats == nil {
+		return nil
+	}
+	cat, err := s.cats.GetChannelCategory(tail, created)
+	if err != nil || cat == nil {
+		slog.Warn("created category could not be read back", "category_id", created, "error", err)
+		return nil
+	}
+	slog.Info("channel category created", "actor_id", actorID, "category_id", created)
+	db.WriteAudit(tail, s.st, actorID, "category_create", "category", created,
+		fmt.Sprintf("created category %s", cat.Name))
+	cats, err := s.cats.ListChannelCategories(tail)
+	if err != nil {
+		slog.Warn("category list unavailable after create", "category_id", created, "error", err)
+		return nil
+	}
+	return cats
+}
+
+// resolveUpdateTarget is resolveCategoryTarget for an update. A category the
+// request merely carries forward (KeepCategory with no legacy name) that no
+// longer exists resolves to uncategorized rather than ErrBadRequest: the
+// caller never asked for it.
+func (s *ChannelService) resolveUpdateTarget(ctx context.Context, req AdminChannelUpdate, legacy *string) (categoryTarget, error) {
+	target, err := s.resolveCategoryTarget(ctx, req.CategoryID, legacy)
+	if err != nil && req.KeepCategory && req.Category == nil && req.CategoryID > 0 && errors.Is(err, ErrBadRequest) {
+		return categoryTarget{}, nil
+	}
+	return target, err
+}

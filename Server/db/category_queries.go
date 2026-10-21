@@ -177,6 +177,11 @@ type NewChannel struct {
 	Position     int
 	CategoryID   int64
 	CategoryName string
+	// CreatedCategory, when non-nil, receives the id of the category this
+	// write created because CategoryName matched none, and is left alone
+	// otherwise. The caller owes that creation an audit row and a manager
+	// broadcast, since it bypassed the category routes.
+	CreatedCategory *int64
 }
 
 // CreateChannelIn inserts a channel and returns its id. Resolving or creating
@@ -185,12 +190,13 @@ type NewChannel struct {
 // channel lands on the one category row by id. An unknown CategoryID is
 // ErrNotFound and writes nothing.
 func (d *DB) CreateChannelIn(ctx context.Context, c NewChannel) (int64, error) {
-	var id int64
+	var id, createdID int64
 	err := d.inWriteTx(ctx, "CreateChannel", func(q *dbgen.Queries) error {
-		catID, err := resolveCategoryTx(ctx, q, c.CategoryID, c.CategoryName)
+		catID, created, err := resolveCategoryTx(ctx, q, c.CategoryID, c.CategoryName, false)
 		if err != nil {
 			return err
 		}
+		createdID = created
 		res, err := q.CreateChannel(ctx, dbgen.CreateChannelParams{
 			Name:       c.Name,
 			Type:       c.Type,
@@ -207,41 +213,48 @@ func (d *DB) CreateChannelIn(ctx context.Context, c NewChannel) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	if c.CreatedCategory != nil && createdID != 0 {
+		*c.CreatedCategory = createdID
+	}
 	return id, nil
 }
 
 // resolveCategoryTx maps a (category id, legacy name) pair to the id to store:
-// nil for none. An id must exist; a name is matched ignoring case and created
-// at the end when missing.
-func resolveCategoryTx(ctx context.Context, q *dbgen.Queries, id int64, name string) (*int64, error) {
+// nil for none. An id must exist (ErrNotFound otherwise, or none when
+// ifExists); a name is matched ignoring case and created at the end when
+// missing, in which case created is that new row's id.
+func resolveCategoryTx(ctx context.Context, q *dbgen.Queries, id int64, name string, ifExists bool) (catID *int64, created int64, err error) {
 	if id > 0 {
 		if _, err := q.GetChannelCategory(ctx, id); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return nil, ErrNotFound
+				if ifExists {
+					return nil, 0, nil
+				}
+				return nil, 0, ErrNotFound
 			}
-			return nil, err
+			return nil, 0, err
 		}
-		return &id, nil
+		return &id, 0, nil
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return nil, nil
+		return nil, 0, nil
 	}
 	row, err := q.FindChannelCategoryByName(ctx, name)
 	if err == nil {
 		rid := row.ID
-		return &rid, nil
+		return &rid, 0, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return nil, err
+		return nil, 0, err
 	}
 	res, err := q.InsertChannelCategory(ctx, name)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	rid, err := res.LastInsertId()
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return &rid, nil
+	return &rid, rid, nil
 }

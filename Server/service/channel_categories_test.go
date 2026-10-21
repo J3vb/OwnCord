@@ -35,15 +35,15 @@ func TestCategoryService_ChangesNameTheChannelsThatMoved(t *testing.T) {
 	ctx := context.Background()
 	a, _ := svc.CreateCategory(ctx, 1, "A")
 	b, _ := svc.CreateCategory(ctx, 1, "B")
-	inA, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "in-a", CategoryID: a.Category.ID}, nil)
+	inA, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "in-a", CategoryID: a.Category.ID}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	inB, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "in-b", CategoryID: b.Category.ID}, nil)
+	inB, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "in-b", CategoryID: b.Category.ID}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	loose, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "loose"}, nil)
+	loose, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "loose"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,30 +117,30 @@ func TestCategoryService_ChannelNamesAreUniquePerTypeAndCategoryID(t *testing.T)
 	ctx := context.Background()
 	a, _ := svc.CreateCategory(ctx, 1, "A")
 	b, _ := svc.CreateCategory(ctx, 1, "B")
-	inA, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "lobby", CategoryID: a.Category.ID}, nil)
+	inA, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "lobby", CategoryID: a.Category.ID}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	inB, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "lobby", CategoryID: b.Category.ID}, nil)
+	inB, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "lobby", CategoryID: b.Category.ID}, nil)
 	if err != nil {
 		t.Fatalf("same name in another category: %v", err)
 	}
 	// Moving the B channel into A would duplicate the name there.
-	if _, err := svc.AdminUpdateChannel(ctx, 1, inB, AdminChannelUpdate{Name: "lobby", CategoryID: a.Category.ID}, nil); !errors.Is(err, ErrConflict) {
+	if _, _, err := svc.AdminUpdateChannel(ctx, 1, inB, AdminChannelUpdate{Name: "lobby", CategoryID: a.Category.ID}, nil); !errors.Is(err, ErrConflict) {
 		t.Fatalf("a move onto a sibling's name: err = %v, want ErrConflict", err)
 	}
 	// By the legacy string too.
 	name := "a"
-	if _, err := svc.AdminUpdateChannel(ctx, 1, inB, AdminChannelUpdate{Name: "lobby", Category: &name}, nil); !errors.Is(err, ErrConflict) {
+	if _, _, err := svc.AdminUpdateChannel(ctx, 1, inB, AdminChannelUpdate{Name: "lobby", Category: &name}, nil); !errors.Is(err, ErrConflict) {
 		t.Fatalf("a legacy move onto a sibling's name: err = %v, want ErrConflict", err)
 	}
 	// A move to a category with no clash works, and the old one is untouched.
 	none := ""
-	moved, err := svc.AdminUpdateChannel(ctx, 1, inB, AdminChannelUpdate{Name: "lobby", Category: &none}, nil)
+	moved, _, err := svc.AdminUpdateChannel(ctx, 1, inB, AdminChannelUpdate{Name: "lobby", Category: &none}, nil)
 	if err != nil || moved.CategoryID != 0 {
 		t.Fatalf("move out: %+v, %v", moved, err)
 	}
-	if _, err := svc.AdminUpdateChannel(ctx, 1, inA, AdminChannelUpdate{Name: "lobby", CategoryID: a.Category.ID}, nil); err != nil {
+	if _, _, err := svc.AdminUpdateChannel(ctx, 1, inA, AdminChannelUpdate{Name: "lobby", CategoryID: a.Category.ID}, nil); err != nil {
 		t.Fatalf("an unchanged edit of a channel: %v", err)
 	}
 }
@@ -148,22 +148,100 @@ func TestCategoryService_ChannelNamesAreUniquePerTypeAndCategoryID(t *testing.T)
 func TestCategoryService_LegacyNameThatMatchesNothingCreatesTheCategory(t *testing.T) {
 	svc, _ := newChannelAdminService(t)
 	ctx := context.Background()
-	ch, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "x", Category: "  Fresh  "}, nil)
+	ch, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "x", Category: "  Fresh  "}, nil)
 	if err != nil || ch.Category != "Fresh" || ch.CategoryID == 0 {
 		t.Fatalf("legacy create = %+v, %v; want a new category Fresh", ch, err)
 	}
-	again, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "y", Category: "fRESH"}, nil)
+	again, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "y", Category: "fRESH"}, nil)
 	if err != nil || again.CategoryID != ch.CategoryID {
 		t.Fatalf("legacy create by another spelling = %+v, %v; want category %d", again, err, ch.CategoryID)
 	}
-	if _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "z", Category: strings.Repeat("c", MaxChannelCategoryLen+1)}, nil); !errors.Is(err, ErrBadRequest) {
+	if _, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "z", Category: strings.Repeat("c", MaxChannelCategoryLen+1)}, nil); !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("an over-long legacy category: err = %v, want ErrBadRequest", err)
 	}
-	if _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "w", CategoryID: 12345}, nil); !errors.Is(err, ErrBadRequest) {
+	if _, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "w", CategoryID: 12345}, nil); !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("an unknown category_id: err = %v, want ErrBadRequest", err)
 	}
 	cats, _ := svc.ListCategories(ctx)
 	if len(cats) != 1 {
 		t.Fatalf("categories = %+v, want just Fresh", cats)
+	}
+}
+
+// A PATCH carries the channel's current category forward when its body names
+// none. If that category was deleted after the handler read the row, the
+// update must land uncategorized, not fail.
+func TestCategoryService_CarriedCategoryThatVanishedFallsBackToUncategorized(t *testing.T) {
+	svc, _ := newChannelAdminService(t)
+	ctx := context.Background()
+	cat, err := svc.CreateCategory(ctx, 1, "Doomed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "room", CategoryID: cat.Category.ID}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := *ch // what the handler read before the delete
+	if _, err := svc.DeleteCategory(ctx, 1, cat.Category.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	got, newCats, err := svc.AdminUpdateChannel(ctx, 1, &stale, AdminChannelUpdate{
+		Name: "room", Topic: "t", CategoryID: stale.CategoryID, KeepCategory: true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("update after the carried category vanished: %v", err)
+	}
+	if got.CategoryID != 0 || got.Topic != "t" || newCats != nil {
+		t.Fatalf("updated = %+v, categories %v; want uncategorized, topic kept, nothing created", got, newCats)
+	}
+
+	// The archive step of a delete carries the category the same way.
+	other, err := svc.CreateCategory(ctx, 1, "Other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch2, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "room2", CategoryID: other.Category.ID}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale2 := *ch2
+	if _, err := svc.DeleteCategory(ctx, 1, other.Category.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AdminDeleteChannel(ctx, 1, &stale2, nil); err != nil {
+		t.Fatalf("delete after the category vanished: %v", err)
+	}
+
+	// A category the request NAMED that does not exist is still a 400.
+	if _, _, err := svc.AdminUpdateChannel(ctx, 1, got, AdminChannelUpdate{Name: "room", CategoryID: 9999}, nil); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("named unknown category: err = %v, want ErrBadRequest", err)
+	}
+}
+
+func TestCategoryService_LegacyCreateReturnsTheListAndAudits(t *testing.T) {
+	svc, database := newChannelAdminService(t)
+	ctx := context.Background()
+	_, cats, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "x", Category: "Fresh"}, nil)
+	if err != nil || len(cats) != 1 || cats[0].Name != "Fresh" {
+		t.Fatalf("create = %v, %v; want the list holding Fresh", cats, err)
+	}
+	_, cats, err = svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "y", Category: "fresh"}, nil)
+	if err != nil || cats != nil {
+		t.Fatalf("reuse = %v, %v; want no list", cats, err)
+	}
+	rows, err := database.GetAuditLog(ctx, 50, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, r := range rows {
+		if r.Action == "category_create" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("category_create rows = %d, want 1", n)
 	}
 }

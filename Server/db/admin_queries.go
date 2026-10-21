@@ -181,9 +181,18 @@ type ChannelUpdate struct {
 	// in the same transaction as the update (the legacy free-text field).
 	CategoryID   int64
 	CategoryName *string
-	SlowMode     int
-	Position     int
-	Archived     bool
+	// CategoryIfExists makes a CategoryID that no longer exists mean "no
+	// category" instead of ErrNotFound. It is for writes that carry the
+	// channel's own current category forward (a PATCH that names none, the
+	// archive step of a delete), where losing a race with a category delete
+	// must not fail the write.
+	CategoryIfExists bool
+	// CreatedCategory, when non-nil, receives the id of a category this
+	// write created because CategoryName matched none. See NewChannel.
+	CreatedCategory *int64
+	SlowMode        int
+	Position        int
+	Archived        bool
 	// NSFW is stored and broadcast only; it drives no server-side content
 	// behaviour (see migration 025).
 	NSFW bool
@@ -212,14 +221,18 @@ func (d *DB) adminUpdateChannel(ctx context.Context, id int64, u ChannelUpdate, 
 	return d.inWriteTx(ctx, "update", func(q *dbgen.Queries) error {
 		var catID *int64
 		var err error
+		var created int64
 		switch {
 		case u.CategoryName != nil:
-			catID, err = resolveCategoryTx(ctx, q, 0, *u.CategoryName)
+			catID, created, err = resolveCategoryTx(ctx, q, 0, *u.CategoryName, false)
 		case u.CategoryID > 0:
-			catID, err = resolveCategoryTx(ctx, q, u.CategoryID, "")
+			catID, created, err = resolveCategoryTx(ctx, q, u.CategoryID, "", u.CategoryIfExists)
 		}
 		if err != nil {
 			return err
+		}
+		if u.CreatedCategory != nil && created != 0 {
+			*u.CreatedCategory = created
 		}
 		if err := q.AdminUpdateChannel(ctx, dbgen.AdminUpdateChannelParams{
 			Name:          u.Name,

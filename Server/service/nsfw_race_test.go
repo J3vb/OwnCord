@@ -162,7 +162,7 @@ func TestAdminUpdateChannel_ClearsAcksOnResultingFlagRegardlessOfStaleRead(t *te
 	// This edit's req.NSFW is false — the same as existing.NSFW's stale
 	// read, so the OLD 1→0-transition-only gate would have skipped the
 	// clear entirely and left the acknowledgement row on file.
-	if _, err := channels.AdminUpdateChannel(ctx, 1, existing, AdminChannelUpdate{
+	if _, _, err := channels.AdminUpdateChannel(ctx, 1, existing, AdminChannelUpdate{
 		Name: "general", NSFW: false,
 	}, nil); err != nil {
 		t.Fatalf("AdminUpdateChannel: %v", err)

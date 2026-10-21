@@ -100,7 +100,7 @@ func handleCreateChannel(channels *service.ChannelService, hub HubBroadcaster) h
 			return
 		}
 
-		ch, err := channels.AdminCreateChannel(r.Context(), actorFromContext(r), service.AdminChannelCreate{
+		ch, newCats, err := channels.AdminCreateChannel(r.Context(), actorFromContext(r), service.AdminChannelCreate{
 			Name:       req.Name,
 			Type:       req.Type,
 			CategoryID: req.CategoryID,
@@ -114,6 +114,12 @@ func handleCreateChannel(channels *service.ChannelService, hub HubBroadcaster) h
 		}
 		if hub != nil {
 			hub.BroadcastChannelCreate(ch)
+			// A category made by the legacy category string: managers get
+			// the list after the channel frame (see BroadcastChannelCategories
+			// on ordering).
+			if newCats != nil {
+				hub.BroadcastChannelCategories(newCats)
+			}
 		}
 		writeJSON(w, http.StatusCreated, ch)
 	}
@@ -170,19 +176,20 @@ func handlePatchChannel(channels *service.ChannelService, hub HubBroadcaster) ht
 
 		// Keep the category unless the body names one: category_id wins, then
 		// the legacy name; neither sent leaves the channel where it is.
-		categoryID, legacyName := existing.CategoryID, (*string)(nil)
+		categoryID, legacyName, keepCategory := existing.CategoryID, (*string)(nil), true
 		switch {
 		case req.CategoryID != nil:
-			categoryID = *req.CategoryID
+			categoryID, keepCategory = *req.CategoryID, false
 		case req.Category != nil:
-			categoryID, legacyName = 0, req.Category
+			categoryID, legacyName, keepCategory = 0, req.Category, false
 		}
 
-		updated, err := channels.AdminUpdateChannel(r.Context(), actorFromContext(r), existing, service.AdminChannelUpdate{
+		updated, newCats, err := channels.AdminUpdateChannel(r.Context(), actorFromContext(r), existing, service.AdminChannelUpdate{
 			Name:          req.Name,
 			Topic:         req.Topic,
 			CategoryID:    categoryID,
 			Category:      legacyName,
+			KeepCategory:  keepCategory,
 			SlowMode:      req.SlowMode,
 			Position:      req.Position,
 			Archived:      req.Archived,
@@ -197,6 +204,9 @@ func handlePatchChannel(channels *service.ChannelService, hub HubBroadcaster) ht
 
 		if hub != nil {
 			hub.BroadcastChannelUpdate(updated)
+			if newCats != nil {
+				hub.BroadcastChannelCategories(newCats)
+			}
 			// Archiving/unarchiving changes who sees the channel, not just its
 			// metadata — send targeted channel_create/channel_delete so
 			// connected clients re-sync without a reconnect. Archiving also

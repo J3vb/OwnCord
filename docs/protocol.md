@@ -1600,6 +1600,8 @@ fields on every channel in the touched categories, so the server re-sends a
 `channel_update` for each of them (to the clients that may read that channel,
 as for any channel edit) and then a `channel_categories` frame to managers. A
 deleted category leaves its channels in place with `category_id` `0`.
+`category_position` can have gaps (a hidden or empty category still holds a
+position), so clients only sort by it and never treat it as an index.
 
 `nsfw` is shipped so clients can gate or label a channel, and **the server now
 enforces it** (migration `047`, B5-7): a member with no acknowledgement row

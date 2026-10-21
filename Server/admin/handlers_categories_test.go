@@ -411,3 +411,87 @@ func TestCategories_RenameRacingChannelCreate(t *testing.T) {
 		}
 	}
 }
+
+// auditCount counts audit rows with the given action.
+func (f *categoryFixture) auditCount(action string) int {
+	f.t.Helper()
+	rows, err := f.database.GetAuditLog(context.Background(), 200, 0)
+	if err != nil {
+		f.t.Fatalf("GetAuditLog: %v", err)
+	}
+	n := 0
+	for i := range rows {
+		if rows[i].Action == action {
+			n++
+		}
+	}
+	return n
+}
+
+// A category made by the legacy category string bypasses the category routes,
+// so the channel routes owe it the same category_create audit row and the same
+// channel_categories frame to managers.
+func TestChannelWrites_LegacyCategoryCreateIsAuditedAndBroadcast(t *testing.T) {
+	f := newCategoryFixture(t)
+
+	ch := f.mustCreateChannel(map[string]any{"name": "arena", "category": "Brand New"})
+	if ch.CategoryID == 0 {
+		t.Fatalf("channel = %+v, want it in the new category", ch)
+	}
+	if n := f.auditCount("category_create"); n != 1 {
+		t.Fatalf("category_create audit rows after a create = %d, want 1", n)
+	}
+	if len(f.hub.categoryBroadcasts) != 1 || len(f.hub.categoryBroadcasts[0]) != 1 || f.hub.categoryBroadcasts[0][0].Name != "Brand New" {
+		t.Fatalf("category broadcasts = %+v, want one frame holding the new list", f.hub.categoryBroadcasts)
+	}
+
+	// Reusing the name makes nothing, so nothing is audited or sent.
+	f.mustCreateChannel(map[string]any{"name": "arena2", "category": "brand new"})
+	if n := f.auditCount("category_create"); n != 1 || len(f.hub.categoryBroadcasts) != 1 {
+		t.Fatalf("reusing a category: audit rows %d, broadcasts %d; want 1 and 1", n, len(f.hub.categoryBroadcasts))
+	}
+}
+
+func TestChannelWrites_LegacyCategoryPatchIsAuditedAndBroadcast(t *testing.T) {
+	f := newCategoryFixture(t)
+	ch := f.mustCreateChannel(map[string]any{"name": "lounge"})
+	f.hub.channelUpdates = nil
+
+	code, body := f.do(http.MethodPatch, "/channels/"+itoa(ch.ID), map[string]any{"category": "Fresh"})
+	if code != http.StatusOK {
+		t.Fatalf("patch: status %d, body %s", code, body)
+	}
+	if n := f.auditCount("category_create"); n != 1 {
+		t.Fatalf("category_create audit rows after a PATCH = %d, want 1", n)
+	}
+	if len(f.hub.categoryBroadcasts) != 1 || len(f.hub.categoryBroadcasts[0]) != 1 || f.hub.categoryBroadcasts[0][0].Name != "Fresh" {
+		t.Fatalf("category broadcasts = %+v, want one frame holding the new list", f.hub.categoryBroadcasts)
+	}
+	if len(f.hub.channelUpdates) != 1 || f.hub.channelUpdates[0].Category != "Fresh" {
+		t.Fatalf("channel updates = %+v, want the moved channel", f.hub.channelUpdates)
+	}
+
+	// Moving into an existing category creates nothing.
+	code, body = f.do(http.MethodPatch, "/channels/"+itoa(ch.ID), map[string]any{"category": "fresh"})
+	if code != http.StatusOK || f.auditCount("category_create") != 1 || len(f.hub.categoryBroadcasts) != 1 {
+		t.Fatalf("second patch: status %d (%s), audit %d, broadcasts %d; want 200, 1, 1", code, body, f.auditCount("category_create"), len(f.hub.categoryBroadcasts))
+	}
+}
+
+// category_id wins over the legacy string, so a bad string beside it is not
+// validated.
+func TestChannelWrites_CategoryIDIgnoresLegacyString(t *testing.T) {
+	f := newCategoryFixture(t)
+	games := f.mustCreate("Games")
+	ch := f.mustCreateChannel(map[string]any{
+		"name":        "arena",
+		"category_id": games.ID,
+		"category":    strings.Repeat("c", 500),
+	})
+	if ch.CategoryID != games.ID || ch.Category != "Games" {
+		t.Fatalf("channel = %+v, want it in Games", ch)
+	}
+	if got := f.list(); len(got) != 1 {
+		t.Fatalf("categories = %+v, want no extra category", got)
+	}
+}

@@ -75,6 +75,13 @@ const categoryVerdictBudget = 5 * time.Second
 // (which carries categories) instead of replaying past the change. A client
 // whose permission lookup fails is skipped and logged; the next category
 // event or its next ready settles it.
+//
+// Ordering: callers send the channel_update frames first, but those go
+// through the broadcast queue while this frame is queued straight to the
+// manager's connection, so the list can reach a manager before the
+// channel_update frames that precede it. Clients must not depend on that
+// order: channels carry their own category fields, and this list only
+// replaces the manager's category set.
 func (h *Hub) BroadcastChannelCategories(cats []db.ChannelCategory) {
 	h.beginTargetedFanout()
 	defer h.endTargetedFanout()

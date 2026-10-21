@@ -131,7 +131,7 @@ func (f *evidenceFixture) relabel(nsfw bool) {
 	if err != nil || ch == nil {
 		f.t.Fatalf("GetChannel: %v", err)
 	}
-	if _, err := f.svc.Channels.AdminUpdateChannel(ctx, 0, ch, service.AdminChannelUpdate{
+	if _, _, err := f.svc.Channels.AdminUpdateChannel(ctx, 0, ch, service.AdminChannelUpdate{
 		Name: ch.Name, Topic: ch.Topic, CategoryID: ch.CategoryID, Position: ch.Position, NSFW: nsfw,
 	}, nil); err != nil {
 		f.t.Fatalf("AdminUpdateChannel(nsfw=%v): %v", nsfw, err)
