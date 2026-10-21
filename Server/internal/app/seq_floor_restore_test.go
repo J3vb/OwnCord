@@ -70,9 +70,7 @@ func restoreOver(t *testing.T, database *db.DB, path, backup string) {
 		t.Fatalf("AdvanceMessageDeliveryFloorForRestore: %v", err)
 	}
 	removeWALSidecars(t, path)
-	if err := db.CopyDatabaseFile(backup, path); err != nil {
-		t.Fatalf("CopyDatabaseFile: %v", err)
-	}
+	copyFile(t, backup, path)
 }
 
 // prepareRestoredScenario boots twice, takes a backup after the first boot,
@@ -111,9 +109,7 @@ func TestSeedHubSeqFloor_RestoredBackupDoesNotReuseTheOldBlock(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 	removeWALSidecars(t, path)
-	if err := db.CopyDatabaseFile(filepath.Join(filepath.Dir(path), "backup.db"), path); err != nil {
-		t.Fatal(err)
-	}
+	copyFile(t, filepath.Join(filepath.Dir(path), "backup.db"), path)
 	again, floor2 := openAndBoot(t, path)
 	defer again.Close() //nolint:errcheck
 	if floor2 < floor+wsSeqFloorReserve {
