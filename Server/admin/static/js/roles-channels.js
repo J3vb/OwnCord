@@ -862,7 +862,11 @@ async function reloadRoleAfterConflict(id){
     state.roleList=(await api('GET','/roles'))||[];
     if(state.roleList.some(r=>r.id===id))openRoleModal(id);
     else{closeModal();renderContent()}
-  }catch(e){closeModal();renderContent()}
+  }catch(e){
+    closeModal();renderContent();
+    showToast('Someone else changed this role and it could not be reloaded. Refresh the page and apply your change again.','error');
+    return;
+  }
   showToast('Someone else changed this role. The latest version is loaded; apply your change again.','error');
 }
 
