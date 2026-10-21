@@ -66,18 +66,18 @@ function draw(msg: Message, over = {}): HTMLElement {
 /** The card's message id, from its own `msg-poll-<id>` test id. */
 const cardId = (el: HTMLElement): string =>
   /^msg-poll-(\d+)$/.exec(el.dataset["testid"] ?? "")?.[1] ?? "";
-const FOCUSABLE = [
+const FOCUSABLE = new Set([
   "poll-vote",
   "poll-end",
   "poll-remove",
   "poll-show-results",
   "poll-hide-results",
-];
+]);
 
 /** Find a control by its short name; focusable controls carry the message id in their test id. */
 const q = <T extends HTMLElement = HTMLElement>(el: HTMLElement, id: string): T | null => {
   const choice = /^poll-choice-(\d+)$/.exec(id);
-  const full = FOCUSABLE.includes(id)
+  const full = FOCUSABLE.has(id)
     ? `${id}-${cardId(el)}`
     : choice !== null
       ? `poll-choice-${cardId(el)}-${choice[1]}`
