@@ -3,7 +3,7 @@
  * embedded DM section (channels mode) and the full DM sidebar (dms mode).
  */
 
-import { type ApiClient, errorText } from "@lib/api";
+import { type ApiClient, ApiClientError, errorText } from "@lib/api";
 import type { ToastContainer } from "@components/Toast";
 import type { DmConversation } from "@components/DmSidebar";
 import { setSidebarMode, setActiveDmUser } from "@stores/ui.store";
@@ -116,7 +116,12 @@ export async function handleCreateDm(
     selectDmConversation(storedDm(dmChannel), deps);
     onReady?.(dmChannel);
   } catch (err) {
-    const msg = errorText(err, connectText("app.dmCreateFailed"));
+    // A 403 is a block or the other member's DM setting; both read the same,
+    // in the app's own words, so the toast never says which.
+    const msg =
+      err instanceof ApiClientError && err.status === 403
+        ? connectText("blocks.blockedByThem")
+        : errorText(err, connectText("app.dmCreateFailed"));
     deps.getToast()?.show(msg, "error");
   }
 }

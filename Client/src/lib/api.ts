@@ -330,6 +330,12 @@ export interface SessionInfo {
 
 /** GET and PUT /users/me/notes/{userId}: the caller's private note about one
  *  member. `note` is "" when there is none (a PUT of "" deletes it). */
+/** The caller's direct message privacy settings (WP 6.8b). Both are always sent. */
+export interface DmPrivacy {
+  readonly allow_member_dms: boolean;
+  readonly message_requests: boolean;
+}
+
 export interface UserNote {
   readonly user_id: number;
   readonly note: string;
@@ -1044,6 +1050,16 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
      *  `userId`; resolves to the stored value. Callers wrap in try/catch. */
     putUserNote(userId: number, note: string, signal?: AbortSignal): Promise<UserNote> {
       return request<UserNote>("PUT", `/users/me/notes/${userId}`, { note }, signal);
+    },
+
+    /** The caller's DM privacy settings. Callers wrap in try/catch. */
+    getDmPrivacy(signal?: AbortSignal): Promise<DmPrivacy> {
+      return request<DmPrivacy>("GET", "/users/me/privacy", undefined, signal);
+    },
+
+    /** Replace both DM privacy settings; resolves to the stored values. Callers wrap in try/catch. */
+    putDmPrivacy(settings: DmPrivacy, signal?: AbortSignal): Promise<DmPrivacy> {
+      return request<DmPrivacy>("PUT", "/users/me/privacy", settings, signal);
     },
 
     getOwnModeration(signal?: AbortSignal): Promise<OwnModerationAction[]> {
