@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"log/slog"
+	"sync/atomic"
 	"time"
 )
 
@@ -164,9 +165,15 @@ func (h *Hub) removeLiveKitParticipantAsync(ctx context.Context, channelID, user
 }
 
 // voiceLeaveRetryTimeout bounds each background retry of the voice-state
-// delete, so a wedged DB cannot hold the retry goroutine forever. A var so
-// tests can shorten it.
-var voiceLeaveRetryTimeout = 5 * time.Second
+// delete, so a wedged DB cannot hold the retry goroutine forever. Atomic so a
+// test can change it while another test's grace timer still reads it.
+var voiceLeaveRetryTimeout = newDurationVar(5 * time.Second)
+
+func newDurationVar(d time.Duration) *atomic.Int64 {
+	var v atomic.Int64
+	v.Store(int64(d))
+	return &v
+}
 
 // leaveVoiceChannelWithRetry attempts to remove the voice state from the DB
 // using a channel-conditional delete. Only the row matching (userID, channelID)
@@ -201,7 +208,7 @@ func leaveVoiceChannelWithRetry(ctx context.Context, txn *voiceTxn, channelID in
 		// returns, and on the voice_leave path it dies with the connection —
 		// either would kill retry 2 before it ever ran, leaving a ghost
 		// voice_states row holding a capacity slot until the 60s sweep.
-		attemptTimeout := voiceLeaveRetryTimeout
+		attemptTimeout := time.Duration(voiceLeaveRetryTimeout.Load())
 		// The retries run on the hub's group: StopHub cancels and joins them,
 		// and a leave that fails after the group closed gets no retry (the
 		// sweep clears the row). Go only takes the group's leaf mutex and

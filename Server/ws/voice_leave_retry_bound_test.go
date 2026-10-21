@@ -32,9 +32,9 @@ func (s *wedgedLeaveVoiceStore) LeaveIfMatch(ctx context.Context, _, _ int64, _ 
 // stop channel is checked only between attempts. Each attempt must still give
 // up at its own deadline: a wedged DB otherwise parks the goroutine for good.
 func TestLeaveVoiceChannelWithRetry_RetryAttemptsAreBounded(t *testing.T) {
-	old := voiceLeaveRetryTimeout
-	voiceLeaveRetryTimeout = 20 * time.Millisecond
-	t.Cleanup(func() { voiceLeaveRetryTimeout = old })
+	old := voiceLeaveRetryTimeout.Load()
+	voiceLeaveRetryTimeout.Store(int64(20 * time.Millisecond))
+	t.Cleanup(func() { voiceLeaveRetryTimeout.Store(old) })
 
 	database := newHarvestVoiceDB(t)
 	voice := &wedgedLeaveVoiceStore{VoiceService: service.NewVoiceService(database), ended: make(chan error, 2)}
