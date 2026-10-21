@@ -21,6 +21,7 @@ const groupModel: fc.Arbitrary<CategoryGroupModel> = fc.record({
   label: text,
   collapsed: fc.boolean(),
   showCreate: fc.boolean(),
+  draggable: fc.boolean(),
 });
 
 function mutate(model: CategoryGroupModel, field: string): CategoryGroupModel {
@@ -38,6 +39,8 @@ function mutate(model: CategoryGroupModel, field: string): CategoryGroupModel {
       return { ...model, collapsed: !model.collapsed };
     case "showCreate":
       return { ...model, showCreate: !model.showCreate };
+    case "draggable":
+      return { ...model, draggable: !model.draggable };
     default:
       throw new Error(`no mutation for ${field}`);
   }

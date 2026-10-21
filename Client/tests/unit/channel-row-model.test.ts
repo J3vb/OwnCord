@@ -61,7 +61,13 @@ function ctx(
   muted: readonly number[] = [],
   over: Partial<ChannelListContext> = {},
 ): ChannelListContext {
-  return { isMuted: (id) => muted.includes(id), canCreate: true, canReorder: true, ...over };
+  return {
+    isMuted: (id) => muted.includes(id),
+    canCreate: true,
+    canReorder: true,
+    canReorderCategories: true,
+    ...over,
+  };
 }
 
 function group(name: string | null, channels: readonly Channel[]): ChannelGroup {
@@ -206,6 +212,7 @@ describe("category group model", () => {
       label: "",
       collapsed: false,
       showCreate: false,
+      draggable: false,
     });
   });
 
@@ -218,6 +225,7 @@ describe("category group model", () => {
       label: "Text",
       collapsed: false,
       showCreate: true,
+      draggable: false,
     });
     expect(categoryGroupModel(g, inputs({ collapsed: new Set(["Text"]) }), ctx()).collapsed).toBe(
       true,

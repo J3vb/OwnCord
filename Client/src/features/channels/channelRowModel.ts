@@ -48,6 +48,8 @@ export interface ChannelListContext {
   readonly canCreate: boolean;
   /** The page wired reordering (`onReorderChannel`). */
   readonly canReorder: boolean;
+  /** The page wired category reordering (`onReorderCategory`). */
+  readonly canReorderCategories: boolean;
 }
 
 /** One category's channels in display order. */
@@ -176,7 +178,15 @@ export function categoryGroupModel(
   ctx: ChannelListContext,
 ): CategoryGroupModel {
   if (g.key === null || g.name === null) {
-    return { key: null, name: null, categoryId: 0, label: "", collapsed: false, showCreate: false };
+    return {
+      key: null,
+      name: null,
+      categoryId: 0,
+      label: "",
+      collapsed: false,
+      showCreate: false,
+      draggable: false,
+    };
   }
   return {
     key: g.key,
@@ -185,6 +195,8 @@ export function categoryGroupModel(
     label: groupLabel(g),
     collapsed: list.collapsed.has(g.key),
     showCreate: ctx.canCreate && channelAccess(list).manageChannels,
+    // Only a real category has a place in the order to move.
+    draggable: ctx.canReorderCategories && g.categoryId > 0 && channelAccess(list).manageChannels,
   };
 }
 

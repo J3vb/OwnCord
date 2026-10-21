@@ -90,14 +90,29 @@ export function canMoveCategory(id: number, direction: -1 | 1): boolean {
 }
 
 /**
- * Move a category one place up or down: PUT the full id list with the category
- * swapped with its neighbour. Nothing is applied locally. The server answers
- * with the new order as a `channel_categories` frame, and on `409
- * CATEGORY_LIST_STALE` (another manager reordered or created one first) it
- * refused and wrote nothing, so the order this client already shows, which that
- * other change's frame brought, stays: only a toast says the move did not apply.
- * Never rejects.
+ * PUT the full id list. Nothing is applied locally. The server answers with the
+ * new order as a `channel_categories` frame, and on `409 CATEGORY_LIST_STALE`
+ * (another manager reordered or created one first) it refused and wrote
+ * nothing, so the order this client already shows, which that other change's
+ * frame brought, stays: only a toast says the move did not apply. Never rejects.
  */
+async function putOrder(
+  api: CategoryApi,
+  toast: () => CategoryToast | null,
+  ids: readonly number[],
+): Promise<void> {
+  try {
+    await api.adminReorderCategories(ids);
+  } catch (err) {
+    if (err instanceof ApiClientError && err.code === CATEGORY_LIST_STALE) {
+      toast()?.show(shellText("category.listChanged"), "info");
+      return;
+    }
+    toast()?.show(categoryErrorText(err, shellText("category.reorderFailed")), "error");
+  }
+}
+
+/** Move a category one place up or down: the full id list with it swapped with its neighbour. */
 export async function moveCategory(
   api: CategoryApi,
   toast: () => CategoryToast | null,
@@ -110,13 +125,26 @@ export async function moveCategory(
   if (at === -1 || to < 0 || to >= ids.length) return;
   const next = ids.slice();
   [next[at], next[to]] = [ids[to] as number, ids[at] as number];
-  try {
-    await api.adminReorderCategories(next);
-  } catch (err) {
-    if (err instanceof ApiClientError && err.code === CATEGORY_LIST_STALE) {
-      toast()?.show(shellText("category.listChanged"), "info");
-      return;
-    }
-    toast()?.show(categoryErrorText(err, shellText("category.reorderFailed")), "error");
-  }
+  await putOrder(api, toast, next);
+}
+
+/**
+ * Drop a dragged category before or after another (WP 6.5c): the full id list
+ * with `id` taken out and put back next to `targetId`. A drop that leaves the
+ * order as it is, or names a category the list does not hold, sends nothing.
+ */
+export async function placeCategory(
+  api: CategoryApi,
+  toast: () => CategoryToast | null,
+  id: number,
+  targetId: number,
+  before: boolean,
+): Promise<void> {
+  const ids = categoryIds();
+  if (id === targetId || !ids.includes(id) || !ids.includes(targetId)) return;
+  const rest = ids.filter((x) => x !== id);
+  const at = rest.indexOf(targetId) + (before ? 0 : 1);
+  const next = [...rest.slice(0, at), id, ...rest.slice(at)];
+  if (next.every((x, i) => x === ids[i])) return;
+  await putOrder(api, toast, next);
 }

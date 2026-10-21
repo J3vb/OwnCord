@@ -324,6 +324,16 @@
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   border-radius: var(--radius-sm);
 }
+/* A category header dragged to reorder the categories (WP 6.5c). */
+.category.dragging {
+  opacity: 0.3;
+}
+.category-drop-before {
+  box-shadow: 0 -2px 0 var(--accent);
+}
+.category-drop-after {
+  box-shadow: 0 2px 0 var(--accent);
+}
 .voice-user-moving {
   user-select: none;
   cursor: grabbing !important;

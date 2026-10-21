@@ -37,6 +37,7 @@ import {
   canMoveCategory,
   createCategory,
   moveCategory,
+  placeCategory,
   type CategoryApi,
 } from "../../src/features/channels/categoryActions";
 import { ApiClientError } from "@lib/api";
@@ -509,6 +510,45 @@ describe("category actions", () => {
     });
     await moveCategory(a, toast, 11, -1);
     expect(show).toHaveBeenCalledWith("boom", "error");
+  });
+
+  it("places a dragged category before or after another by PUTting the full id list", async () => {
+    const a = api();
+    await placeCategory(a, toast, 12, 10, true);
+    expect(a.adminReorderCategories).toHaveBeenLastCalledWith([12, 10, 11]);
+    await placeCategory(a, toast, 10, 12, false);
+    expect(a.adminReorderCategories).toHaveBeenLastCalledWith([11, 12, 10]);
+    await placeCategory(a, toast, 10, 11, false);
+    expect(a.adminReorderCategories).toHaveBeenLastCalledWith([11, 10, 12]);
+    // Nothing is applied locally: the channel_categories frame does that.
+    expect(channelsStore.getState().categories.map((c) => c.id)).toEqual([10, 11, 12]);
+    expect(show).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing for a drop that leaves the order alone or names an unknown category", async () => {
+    const a = api();
+    await placeCategory(a, toast, 11, 10, false); // already right after 10
+    await placeCategory(a, toast, 11, 12, true); // already right before 12
+    await placeCategory(a, toast, 11, 11, true);
+    await placeCategory(a, toast, 99, 10, true);
+    await placeCategory(a, toast, 10, 99, true);
+    expect(a.adminReorderCategories).not.toHaveBeenCalled();
+  });
+
+  it("a drag-reorder that hits 409 CATEGORY_LIST_STALE toasts the list-changed copy and keeps the order", async () => {
+    const a = api({
+      adminReorderCategories: vi.fn(async () => {
+        throw new ApiClientError(409, CATEGORY_LIST_STALE, "category list is stale");
+      }),
+    });
+    await placeCategory(a, toast, 12, 10, true);
+    expect(a.adminReorderCategories).toHaveBeenCalledWith([12, 10, 11]);
+    expect(show).toHaveBeenCalledTimes(1);
+    expect(show).toHaveBeenCalledWith(
+      "The category list changed. Showing the latest order.",
+      "info",
+    );
+    expect(channelsStore.getState().categories.map((c) => c.id)).toEqual([10, 11, 12]);
   });
 
   it("a duplicate name toasts friendly copy and rethrows for the dialog", async () => {

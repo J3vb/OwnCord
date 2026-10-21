@@ -2656,6 +2656,163 @@ describe("SidebarArea", () => {
         cleanup(result);
       });
     });
+
+    describe("onReorderChannel across categories", () => {
+      /** Channel 1 sat at position 0 in category 10 "A" (position 0) and the drop
+       *  moved it to category 11 "B" (position 1) at position 6; channel 2 in B was
+       *  re-slotted from 6 to 7. The store already shows the optimistic result. */
+      function seedMoved(): void {
+        const base = {
+          type: "text" as const,
+          unreadCount: 0,
+          mentionCount: 0,
+          lastMessageId: null,
+          canSend: true,
+          topic: "",
+          slowMode: 0,
+          nsfw: false,
+          isPrivate: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
+        };
+        channelsStore.setState((prev) => ({
+          ...prev,
+          channels: new Map([
+            [
+              1,
+              {
+                ...base,
+                id: 1,
+                name: "one",
+                category: "B",
+                categoryId: 11,
+                categoryPosition: 1,
+                position: 6,
+              },
+            ],
+            [
+              2,
+              {
+                ...base,
+                id: 2,
+                name: "two",
+                category: "B",
+                categoryId: 11,
+                categoryPosition: 1,
+                position: 7,
+              },
+            ],
+          ]),
+        }));
+      }
+      const moved = {
+        channelId: 1,
+        newPosition: 6,
+        previousPosition: 0,
+        category: {
+          previous: { categoryId: 10, category: "A", categoryPosition: 0 },
+          next: { categoryId: 11, category: "B", categoryPosition: 1 },
+        },
+      };
+      const reslotted = { channelId: 2, newPosition: 7, previousPosition: 6 };
+      const stored = (id: number) => channelsStore.getState().channels.get(id);
+      const flush = async (): Promise<void> => {
+        for (let i = 0; i < 5; i++) await Promise.resolve();
+      };
+
+      it("PATCHes category_id and position for the moved channel and position alone for the rest", () => {
+        const opts = defaultOpts();
+        const result = createSidebarArea(opts);
+        container.appendChild(result.sidebarWrapper);
+        seedMoved();
+
+        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+        callArgs.onReorderChannel([moved, reslotted]);
+
+        expect(opts.api.adminUpdateChannel).toHaveBeenCalledWith(1, {
+          category_id: 11,
+          position: 6,
+        });
+        expect(opts.api.adminUpdateChannel).toHaveBeenCalledWith(2, { position: 7 });
+
+        cleanup(result);
+      });
+
+      it("a failed PATCH rolls back both the category and the position, with one error toast", async () => {
+        const opts = defaultOpts();
+        const toast = { show: vi.fn() };
+        (opts.getToast as MockedFn).mockReturnValue(toast);
+        (opts.api.adminUpdateChannel as MockedFn)
+          .mockRejectedValueOnce(new Error("forbidden"))
+          .mockResolvedValueOnce(undefined);
+        const result = createSidebarArea(opts);
+        container.appendChild(result.sidebarWrapper);
+        seedMoved();
+
+        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+        callArgs.onReorderChannel([moved, reslotted]);
+        await flush();
+
+        expect(stored(1)).toMatchObject({
+          categoryId: 10,
+          category: "A",
+          categoryPosition: 0,
+          position: 0,
+        });
+        // The re-slotted row's write landed, so it keeps its new slot.
+        expect(stored(2)?.position).toBe(7);
+        expect(toast.show).toHaveBeenCalledTimes(1);
+        expect(toast.show).toHaveBeenCalledWith("forbidden", "error");
+
+        cleanup(result);
+      });
+
+      it("does not roll the category back once a channel_update confirmed the write", async () => {
+        const opts = defaultOpts();
+        (opts.api.adminUpdateChannel as MockedFn)
+          .mockRejectedValueOnce(new Error("response lost"))
+          .mockResolvedValueOnce(undefined);
+        const result = createSidebarArea(opts);
+        container.appendChild(result.sidebarWrapper);
+        seedMoved();
+
+        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+        callArgs.onReorderChannel([moved, reslotted]);
+        const onUpdate = (opts.ws.on as MockedFn).mock.calls.find(
+          (c: unknown[]) => c[0] === "channel_update",
+        )![1] as (payload: { id: number }) => void;
+        onUpdate({ id: 1 });
+        await flush();
+
+        expect(stored(1)).toMatchObject({ categoryId: 11, position: 6 });
+
+        cleanup(result);
+      });
+
+      it("does not overwrite a newer category that arrived while the failed write was in flight", async () => {
+        const opts = defaultOpts();
+        (opts.api.adminUpdateChannel as MockedFn)
+          .mockRejectedValueOnce(new Error("response lost"))
+          .mockResolvedValueOnce(undefined);
+        const result = createSidebarArea(opts);
+        container.appendChild(result.sidebarWrapper);
+        seedMoved();
+
+        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+        callArgs.onReorderChannel([moved, reslotted]);
+        // Another move put the channel in category 12 before the failure surfaced.
+        channelsStore.setState((prev) => {
+          const channels = new Map(prev.channels);
+          channels.set(1, { ...channels.get(1)!, categoryId: 12, category: "C" });
+          return { ...prev, channels };
+        });
+        await flush();
+
+        expect(stored(1)).toMatchObject({ categoryId: 12, category: "C", position: 6 });
+
+        cleanup(result);
+      });
+    });
   });
 
   // -------------------------------------------------------------------------
