@@ -182,7 +182,7 @@ var erasureStatements = []struct {
 	// DM privacy settings (migration 070, class 16b): one row per user, keyed
 	// by the owner. The users delete below would cascade it, but this is the
 	// explicit statement the inventory's zero is proved against.
-	{"user_privacy", `DELETE FROM user_privacy WHERE user_id = ?`},
+	{"user_privacy", `DELETE FROM user_privacy WHERE user_id = ?1`},
 	{"user_blocks", `DELETE FROM user_blocks WHERE blocker_id = ?1 OR blocked_id = ?1`},
 	{"channel_user_overrides", `DELETE FROM channel_user_overrides WHERE user_id = ?`},
 	// Message requests and trusted senders (migration 046, B5-6, classes 14c

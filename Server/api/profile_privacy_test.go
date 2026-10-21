@@ -93,6 +93,8 @@ func TestPrivacy_RejectsBadBodies(t *testing.T) {
 		"null value":               `{"allow_member_dms":null,"message_requests":true}`,
 		"not json":                 `nope`,
 		"empty body":               ``,
+		"trailing object":          `{"allow_member_dms":false,"message_requests":false}{"x":1}`,
+		"trailing garbage":         `{"allow_member_dms":false,"message_requests":false} garbage`,
 	} {
 		rr := noteDo(t, router, http.MethodPut, privacyPath, token, body)
 		if rr.Code != http.StatusBadRequest {

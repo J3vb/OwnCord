@@ -8,6 +8,8 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 
@@ -51,7 +53,11 @@ func handlePutPrivacy(privacy *service.PrivacyService) http.HandlerFunc {
 		}
 		dec := json.NewDecoder(r.Body)
 		dec.DisallowUnknownFields()
-		if err := dec.Decode(&in); err != nil || in.AllowMemberDMs == nil || in.MessageRequests == nil {
+		err := dec.Decode(&in)
+		if err == nil && !errors.Is(dec.Decode(&struct{}{}), io.EOF) {
+			err = errors.New("trailing data")
+		}
+		if err != nil || in.AllowMemberDMs == nil || in.MessageRequests == nil {
 			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "invalid request body")
 			return
 		}
