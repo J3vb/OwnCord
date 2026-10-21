@@ -301,6 +301,19 @@ func CanModerate(s Subject) error {
 	return missing(ModerateMembers)
 }
 
+// CanManageChannels is the gate on everything that edits the channel list and
+// on the channel_categories view (WP 6.5a): MANAGE_CHANNELS or Administrator,
+// server-wide. Like CanModerate it reads the role only; a per-channel override
+// can neither grant nor strip it. The ws hub asks it at send time to decide
+// which connected clients may be told the full category list, empty and
+// hidden categories included.
+func CanManageChannels(s Subject) error {
+	if HasAdmin(s.RolePerms) || HasPerm(s.RolePerms, ManageChannels) {
+		return nil
+	}
+	return missing(ManageChannels)
+}
+
 // CanModerateVoice is the actor's authority in the TARGET's channel:
 // effective MUTE_MEMBERS there (so a per-channel deny holds — SEC-02), and
 // READ_MESSAGES so a moderator can only act in a room they can see; a DM call

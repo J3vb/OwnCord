@@ -95,15 +95,15 @@ The sequence number system enables reconnection with state recovery.
 
 ### Which Messages Get seq
 
-| Category           | Has seq? | Examples                                                                                                                                                                                                                                                                |
-| ------------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`                                                                                                                                                                    |
-| Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart`                                  |
-| Ephemeral          | No       | `typing`, `upload_policy` (see below), a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `member_timeouts` (see below), `appeal_status`, `mention_count`, `read_state`, `channel_activity`, `channel_create` (targeted per recipient; see below) |
-| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                                                 |
-| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                                                              |
-| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                                                        |
-| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `chat_forward_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                                                              |
+| Category           | Has seq? | Examples                                                                                                                                                                                                                                                                                                  |
+| ------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`                                                                                                                                                                                                      |
+| Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart`                                                                    |
+| Ephemeral          | No       | `typing`, `upload_policy` (see below), a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `member_timeouts` (see below), `channel_categories` (see below), `appeal_status`, `mention_count`, `read_state`, `channel_activity`, `channel_create` (targeted per recipient; see below) |
+| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                                                                                   |
+| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                                                                                                |
+| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                                                                                          |
+| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `chat_forward_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                                                                                                |
 
 **Presence is sequenced, but droppable.** Connect and disconnect presence
 arrives as `presence_batch` (one frame per coalescing window), a status change
@@ -489,7 +489,7 @@ These fields advertise retry-safe `chat_send` support. Older servers omit them;
 clients must not infer support from the protocol epoch or silently retry a
 durable pending message against a server that no longer advertises support.
 
-**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin`, `can_react`, `slow_mode`, `nsfw`, `afk`, `private`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text, announcement and voice), `last_message_id` (text, announcement and voice), `mention_count` (text, announcement and voice), `last_read_message_id` (text, announcement and voice)
+**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `category_id`, `category_position`, `topic`, `position`, `can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin`, `can_react`, `slow_mode`, `nsfw`, `afk`, `private`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text, announcement and voice), `last_message_id` (text, announcement and voice), `mention_count` (text, announcement and voice), `last_read_message_id` (text, announcement and voice)
 
 `last_read_message_id` is the caller's own read pointer (`read_states.last_message_id`):
 the newest message id they have read, or `0` when they have no read state for the
@@ -600,6 +600,8 @@ every reconnect; the ready payload now ships the stored value. A DM's
 **members[]:** All registered users with `id`, `username`, `avatar`, `role` (lowercase name), `status`, `display_name` (`null` when unset — render it instead of `username`), `about` (the About Me bio, `null` when unset; sent for every member, invisible ones included), `created_at` (the account creation instant, RFC 3339 UTC like `2026-10-15T13:04:05Z`; for an approval-mode account this is the application time), `custom_status` (`null` when unset), `identity_public_key` (base64 long-term E2EE identity key, omitted when the user has not published one — see voice E2EE TOFU), `banner` (the profile banner image path `/api/v1/files/{id}`) and `banner_color` (`#rgb` or `#rrggbb`, lower-case); both are omitted when unset, so absent means no banner
 
 **member_timeouts[]:** The active timeouts this viewer may see, as `{user_id, expires_at}` (RFC 3339 UTC); always an array, `[]` when there are none. A viewer who holds `MODERATE_MEMBERS` or `ADMINISTRATOR` gets every unexpired timeout, sorted by `user_id`; everyone else gets only their own entry, because a timeout is a sanction and other members are not told of it. It is the last field before `members` in the payload. An absent key means an older server: show no timeout icons. See [member_timeouts](#member_timeouts-server---client).
+
+**categories[]:** The full channel category list, as `{id, name, position}` ordered by `(position, id)`. It is present **only** when the viewer holds `MANAGE_CHANNELS` or `ADMINISTRATOR`, and then always, as `[]` when no category exists. Everyone else gets no `categories` key at all: they build their sidebar groups from the `category`, `category_id` and `category_position` of the channels they can see, so the name of an empty category, or of one whose channels are all hidden from them, never reaches them. It sorts between `capabilities` and `channels` in the payload. An absent key means either an older server or a viewer who cannot manage channels: derive groups from `channels[]`. A manager who gains `MANAGE_CHANNELS` mid-session learns the empty categories at the next `ready`, or from the next `channel_categories` frame. See [channel_categories](#channel_categories-server---client).
 
 `status` is per-viewer. Two rules apply, in this order, so a client never has
 to reconstruct them:
@@ -1539,6 +1541,8 @@ Channel messages are triggered by REST API calls from admins and reach only the 
     "name": "gaming",
     "type": "text",
     "category": "Hangout",
+    "category_id": 2,
+    "category_position": 1,
     "topic": "",
     "position": 3,
     "slow_mode": 0,
@@ -1584,6 +1588,18 @@ same constructor so the two events can never disagree about which fields a
 client is told about. Sent on every admin `PATCH`, so a client applies channel
 edits (rename, topic, category move, slow mode, `nsfw`, voice limits) without
 reconnecting.
+
+**Category fields (WP 6.5a).** Every channel object (`ready.channels[]`,
+`channel_create`, `channel_update`) carries three category fields, identical for
+every recipient so the shared `channel_update` frame stays shared: `category`
+(the category's name, `""` when none; kept for older clients), `category_id`
+(the category's id, `0` when none) and `category_position` (the category's
+position in the category order, `0` when none). A client groups channels by
+`category_id`. Renaming, reordering or deleting a category changes these
+fields on every channel in the touched categories, so the server re-sends a
+`channel_update` for each of them (to the clients that may read that channel,
+as for any channel edit) and then a `channel_categories` frame to managers. A
+deleted category leaves its channels in place with `category_id` `0`.
 
 `nsfw` is shipped so clients can gate or label a channel, and **the server now
 enforces it** (migration `047`, B5-7): a member with no acknowledgement row
@@ -1971,6 +1987,26 @@ WP 3C-7c: the active-timeout list changed. A timeout was issued, lifted or ran o
 ```
 
 Audience: every connected moderator (`MODERATE_MEMBERS` or `ADMINISTRATOR`) receives the full list; a timed-out member receives only their own entry (or `[]` once it ends). Anyone else normally receives nothing, but after a role change or a reconnect a non-moderator may receive a redundant frame holding only their own entry (often `[]`); apply it like any other. When a viewer stops being a moderator they receive one last frame holding only their own entry. A frame can arrive straight after `ready` when a role change lands while the connection is being set up; apply it over the `ready` list like any other. `ready.member_timeouts` carries the same view on every connect, and a resume that missed a change takes a full `ready`, so a client that was offline never needs the frame. An entry is active while now is before `expires_at`; a client should also drop it locally at that moment. The list names no actor and no reason. An Administrator target is exempt from the timeout's effect, but the sanction still exists, so the list shows it. The server does not consult this view: enforcement stays in the send predicates.
+
+### channel_categories (Server -> Client)
+
+WP 6.5a: the channel category list changed (a category was created, renamed, reordered or deleted). Targeted and unsequenced, never replayed. It **replaces the manager's list wholesale**, the way `roles_update` does: drop what you hold and keep exactly these entries.
+
+```json
+{
+  "type": "channel_categories",
+  "payload": {
+    "categories": [
+      { "id": 2, "name": "Hangout", "position": 0 },
+      { "id": 5, "name": "Voice", "position": 1 }
+    ]
+  }
+}
+```
+
+Audience: every connected client that holds `MANAGE_CHANNELS` or `ADMINISTRATOR`, judged when the frame is sent, and no one else. A non-manager is never sent the list, so the name of an empty or hidden category cannot reach them; they follow the `category*` fields on the channels they can see (see [channel_update](#channel_update-server---client-broadcast)). The frame follows the `channel_update` frames the same change produced. `ready.categories` carries the same list on every connect, and a resume that missed a change takes a full `ready`, so a client that was offline never needs the frame.
+
+The REST routes that change categories are `GET`/`POST /api/v1/moderation/channels/categories`, `PUT .../categories/order` (body `{"ids":[...]}`, the full ordered id list; `409 CATEGORY_LIST_STALE` and nothing written when the set differs from the current one) and `PATCH`/`DELETE .../categories/{id}`, all `MANAGE_CHANNELS`, mirrored under `/admin/api/channels/categories`. A channel `POST`/`PATCH` accepts `category_id` (`0` = none, `400` when unknown); the older `category` name string still works (matched ignoring case, created when new, `""` = none) and `category_id` wins when both are sent. See [docs/api.md](api.md).
 
 ## Appeals
 
@@ -3073,6 +3109,7 @@ tables below add per-type behavioral notes.
 | `mod_queue`           | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders only                                              |
 | `mod_action`          | No       | Direct to the live target only                                                                         |
 | `member_timeouts`     | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders (full list) and each timed-out member (own entry) |
+| `channel_categories`  | No       | Connected `MANAGE_CHANNELS`/`ADMINISTRATOR` holders only (full list, judged at send time)              |
 | `appeal_status`       | No       | Direct to the appellant only                                                                           |
 | `mention_count`       | No       | Direct to the reader whose mention badge changed (DP-27)                                               |
 | `read_state`          | No       | Direct to the caller after an accepted `mark_read` or `mark_unread` (WP 3D-5c)                         |

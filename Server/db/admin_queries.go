@@ -150,18 +150,17 @@ func (d *DB) GetUserSessions(ctx context.Context, userID int64) ([]Session, erro
 
 // ─── Channel Management (admin) ───────────────────────────────────────────────
 
-// AdminCreateChannel creates a channel with full field control including position.
-// No sqlc query covers this exact INSERT shape, so it stays on raw SQL.
+// AdminCreateChannel creates a channel with full field control including
+// position. A non-empty category is resolved by name ignoring case and created
+// when missing, in the same transaction as the insert (CreateChannelIn).
 func (d *DB) AdminCreateChannel(ctx context.Context, name, chanType, category, topic string, position int) (int64, error) {
-	res, err := d.writer.ExecContext(ctx,
-		`INSERT INTO channels (name, type, category, topic, position)
-		 VALUES (?, ?, ?, ?, ?)`,
-		name, chanType, strToNullPtr(category), strToNullPtr(topic), position,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("AdminCreateChannel: %w", err)
-	}
-	return res.LastInsertId()
+	return d.CreateChannelIn(ctx, NewChannel{
+		Name:         name,
+		Type:         chanType,
+		CategoryName: category,
+		Topic:        topic,
+		Position:     position,
+	})
 }
 
 // ChannelUpdate is the full set of mutable channel fields an admin edit writes.
@@ -174,12 +173,17 @@ func (d *DB) AdminCreateChannel(ctx context.Context, name, chanType, category, t
 // from the channel's current values — the handler does, which is what makes a
 // partial PATCH body safe.
 type ChannelUpdate struct {
-	Name     string
-	Topic    string
-	Category string
-	SlowMode int
-	Position int
-	Archived bool
+	Name  string
+	Topic string
+	// CategoryID is the category the channel ends up in, 0 for none. It must
+	// exist (ErrNotFound otherwise). CategoryName, when non-nil, overrides it:
+	// the name is resolved ignoring case and the category created when missing,
+	// in the same transaction as the update (the legacy free-text field).
+	CategoryID   int64
+	CategoryName *string
+	SlowMode     int
+	Position     int
+	Archived     bool
 	// NSFW is stored and broadcast only; it drives no server-side content
 	// behaviour (see migration 025).
 	NSFW bool
@@ -191,25 +195,51 @@ type ChannelUpdate struct {
 	VoiceMaxVideo int
 }
 
-// AdminUpdateChannel updates all mutable channel fields, category included —
-// moving a channel between categories is a rename of free text, not a
-// structural change, so it rides on the ordinary update.
+// AdminUpdateChannel updates all mutable channel fields, category included.
+// The category resolve (when it is by name) and the update share one
+// transaction.
 func (d *DB) AdminUpdateChannel(ctx context.Context, id int64, u ChannelUpdate) error {
-	if err := d.q.AdminUpdateChannel(ctx, dbgen.AdminUpdateChannelParams{
-		Name:          u.Name,
-		Topic:         strToNullPtr(u.Topic),
-		Category:      strToNullPtr(u.Category),
-		SlowMode:      int64(u.SlowMode),
-		Position:      int64(u.Position),
-		Archived:      b2i64(u.Archived),
-		Nsfw:          b2i64(u.NSFW),
-		VoiceMaxUsers: int64(u.VoiceMaxUsers),
-		VoiceMaxVideo: int64(u.VoiceMaxVideo),
-		ID:            id,
-	}); err != nil {
+	if err := d.adminUpdateChannel(ctx, id, u, false); err != nil {
 		return fmt.Errorf("AdminUpdateChannel: %w", err)
 	}
 	return nil
+}
+
+// adminUpdateChannel is the one write behind AdminUpdateChannel and
+// AdminUpdateChannelClearingNSFW. With clearNSFW it also deletes the channel's
+// standing NSFW acknowledgements, in the same transaction as the flag write.
+func (d *DB) adminUpdateChannel(ctx context.Context, id int64, u ChannelUpdate, clearNSFW bool) error {
+	return d.inWriteTx(ctx, "update", func(q *dbgen.Queries) error {
+		var catID *int64
+		var err error
+		switch {
+		case u.CategoryName != nil:
+			catID, err = resolveCategoryTx(ctx, q, 0, *u.CategoryName)
+		case u.CategoryID > 0:
+			catID, err = resolveCategoryTx(ctx, q, u.CategoryID, "")
+		}
+		if err != nil {
+			return err
+		}
+		if err := q.AdminUpdateChannel(ctx, dbgen.AdminUpdateChannelParams{
+			Name:          u.Name,
+			Topic:         strToNullPtr(u.Topic),
+			CategoryID:    catID,
+			SlowMode:      int64(u.SlowMode),
+			Position:      int64(u.Position),
+			Archived:      b2i64(u.Archived),
+			Nsfw:          b2i64(u.NSFW),
+			VoiceMaxUsers: int64(u.VoiceMaxUsers),
+			VoiceMaxVideo: int64(u.VoiceMaxVideo),
+			ID:            id,
+		}); err != nil {
+			return err
+		}
+		if clearNSFW {
+			return q.DeleteNSFWAcknowledgementsForChannel(ctx, id)
+		}
+		return nil
+	})
 }
 
 // AdminDeleteChannel removes a channel by ID (cascades to messages, etc.).

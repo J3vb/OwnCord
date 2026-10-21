@@ -328,20 +328,24 @@ func (h *Hub) LegacyReadyForTest(database ReadySnapshotReader, userID int64, rol
 	for _, m := range h.presentableMembers(f.roster.members, userID) {
 		members = append(members, m)
 	}
+	payload := map[string]any{
+		"capabilities":    f.head.Capabilities,
+		"channels":        f.head.Channels,
+		"member_timeouts": f.head.MemberTimeouts,
+		"members":         members,
+		"voice_states":    f.tail.VoiceStates,
+		"roles":           f.tail.Roles,
+		"dm_channels":     f.head.DMChannels,
+		"server_name":     f.tail.ServerName,
+		"motd":            f.tail.MOTD,
+		"notices":         f.tail.Notices,
+	}
+	if f.head.Categories != nil {
+		payload["categories"] = f.head.Categories
+	}
 	return buildJSON(map[string]any{
-		"type": MsgTypeReady,
-		"payload": map[string]any{
-			"capabilities":    f.head.Capabilities,
-			"channels":        f.head.Channels,
-			"member_timeouts": f.head.MemberTimeouts,
-			"members":         members,
-			"voice_states":    f.tail.VoiceStates,
-			"roles":           f.tail.Roles,
-			"dm_channels":     f.head.DMChannels,
-			"server_name":     f.tail.ServerName,
-			"motd":            f.tail.MOTD,
-			"notices":         f.tail.Notices,
-		},
+		"type":    MsgTypeReady,
+		"payload": payload,
 	}), nil
 }
 

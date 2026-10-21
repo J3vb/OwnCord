@@ -65,7 +65,7 @@ func TestMigration064_ExistingMessagesKindZero(t *testing.T) {
 	}
 	ctx := context.Background()
 	alice := seedUser(t, database, "alice")
-	ch := seedChannel(t, database, "general")
+	ch := seedChannelRawSQL(t, database, "general")
 	// Raw SQL: the generated writers name the kind column, which 063 lacks.
 	res, err := database.ExecContext(ctx,
 		`INSERT INTO messages (channel_id, user_id, content) VALUES (?, ?, 'before the migration')`, ch, alice)

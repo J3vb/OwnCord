@@ -30,6 +30,24 @@ func seedChannel(t *testing.T, database *db.DB, name string) int64 {
 	return id
 }
 
+// seedChannelRawSQL inserts a text channel with plain SQL, so it works against
+// a schema older than the current writers expect (a test that migrates only up
+// to some version and then seeds). seedChannel uses the generated writer, which
+// names columns a partly migrated database may not have yet.
+func seedChannelRawSQL(t *testing.T, database *db.DB, name string) int64 {
+	t.Helper()
+	res, err := database.ExecContext(context.Background(),
+		`INSERT INTO channels (name, type) VALUES (?, 'text')`, name)
+	if err != nil {
+		t.Fatalf("seedChannelRawSQL(%q): %v", name, err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		t.Fatalf("seedChannelRawSQL(%q) id: %v", name, err)
+	}
+	return id
+}
+
 // ─── CreateMessage ────────────────────────────────────────────────────────────
 
 func TestCreateMessage_ReturnsID(t *testing.T) {

@@ -121,3 +121,82 @@ func TestChannelActions_ForeignOrMissingToken_Unauthorised(t *testing.T) {
 		t.Fatalf("channels = %d, want unchanged %d", got, before)
 	}
 }
+
+// WP 6.5a: the category routes ride the same mount, so the client reaches them
+// without the /admin prefix, behind the same MANAGE_CHANNELS check.
+func TestChannelActions_Categories_PermittedMemberRoundTrip(t *testing.T) {
+	e := newMemberActionsEnv(t)
+
+	rr := e.do(t, http.MethodPost, channelsBase+"/categories", "admin", `{"name":"Games"}`)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create category: status = %d, want 201; body = %s", rr.Code, rr.Body.String())
+	}
+	var games struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &games); err != nil || games.ID == 0 {
+		t.Fatalf("create body has no id: err=%v body=%s", err, rr.Body.String())
+	}
+	rr = e.do(t, http.MethodPost, channelsBase+"/categories", "admin", `{"name":"Voice"}`)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create second category: status = %d; body = %s", rr.Code, rr.Body.String())
+	}
+	var voice struct {
+		ID int64 `json:"id"`
+	}
+	_ = json.Unmarshal(rr.Body.Bytes(), &voice)
+
+	if rr := e.do(t, http.MethodPost, channelsBase+"/categories", "admin", `{"name":"games"}`); rr.Code != http.StatusConflict {
+		t.Fatalf("duplicate: status = %d, want 409; body = %s", rr.Code, rr.Body.String())
+	}
+	if rr := e.do(t, http.MethodPatch, channelsBase+"/categories/"+itoa(games.ID), "admin", `{"name":"Play"}`); rr.Code != http.StatusOK {
+		t.Fatalf("rename: status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+	if rr := e.do(t, http.MethodPatch, channelsBase+"/categories/99999", "admin", `{"name":"Nope"}`); rr.Code != http.StatusNotFound {
+		t.Fatalf("rename missing: status = %d, want 404", rr.Code)
+	}
+	order := `{"ids":[` + itoa(voice.ID) + `,` + itoa(games.ID) + `]}`
+	if rr := e.do(t, http.MethodPut, channelsBase+"/categories/order", "admin", order); rr.Code != http.StatusOK {
+		t.Fatalf("reorder: status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+	stale := `{"ids":[` + itoa(voice.ID) + `]}`
+	if rr := e.do(t, http.MethodPut, channelsBase+"/categories/order", "admin", stale); rr.Code != http.StatusConflict {
+		t.Fatalf("stale reorder: status = %d, want 409; body = %s", rr.Code, rr.Body.String())
+	}
+	rr = e.do(t, http.MethodGet, channelsBase+"/categories", "admin", "")
+	var cats []struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &cats); err != nil || len(cats) != 2 || cats[0].ID != voice.ID || cats[1].Name != "Play" {
+		t.Fatalf("list = %s (err %v), want Voice then Play", rr.Body.String(), err)
+	}
+	if rr := e.do(t, http.MethodDelete, channelsBase+"/categories/"+itoa(games.ID), "admin", ""); rr.Code != http.StatusNoContent {
+		t.Fatalf("delete: status = %d, want 204; body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestChannelActions_Categories_WithoutManageChannels_Forbidden(t *testing.T) {
+	e := newMemberActionsEnv(t)
+	for _, actor := range []string{e.addKicker(t), "member"} {
+		for _, c := range []struct{ method, path, body string }{
+			{http.MethodGet, channelsBase + "/categories", ""},
+			{http.MethodPost, channelsBase + "/categories", `{"name":"Nope"}`},
+			{http.MethodPut, channelsBase + "/categories/order", `{"ids":[]}`},
+			{http.MethodPatch, channelsBase + "/categories/1", `{"name":"Nope"}`},
+			{http.MethodDelete, channelsBase + "/categories/1", ""},
+		} {
+			if rr := e.do(t, c.method, c.path, actor, c.body); rr.Code != http.StatusForbidden {
+				t.Fatalf("%s %s as %s: status = %d, want 403; body = %s", c.method, c.path, actor, rr.Code, rr.Body.String())
+			}
+		}
+	}
+	for _, c := range []struct{ method, path, body string }{
+		{http.MethodGet, channelsBase + "/categories", ""},
+		{http.MethodPost, channelsBase + "/categories", `{"name":"Nope"}`},
+	} {
+		if rr := e.do(t, c.method, c.path, "", c.body); rr.Code != http.StatusUnauthorized {
+			t.Fatalf("%s %s without a token: status = %d, want 401", c.method, c.path, rr.Code)
+		}
+	}
+}

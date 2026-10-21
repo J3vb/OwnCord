@@ -43,9 +43,13 @@ const (
 	// MessageAPIResponse.Forward). The 6.9a tag is unavoidable: the history row
 	// is this struct and its forward block is a field of it. ForwardInfo and
 	// ForwardRow live in db/message_forwards.go, outside the count, and Store
-	// did not grow (ForwardStore is a slice interface in service). Any further
-	// tag fails.
-	modelsJSONTagBaseline = 126
+	// did not grow (ForwardStore is a slice interface in service). 6.5a adds
+	// two (126 to 128): Channel.CategoryID and Channel.CategoryPosition, which
+	// the admin channel list and the create/PATCH responses serialize straight
+	// from this struct. ChannelCategory lives in db/category_queries.go,
+	// outside the count, and Store did not grow (CategoryStore is a slice
+	// interface in service). Any further tag fails.
+	modelsJSONTagBaseline = 128
 
 	// storeFullSurfaceBaseline is the compiler's own method count for Store,
 	// promoted methods from the cross-package embeds included (309 plus the 9

@@ -124,6 +124,12 @@
       "note": "WP 3C-7c: the active-timeout list, to connected MODERATE_MEMBERS/Administrator holders (everyone) and each timed-out member (own entry only); targeted, unsequenced, never replayed -- replaces the viewer's list wholesale"
     },
     {
+      "wire": "channel_categories",
+      "go": "MsgTypeChannelCategories",
+      "ts": "CHANNEL_CATEGORIES",
+      "note": "WP 6.5a: the full channel category list {categories:[{id,name,position}]}, sent per connected client only to MANAGE_CHANNELS/Administrator holders after any category mutation (permission evaluated at send time); targeted, unsequenced, never replayed -- replaces the manager's list wholesale. Everyone else derives groups from the category fields on the channels they can see"
+    },
+    {
       "wire": "appeal_status",
       "go": "MsgTypeAppealStatus",
       "ts": "APPEAL_STATUS",

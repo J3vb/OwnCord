@@ -214,13 +214,13 @@ func TestAdminChannel_DuplicateNameIsConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if _, err := svc.AdminUpdateChannel(ctx, 1, third, AdminChannelUpdate{Name: "lobby", Category: "Chat"}, nil); !errors.Is(err, ErrConflict) {
+	if _, err := svc.AdminUpdateChannel(ctx, 1, third, AdminChannelUpdate{Name: "lobby", Category: new("Chat")}, nil); !errors.Is(err, ErrConflict) {
 		t.Fatalf("rename onto a sibling: err = %v, want ErrConflict", err)
 	}
-	if _, err := svc.AdminUpdateChannel(ctx, 1, first, AdminChannelUpdate{Name: "lobby", Category: "Chat"}, nil); err != nil {
+	if _, err := svc.AdminUpdateChannel(ctx, 1, first, AdminChannelUpdate{Name: "lobby", Category: new("Chat")}, nil); err != nil {
 		t.Fatalf("case-only rename of itself: %v", err)
 	}
-	if _, err := svc.AdminUpdateChannel(ctx, 1, second, AdminChannelUpdate{Name: "lobby", Category: "Chat", Topic: "t"}, nil); err != nil {
+	if _, err := svc.AdminUpdateChannel(ctx, 1, second, AdminChannelUpdate{Name: "lobby", Category: new("Chat"), Topic: "t"}, nil); err != nil {
 		t.Fatalf("unchanged name on another type: %v", err)
 	}
 }

@@ -29,8 +29,9 @@ const (
 	// MaxChannelTopicLen bounds channels.topic — the client's edit modal has
 	// always capped its input at 1024; the server now enforces the same.
 	MaxChannelTopicLen = 1024
-	// MaxChannelCategoryLen bounds channels.category. Categories are free
-	// text rendered as sidebar group headers, so they take the name cap.
+	// MaxChannelCategoryLen bounds a category name (channel_categories.name,
+	// and the legacy free-text category field). Categories render as sidebar
+	// group headers, so they take the name cap.
 	MaxChannelCategoryLen = 100
 )
 
@@ -111,8 +112,14 @@ func (s *ChannelService) ResolveGuildChannel(ctx context.Context, id int64) (*db
 // AdminChannelCreate carries a create request's raw fields; the service
 // cleans and validates them (S-03) before anything persists.
 type AdminChannelCreate struct {
-	Name     string
-	Type     string
+	Name string
+	Type string
+	// CategoryID places the channel in that category (0 = none). It must
+	// exist and wins over Category.
+	CategoryID int64
+	// Category is the legacy free-text category: matched by name ignoring
+	// case, created when missing, empty means none. Ignored when CategoryID
+	// is set.
 	Category string
 	Topic    string
 	Position int
@@ -151,13 +158,23 @@ func (s *ChannelService) AdminCreateChannel(ctx context.Context, actorID int64, 
 	if err != nil {
 		return nil, err
 	}
-	if err := s.requireChannelNameFree(ctx, meta, req.Type, 0); err != nil {
+	var legacy *string
+	if req.CategoryID == 0 {
+		legacy = &req.Category
+	}
+	target, err := s.resolveCategoryTarget(ctx, req.CategoryID, legacy)
+	if err != nil {
 		return nil, err
 	}
+	if !target.fresh {
+		if err := s.requireChannelNameFree(ctx, meta.Name, req.Type, target.id, 0); err != nil {
+			return nil, err
+		}
+	}
 
-	id, err := s.st.AdminCreateChannel(ctx, meta.Name, req.Type, meta.Category, meta.Topic, req.Position)
+	id, err := s.createChannelRow(ctx, meta, req, target)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to create channel: %w", ErrInternal, err)
+		return nil, err
 	}
 
 	tail := context.WithoutCancel(ctx)
@@ -174,18 +191,58 @@ func (s *ChannelService) AdminCreateChannel(ctx context.Context, actorID int64, 
 	return ch, nil
 }
 
+// createChannelRow persists a new channel. A category the request names goes
+// through CategoryStore.CreateChannelIn so the category resolve-or-create and
+// the insert share one transaction; a channel with no category keeps the plain
+// Store path.
+func (s *ChannelService) createChannelRow(ctx context.Context, meta ChannelMeta, req AdminChannelCreate, target categoryTarget) (int64, error) {
+	if target.id == 0 && target.name == nil {
+		id, err := s.st.AdminCreateChannel(ctx, meta.Name, req.Type, "", meta.Topic, req.Position)
+		if err != nil {
+			return 0, fmt.Errorf("%w: failed to create channel: %w", ErrInternal, err)
+		}
+		return id, nil
+	}
+	if target.name != nil && *target.name == "" {
+		id, err := s.st.AdminCreateChannel(ctx, meta.Name, req.Type, "", meta.Topic, req.Position)
+		if err != nil {
+			return 0, fmt.Errorf("%w: failed to create channel: %w", ErrInternal, err)
+		}
+		return id, nil
+	}
+	cs, err := s.categoryStore()
+	if err != nil {
+		return 0, err
+	}
+	nc := db.NewChannel{Name: meta.Name, Type: req.Type, Topic: meta.Topic, Position: req.Position}
+	if target.name != nil {
+		nc.CategoryName = *target.name
+	} else {
+		nc.CategoryID = target.id
+	}
+	id, err := cs.CreateChannelIn(ctx, nc)
+	switch {
+	case errors.Is(err, db.ErrNotFound):
+		return 0, fmt.Errorf("category_id does not exist%.0w", ErrBadRequest)
+	case err != nil:
+		return 0, fmt.Errorf("%w: failed to create channel: %w", ErrInternal, err)
+	}
+	return id, nil
+}
+
 // requireChannelNameFree refuses a name another channel of the same type in
-// the same category already has, ignoring case, with ErrConflict. selfID is
-// the channel being renamed (0 on create). A check, not a constraint: rows
-// that already share a name are left as they are.
-func (s *ChannelService) requireChannelNameFree(ctx context.Context, meta ChannelMeta, chType string, selfID int64) error {
+// the same category (categoryID, 0 = uncategorized) already has, ignoring
+// case, with ErrConflict. selfID is the channel being renamed (0 on create). A
+// check, not a constraint: rows that already share a name are left as they
+// are.
+func (s *ChannelService) requireChannelNameFree(ctx context.Context, name, chType string, categoryID, selfID int64) error {
 	channels, err := s.st.ListChannels(ctx)
 	if err != nil {
 		return fmt.Errorf("%w: failed to list channels: %w", ErrInternal, err)
 	}
 	for i := range channels {
 		c := &channels[i]
-		if c.ID != selfID && c.Type == chType && c.Category == meta.Category && strings.EqualFold(c.Name, meta.Name) {
+		if c.ID != selfID && c.Type == chType && c.CategoryID == categoryID && strings.EqualFold(c.Name, name) {
 			return fmt.Errorf("a %s channel named %q already exists in this category%.0w", chType, c.Name, ErrConflict)
 		}
 	}
@@ -196,9 +253,16 @@ func (s *ChannelService) requireChannelNameFree(ctx context.Context, meta Channe
 // the existing row so a partial PATCH body is safe — with the raw text
 // fields cleaned here per S-03.
 type AdminChannelUpdate struct {
-	Name          string
-	Topic         string
-	Category      string
+	Name  string
+	Topic string
+	// CategoryID is the category the channel ends up in (0 = none); it must
+	// exist and wins over Category. Category, when non-nil and CategoryID is
+	// 0, is the legacy free-text category: matched by name ignoring case,
+	// created when missing, empty means none. The handler pre-fills
+	// CategoryID from the existing row, so a body that names neither leaves
+	// the category alone.
+	CategoryID    int64
+	Category      *string
 	SlowMode      int
 	Position      int
 	Archived      bool
@@ -221,7 +285,15 @@ const (
 // tail (OC-0158). The caller fans out visibility changes from the returned
 // before/after pair.
 func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, existing *db.Channel, req AdminChannelUpdate, postCommitHook func()) (*db.Channel, error) {
-	meta, err := cleanChannelMeta(req.Name, req.Topic, req.Category)
+	meta, err := cleanChannelMeta(req.Name, req.Topic, "")
+	if err != nil {
+		return nil, err
+	}
+	var legacy *string
+	if req.CategoryID == 0 {
+		legacy = req.Category
+	}
+	target, err := s.resolveCategoryTarget(ctx, req.CategoryID, legacy)
 	if err != nil {
 		return nil, err
 	}
@@ -235,8 +307,8 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 	}
 	// Only a rename or a move is checked, so rows that already share a name
 	// stay editable.
-	if !strings.EqualFold(meta.Name, existing.Name) || meta.Category != existing.Category {
-		if err := s.requireChannelNameFree(ctx, meta, existing.Type, existing.ID); err != nil {
+	if !target.fresh && (!strings.EqualFold(meta.Name, existing.Name) || target.id != existing.CategoryID) {
+		if err := s.requireChannelNameFree(ctx, meta.Name, existing.Type, target.id, existing.ID); err != nil {
 			return nil, err
 		}
 	}
@@ -244,7 +316,8 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 	update := db.ChannelUpdate{
 		Name:          meta.Name,
 		Topic:         meta.Topic,
-		Category:      meta.Category,
+		CategoryID:    target.id,
+		CategoryName:  target.name,
 		SlowMode:      req.SlowMode,
 		Position:      req.Position,
 		Archived:      req.Archived,
@@ -266,12 +339,18 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 	// existing.NSFW says, an edit that turns the flag off (or leaves it off)
 	// always clears, so no acknowledgement row for a DIFFERENT labelling
 	// survives it.
+	var writeErr error
 	if !req.NSFW {
-		if err := s.st.AdminUpdateChannelClearingNSFW(ctx, existing.ID, update); err != nil {
-			return nil, fmt.Errorf("%w: failed to update channel: %w", ErrInternal, err)
-		}
-	} else if err := s.st.AdminUpdateChannel(ctx, existing.ID, update); err != nil {
-		return nil, fmt.Errorf("%w: failed to update channel: %w", ErrInternal, err)
+		writeErr = s.st.AdminUpdateChannelClearingNSFW(ctx, existing.ID, update)
+	} else {
+		writeErr = s.st.AdminUpdateChannel(ctx, existing.ID, update)
+	}
+	if errors.Is(writeErr, db.ErrNotFound) {
+		// The category was deleted between the check above and the write.
+		return nil, fmt.Errorf("category_id does not exist%.0w", ErrBadRequest)
+	}
+	if writeErr != nil {
+		return nil, fmt.Errorf("%w: failed to update channel: %w", ErrInternal, writeErr)
 	}
 
 	tail := context.WithoutCancel(ctx)
@@ -327,7 +406,7 @@ func (s *ChannelService) AdminDeleteChannel(ctx context.Context, actorID int64, 
 		if err := s.st.AdminUpdateChannel(ctx, existing.ID, db.ChannelUpdate{
 			Name:          existing.Name,
 			Topic:         existing.Topic,
-			Category:      existing.Category,
+			CategoryID:    existing.CategoryID,
 			SlowMode:      existing.SlowMode,
 			Position:      existing.Position,
 			Archived:      true,
@@ -356,96 +435,4 @@ func (s *ChannelService) AdminDeleteChannel(ctx context.Context, actorID int64, 
 	db.WriteAudit(delCtx, s.st, actorID, "channel_delete", "channel", existing.ID,
 		fmt.Sprintf("deleted #%s", existing.Name))
 	return nil, nil
-}
-
-// ─── AFK channel (WP 6.10a) ──────────────────────────────────────────────────
-
-// AFKStore is the persistence slice behind ChannelService.SetAFKChannel.
-// SetAFKChannel reads the old flag, clears it and sets the new one in one
-// transaction and returns the previously flagged channel id (nil for none).
-type AFKStore interface {
-	GetAFKChannel(ctx context.Context) (*db.Channel, error)
-	SetAFKChannel(ctx context.Context, channelID *int64) (*int64, error)
-}
-
-// AFKChange is the committed outcome of SetAFKChannel: the channel that lost
-// the flag and the one that gained it. Either may be nil, and both are nil
-// when nothing changed. The caller broadcasts channel_update for each.
-type AFKChange struct {
-	Previous *db.Channel
-	Current  *db.Channel
-}
-
-// SetAFKChannel flags channelID as the server's AFK channel, or clears the
-// flag when channelID is nil. Only a live voice channel qualifies: text,
-// announcement and archived channels answer ErrBadRequest, and a missing or
-// DM channel answers ErrNotFound. The clear of the old flag and the set of the
-// new one are one transaction, audited as afk_channel_change. The rows handed
-// back are re-read on an uncancellable tail, because the flag has committed
-// and the caller must still be able to tell connected clients.
-func (s *ChannelService) SetAFKChannel(ctx context.Context, actorID int64, channelID *int64) (AFKChange, error) {
-	if s.afk == nil {
-		return AFKChange{}, fmt.Errorf("%w: afk channel storage unavailable", ErrInternal)
-	}
-	var target *db.Channel
-	if channelID != nil {
-		ch, err := s.ResolveGuildChannel(ctx, *channelID)
-		if err != nil {
-			return AFKChange{}, err
-		}
-		if ch.Type != "voice" {
-			return AFKChange{}, fmt.Errorf("only a voice channel can be the AFK channel%.0w", ErrBadRequest)
-		}
-		if ch.Archived {
-			return AFKChange{}, fmt.Errorf("an archived channel cannot be the AFK channel%.0w", ErrBadRequest)
-		}
-		target = ch
-	}
-
-	prevID, err := s.afk.SetAFKChannel(ctx, channelID)
-	if errors.Is(err, db.ErrNotFound) {
-		return AFKChange{}, fmt.Errorf("%w: channel not found", ErrNotFound)
-	}
-	if err != nil {
-		return AFKChange{}, fmt.Errorf("%w: failed to set afk channel: %w", ErrInternal, err)
-	}
-	if sameChannelID(prevID, channelID) {
-		return AFKChange{}, nil
-	}
-
-	tail := context.WithoutCancel(ctx)
-	var change AFKChange
-	if prevID != nil {
-		prev, err := s.st.GetChannel(tail, *prevID)
-		if err != nil {
-			return AFKChange{}, fmt.Errorf("%w: failed to fetch previous afk channel: %w", ErrInternal, err)
-		}
-		change.Previous = prev
-	}
-	if target != nil {
-		cur, err := s.st.GetChannel(tail, target.ID)
-		if err != nil || cur == nil {
-			return AFKChange{}, fmt.Errorf("%w: failed to fetch afk channel: %w", ErrInternal, err)
-		}
-		change.Current = cur
-	}
-
-	detail := "cleared the AFK channel"
-	if target != nil {
-		detail = fmt.Sprintf("set #%s as the AFK channel", target.Name)
-	}
-	slog.Info("afk channel changed", "actor_id", actorID, "channel_id", channelID)
-	var targetID int64
-	if target != nil {
-		targetID = target.ID
-	}
-	db.WriteAudit(tail, s.st, actorID, "afk_channel_change", "channel", targetID, detail)
-	return change, nil
-}
-
-func sameChannelID(a, b *int64) bool {
-	if a == nil || b == nil {
-		return a == nil && b == nil
-	}
-	return *a == *b
 }

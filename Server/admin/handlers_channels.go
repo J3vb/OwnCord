@@ -71,11 +71,16 @@ func handleListChannels(channels *service.ChannelService) http.HandlerFunc {
 
 // createChannelRequest is the JSON body for POST /admin/api/channels.
 type createChannelRequest struct {
-	Name     string `json:"name"`
-	Type     string `json:"type"`
-	Category string `json:"category"`
-	Topic    string `json:"topic"`
-	Position int    `json:"position"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+	// CategoryID places the channel in that category (0 = none); an unknown id
+	// answers 400. Category is the legacy free-text name (matched ignoring
+	// case, created when missing, empty = none). category_id wins when both
+	// are sent.
+	CategoryID int64  `json:"category_id"`
+	Category   string `json:"category"`
+	Topic      string `json:"topic"`
+	Position   int    `json:"position"`
 }
 
 // createChannelPostCommitHook, when non-nil, runs synchronously right after
@@ -96,11 +101,12 @@ func handleCreateChannel(channels *service.ChannelService, hub HubBroadcaster) h
 		}
 
 		ch, err := channels.AdminCreateChannel(r.Context(), actorFromContext(r), service.AdminChannelCreate{
-			Name:     req.Name,
-			Type:     req.Type,
-			Category: req.Category,
-			Topic:    req.Topic,
-			Position: req.Position,
+			Name:       req.Name,
+			Type:       req.Type,
+			CategoryID: req.CategoryID,
+			Category:   req.Category,
+			Topic:      req.Topic,
+			Position:   req.Position,
 		}, createChannelPostCommitHook)
 		if err != nil {
 			writeChannelErr(w, err)
@@ -115,12 +121,17 @@ func handleCreateChannel(channels *service.ChannelService, hub HubBroadcaster) h
 
 // updateChannelRequest is the JSON body for PATCH /admin/api/channels/{id}.
 type updateChannelRequest struct {
-	Name     string `json:"name"`
-	Topic    string `json:"topic"`
-	Category string `json:"category"`
-	SlowMode int    `json:"slow_mode"`
-	Position int    `json:"position"`
-	Archived bool   `json:"archived"`
+	Name  string `json:"name"`
+	Topic string `json:"topic"`
+	// CategoryID moves the channel into that category (0 = uncategorized);
+	// an unknown id answers 400. Category is the legacy free-text name
+	// (matched ignoring case, created when missing, empty = none). Neither
+	// sent leaves the category alone, and category_id wins when both are.
+	CategoryID *int64  `json:"category_id"`
+	Category   *string `json:"category"`
+	SlowMode   int     `json:"slow_mode"`
+	Position   int     `json:"position"`
+	Archived   bool    `json:"archived"`
 	// NSFW is stored, broadcast and audited; it changes no server-side content
 	// behaviour (see migration 025). Clients decide how to present it.
 	NSFW bool `json:"nsfw"`
@@ -145,7 +156,6 @@ func handlePatchChannel(channels *service.ChannelService, hub HubBroadcaster) ht
 		req := updateChannelRequest{
 			Name:          existing.Name,
 			Topic:         existing.Topic,
-			Category:      existing.Category,
 			SlowMode:      existing.SlowMode,
 			Position:      existing.Position,
 			Archived:      existing.Archived,
@@ -158,10 +168,21 @@ func handlePatchChannel(channels *service.ChannelService, hub HubBroadcaster) ht
 			return
 		}
 
+		// Keep the category unless the body names one: category_id wins, then
+		// the legacy name; neither sent leaves the channel where it is.
+		categoryID, legacyName := existing.CategoryID, (*string)(nil)
+		switch {
+		case req.CategoryID != nil:
+			categoryID = *req.CategoryID
+		case req.Category != nil:
+			categoryID, legacyName = 0, req.Category
+		}
+
 		updated, err := channels.AdminUpdateChannel(r.Context(), actorFromContext(r), existing, service.AdminChannelUpdate{
 			Name:          req.Name,
 			Topic:         req.Topic,
-			Category:      req.Category,
+			CategoryID:    categoryID,
+			Category:      legacyName,
 			SlowMode:      req.SlowMode,
 			Position:      req.Position,
 			Archived:      req.Archived,
