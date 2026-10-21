@@ -156,20 +156,23 @@ func (s *MessageRequestService) raceOrNotFound(ctx context.Context, userID, id i
 //
 // Returns the newly created row, or nil when a request already existed
 // (resend while pending/ignored/deleted/blocked, or the loser of a race) —
-// nil is not an error, it just means no new dm_request frame is owed.
-func (s *MessageRequestService) firstContact(ctx context.Context, senderID, recipientID, channelID, messageID int64) (*db.MessageRequest, error) {
-	created, err := s.st.CreateMessageRequest(ctx, senderID, recipientID, channelID, messageID)
+// nil is not an error, it just means no new dm_request frame is owed. When
+// the recipient has message requests off, the outcome reports AutoAccepted
+// and the row is nil: the caller delivers the message and sends no frame
+// (WP 6.8e).
+func (s *MessageRequestService) firstContact(ctx context.Context, senderID, recipientID, channelID, messageID int64) (*db.MessageRequest, db.MessageRequestOutcome, error) {
+	out, err := s.st.CreateMessageRequest(ctx, senderID, recipientID, channelID, messageID)
 	if err != nil {
-		return nil, err
+		return nil, db.MessageRequestOutcome{}, err
 	}
-	if !created {
-		return nil, nil
+	if !out.Created || out.AutoAccepted {
+		return nil, out, nil
 	}
 	req, err := s.st.GetMessageRequestByPair(ctx, senderID, recipientID)
 	if err != nil {
-		return nil, err
+		return nil, out, err
 	}
-	return req, nil
+	return req, out, nil
 }
 
 // DMDeliveryAudience returns who should receive a live frame that

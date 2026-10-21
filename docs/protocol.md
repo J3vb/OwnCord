@@ -484,7 +484,7 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
 
 ### Payload Fields
 
-**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true, "user_notes": true, "profile_banners": true, "dm_privacy": true }`. `dm_privacy` means the server stores the two direct message privacy settings (`GET` and `PUT /api/v1/users/me/privacy`, body `{ "allow_member_dms": bool, "message_requests": bool }`, both required); a client that does not see it shows no privacy controls. The settings are not enforced yet. `profile_banners` means the server supports profile banners (`POST` and `DELETE /api/v1/users/me/banner`, `banner_color` on `PATCH /api/v1/users/me`); a client that does not see it shows no banner controls. `user_notes` means the server stores private profile notes (`GET` and `PUT /api/v1/users/me/notes/{userId}`); a client that does not see it keeps notes in local storage. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
+**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true, "user_notes": true, "profile_banners": true, "dm_privacy": true }`. `dm_privacy` means the server stores the two direct message privacy settings (`GET` and `PUT /api/v1/users/me/privacy`, body `{ "allow_member_dms": bool, "message_requests": bool }`, both required); a client that does not see it shows no privacy controls. The server applies them to direct messages (see `dm_request`). `profile_banners` means the server supports profile banners (`POST` and `DELETE /api/v1/users/me/banner`, `banner_color` on `PATCH /api/v1/users/me`); a client that does not see it shows no banner controls. `user_notes` means the server stores private profile notes (`GET` and `PUT /api/v1/users/me/notes/{userId}`); a client that does not see it keeps notes in local storage. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
 These fields advertise retry-safe `chat_send` support. Older servers omit them;
 clients must not infer support from the protocol epoch or silently retry a
 durable pending message against a server that no longer advertises support.
@@ -2493,6 +2493,15 @@ B5-6, one-to-one DMs only. Sent to the **recipient** in two situations:
   a blocked sender never reaches this gate at all — it is refused up front
   with `ErrBlocked` by the existing, pre-B5-6 block check, which the sender
   does see.
+- **Never, when the recipient has message requests off.** A member who has
+  direct messages on and message requests off (`message_requests: false` in
+  `PUT /api/v1/users/me/privacy`) is reached by a first message directly: the
+  request is recorded as already accepted, the recipient gets `dm_channel_open`
+  and the `chat_message` as for any trusted sender, and no `dm_request` frame
+  is sent. Requests already waiting stay pending. Turning requests back on
+  later keeps that pair trusted. The setting is read when the message is
+  stored, so a change made while a first message is in flight takes effect for
+  that message either way.
 - **On every transition**, with the new `state` and `preview: null` (the held
   message never changes): `accept` (`dm_channel_open` is sent first, then
   this), `ignore`, `delete`, `block` — see `docs/api.md`'s "Message Requests"

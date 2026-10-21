@@ -284,11 +284,12 @@ func (s *MessageService) sendMessageDMSideEffects(ctx context.Context, p SendMes
 		slog.Warn("MessageService.SendMessage GetDMParticipants", "err", partErr, "channel_id", p.ChannelID)
 	}
 
-	for _, t := range targets {
+	for i := range targets {
+		t := targets[i]
 		if t.UserID == p.UserID {
 			continue
 		}
-		if !isGroup && s.messageRequests != nil && s.dmFirstContactGate(bgCtx, p, t, result) {
+		if !isGroup && s.messageRequests != nil && s.dmFirstContactGate(bgCtx, p, &targets[i], result) {
 			// Staged as a request (or refused outright — recipient not reachable):
 			// never OpenDM an untrusted recipient. dmFirstContactGate has
 			// already done everything this send owes them.

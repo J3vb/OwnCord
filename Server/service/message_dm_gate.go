@@ -13,8 +13,10 @@ import (
 // effect for this recipient is already fully handled (a request was staged,
 // or the recipient is not reachable and gets nothing) — the caller's cue to skip
 // OpenDM entirely for them. False means the recipient already trusts the
-// sender and today's OpenDM path applies.
-func (s *MessageService) dmFirstContactGate(ctx context.Context, p SendMessageParams, target db.DMDeliveryTarget, result *SendMessageResult) bool {
+// sender and today's OpenDM path applies. A recipient with message requests
+// off is accepted and opened inside the gate's own transaction; the gate
+// then marks target as trusting the sender and reports true.
+func (s *MessageService) dmFirstContactGate(ctx context.Context, p SendMessageParams, target *db.DMDeliveryTarget, result *SendMessageResult) bool {
 	recipientID := target.UserID
 	recipient, rErr := s.st.GetUserByID(ctx, recipientID)
 	if rErr != nil {
@@ -35,10 +37,22 @@ func (s *MessageService) dmFirstContactGate(ctx context.Context, p SendMessagePa
 		hook()
 	}
 
-	req, fcErr := s.messageRequests.firstContact(ctx, p.UserID, recipientID, p.ChannelID, result.MessageID)
+	req, outcome, fcErr := s.messageRequests.firstContact(ctx, p.UserID, recipientID, p.ChannelID, result.MessageID)
 	if fcErr != nil {
 		slog.Error("MessageService.SendMessage: first-contact gate failed",
 			"err", fcErr, "recipient_id", recipientID, "sender_id", p.UserID)
+		return true
+	}
+	if outcome.AutoAccepted {
+		// The recipient has message requests off: the transaction accepted
+		// the pair and opened the DM, so this recipient is now a trusting
+		// participant. Mark the in-memory target so the delivery audience,
+		// mentions and push include them, announce the open once, and send
+		// no dm_request frame (WP 6.8e).
+		target.TrustsSender = true
+		if outcome.Opened {
+			result.OpenedDMFor = append(result.OpenedDMFor, recipientID)
+		}
 		return true
 	}
 	if req != nil {
