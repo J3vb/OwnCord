@@ -207,11 +207,15 @@ context. So `Stop` cancels it and `Done()` waits for it (`hub_sweep.go`,
 `hub_stop.go`). The two coalescing workers run on that context too, and
 `finishRun` joins them.
 
-**Role-refresh worker (WP 4.4b).** An admin role handler commits, invalidates
-the permission cache and makes one `Hub.EnqueueRoleRefresh` call; it never
-waits on the fan-out. For the members it names directly it also calls
-`Hub.RevokeUnreadableChannels`, so their held channels are released as the
-request answers. The worker takes the pending users in rounds. Each affected
+**Role-refresh worker (WP 4.4b).** The role, channel and moderation services
+(WP 5.1a) commit, invalidate the permission cache and then call the hub through
+the `service.PermissionChangeNotifier` port, which `ws/permission_notifier.go`
+implements. A role mutation becomes one `Hub.EnqueueRoleRefresh` call and never
+waits on the fan-out. For the members it names directly (a role delete's first
+32 members, a single role assignment) the service also calls
+`Hub.RevokeUnreadableChannels`, so their held channels are released before the
+call returns. Because the services own this, a caller other than an admin
+handler gets the same effects. The worker takes the pending users in rounds. Each affected
 member's held topics are released before their sidebar is sent. For each
 user whose role changed it revokes held topics first, then sends
 `channel_create`/`channel_delete` in chunks (a client that does not drain is

@@ -31,8 +31,9 @@ func TestAdminAPI_PatchRole_MemberLookupFailureBlanketInvalidates(t *testing.T) 
 	inv := &mockPermInvalidator{}
 	roleSvc := service.NewRoleService(
 		failingMembersStore{Store: database},
-		service.NewPermissionService(database, permissions.NewChecker(database)),
+		observeInvalidations(service.NewPermissionService(database, permissions.NewChecker(database)), inv),
 	)
+	roleSvc.SetPermissionNotifier(hub)
 	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv,
 		svcWithRoles(database, roleSvc))
 	token := createAdminUser(t, database)

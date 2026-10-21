@@ -264,8 +264,9 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 	// buildReady / REST ListVisibleChannels — resolved per user from their
 	// CURRENT role (c.user is a connect-time snapshot). With a
 	// PermissionService the subject comes from the per-user cache — safe
-	// because the admin handlers invalidate (InvalidateAll on override
-	// change, InvalidateUser on role change) before calling into the hub, so
+	// because the role, channel and moderation services invalidate the
+	// affected users (InvalidateAll when that list is unreadable) before
+	// calling into the hub (WP 5.1a), so
 	// the lookups below repopulate from post-change data; the 30s TTL is only
 	// a backstop and the F6 gen-counter guard keeps a racing populate from
 	// caching stale rows. Without a service (bare test hubs) each client is
