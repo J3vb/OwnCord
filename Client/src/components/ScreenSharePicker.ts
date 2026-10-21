@@ -18,7 +18,11 @@
  *
  * On the web path (Windows) the OS picker owns the source and the audio
  * switch, so `osPicker: true` shows only the Quality step and resolves
- * `"os"`; the caller opens the OS picker after it.
+ * `"os"`; the caller opens the OS picker after it. On Windows, when the host
+ * can capture one app's sound (`appAudioAvailable`), the step also has a
+ * "Share the app's sound" switch (on by default, like Linux's Share audio):
+ * a shared window then carries its app's sound, which Chromium's picker never
+ * offers for a window.
  *
  * Built on `createModal`, so it carries the shared dialog contract (role,
  * modal, focus trap, Escape, focus restore). All copy lives in the `voice`
@@ -34,6 +38,7 @@ import { createIcon } from "@lib/icons";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
 import type { NativeVoiceScreenSource } from "../platform/contracts/nativeVoice";
 import { voiceText as t } from "../i18n/voice";
+import { desktop } from "../platform/desktop";
 import { getEffectiveScreenShareFps, type StreamQuality } from "@lib/screenShare";
 
 export interface ScreenSharePick {
@@ -80,11 +85,17 @@ function buildAudioNote(): HTMLElement {
 
 /** The Share audio switch (on by default, as the Windows picker's); `onChange`
  *  hears every flip. */
-function buildAudioSwitch(onChange: (on: boolean) => void): HTMLElement {
+function buildAudioSwitch(
+  onChange: (on: boolean) => void,
+  copy: { label: string; hint: string } = {
+    label: t("picker.shareAudio"),
+    hint: t("picker.shareAudioHint"),
+  },
+): HTMLElement {
   const wrap = createElement("div", { class: "ssp-opt" });
   const row = createElement("div", { class: "ssp-opt-row" });
   row.appendChild(
-    createElement("div", { class: "ssp-opt-label", id: "ssp-audio-label" }, t("picker.shareAudio")),
+    createElement("div", { class: "ssp-opt-label", id: "ssp-audio-label" }, copy.label),
   );
   const toggle = createElement("div", {
     class: "toggle on",
@@ -109,15 +120,31 @@ function buildAudioSwitch(onChange: (on: boolean) => void): HTMLElement {
   });
   row.appendChild(toggle);
   wrap.appendChild(row);
-  wrap.appendChild(
-    createElement("div", { class: "ssp-hint", id: "ssp-audio-hint" }, t("picker.shareAudioHint")),
-  );
+  wrap.appendChild(createElement("div", { class: "ssp-hint", id: "ssp-audio-hint" }, copy.hint));
   return wrap;
 }
 
-/** Resolve the source to share, or null when the user closed the dialog. */
+/** Resolve the source to share, or null when the user closed the dialog. On
+ *  the Windows web path the dialog waits for the host to say whether it can
+ *  capture one app's sound (a host that cannot say counts as no); everywhere
+ *  else it opens at once. */
 export function showScreenSharePicker(
   opts: ScreenSharePickerOptions,
+): Promise<ScreenSharePick | null> {
+  if (
+    opts.osPicker !== true ||
+    opts.sourceOnly === true ||
+    !/\bWindows\b/.test(navigator.userAgent)
+  ) {
+    return openPicker(opts, false);
+  }
+  return desktop.appAudio.available().then((appAudio) => openPicker(opts, appAudio));
+}
+
+/** `appAudio`: offer the "Share the app's sound" switch (Windows web path). */
+function openPicker(
+  opts: ScreenSharePickerOptions,
+  appAudio: boolean,
 ): Promise<ScreenSharePick | null> {
   return new Promise((resolve) => {
     let picked: ScreenSharePick | null = null;
@@ -335,6 +362,15 @@ export function showScreenSharePicker(
     // ---- Options: audio note + quality -------------------------------------
     if (opts.sourceOnly !== true) {
       const options = createElement("div", { class: "ssp-options" });
+      if (appAudio)
+        options.appendChild(
+          buildAudioSwitch(
+            (on) => {
+              selectedAudio = on;
+            },
+            { label: t("picker.shareAppAudio"), hint: t("picker.shareAppAudioHint") },
+          ),
+        );
       if (opts.osPicker !== true)
         options.appendChild(
           opts.audioAvailable === true
@@ -470,7 +506,8 @@ export function showScreenSharePicker(
         quality: selectedQuality,
         fps: selectedFps,
         // Only when the switch was offered (a Change source offers none).
-        ...(opts.audioAvailable === true && opts.sourceOnly !== true && opts.osPicker !== true
+        ...((opts.audioAvailable === true && opts.sourceOnly !== true && opts.osPicker !== true) ||
+        appAudio
           ? { audio: selectedAudio }
           : {}),
       };

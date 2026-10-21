@@ -41,6 +41,8 @@ import {
   type VideoTrackDeps,
 } from "../../lib/screenShare";
 import { bumpLocalShareRev } from "../../stores/voice.store";
+import { isLinuxDesktop } from "./native/platform";
+import { startAppShareAudio, wantsAppAudio, type AppShareAudio } from "../../lib/appAudioShare";
 import { voiceText } from "../../i18n/voice";
 
 const log = createLogger("screenShare");
@@ -115,6 +117,7 @@ export async function changeScreenshareSource(
   state.changing = true;
   let fresh: LocalTrack[] = [];
   let swapped = false;
+  let appShare: AppShareAudio | null = null;
   try {
     fresh = await createLocalScreenTracks(getScreenShareCaptureOptions(live.quality, live.fps));
     const freshVideo = fresh.find((t) => t.kind === Track.Kind.Video);
@@ -126,8 +129,25 @@ export async function changeScreenshareSource(
       for (const t of fresh) t.stop();
       return;
     }
-    const freshAudio = fresh.find((t) => t.kind === Track.Kind.Audio);
+    let freshAudio: LocalTrack | undefined = fresh.find((t) => t.kind === Track.Kind.Audio);
     const oldAudio = live.tracks.find((t) => t.kind === Track.Kind.Audio);
+    // Windows (WP 6.7b): a window gets its app's sound as the "fresh audio".
+    // The host replaces the capture of the window being left; leaving a
+    // window for anything else stops it below.
+    if (
+      !isLinuxDesktop() &&
+      wantsAppAudio(state.appAudioOn, freshVideo.mediaStreamTrack, freshAudio !== undefined)
+    ) {
+      appShare = await startAppShareAudio(freshVideo.mediaStreamTrack, () =>
+        superseded(state, deps, live),
+      );
+      if (superseded(state, deps, live)) {
+        // startAppShareAudio already stopped a capture it opened.
+        for (const t of fresh) t.stop();
+        return;
+      }
+      if (appShare !== null) freshAudio = appShare.track;
+    }
     swapped = true;
     state.screenTrackEndedCleanup?.();
     // The SDK stops the old capture once the sender carries the new one.
@@ -151,6 +171,7 @@ export async function changeScreenshareSource(
       // The stop already released the share's tracks; these captures are the
       // only ones it could not reach.
       for (const t of fresh) t.stop();
+      appShare?.close();
       if (freshAudio !== undefined && tracks.includes(freshAudio)) {
         unpublishManualTrack(live.room, freshAudio);
       }
@@ -159,6 +180,12 @@ export async function changeScreenshareSource(
     // The `fresh` wrappers stay unstopped: stopping one would stop the
     // capture the published track now carries.
     state.manualScreenTracks = tracks;
+    // The app's sound follows the window.
+    const oldApp = state.appAudio;
+    state.appAudio = appShare ?? undefined;
+    // A newer start (window to window) already replaced the old capture on the
+    // host, so closing the old one skips the stop; to a screen it stops.
+    oldApp?.close();
     watchScreenEnded(state, deps, live.video, tracks, live.generation);
     if (live.video.mediaStreamTrack.readyState === "ended") {
       // The new capture ended while it was being swapped in, before the
@@ -171,6 +198,7 @@ export async function changeScreenshareSource(
     log.info("Screenshare source changed", { audio: freshAudio !== undefined });
   } catch (err) {
     for (const t of fresh) t.stop();
+    if (appShare !== null && state.appAudio !== appShare) appShare.close();
     if (superseded(state, deps, live)) return;
     if (!swapped) {
       // The picker was closed (not a failure) or could not open: the old

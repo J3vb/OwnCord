@@ -5,6 +5,7 @@
 // This registry is statically reachable from the entry, so anything a member
 // imports statically lands in the startup chunk. A member whose native module
 // was lazy before it moved keeps it a dynamic `import()` inside its methods.
+import { appAudio } from "./appAudio";
 import { appMetadata } from "./appMetadata";
 import { appProcess } from "./appProcess";
 import { autostart } from "./autostart";
@@ -33,6 +34,7 @@ import { windowPrefs } from "./windowPrefs";
 import type { Platform } from "../contracts";
 
 export const desktop: Platform = {
+  appAudio,
   appMetadata,
   appProcess,
   autostart,

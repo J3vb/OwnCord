@@ -38,6 +38,8 @@ export const shards = {
   "livekit-3": [
     "src/lib/livekitUrlResolver.ts",
     "src/lib/screenShare.ts",
+    "src/lib/appAudioTrack.ts",
+    "src/lib/appAudioShare.ts",
     "src/features/voice/joinRequest.ts",
     "src/lib/watchRequest.ts",
     "src/features/voice/cameraMenu.ts",
