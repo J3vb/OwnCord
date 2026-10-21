@@ -502,7 +502,12 @@ func TestSweepAFK_SkipsMemberWithModerationInFlight(t *testing.T) {
 	a := r.members[0]
 	r.seat(a, r.room)
 	r.idle(a, time.Hour)
-	unlock := r.hub.voiceMod.lock(a.userID)
+	// The moderator is another goroutine, as in production: a sweep run on
+	// the goroutine that holds voiceMod would take voiceMember under it, which
+	// the lock order (and the deadlock build's rank check) forbids.
+	held := make(chan func())
+	go func() { held <- r.hub.voiceMod.lock(a.userID) }()
+	unlock := <-held
 	r.sweep()
 	unlock()
 	if len(r.moved(a)) != 0 || r.rowChannel(a) != r.room || stashed(a.c) {

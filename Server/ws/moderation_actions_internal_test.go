@@ -584,7 +584,7 @@ func TestMuteForTimeout_ContendsOnTheHubLock(t *testing.T) {
 // NOT yet reported "acquired" a short, generous instant later, before
 // releasing the first and confirming the second then proceeds.
 func TestVoiceModLocks_SerializesSameUser(t *testing.T) {
-	v := newUserLocks()
+	v := newUserLocks[lockRankVoiceMod]()
 	const uid = int64(1)
 
 	firstAcquired := make(chan struct{})
@@ -626,7 +626,7 @@ func TestVoiceModLocks_SerializesSameUser(t *testing.T) {
 // per userID, not a single global lock — a moderation action against one
 // user must not stall on an unrelated one.
 func TestVoiceModLocks_DoesNotSerializeDifferentUsers(t *testing.T) {
-	v := newUserLocks()
+	v := newUserLocks[lockRankVoiceMod]()
 	unlock1 := v.lock(1)
 	defer unlock1()
 
@@ -648,7 +648,7 @@ func TestVoiceModLocks_DoesNotSerializeDifferentUsers(t *testing.T) {
 // current holder and no queued waiter is removed as soon as the last
 // release happens, not kept around indefinitely.
 func TestVoiceModLocks_EvictsEntryOnceUnheldAndUnwaited(t *testing.T) {
-	v := newUserLocks()
+	v := newUserLocks[lockRankVoiceMod]()
 
 	unlock := v.lock(1)
 	if len(v.locks) != 1 {

@@ -50,7 +50,7 @@ type tombstoneBatch struct {
 // failing until a retry of that purge succeeds. Lock order: mu before
 // seqMu; no path takes mu while holding seqMu.
 type replayPurgeState struct {
-	mu       syncutil.RWMutex
+	mu       syncutil.RankedRW[lockRankSerialiser]
 	waiting  atomic.Int32
 	users    map[int64]uint64
 	messages map[int64]uint64

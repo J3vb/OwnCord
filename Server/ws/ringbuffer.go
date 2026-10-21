@@ -11,7 +11,7 @@ type eventEntry struct {
 
 // EventRingBuffer is a bounded, thread-safe ring buffer for recent broadcast events.
 type EventRingBuffer struct {
-	mu      syncutil.RWMutex
+	mu      syncutil.RankedRW[lockRankLeaf]
 	entries []eventEntry
 	size    int
 	pos     int // next write position

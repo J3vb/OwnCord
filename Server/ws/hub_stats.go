@@ -160,7 +160,7 @@ type queueDropState struct {
 	applied uint64
 	// routes are the audiences of drops not yet marked (hub_loss.go);
 	// guarded by mu, a leaf lock.
-	mu             syncutil.Mutex
+	mu             syncutil.Ranked[lockRankLeaf]
 	routes         []lossRoute
 	routesOverflow bool
 	routesPending  atomic.Bool

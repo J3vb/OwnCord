@@ -92,7 +92,7 @@ type pendingChannel struct {
 }
 
 type activityState struct {
-	mu        syncutil.Mutex
+	mu        syncutil.Ranked[lockRankLeaf]
 	pending   map[int64]*pendingChannel
 	lastFlush time.Time
 	wake      chan struct{} // cap 1; made on first use so a zero Hub works
@@ -102,7 +102,7 @@ type activityState struct {
 	highest  map[int64]int64
 	readUpTo map[readKey]readMark
 
-	flushMu syncutil.Mutex
+	flushMu syncutil.Ranked[lockRankSerialiser]
 }
 
 func (a *activityState) wakeChan() chan struct{} {
