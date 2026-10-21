@@ -92,6 +92,9 @@ export const voiceText = defineCatalog("voice", {
 
   "tile.watch": "Watch {name}",
   "tile.live": "LIVE",
+  "tile.viewers": "Watching: {names}",
+  "tile.viewersMore": "Watching: {names} and {count} more",
+  "tile.viewersYou": "You",
   "tile.backToGrid": "Back to grid",
   "grid.showChat": "Show chat",
   "grid.viewOptions": "View options",

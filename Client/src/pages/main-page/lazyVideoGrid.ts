@@ -66,6 +66,7 @@ export function createLazyVideoGrid(): LazyVideoGrid {
   let people: readonly GridPerson[] = [];
   let speaking: ReadonlySet<number> | null = null;
   let audioState: ReadonlyMap<number, { muted: boolean; deafened: boolean }> | null = null;
+  let viewers: ReadonlyMap<number, readonly string[]> | null = null;
   let focusedTileId: number | null = null;
   /** Insertion order is the replay order; an update keeps its place. */
   const streams = new Map<number, PendingStream>();
@@ -87,6 +88,7 @@ export function createLazyVideoGrid(): LazyVideoGrid {
     people = [];
     speaking = null;
     audioState = null;
+    viewers = null;
     focusedTileId = null;
   }
 
@@ -97,6 +99,7 @@ export function createLazyVideoGrid(): LazyVideoGrid {
     if (callState !== null) grid.setCallState(callState);
     if (exitVisible) grid.setExitVisible(true);
     if (audioState !== null) grid.setUserAudioState(audioState);
+    if (viewers !== null) grid.setStreamViewers(viewers);
     if (speaking !== null) grid.setSpeaking(speaking);
     if (people.length > 0) grid.setPeople(people);
     for (const [tileId, s] of streams) {
@@ -262,6 +265,11 @@ export function createLazyVideoGrid(): LazyVideoGrid {
     setUserAudioState(state): void {
       if (real !== null) real.setUserAudioState(state);
       else audioState = state;
+    },
+
+    setStreamViewers(next): void {
+      if (real !== null) real.setStreamViewers(next);
+      else viewers = next;
     },
 
     setCallbacks(next): void {

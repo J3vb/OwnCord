@@ -377,7 +377,9 @@ export type VoiceSound =
   | "deafen"
   | "undeafen"
   | "streamStart"
-  | "streamEnd";
+  | "streamEnd"
+  | "viewerJoin"
+  | "viewerLeave";
 
 // A note (or pair) per edge, all under a fifth of a second. Distinct enough to
 // tell apart by ear without being a message or a call.
@@ -410,11 +412,29 @@ const VOICE_SOUND_NOTES: Readonly<Record<VoiceSound, readonly (readonly [number,
     [587, 0.08],
     [440, 0.16],
   ],
+  // The streamer's cue that someone started or stopped watching: two soft
+  // notes, the pair reversed for leaving (voiceTone plays them quieter).
+  viewerJoin: [
+    [659, 0],
+    [880, 0.07],
+  ],
+  viewerLeave: [
+    [880, 0],
+    [659, 0.07],
+  ],
+};
+
+/** Per-sound gain; the viewer cues sit well under the others (0.2). */
+const VOICE_SOUND_GAIN: Readonly<Partial<Record<VoiceSound, number>>> = {
+  viewerJoin: 0.1,
+  viewerLeave: 0.1,
 };
 
 /** Each voice sound as a tone spec: a short note per `[hz, at]` pair. */
 function voiceTone(kind: VoiceSound): ToneSpec {
-  return VOICE_SOUND_NOTES[kind].map(([hz, at]) => note(at, 0.12, 0.2, hz));
+  return VOICE_SOUND_NOTES[kind].map(([hz, at]) =>
+    note(at, 0.12, VOICE_SOUND_GAIN[kind] ?? 0.2, hz),
+  );
 }
 
 /** Play one voice UI sound. */

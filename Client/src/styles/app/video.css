@@ -181,6 +181,29 @@
   font-weight: 800;
   letter-spacing: 0.05em;
 }
+/* Who is watching a screen share: an eye and the count, top-right. The tile's
+   hover controls step down below it while it shows. */
+.video-viewers {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--scrim);
+  color: var(--on-fill);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+.video-viewers[hidden] {
+  display: none;
+}
+.video-cell--has-viewers .video-tile-nav {
+  top: 40px;
+}
 .video-cell--speaking {
   box-shadow: 0 0 0 2px var(--text-positive);
 }

@@ -77,6 +77,8 @@ import {
   handleVoiceConfig,
   handleVoiceDisconnected,
   handleVoiceE2eeAnnounce,
+  handleVoiceWatching,
+  handleVoiceWatchError,
   handleVoiceE2eeOffer,
   handleVoiceError,
   handleVoiceJoinRollback,
@@ -332,6 +334,8 @@ export function wireDispatcher(
 
   unsubs.push(ws.on(S.VOICE_E2EE_OFFER, handleVoiceE2eeOffer));
 
+  unsubs.push(ws.on(S.VOICE_WATCHING, handleVoiceWatching));
+
   // ── Server Events ─────────────────────────────────────
 
   unsubs.push(ws.on(S.SERVER_RESTART, (payload) => handleServerRestart(clock, payload)));
@@ -364,6 +368,8 @@ export function wireDispatcher(
       // code-specific branch and never consumes the frame -> capacity
       // refusals -> the generic toast -> the video rollback.
       if (handleConnectionError(ws, payload)) return;
+      // A server that does not know voice_watch answers with an error: ignore it.
+      if (handleVoiceWatchError(payload, id)) return;
       // A timeout refuses a custom status without writing or broadcasting
       // anything, so the PresenceSender's optimistic apply would leave the
       // user seeing and saving a status nobody else has. This is the one

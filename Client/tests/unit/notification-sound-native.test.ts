@@ -107,6 +107,8 @@ const VOICE_SOUNDS: VoiceSound[] = [
   "undeafen",
   "streamStart",
   "streamEnd",
+  "viewerJoin",
+  "viewerLeave",
 ];
 
 /** Let the mocked host's promises settle. */

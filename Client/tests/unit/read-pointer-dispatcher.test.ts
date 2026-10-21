@@ -54,6 +54,7 @@ vi.mock("@lib/livekitSession", () => ({
   disableCamera: vi.fn(async () => {}),
   disableScreenshare: vi.fn(async () => {}),
   reconcileVideoFlags: vi.fn(),
+  resendWatching: vi.fn(),
 }));
 const mockShowToast = vi.fn();
 vi.mock("@lib/toast", () => ({

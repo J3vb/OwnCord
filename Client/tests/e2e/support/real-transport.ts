@@ -55,7 +55,9 @@ export async function installRealTransport(page: Page, server: TestServer) {
         { event, payload },
       )
       .catch((error: Error) => {
-        if (!closed && sentTo === documents) errors.push(error.message);
+        // A closed page (a test that ends with page.close()) has no frontend
+        // left to deliver to; the server may still be sending to its socket.
+        if (!closed && sentTo === documents && !page.isClosed()) errors.push(error.message);
       });
     pendingEvents.add(pending);
     void pending.finally(() => pendingEvents.delete(pending));
