@@ -188,8 +188,19 @@ function moreButtonOf(target: EventTarget | null): HTMLElement | null {
 /** Headroom above the NEW divider on open: the unread bar overlays the top of the viewport. */
 const UNREAD_BAR_CLEARANCE = 40;
 
-/** Number of items to render beyond visible viewport in each direction. */
-const OVERSCAN = 20;
+/** Most items rendered beyond the visible range in each direction. Also the
+ *  buffer when the viewport has no height yet (first paint, hidden tab). */
+const OVERSCAN_MAX_ROWS = 20;
+/** Fewest items kept beyond the visible range, so a list of tall rows still has
+ *  something to scroll into. */
+const OVERSCAN_MIN_ROWS = 4;
+/** The render window reaches this many viewport heights above and below what is
+ *  on screen, bounded by the row limits above. */
+const OVERSCAN_VIEWPORTS = 1;
+
+function clampOverscan(rows: number): number {
+  return Math.min(OVERSCAN_MAX_ROWS, Math.max(OVERSCAN_MIN_ROWS, rows));
+}
 
 /** Regex for direct image URLs in message content. */
 const IMAGE_URL_RE = /\.(?:png|jpe?g|gif|webp)(?:\?[^\s]*)?(?:\s|$)/i;
@@ -1399,8 +1410,18 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const firstVisible = offsetToIndex(scrollTop);
     const lastVisible = offsetToIndex(scrollTop + clientHeight);
 
-    let start = Math.max(0, firstVisible - OVERSCAN);
-    const end = Math.min(virtualItems.length, lastVisible + OVERSCAN + 1);
+    // Overscan is a distance, not a row count: a viewport above and below,
+    // bounded to 4..20 rows each way so tall media rows do not pile up and
+    // short rows keep a buffer. Without a viewport height, the row maximum.
+    let above = OVERSCAN_MAX_ROWS;
+    let below = OVERSCAN_MAX_ROWS;
+    if (clientHeight > 0) {
+      const margin = clientHeight * OVERSCAN_VIEWPORTS;
+      above = clampOverscan(firstVisible - offsetToIndex(scrollTop - margin));
+      below = clampOverscan(offsetToIndex(scrollTop + clientHeight + margin) - lastVisible);
+    }
+    let start = Math.max(0, firstVisible - above);
+    const end = Math.min(virtualItems.length, lastVisible + below + 1);
     // A divider is drawn with the row under it: that row's top margin depends
     // on the divider being there, so a window starting between them would
     // measure the row differently from how it is laid out once both show.

@@ -755,6 +755,10 @@ describe("MessageList — unread navigation (P4-03)", () => {
       scrollUp();
       returnToTail();
       await nextFrame();
+      // The window follows the reader (a viewport of buffer, not the whole
+      // 60-row tail), so bring the unread rows into it before looking.
+      scrollTo(60 * ROW_PX - CLIENT_HEIGHT - 100);
+      await nextFrame();
 
       const divider = container.querySelector('[data-testid="new-messages-divider"]');
       expect((divider?.nextElementSibling as HTMLElement | null)?.dataset.testid).toBe(
