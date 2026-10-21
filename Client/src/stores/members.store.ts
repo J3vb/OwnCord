@@ -25,6 +25,10 @@ export interface Member {
   readonly customStatusExpiresAt?: string | null;
   /** Profile text. Null = unset, undefined = never sent (older server). */
   readonly about?: string | null;
+  /** Banner image path. Null = none, undefined = none or never sent. */
+  readonly banner?: string | null;
+  /** Banner colour. Null = none, undefined = none or never sent. */
+  readonly banner_color?: string | null;
   /** Account creation time (RFC3339) for "Member since"; undefined = older server. */
   readonly createdAt?: string;
   /** Long-term E2EE identity public key (base64) for voice TOFU (F3). The store
@@ -82,6 +86,8 @@ export function setMembers(members: readonly ReadyMember[]): void {
       customStatus: m.custom_status ?? null,
       identityPublicKey: m.identity_public_key ?? null,
       ...(m.about === undefined ? {} : { about: m.about }),
+      ...(m.banner === undefined ? {} : { banner: m.banner }),
+      ...(m.banner_color === undefined ? {} : { banner_color: m.banner_color }),
       ...(m.created_at === undefined ? {} : { createdAt: m.created_at }),
     });
   }
@@ -118,6 +124,10 @@ export function addMember(payload: MemberJoinPayload): void {
       customStatus: prev.members.get(payload.user.id)?.customStatus ?? null,
       identityPublicKey: payload.user.identity_public_key ?? null,
       ...(payload.user.about === undefined ? {} : { about: payload.user.about }),
+      ...(payload.user.banner === undefined ? {} : { banner: payload.user.banner }),
+      ...(payload.user.banner_color === undefined
+        ? {}
+        : { banner_color: payload.user.banner_color }),
       ...(payload.user.created_at === undefined ? {} : { createdAt: payload.user.created_at }),
     });
     return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
@@ -154,6 +164,9 @@ export interface MemberProfilePatch {
   readonly identityPublicKey?: string | null;
   /** Only applied when provided; null clears it. */
   readonly about?: string | null;
+  /** Only applied when provided (an old server sends neither); null clears. */
+  readonly banner?: string | null;
+  readonly banner_color?: string | null;
 }
 
 /** Update a member's profile from a user_update event. */
@@ -172,6 +185,8 @@ export function updateMemberProfile(userId: number, patch: MemberProfilePatch): 
           ? existing.identityPublicKey
           : patch.identityPublicKey,
       ...(patch.about === undefined ? {} : { about: patch.about }),
+      ...(patch.banner === undefined ? {} : { banner: patch.banner }),
+      ...(patch.banner_color === undefined ? {} : { banner_color: patch.banner_color }),
     });
     return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
   });

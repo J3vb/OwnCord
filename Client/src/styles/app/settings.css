@@ -670,7 +670,8 @@ details.disclose[open] > summary .icon {
 
 /* ── Discord-style account profile card ── */
 .account-banner {
-  height: 100px;
+  height: var(--upp-banner-h, 100px);
+  overflow: hidden;
   border-radius: var(--radius-md) var(--radius-md) 0 0;
   background: var(--accent);
 }

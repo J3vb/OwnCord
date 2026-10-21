@@ -132,6 +132,11 @@ export interface UserWithRole extends MessageUser {
   /** The user's profile text. Null = unset. Sent for every member since the
    *  server's 3C-7 (absent from older servers). */
   readonly about?: string | null;
+  /** Profile banner image path (`/api/v1/files/<id>`). Null = none, absent =
+   *  older server (WP 6.11b). */
+  readonly banner?: string | null;
+  /** Profile banner colour (`#rgb` / `#rrggbb`). Null = none, absent = older server. */
+  readonly banner_color?: string | null;
   /** Account creation time (RFC3339), the "Member since" date. Absent from
    *  older servers. */
   readonly created_at?: string;
@@ -271,6 +276,10 @@ export interface ReadyMember {
   readonly custom_status?: string | null;
   /** Profile text. Null = unset; absent from servers before 3C-7. */
   readonly about?: string | null;
+  /** Banner image path; absent = none (omitted for members without one). */
+  readonly banner?: string | null;
+  /** Banner colour; absent = none. */
+  readonly banner_color?: string | null;
   /** Account creation time (RFC3339); absent from servers before 3C-7. */
   readonly created_at?: string;
   /** Long-term E2EE identity public key (base64) for voice TOFU (F3). */
@@ -407,6 +416,13 @@ export interface ReadyPayload {
      * written over `/users/me/notes/{userId}`. Absent means an older server.
      */
     readonly user_notes?: boolean;
+    /**
+     * The server keeps a profile banner, an image and/or a colour (WP 6.11b):
+     * `POST` and `DELETE` `/users/me/banner`, `banner_color` on `PATCH
+     * /users/me`. Advertised even when attachment storage is off, in which case
+     * the upload route is not mounted. Absent means an older server.
+     */
+    readonly profile_banners?: boolean;
   };
   readonly channels: readonly ReadyChannel[];
   readonly members: readonly ReadyMember[];
@@ -862,6 +878,10 @@ export interface UserUpdatePayload {
    *  of the profile wholesale. */
   readonly display_name?: string | null;
   readonly about?: string | null;
+  /** Always present from a server with banners (null = cleared); absent from
+   *  an older one, which leaves the stored banner alone. */
+  readonly banner?: string | null;
+  readonly banner_color?: string | null;
   /** Updated E2EE identity public key (base64) — lets peers detect an
    *  identity-key change (TOFU mismatch) as it happens (F3). */
   readonly identity_public_key?: string | null;
@@ -1434,6 +1454,8 @@ export interface MemberResponse {
   readonly totp_enabled?: boolean;
   readonly display_name?: string | null;
   readonly about?: string | null;
+  readonly banner?: string | null;
+  readonly banner_color?: string | null;
   readonly custom_status?: string | null;
 }
 

@@ -507,6 +507,8 @@ export function handleUserUpdate(payload: Payload<"user_update">): void {
     displayName: payload.display_name,
     identityPublicKey: payload.identity_public_key,
     about: payload.about,
+    banner: payload.banner,
+    banner_color: payload.banner_color,
   });
   // Same reasoning as PRESENCE above: dmStore's copy of a DM partner's
   // username/avatar/displayName is otherwise never refreshed. DmUser's
@@ -536,6 +538,9 @@ export function handleUserUpdate(payload: Payload<"user_update">): void {
         avatar: payload.avatar,
         display_name: payload.display_name,
         about: payload.about,
+        // Absent (an older server) keeps the stored banner; null clears it.
+        ...(payload.banner === undefined ? {} : { banner: payload.banner }),
+        ...(payload.banner_color === undefined ? {} : { banner_color: payload.banner_color }),
       },
       authStore.getState().serverName ?? "",
       authStore.getState().motd ?? "",

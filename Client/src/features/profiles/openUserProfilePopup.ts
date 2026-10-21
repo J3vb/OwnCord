@@ -166,6 +166,8 @@ export function openUserProfilePopup(options: OpenUserProfilePopupOptions): () =
           customStatus: live.customStatus,
           // Absent (older server) hides the sections, as before.
           ...(live.about === undefined ? {} : { about: live.about }),
+          banner: live.banner ?? null,
+          banner_color: live.banner_color ?? null,
           ...(joinDate === null ? {} : { joinDate }),
         },
         anchorX,

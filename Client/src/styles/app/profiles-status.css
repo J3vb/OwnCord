@@ -85,3 +85,13 @@
 .account-avatar-upload {
   margin: 12px 0 4px;
 }
+
+.account-banner-edit .account-avatar-upload {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.account-banner-edit .ac-btn {
+  margin-left: 0;
+}

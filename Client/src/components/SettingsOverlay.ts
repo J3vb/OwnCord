@@ -66,11 +66,18 @@ export interface SettingsOverlayOptions {
     username?: string;
     display_name?: string;
     about?: string;
+    /** `#rrggbb`; "" clears. Sent only on a server with `profile_banners`. */
+    banner_color?: string;
   }): Promise<void>;
   /** Upload an avatar image. Resolves with the URL the server stored. */
   onUploadAvatar(file: File): Promise<string>;
   /** Remove the avatar (3C-7a). Resolves once the server has cleared it. */
   onRemoveAvatar(): Promise<void>;
+  /** Upload a cropped banner image (WP 6.11d). Resolves with the stored URL.
+   *  Omitted: no banner upload control. */
+  onUploadBanner?(file: File): Promise<string>;
+  /** Remove the banner image. Omitted: no remove control. */
+  onRemoveBanner?(): Promise<void>;
   onLogout(): void;
   onDeleteAccount(password: string): Promise<void>;
   /** The server-default retention sentence for the Account tab, or null when

@@ -28,6 +28,23 @@ describe("UserProfilePopup", () => {
     container.remove();
   });
 
+  it("paints a banner colour on the strip and leaves the gradient without one", () => {
+    const first = createUserProfilePopup({
+      user: makeUser({ banner: null, banner_color: "#336699" }),
+      anchorX: 1,
+      anchorY: 1,
+    });
+    first.mount(container);
+    const strip = container.querySelector<HTMLElement>(".upp-banner")!;
+    expect(strip.style.background).toContain("rgb(51, 102, 153)");
+    first.destroy?.();
+
+    const second = createUserProfilePopup({ user: makeUser(), anchorX: 1, anchorY: 1 });
+    second.mount(container);
+    expect(container.querySelector<HTMLElement>(".upp-banner")!.style.background).toBe("");
+    second.destroy?.();
+  });
+
   it("click trigger opens popup with correct content", () => {
     const user = makeUser({ username: "alice", role: "admin" });
     const popup = createUserProfilePopup({

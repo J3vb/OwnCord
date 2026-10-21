@@ -204,6 +204,33 @@ describe("members store", () => {
       expect(membersStore.getState().roleRevision ?? 0).toBe(before + 1);
     });
 
+    it("undefined keeps banner, null clears", () => {
+      setMembers([{ ...MEMBER_ALICE, banner: "/api/v1/files/9", banner_color: "#112233" }]);
+      // An old server's user_update carries no banner keys at all.
+      updateMemberProfile(1, { username: "alice", avatar: "alice.png" });
+      expect(membersStore.getState().members.get(1)).toMatchObject({
+        banner: "/api/v1/files/9",
+        banner_color: "#112233",
+      });
+      // A new server states a cleared banner as null.
+      updateMemberProfile(1, { username: "alice", avatar: "alice.png", banner: null });
+      expect(membersStore.getState().members.get(1)?.banner).toBeNull();
+      expect(membersStore.getState().members.get(1)?.banner_color).toBe("#112233");
+      updateMemberProfile(1, { username: "alice", avatar: "alice.png", banner_color: null });
+      expect(membersStore.getState().members.get(1)?.banner_color).toBeNull();
+    });
+
+    it("takes the banner from ready and member_join when present", () => {
+      setMembers([{ ...MEMBER_ALICE, banner: "/api/v1/files/9" }, MEMBER_BOB]);
+      expect(membersStore.getState().members.get(1)?.banner).toBe("/api/v1/files/9");
+      expect(membersStore.getState().members.get(2)?.banner).toBeUndefined();
+      addMember({
+        user: { ...MEMBER_CAROL, banner_color: "#abc" },
+        status: "online",
+      } as MemberJoinPayload);
+      expect(membersStore.getState().members.get(3)?.banner_color).toBe("#abc");
+    });
+
     it("updates username, avatar, and displayName of an existing member", () => {
       setMembers([MEMBER_ALICE]);
       updateMemberProfile(1, { username: "alice2", avatar: "alice2.png", displayName: "Al" });

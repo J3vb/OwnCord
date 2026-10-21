@@ -82,6 +82,41 @@ describe("about and created_at on members (3C-7a)", () => {
   });
 });
 
+describe("banner on user_update (6.11d)", () => {
+  beforeEach(() => {
+    setMembers([{ ...BOB, banner: "/api/v1/files/5", banner_color: "#123456" }]);
+    authStore.setState((p) => ({
+      ...p,
+      user: { id: 7, username: "bob", avatar: null, role: "member", banner: "/api/v1/files/5" },
+    }));
+  });
+
+  it("an old server's user_update (no banner keys) keeps the banner", () => {
+    handleUserUpdate({ user_id: 7, username: "bobby", avatar: null });
+    expect(membersStore.getState().members.get(7)).toMatchObject({
+      banner: "/api/v1/files/5",
+      banner_color: "#123456",
+    });
+    expect(authStore.getState().user?.banner).toBe("/api/v1/files/5");
+  });
+
+  it("a new server's null clears the banner, on the member and on the signed-in user", () => {
+    handleUserUpdate({
+      user_id: 7,
+      username: "bob",
+      avatar: null,
+      banner: null,
+      banner_color: null,
+    });
+    expect(membersStore.getState().members.get(7)).toMatchObject({
+      banner: null,
+      banner_color: null,
+    });
+    expect(authStore.getState().user?.banner).toBeNull();
+    expect(authStore.getState().user?.banner_color).toBeNull();
+  });
+});
+
 describe("profile popup receives about and join date (3C-7a)", () => {
   beforeEach(() => {
     createPopupMock.mockClear();

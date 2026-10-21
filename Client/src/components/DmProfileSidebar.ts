@@ -24,6 +24,8 @@ import {
   resolveServerUrl,
 } from "./message-list/attachments";
 import { blocksStore } from "@stores/blocks.store";
+import { paintBanner } from "../features/profiles/banner";
+import { bannerImages } from "./bannerImages";
 import { shellText, statusLabel } from "../i18n/shell";
 import { requestsText } from "../i18n/requests";
 import {
@@ -47,6 +49,9 @@ export interface DmProfileData {
   readonly status: UserStatus;
   readonly about?: string | null;
   readonly joinDate?: string | null;
+  /** Banner image path and colour; absent or null = no strip (WP 6.11d). */
+  readonly banner?: string | null;
+  readonly banner_color?: string | null;
 }
 
 export interface DmProfileSidebarOptions {
@@ -115,6 +120,9 @@ const STATUS_COLORS: Readonly<Record<UserStatus, string>> = {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** What the strip is painted from; "|" means no banner at all. */
+const bannerKeyOf = (u: DmProfileData): string => `${u.banner ?? ""}|${u.banner_color ?? ""}`;
+
 // ---------------------------------------------------------------------------
 // Component factory
 // ---------------------------------------------------------------------------
@@ -145,6 +153,9 @@ export function createDmProfileSidebar(
   // stale fetch when a newer paint has started.
   let avatarSource: string | null | undefined;
   let avatarGen = 0;
+  let bannerNode: HTMLDivElement | null = null;
+  // What the strip was last painted from, so a presence change does not refetch.
+  let bannerKey = "";
   let statusDotNode: HTMLDivElement | null = null;
   let statusDotInlineNode: HTMLSpanElement | null = null;
   let statusTextNode: HTMLSpanElement | null = null;
@@ -190,6 +201,23 @@ export function createDmProfileSidebar(
     }
   }
 
+  /** Put the strip in front of the avatar when the member has a banner, or take
+   *  it away when they no longer do. `content` holds the avatar as a child. */
+  function paintBannerStrip(content: HTMLElement): void {
+    bannerKey = bannerKeyOf(user);
+    const has = bannerKey !== "|";
+    if (!has) {
+      bannerNode?.remove();
+      bannerNode = null;
+      return;
+    }
+    if (bannerNode === null) {
+      bannerNode = createElement("div", { class: "dps-banner", "data-testid": "dps-banner" });
+      content.insertBefore(bannerNode, content.firstChild);
+    }
+    paintBanner(bannerNode, user, content, bannerImages);
+  }
+
   function buildAvatar(): HTMLDivElement {
     const wrapper = createElement("div", {
       class: "dps-avatar",
@@ -215,8 +243,10 @@ export function createDmProfileSidebar(
     const contentSignal = contentOwner.signal;
     const content = createElement("div", { class: "dps-content" });
 
-    // Avatar
+    // Banner strip, only for a member who has one; the avatar overlaps it.
+    bannerNode = null;
     content.appendChild(buildAvatar());
+    paintBannerStrip(content);
 
     // Username
     const nameEl = createElement("div", {
@@ -452,6 +482,7 @@ export function createDmProfileSidebar(
     contentOwner?.destroy();
     contentOwner = null;
     avatarGen++;
+    bannerNode = null;
     statusDotNode = null;
     statusDotInlineNode = null;
     statusTextNode = null;
@@ -477,6 +508,7 @@ export function createDmProfileSidebar(
     }
 
     if (nameNode !== null) setText(nameNode, resolveDisplayName(user));
+    if (contentNode !== null && bannerKeyOf(user) !== bannerKey) paintBannerStrip(contentNode);
 
     const color = STATUS_COLORS[user.status] ?? STATUS_COLORS.offline;
     const label = statusLabel(user.status);

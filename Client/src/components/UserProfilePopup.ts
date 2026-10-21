@@ -22,6 +22,8 @@ import { roleColorVar } from "@lib/formatting";
 import { reportEntryText } from "../i18n/reportEntry";
 import { statusLabel } from "../i18n/shell";
 import { NOTE_MAX_LENGTH, type NoteBinding } from "../features/profiles/userNotes";
+import { paintBanner } from "../features/profiles/banner";
+import { bannerImages } from "./bannerImages";
 import { requestsText } from "../i18n/requests";
 import { shellText } from "../i18n/shell";
 
@@ -42,6 +44,9 @@ export interface UserProfileData {
   /** Free-text status line, shown under the name. */
   readonly customStatus?: string | null;
   readonly joinDate?: string | null;
+  /** Banner image path and colour (WP 6.11); absent or null = the gradient. */
+  readonly banner?: string | null;
+  readonly banner_color?: string | null;
   readonly isDeleted?: boolean;
 }
 
@@ -651,6 +656,7 @@ export function createUserProfilePopup(
     // rather than the body — the body scrolls, and a scroll container clips.
     // Appending it last puts it over the banner without needing a z-index.
     appendChildren(popup, banner, body, avatar);
+    paintBanner(banner, user, popup, bannerImages);
 
     renderRole();
     overlay.appendChild(popup);

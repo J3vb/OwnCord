@@ -14,6 +14,7 @@
 export interface ReadyCapabilityFlags {
   readonly read_pointer?: boolean;
   readonly user_notes?: boolean;
+  readonly profile_banners?: boolean;
 }
 
 /** The last full `ready`'s capabilities; null until one arrives. */
@@ -50,4 +51,14 @@ export function readPointerEnabled(): boolean {
  */
 export function userNotesEnabled(): boolean {
   return caps?.user_notes === true;
+}
+
+/**
+ * Whether the server keeps a profile banner (WP 6.11b): an uploaded image
+ * and/or a colour. False hides every banner control. True does not promise the
+ * upload route exists: a server with attachment storage off advertises it too
+ * and answers the upload with 404.
+ */
+export function profileBannersEnabled(): boolean {
+  return caps?.profile_banners === true;
 }
