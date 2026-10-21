@@ -221,7 +221,7 @@ source): 411 Vitest files and 132 Playwright specs.
   - `client-e2e` always runs the smoke set against the Vite dev
     server; the full suite runs only in `client-e2e-parity`.
 - **Native Tauri suite**, the `client-native` job on `windows-latest` (a
-  100-minute budget, on pull requests to `main` and `dev`). It builds the app,
+  70-minute budget, on pull requests to `main` and `dev`). It builds the app,
   runs the `native-core` Playwright project, then the auth, UI and
   native-extra projects listed in `docs/testing-behavior.md`, then the
   signed-NSIS install and relaunch script.

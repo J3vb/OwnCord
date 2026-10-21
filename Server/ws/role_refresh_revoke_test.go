@@ -121,6 +121,11 @@ func TestRoleRefresh_NamedUserRevokedWhileRoundHeld(t *testing.T) {
 		Sessions:   service.NewSessionService(database),
 		Auth:       service.NewAuthService(database, auth.NewRateLimiter(), nil, nil),
 	}
+	// The composition root installs the hub as each service's notifier (WP
+	// 5.1a); the services, not the admin handlers, now invalidate and fan out.
+	svcs.Moderation.SetPermissionNotifier(hub)
+	svcs.Roles.SetPermissionNotifier(hub)
+	svcs.Channels.SetPermissionNotifier(hub)
 	adminID, err := database.CreateUser(ctx, "rv-admin", "hash", 1)
 	if err != nil {
 		t.Fatalf("CreateUser admin: %v", err)

@@ -104,7 +104,7 @@ func TestPutChannelPermission_PersistsAndPropagates(t *testing.T) {
 	database := openAdminTestDB(t)
 	hub := &mockHub{}
 	inv := &mockPermInvalidator{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv, newTestServices(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv, newTestServicesFor(database, hub, inv))
 	token := createAdminUser(t, database)
 
 	chID, err := database.CreateChannel(context.Background(), "secret", "text", "", "", 0)
@@ -325,7 +325,7 @@ func TestDeleteChannelPermission_ClearsOverride(t *testing.T) {
 	database := openAdminTestDB(t)
 	hub := &mockHub{}
 	inv := &mockPermInvalidator{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv, newTestServices(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv, newTestServicesFor(database, hub, inv))
 	token := createAdminUser(t, database)
 
 	chID, err := database.CreateChannel(context.Background(), "secret5", "text", "", "", 0)

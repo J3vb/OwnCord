@@ -12,7 +12,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
-	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // ─── User Handlers ───────────────────────────────────────────────────────────
@@ -222,11 +221,12 @@ func patchUserApplyBan(w http.ResponseWriter, r *http.Request, hub HubBroadcaste
 	return true
 }
 
-// patchUserApplyRole commits the role half of the PATCH and fans the result
-// out to connected clients; a request without role_id is a no-op. It reports
+// patchUserApplyRole commits the role half of the PATCH; ModerationService
+// invalidates the target's cached permissions and fans the change out to
+// connected clients (WP 5.1a). A request without role_id is a no-op. It reports
 // whether the handler may continue; on false it has already written the error
 // response.
-func patchUserApplyRole(w http.ResponseWriter, r *http.Request, hub HubBroadcaster, permInvalidator PermissionInvalidator, mod *service.ModerationService, actor, id int64, req patchUserRequest) bool {
+func patchUserApplyRole(w http.ResponseWriter, r *http.Request, mod *service.ModerationService, actor, id int64, req patchUserRequest) bool {
 	if req.RoleID == nil {
 		return true
 	}
@@ -246,25 +246,10 @@ func patchUserApplyRole(w http.ResponseWriter, r *http.Request, hub HubBroadcast
 		writeModerationErr(w, err)
 		return false
 	}
-	if permInvalidator != nil {
-		permInvalidator.InvalidateUser(id)
-	}
-	// The role change already committed, so the fan-out must not be
-	// conditional on anything past that point (OC-0045): it is one enqueue,
-	// whatever the role's name or a later read says. The hub's worker revokes
-	// the subscriptions the new role cannot read, re-derives the sidebar
-	// (including channels the user newly gained), and announces the role name
-	// it reads at send time -- off this request goroutine, so the response does
-	// not wait on it.
-	if hub != nil {
-		// The user's held channels are released before the request answers.
-		hub.RevokeUnreadableChannels(id)
-		hub.EnqueueRoleRefresh(ws.RoleRefresh{Visibility: []int64{id}, MemberUpdate: []int64{id}})
-	}
 	return true
 }
 
-func handlePatchUser(users *service.UserService, hub HubBroadcaster, permInvalidator PermissionInvalidator, mod *service.ModerationService) http.HandlerFunc {
+func handlePatchUser(users *service.UserService, hub HubBroadcaster, mod *service.ModerationService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, req, actor, ok := patchUserPrecheck(w, r, users)
 		if !ok {
@@ -319,7 +304,7 @@ func handlePatchUser(users *service.UserService, hub HubBroadcaster, permInvalid
 			purge = patchUserPurge(r, hub, mod, actor, id, purgeSeconds)
 		}
 
-		if !patchUserApplyRole(w, r, hub, permInvalidator, mod, actor, id, req) {
+		if !patchUserApplyRole(w, r, mod, actor, id, req) {
 			return
 		}
 
