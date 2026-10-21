@@ -110,7 +110,10 @@ type App struct {
 	// pushVAPIDKey is loaded by startPushVAPIDKey and installed on svc.Push
 	// by startHub once the service layer exists (B5-4).
 	pushVAPIDKey *ecdh.PrivateKey
-	serveCtx     context.Context
+	// totpKey is loaded by startTOTPKey and handed to api.NewRouter through
+	// Runtime.TOTPKey (WP 5.6f).
+	totpKey  []byte
+	serveCtx context.Context
 
 	closers []closeStep
 	closed  bool
