@@ -300,7 +300,7 @@ The clock starts when the request arrives, so it includes reading the request
 body. Any other status, including a 2xx written after the deadline and a
 specific 5xx such as 502 or 507, is never rewritten. Exempt, with no deadline of their own beyond the transfer and
 archive progress deadlines: the WebSocket upgrade, the LiveKit proxy, file
-uploads and downloads, avatar, emoji and group-icon uploads, client-update, the admin
+uploads and downloads, avatar, banner, emoji and group-icon uploads, client-update, the admin
 log stream, archive, backup, restore, update-apply and restart routes, plugin
 install, enable and disable, and account erasure.
 

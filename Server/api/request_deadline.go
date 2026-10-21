@@ -70,6 +70,8 @@ var requestDeadlineExempt = []requestDeadlineExemption{
 		"file upload: the transfer deadline (transfer_deadline.go) governs it, and a slow uplink legitimately exceeds 15 s"},
 	{http.MethodPost, regexp.MustCompile(`^/api/v1/users/me/avatar$`),
 		"avatar upload: the transfer deadline governs it"},
+	{http.MethodPost, regexp.MustCompile(`^/api/v1/users/me/banner$`),
+		"banner upload: the same body cap and handling as the avatar upload"},
 	{http.MethodPost, regexp.MustCompile(`^/api/v1/emoji/$`),
 		"custom emoji upload: a body upload at the 1 MiB cap, grouped with the avatar upload"},
 	{http.MethodPost, regexp.MustCompile(`^/api/v1/dms/[0-9]+/icon$`),
