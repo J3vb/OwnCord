@@ -5,6 +5,27 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
+// filterChannels is chs without the rows these features do not allow. It
+// returns chs itself when nothing is dropped, which is every server without a
+// forum, so the common path allocates nothing.
+func (f clientFeatures) filterChannels(chs []db.Channel) []db.Channel {
+	if f.forums {
+		return chs
+	}
+	for i := range chs {
+		if !f.allowsType(chs[i].Type) {
+			out := make([]db.Channel, 0, len(chs)-1)
+			for j := range chs {
+				if f.allowsType(chs[j].Type) {
+					out = append(out, chs[j])
+				}
+			}
+			return out
+		}
+	}
+	return chs
+}
+
 // readyChannelPayloads builds the ready payload's channel objects — one entry
 // per visible channel, with the per-user unread fields folded in. ackMap
 // carries the caller's own acknowledgement per NSFW-labelled channel id
@@ -55,6 +76,11 @@ func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.C
 		// over one subject, asked only in affordancesFor. The server remains
 		// the authority; these only pre-disable controls.
 		readyAffordances(role, overrides[visibleChannels[i].ID], &visibleChannels[i], timedOut).spreadInto(entry)
+		if visibleChannels[i].Forum != nil {
+			// The forum's settings and tags. can_send above means "may create
+			// posts"; a forum has no unread state (it holds no messages).
+			entry["forum"] = visibleChannels[i].Forum
+		}
 		if carriesChatState(visibleChannels[i].Type) {
 			if u, ok := unreadMap[visibleChannels[i].ID]; ok {
 				entry["unread_count"] = u.UnreadCount

@@ -65,7 +65,8 @@ type Runtime struct {
 	// "windows" block (WP 4.3a). StartRuntime builds it; the app starts its
 	// sampler (App.startHub) and stops it before the hub. Nil leaves it out.
 	MetricsWindows *metrics.Windows
-	Lifecycle      // the app's job group and shutdown signal (setup_options.go)
+	TOTPKey        []byte // from the totp-key stage; nil falls back to routerTOTPKey
+	Lifecycle             // the app's job group and shutdown signal (setup_options.go)
 }
 
 // warnOnServerConfig logs the settings that are legal but rarely what an
@@ -133,11 +134,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Install the auth rate multiplier before any route mounts read it.
 	setAuthRateScale(cfg.Security.AuthRateLimitMultiplier)
 
-	// Load (or auto-generate) the AES-256 key for TOTP secret encryption
-	// (M1). Done first, before any other setup, so a fatal failure here
-	// (below) doesn't leave background goroutines or partially-mounted
-	// routes behind.
-	totpKey := routerTOTPKey(cfg)
+	totpKey := routerTOTPKey(cfg, rt.TOTPKey)
 
 	r := chi.NewRouter()
 
@@ -314,9 +311,12 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	return r, cleanup
 }
 
-// routerTOTPKey loads (or auto-generates) the AES-256 key NewRouter hands to the
-// auth routes for TOTP secret encryption (M1).
-func routerTOTPKey(cfg *config.Config) []byte {
+// routerTOTPKey is the AES-256 TOTP secret key (M1): preloaded (the app's
+// totp-key stage) when non-nil, else loaded or generated here.
+func routerTOTPKey(cfg *config.Config, preloaded []byte) []byte {
+	if preloaded != nil {
+		return preloaded
+	}
 	totpKey, totpKeyErr := auth.LoadOrGenerateTOTPKey(cfg.Server.DataDir)
 	if totpKeyErr != nil {
 		if cfg.Server.DataDir != "" {

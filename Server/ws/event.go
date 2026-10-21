@@ -89,12 +89,17 @@ type Result struct {
 type Event interface {
 	// EventType returns the outbound message type constant (e.g. MsgTypeChatMessage).
 	EventType() string
+	// deliveryClass names the route emitEventsFrom delivers the event on. It
+	// is unexported, so Event is sealed to this package and every event type
+	// must choose a route; see delivery_class.go.
+	deliveryClass() deliveryClass
 }
 
 // ── Routing interfaces ──────────────────────────────────────────────────────
-// EmitEvents will type-switch on these interfaces to decide how to deliver
-// each Event. The check order matters: SequencedDMEvent MUST be checked
-// before ChannelEvent because DM events implement both.
+// emitEventsFrom switches on Event.deliveryClass to decide how to deliver each
+// Event, then asserts the one interface its class needs. Order no longer
+// matters: a DM event implements both SequencedDMEvent and ChannelEvent, but its
+// class says which route it takes.
 
 // ChannelEvent routes through Hub.broadcastChannelEvent (sequenced,
 // replayable): a metadata kind still goes straight to BroadcastToChannel, but
@@ -186,9 +191,10 @@ type channelEvt struct {
 	payload   []byte
 }
 
-func (e channelEvt) EventType() string { return e.evType }
-func (e channelEvt) ChannelID() int64  { return e.channelID }
-func (e channelEvt) Payload() []byte   { return e.payload }
+func (e channelEvt) EventType() string            { return e.evType }
+func (e channelEvt) deliveryClass() deliveryClass { return classChannel }
+func (e channelEvt) ChannelID() int64             { return e.channelID }
+func (e channelEvt) Payload() []byte              { return e.payload }
 
 // ActivityEvent feeds the channel_activity coalescer (channel_activity.go). It
 // is deliberately not a ChannelEvent: nothing is sequenced, stored or sent to
@@ -228,7 +234,8 @@ func channelReadEvt(userID, channelID, upTo int64) ActivityEvent {
 	return channelActivityEvt{channelID: channelID, readBy: userID, readUpTo: upTo, readSet: upTo >= 0}
 }
 
-func (e channelActivityEvt) EventType() string { return MsgTypeChannelActivity }
+func (e channelActivityEvt) EventType() string            { return MsgTypeChannelActivity }
+func (e channelActivityEvt) deliveryClass() deliveryClass { return classActivity }
 func (e channelActivityEvt) ActivityNote() activityNote {
 	return activityNote(e)
 }
@@ -244,10 +251,11 @@ type dmEvt struct {
 	payload        []byte
 }
 
-func (e dmEvt) EventType() string       { return e.evType }
-func (e dmEvt) ChannelID() int64        { return e.channelID }
-func (e dmEvt) ParticipantIDs() []int64 { return slices.Clone(e.participantIDs) }
-func (e dmEvt) Payload() []byte         { return e.payload }
+func (e dmEvt) EventType() string            { return e.evType }
+func (e dmEvt) deliveryClass() deliveryClass { return classSequencedDM }
+func (e dmEvt) ChannelID() int64             { return e.channelID }
+func (e dmEvt) ParticipantIDs() []int64      { return slices.Clone(e.participantIDs) }
+func (e dmEvt) Payload() []byte              { return e.payload }
 
 // TypingChannelEvent is a typing indicator broadcast to a channel, excluding sender.
 type TypingChannelEvent struct {
@@ -256,10 +264,11 @@ type TypingChannelEvent struct {
 	payload       []byte
 }
 
-func (e TypingChannelEvent) EventType() string    { return MsgTypeTyping }
-func (e TypingChannelEvent) ChannelID() int64     { return e.channelID }
-func (e TypingChannelEvent) ExcludeUserID() int64 { return e.excludeUserID }
-func (e TypingChannelEvent) Payload() []byte      { return e.payload }
+func (e TypingChannelEvent) EventType() string            { return MsgTypeTyping }
+func (e TypingChannelEvent) deliveryClass() deliveryClass { return classExcludeSender }
+func (e TypingChannelEvent) ChannelID() int64             { return e.channelID }
+func (e TypingChannelEvent) ExcludeUserID() int64         { return e.excludeUserID }
+func (e TypingChannelEvent) Payload() []byte              { return e.payload }
 
 // TypingDMEvent is a typing indicator sent to DM participants, excluding sender.
 // It satisfies UserTargetedEvent structurally (DM typing excludes the sender
@@ -275,9 +284,10 @@ type TypingDMEvent struct {
 	payload      []byte
 }
 
-func (e TypingDMEvent) EventType() string   { return MsgTypeTyping }
-func (e TypingDMEvent) TargetUserID() int64 { return e.targetUserID }
-func (e TypingDMEvent) Payload() []byte     { return e.payload }
+func (e TypingDMEvent) EventType() string            { return MsgTypeTyping }
+func (e TypingDMEvent) deliveryClass() deliveryClass { return classTypingDM }
+func (e TypingDMEvent) TargetUserID() int64          { return e.targetUserID }
+func (e TypingDMEvent) Payload() []byte              { return e.payload }
 
 // PresenceEvent is a presence update broadcast to all connected clients.
 // userID identifies whose presence this is, so EmitEvents can invalidate any
@@ -287,8 +297,9 @@ type PresenceEvent struct {
 	payload []byte
 }
 
-func (e PresenceEvent) EventType() string { return MsgTypePresence }
-func (e PresenceEvent) Payload() []byte   { return e.payload }
+func (e PresenceEvent) EventType() string            { return MsgTypePresence }
+func (e PresenceEvent) deliveryClass() deliveryClass { return classPresence }
+func (e PresenceEvent) Payload() []byte              { return e.payload }
 
 // PresenceOthersEvent is the public half of an invisible user's presence: the
 // mapped ("offline") payload, broadcast to everyone except the user it
@@ -303,10 +314,11 @@ type PresenceOthersEvent struct {
 	payload       []byte
 }
 
-func (e PresenceOthersEvent) EventType() string    { return MsgTypePresence }
-func (e PresenceOthersEvent) ChannelID() int64     { return 0 }
-func (e PresenceOthersEvent) ExcludeUserID() int64 { return e.excludeUserID }
-func (e PresenceOthersEvent) Payload() []byte      { return e.payload }
+func (e PresenceOthersEvent) EventType() string            { return MsgTypePresence }
+func (e PresenceOthersEvent) deliveryClass() deliveryClass { return classPresenceOthers }
+func (e PresenceOthersEvent) ChannelID() int64             { return 0 }
+func (e PresenceOthersEvent) ExcludeUserID() int64         { return e.excludeUserID }
+func (e PresenceOthersEvent) Payload() []byte              { return e.payload }
 
 // PresenceSelfEvent is the private half: the owner's own true status, sent
 // only to them. Without it a user who went invisible would be told they are
@@ -317,9 +329,10 @@ type PresenceSelfEvent struct {
 	payload      []byte
 }
 
-func (e PresenceSelfEvent) EventType() string   { return MsgTypePresence }
-func (e PresenceSelfEvent) TargetUserID() int64 { return e.targetUserID }
-func (e PresenceSelfEvent) Payload() []byte     { return e.payload }
+func (e PresenceSelfEvent) EventType() string            { return MsgTypePresence }
+func (e PresenceSelfEvent) deliveryClass() deliveryClass { return classPresenceSelf }
+func (e PresenceSelfEvent) TargetUserID() int64          { return e.targetUserID }
+func (e PresenceSelfEvent) Payload() []byte              { return e.payload }
 
 // presenceEvents builds the events one presence change needs.
 //
@@ -360,10 +373,11 @@ type VoiceStateEvent struct {
 	payload        []byte
 }
 
-func (e VoiceStateEvent) EventType() string       { return MsgTypeVoiceState }
-func (e VoiceStateEvent) VisibleChannelID() int64 { return e.voiceChannelID }
-func (e VoiceStateEvent) UserID() int64           { return e.userID }
-func (e VoiceStateEvent) Payload() []byte         { return e.payload }
+func (e VoiceStateEvent) EventType() string            { return MsgTypeVoiceState }
+func (e VoiceStateEvent) deliveryClass() deliveryClass { return classVoiceVisibility }
+func (e VoiceStateEvent) VisibleChannelID() int64      { return e.voiceChannelID }
+func (e VoiceStateEvent) UserID() int64                { return e.userID }
+func (e VoiceStateEvent) Payload() []byte              { return e.payload }
 
 // VoiceE2EEAnnounceEvent relays an ECDH public key to other voice channel participants.
 type VoiceE2EEAnnounceEvent struct {
@@ -372,10 +386,11 @@ type VoiceE2EEAnnounceEvent struct {
 	payload        []byte
 }
 
-func (e VoiceE2EEAnnounceEvent) EventType() string     { return MsgTypeVoiceE2EEAnnounceBC }
-func (e VoiceE2EEAnnounceEvent) VoiceChannelID() int64 { return e.voiceChannelID }
-func (e VoiceE2EEAnnounceEvent) ExcludeUserID() int64  { return e.excludeUserID }
-func (e VoiceE2EEAnnounceEvent) Payload() []byte       { return e.payload }
+func (e VoiceE2EEAnnounceEvent) EventType() string            { return MsgTypeVoiceE2EEAnnounceBC }
+func (e VoiceE2EEAnnounceEvent) deliveryClass() deliveryClass { return classVoiceChannel }
+func (e VoiceE2EEAnnounceEvent) VoiceChannelID() int64        { return e.voiceChannelID }
+func (e VoiceE2EEAnnounceEvent) ExcludeUserID() int64         { return e.excludeUserID }
+func (e VoiceE2EEAnnounceEvent) Payload() []byte              { return e.payload }
 
 // VoiceE2EEOfferGuardedEvent relays an encrypted room key to a specific user,
 // using atomic check-and-send to verify the target is still in the same voice
@@ -386,10 +401,11 @@ type VoiceE2EEOfferGuardedEvent struct {
 	payload        []byte
 }
 
-func (e VoiceE2EEOfferGuardedEvent) EventType() string     { return MsgTypeVoiceE2EEOfferRelay }
-func (e VoiceE2EEOfferGuardedEvent) VoiceChannelID() int64 { return e.voiceChannelID }
-func (e VoiceE2EEOfferGuardedEvent) TargetUserID() int64   { return e.targetUserID }
-func (e VoiceE2EEOfferGuardedEvent) Payload() []byte       { return e.payload }
+func (e VoiceE2EEOfferGuardedEvent) EventType() string            { return MsgTypeVoiceE2EEOfferRelay }
+func (e VoiceE2EEOfferGuardedEvent) deliveryClass() deliveryClass { return classVoiceChannelGuarded }
+func (e VoiceE2EEOfferGuardedEvent) VoiceChannelID() int64        { return e.voiceChannelID }
+func (e VoiceE2EEOfferGuardedEvent) TargetUserID() int64          { return e.targetUserID }
+func (e VoiceE2EEOfferGuardedEvent) Payload() []byte              { return e.payload }
 
 // DMChannelOpenEvent sends a dm_channel_open notification to a specific user.
 type DMChannelOpenEvent struct {
@@ -397,9 +413,10 @@ type DMChannelOpenEvent struct {
 	payload      []byte
 }
 
-func (e DMChannelOpenEvent) EventType() string   { return MsgTypeDMChannelOpen }
-func (e DMChannelOpenEvent) TargetUserID() int64 { return e.targetUserID }
-func (e DMChannelOpenEvent) Payload() []byte     { return e.payload }
+func (e DMChannelOpenEvent) EventType() string            { return MsgTypeDMChannelOpen }
+func (e DMChannelOpenEvent) deliveryClass() deliveryClass { return classUserTargeted }
+func (e DMChannelOpenEvent) TargetUserID() int64          { return e.targetUserID }
+func (e DMChannelOpenEvent) Payload() []byte              { return e.payload }
 
 // DMRequestEvent announces a message request to its recipient (B5-6): sent
 // once on creation, by the sender's chat_send handler
@@ -415,9 +432,10 @@ type DMRequestEvent struct {
 	payload      []byte
 }
 
-func (e DMRequestEvent) EventType() string   { return MsgTypeDMRequest }
-func (e DMRequestEvent) TargetUserID() int64 { return e.targetUserID }
-func (e DMRequestEvent) Payload() []byte     { return e.payload }
+func (e DMRequestEvent) EventType() string            { return MsgTypeDMRequest }
+func (e DMRequestEvent) deliveryClass() deliveryClass { return classUserTargeted }
+func (e DMRequestEvent) TargetUserID() int64          { return e.targetUserID }
+func (e DMRequestEvent) Payload() []byte              { return e.payload }
 
 // CallSignalEvent delivers a DM call signal (call_incoming / call_declined) to
 // one participant. Satisfies UserTargetedEvent, so an offline addressee is a
@@ -429,6 +447,7 @@ type CallSignalEvent struct {
 	payload      []byte
 }
 
-func (e CallSignalEvent) EventType() string   { return e.eventType }
-func (e CallSignalEvent) TargetUserID() int64 { return e.targetUserID }
-func (e CallSignalEvent) Payload() []byte     { return e.payload }
+func (e CallSignalEvent) EventType() string            { return e.eventType }
+func (e CallSignalEvent) deliveryClass() deliveryClass { return classCallSignal }
+func (e CallSignalEvent) TargetUserID() int64          { return e.targetUserID }
+func (e CallSignalEvent) Payload() []byte              { return e.payload }

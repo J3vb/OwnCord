@@ -312,6 +312,12 @@ func (d *DB) DeleteRoleReassigning(ctx context.Context, roleID, fallbackRoleID i
 	); err != nil {
 		return nil, fmt.Errorf("DeleteRoleReassigning drop overrides: %w", err)
 	}
+	// The category template rows of the role go the same way (WP 6.5d).
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM category_overrides WHERE role_id = ?`, roleID,
+	); err != nil {
+		return nil, fmt.Errorf("DeleteRoleReassigning drop category overrides: %w", err)
+	}
 	if err := q.DeleteRole(ctx, roleID); err != nil {
 		return nil, fmt.Errorf("DeleteRoleReassigning delete: %w", err)
 	}

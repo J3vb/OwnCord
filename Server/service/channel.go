@@ -18,6 +18,8 @@ type ChannelService struct {
 	st    Store
 	afk   AFKStore
 	cats  CategoryStore
+	cperm CategoryPermStore
+	forum ForumStore
 	perms *PermissionService
 	batch *ConnWrites
 	// notifier re-derives channel audiences after an override change (WP
@@ -36,10 +38,14 @@ func NewChannelService(st Store, perms *PermissionService) *ChannelService {
 	// that does not leaves SetAFKChannel answering ErrInternal.
 	afk, _ := st.(AFKStore)
 	cats, _ := st.(CategoryStore)
+	cperm, _ := st.(CategoryPermStore)
+	forum, _ := st.(ForumStore)
 	return &ChannelService{
 		st:    st,
 		afk:   afk,
 		cats:  cats,
+		cperm: cperm,
+		forum: forum,
 		perms: perms,
 		now:   time.Now,
 	}
@@ -138,6 +144,12 @@ func (s *ChannelService) HandleTyping(ctx context.Context, userID, channelID int
 	ch, err := s.st.GetChannel(ctx, channelID)
 	if err != nil || ch == nil {
 		return nil, nil //nolint:nilerr // typing indicators are best-effort; errors silently dropped
+	}
+
+	// A forum holds no messages, so there is nothing to type into: silent
+	// like every other typing refusal (a send is refused in checkSendPermission).
+	if ch.Type == db.ForumTypeName {
+		return nil, nil
 	}
 
 	// A typing indicator announces a post, so it answers to the post policy
@@ -320,6 +332,11 @@ func (s *ChannelService) HandleChannelFocus(ctx context.Context, userID, channel
 	ch, err := admitReadState(ctx, s.st, s.perms, userID, channelID)
 	if err != nil {
 		return nil, err
+	}
+	// A forum holds no messages, so it has no read state to keep: focusing it
+	// only subscribes the socket (its posts' changes arrive on that topic).
+	if ch.Type == db.ForumTypeName {
+		return ch, nil
 	}
 	s.markFocusedRead(ctx, userID, channelID)
 	slog.Debug("channel_focus", "user_id", userID, "channel_id", channelID)

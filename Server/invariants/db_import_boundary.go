@@ -83,6 +83,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"admin/handlers_archive.go":          {Disposition: "boundary", Note: "full-archive download: VACUUM INTO snapshot, then zip the data dir and config", Calls: calls{"BackupToSafe": 1}},
 	"admin/archive_link.go":              {Disposition: "boundary", Note: "issues and redeems the single-use archive and backup download links; the handle re-resolves the link's credential, audits a backup download with WriteAudit, and is threaded through to serveArchive", Hands: calls{"auth.ResolveTokenHash": 1}},
 	"admin/handlers_channel_perms.go":    {Disposition: "adapter", Note: "override response shapes; the service owns the policy and the calls"},
+	"admin/handlers_category_perms.go":   {Disposition: "adapter", Note: "category template response shapes; the service owns the guards and the writes"},
 	"admin/handlers_channels.go":         {Disposition: "adapter", Note: "db.Channel in the resolver and response shapes; the service owns the calls"},
 	"admin/handlers_config_overrides.go": {Disposition: "boundary", Note: "audits config-override changes and the restart request with WriteAudit, and probes a candidate database.path with the read-only CheckBackupIntegrity/CheckBackupSchemaAhead helpers; no handle calls"},
 	"admin/handlers_users.go":            {Disposition: "adapter", Note: "UserWithRole/User/Role types in the panel response shapes; UserService owns the reads"},

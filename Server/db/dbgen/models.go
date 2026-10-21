@@ -59,33 +59,51 @@ type AuditLog struct {
 	ActorToken   *string `json:"actorToken"`
 }
 
+type CategoryOverride struct {
+	CategoryID int64 `json:"categoryId"`
+	RoleID     int64 `json:"roleId"`
+	Allow      int64 `json:"allow"`
+	Deny       int64 `json:"deny"`
+}
+
+type CategoryUserOverride struct {
+	CategoryID int64 `json:"categoryId"`
+	UserID     int64 `json:"userId"`
+	Allow      int64 `json:"allow"`
+	Deny       int64 `json:"deny"`
+}
+
 type Channel struct {
-	ID                       int64   `json:"id"`
-	Name                     string  `json:"name"`
-	Type                     string  `json:"type"`
-	Category                 *string `json:"category"`
-	Topic                    *string `json:"topic"`
-	Position                 int64   `json:"position"`
-	SlowMode                 int64   `json:"slowMode"`
-	Archived                 int64   `json:"archived"`
-	CreatedAt                string  `json:"createdAt"`
-	VoiceMaxUsers            int64   `json:"voiceMaxUsers"`
-	VoiceQuality             *string `json:"voiceQuality"`
-	MixingThreshold          *int64  `json:"mixingThreshold"`
-	VoiceMaxVideo            int64   `json:"voiceMaxVideo"`
-	Nsfw                     int64   `json:"nsfw"`
-	IsGroup                  int64   `json:"isGroup"`
-	DmOwnerID                *int64  `json:"dmOwnerId"`
-	DmIcon                   *string `json:"dmIcon"`
-	Afk                      int64   `json:"afk"`
-	CategoryID               *int64  `json:"categoryId"`
-	ParentChannelID          *int64  `json:"parentChannelId"`
-	ThreadStarterMessageID   *int64  `json:"threadStarterMessageId"`
-	ThreadOwnerID            *int64  `json:"threadOwnerId"`
-	ThreadArchived           int64   `json:"threadArchived"`
-	ThreadLocked             int64   `json:"threadLocked"`
-	ThreadAutoArchiveMinutes int64   `json:"threadAutoArchiveMinutes"`
-	ThreadLastActivityAt     *string `json:"threadLastActivityAt"`
+	ID                             int64   `json:"id"`
+	Name                           string  `json:"name"`
+	Type                           string  `json:"type"`
+	Category                       *string `json:"category"`
+	Topic                          *string `json:"topic"`
+	Position                       int64   `json:"position"`
+	SlowMode                       int64   `json:"slowMode"`
+	Archived                       int64   `json:"archived"`
+	CreatedAt                      string  `json:"createdAt"`
+	VoiceMaxUsers                  int64   `json:"voiceMaxUsers"`
+	VoiceQuality                   *string `json:"voiceQuality"`
+	MixingThreshold                *int64  `json:"mixingThreshold"`
+	VoiceMaxVideo                  int64   `json:"voiceMaxVideo"`
+	Nsfw                           int64   `json:"nsfw"`
+	IsGroup                        int64   `json:"isGroup"`
+	DmOwnerID                      *int64  `json:"dmOwnerId"`
+	DmIcon                         *string `json:"dmIcon"`
+	Afk                            int64   `json:"afk"`
+	CategoryID                     *int64  `json:"categoryId"`
+	ParentChannelID                *int64  `json:"parentChannelId"`
+	ThreadStarterMessageID         *int64  `json:"threadStarterMessageId"`
+	ThreadOwnerID                  *int64  `json:"threadOwnerId"`
+	ThreadArchived                 int64   `json:"threadArchived"`
+	ThreadLocked                   int64   `json:"threadLocked"`
+	ThreadAutoArchiveMinutes       int64   `json:"threadAutoArchiveMinutes"`
+	ThreadLastActivityAt           *string `json:"threadLastActivityAt"`
+	ForumRequireTag                int64   `json:"forumRequireTag"`
+	ForumDefaultAutoArchiveMinutes int64   `json:"forumDefaultAutoArchiveMinutes"`
+	ThreadPostMessageID            *int64  `json:"threadPostMessageId"`
+	PermissionsSynced              int64   `json:"permissionsSynced"`
 }
 
 type ChannelCategory struct {
@@ -157,6 +175,15 @@ type Event struct {
 	Payload   []byte    `json:"payload"`
 	ChannelID int64     `json:"channelId"`
 	CreatedAt time.Time `json:"createdAt"`
+}
+
+type ForumTag struct {
+	ID        int64   `json:"id"`
+	ForumID   int64   `json:"forumId"`
+	Name      string  `json:"name"`
+	Emoji     *string `json:"emoji"`
+	Position  int64   `json:"position"`
+	CreatedAt string  `json:"createdAt"`
 }
 
 type GifFavorite struct {
@@ -498,6 +525,11 @@ type Session struct {
 type Setting struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
+}
+
+type ThreadTag struct {
+	ThreadID int64 `json:"threadId"`
+	TagID    int64 `json:"tagId"`
 }
 
 type TotpRecoveryCode struct {

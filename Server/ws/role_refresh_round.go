@@ -265,6 +265,21 @@ func (h *Hub) prepareUserVisibility(ctx context.Context, uid int64, rc *roleChan
 	return frames, true
 }
 
+// heldDMs is the DMs uid holds a topic on, all allowed: a role change never
+// revokes a DM. Only held DMs matter, so the cost follows the user's
+// subscriptions rather than every DM on the server.
+func (h *Hub) heldDMs(uid int64, rc *roleChannels) map[int64]bool {
+	allowed := make(map[int64]bool, len(rc.servers))
+	for _, topic := range h.pubsub.TopicsForClient(uid) {
+		if id := channelTopicID(topic); id != 0 {
+			if _, dm := rc.dms[id]; dm {
+				allowed[id] = true
+			}
+		}
+	}
+	return allowed
+}
+
 // roleRefreshVerdicts resolves uid's subject once per server channel, through
 // the permission cache. It returns the frame to send for each channel (a
 // channel_create with this user's affordances, or a channel_delete) and the
@@ -273,17 +288,15 @@ func (h *Hub) prepareUserVisibility(ctx context.Context, uid int64, rc *roleChan
 func (h *Hub) roleRefreshVerdicts(ctx context.Context, uid int64, rc *roleChannels) (frames []roleFrame, allowed map[int64]bool, ok bool) {
 	ctx, cancel := context.WithTimeout(ctx, roleRefreshUserBudget)
 	defer cancel()
-	allowed = make(map[int64]bool, len(rc.servers))
-	// Only the DMs this user holds a topic on matter, so the cost follows
-	// the user's subscriptions rather than every DM on the server.
-	for _, topic := range h.pubsub.TopicsForClient(uid) {
-		if id := channelTopicID(topic); id != 0 {
-			if _, dm := rc.dms[id]; dm {
-				allowed[id] = true
-			}
-		}
-	}
+	allowed = h.heldDMs(uid, rc)
 	frames = make([]roleFrame, 0, len(rc.servers))
+	// A socket without the forums feature is sent no forum row (see
+	// client_features.go). A reconnect replaces the client with its own
+	// declaration, so the live one is read here.
+	var feat clientFeatures
+	if c := h.GetClient(uid); c != nil {
+		feat = c.features
+	}
 	for _, e := range rc.servers {
 		sub, err := h.subjectFor(ctx, uid, e.ch.ID)
 		if err != nil {
@@ -295,6 +308,9 @@ func (h *Hub) roleRefreshVerdicts(ctx context.Context, uid int64, rc *roleChanne
 			continue
 		}
 		allowed[e.ch.ID] = true
+		if !feat.allowsType(e.ch.Type) {
+			continue
+		}
 		frames = append(frames, roleFrame{channelID: e.ch.ID, msg: buildChannelCreateFor(e.ch, e.private, affordancesFor(sub))})
 	}
 	// A channel created after the snapshot and held by this user is resolved
@@ -336,6 +352,9 @@ func (h *Hub) roleRefreshVerdicts(ctx context.Context, uid int64, rc *roleChanne
 			continue
 		}
 		allowed[chID] = true
+		if !feat.allowsType(ch.Type) {
+			continue
+		}
 		frames = append(frames, roleFrame{channelID: chID, msg: buildChannelCreateFor(ch, h.channelIsPrivate(ctx, chID, ch.Type), affordancesFor(sub))})
 	}
 	return frames, allowed, true

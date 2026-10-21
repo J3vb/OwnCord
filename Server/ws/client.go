@@ -65,6 +65,10 @@ type Client struct {
 	// Set once during the handshake, before the client is visible to any
 	// other goroutine, so no lock guards it.
 	wakeReconnect bool
+	// features is what the auth frame declared (client_features.go). Set once
+	// during the handshake, before the client is visible to any other
+	// goroutine, so no lock guards it.
+	features      clientFeatures
 	connectedAt   time.Time      // when the WS connection was established
 	remoteAddr    string         // client IP resolved through trusted_proxies (clientip.Resolve), no port
 	msgCount      int            // count of messages processed; resets after session check

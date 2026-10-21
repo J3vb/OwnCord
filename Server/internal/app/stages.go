@@ -36,6 +36,7 @@ func (a *App) stages() []stage {
 		{"migrate", a.startMigrate},
 		{"erasure-markers", a.startErasureMarkers},
 		{"push-vapid-key", a.startPushVAPIDKey},
+		{"totp-key", a.startTOTPKey},
 		{"telemetry", a.startTelemetry},
 		{"plugins", a.startPlugins},
 		{"hub", a.startHub},

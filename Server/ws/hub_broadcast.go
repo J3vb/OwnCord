@@ -147,7 +147,7 @@ func (h *Hub) BroadcastChannelCreate(ch *db.Channel) {
 	for _, uid := range h.channelReadAudience(ctx, ch.ID) {
 		fireBroadcastChannelCreateRaceHook(uid)
 		live := h.GetClient(uid)
-		if live == nil {
+		if live == nil || !live.sendsChannel(ch.Type) {
 			continue
 		}
 		live.sendMsg(buildChannelCreateFor(ch, private, h.refreshChannelVisibilityAffordances(ctx, ch, uid)))
@@ -375,7 +375,7 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 	// The channel-broadcast debug log is emitted after seqMu is released
 	// (below) so a slow logging sink never extends the critical section that
 	// serializes every broadcast.
-	seq, delivered, channelSend := func() (seq uint64, delivered int, channelSend bool) {
+	seq, delivered, channelSend, pluginMsg := func() (seq uint64, delivered int, channelSend bool, pluginMsg []byte) {
 		h.seqMu.Lock()
 		start := time.Now()
 		defer h.seqMu.Unlock()
@@ -388,7 +388,7 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 		// only max(seq), it could never be requested back. allowTopicFrame
 		// owns the shed handling (count + watermark, SRV-03).
 		if !h.allowTopicFrame(bm) {
-			return 0, 0, false
+			return 0, 0, false, nil
 		}
 
 		// A window's presence_batch names many users: an erased one loses
@@ -397,7 +397,7 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 		if bm.presence != nil {
 			bm.msg, private = h.buildPresenceBatch(bm.presence)
 			if bm.msg == nil {
-				return 0, 0, false
+				return 0, 0, false, nil
 			}
 		}
 
@@ -405,7 +405,7 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 		// its rows before the erasure and reached the hub after the purge,
 		// must not be sequenced: nothing it describes exists any more.
 		if h.dropsForTombstones(bm.msg) {
-			return 0, 0, false
+			return 0, 0, false, nil
 		}
 
 		seq = h.nextSeq()
@@ -423,25 +423,12 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 		h.replayBuf.Push(seq, bm.channelID, stored)
 		h.persistEvent(seq, bm.channelID, stored)
 
-		// Fan out to plugins subscribed to this event type (Phase C Step 9).
-		// Dispatch is a no-op in the default build; the wazero build calls into
-		// the WASM module. Dispatch is called outside seqMu after we release it
-		// conceptually — but since seqMu is still held here, the call MUST NOT
-		// re-enter the hub. The default build is safe; the wazero build should
-		// dispatch asynchronously once the runtime is real.
-		//
-		// skipPluginSink (B5-7 decision 13) withholds a labelled channel's
-		// content-bearing frame here: a plugin has no acknowledgement, so it
-		// is treated as never acknowledged regardless of who is in
-		// bm.recipients. No production Subscribe call exists yet (see
-		// EventSink.Dispatch's own doc), so this is a proof against the sink's
-		// decision, not yet an observable guest-delivery effect.
-		if sink := h.pluginSink.Load(); sink != nil && !labelled {
-			eventType := extractEventType(msg)
-			if eventType == "" {
-				eventType = "broadcast"
-			}
-			sink.Dispatch(context.Background(), eventType, msg)
+		// Plugin fan-out (Phase C Step 9) is captured here and called after
+		// seqMu is released, on this same dispatch goroutine, so sink order
+		// still equals seq order. skipPluginSink (B5-7 decision 13): a
+		// labelled channel's content-bearing frame never reaches the sink.
+		if h.pluginSink.Load() != nil && !labelled {
+			pluginMsg = msg
 		}
 
 		switch {
@@ -470,8 +457,12 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 			}
 			channelSend = true
 		}
-		return seq, delivered, channelSend
+		return seq, delivered, channelSend, pluginMsg
 	}()
+
+	if pluginMsg != nil {
+		h.dispatchToPlugins(pluginMsg)
+	}
 
 	// Instrumentation runs after seqMu is released: a metrics provider must
 	// never extend the critical section serializing every broadcast. The

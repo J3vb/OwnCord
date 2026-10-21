@@ -308,7 +308,7 @@ func (h *Hub) readyBytes(database ReadySnapshotReader, userID int64, role *db.Ro
 // WriteReadyForTest emits userID's ready payload to w as the handshake
 // emits it to the socket, so a test can measure the whole emit.
 func (h *Hub) WriteReadyForTest(database ReadySnapshotReader, userID int64, role *db.Role, w io.Writer) error {
-	ready, err := h.buildReady(context.Background(), database, userID, role)
+	ready, err := h.buildReady(context.Background(), database, userID, role, clientFeatures{})
 	if err != nil {
 		return err
 	}
@@ -320,7 +320,7 @@ func (h *Hub) WriteReadyForTest(database ReadySnapshotReader, userID int64, role
 // json.Marshal of a map, members included, so a golden test can hold the
 // streamed frame to it byte for byte.
 func (h *Hub) LegacyReadyForTest(database ReadySnapshotReader, userID int64, role *db.Role) ([]byte, error) {
-	f, err := h.readReady(context.Background(), database, userID, role)
+	f, err := h.readReady(context.Background(), database, userID, role, clientFeatures{})
 	if err != nil {
 		return nil, err
 	}
@@ -791,4 +791,10 @@ func (h *Hub) ReplaceHandlerForTest(typ string, fn func(ctx context.Context) Res
 // context.
 func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMessage, reqID string) {
 	h.handleVoiceJoinFrame(ctx, ctx, c, payload, reqID)
+}
+
+// NewTestDMEvent builds the sequenced DM event the real handlers emit, for
+// external tests that cannot implement the sealed Event interface themselves.
+func NewTestDMEvent(evType string, channelID int64, participantIDs []int64, payload []byte) Event {
+	return dmEvt{evType: evType, channelID: channelID, participantIDs: participantIDs, payload: payload}
 }

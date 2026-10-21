@@ -34,7 +34,6 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"DeleteAccount: files pending":                                                                            "deleteaccount_files_pending",
 	"DispatchV2 panic recovered":                                                                              "dispatchv2_panic_recovered",
 	"DispatchV2: hardware fault, exiting for supervisor restart":                                              "dispatchv2_hardware_fault_exiting",
-	"EmitEvents: unknown event type":                                                                          "emitevents_unknown_event_type",
 	"ModerationService: RefreshTimeouts":                                                                      "moderationservice_refreshtimeouts",
 	"boot: load active timeouts":                                                                              "boot_load_active_timeouts",
 	"FinalizeTimeoutLift: HasActiveTimeout":                                                                   "finalizetimeoutlift_hasactivetimeout",

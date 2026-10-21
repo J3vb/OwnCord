@@ -178,6 +178,7 @@ type Channel struct {
 	AFK bool `json:"afk"`
 	// Thread is set on a thread row only (migration 074); never on the wire.
 	Thread ChannelThread `json:"-"`
+	Forum  *ChannelForum `json:"forum,omitempty"` // forum rows only (migration 075)
 }
 
 // Message represents a row in the messages table.
@@ -313,9 +314,8 @@ type MessageAPIResponse struct {
 	GroupEvent *GroupEventInfo `json:"group_event,omitempty"`
 	// Forward is set only on a forwarded message (WP 6.9a). See ForwardInfo.
 	Forward *ForwardInfo `json:"forward,omitempty"`
-	// Poll is set only on a poll message (WP 6.9b). See PollInfo.
-	Poll *PollInfo `json:"poll,omitempty"`
-	// Thread is set only on a thread starter message (WP 6.9c).
+	// Poll is set only on a poll (6.9b), Thread only on a thread starter (6.9c).
+	Poll   *PollInfo   `json:"poll,omitempty"`
 	Thread *ThreadInfo `json:"thread,omitempty"`
 }
 

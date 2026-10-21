@@ -38,6 +38,10 @@ type channelFields struct {
 	ParentChannelID int64
 	ThreadArchived  int64
 	ThreadLocked    int64
+	// ForumRequireTag and ForumDefaultAutoArchiveMinutes are the forum
+	// settings columns (migration 075), meaningful on a type 'forum' row.
+	ForumRequireTag                int64
+	ForumDefaultAutoArchiveMinutes int64
 }
 
 func channelFromFields(f channelFields) Channel {
@@ -64,6 +68,7 @@ func channelFromFields(f channelFields) Channel {
 			Archived: f.ThreadArchived != 0,
 			Locked:   f.ThreadLocked != 0,
 		},
+		Forum: forumFromFields(f),
 	}
 }
 
@@ -76,6 +81,9 @@ func (d *DB) ListChannels(ctx context.Context) ([]Channel, error) {
 	channels := make([]Channel, 0, len(rows))
 	for i := range rows {
 		channels = append(channels, channelFromFields(channelFields(rows[i])))
+	}
+	if err := d.attachForumTags(ctx, channels); err != nil {
+		return nil, err
 	}
 	return channels, nil
 }
@@ -90,6 +98,13 @@ func (d *DB) GetChannel(ctx context.Context, id int64) (*Channel, error) {
 		return nil, fmt.Errorf("GetChannel: %w", err)
 	}
 	ch := channelFromFields(channelFields(r))
+	if ch.Forum != nil {
+		one := []Channel{ch}
+		if err := d.attachForumTags(ctx, one); err != nil {
+			return nil, err
+		}
+		ch = one[0]
+	}
 	return &ch, nil
 }
 
@@ -192,29 +207,35 @@ func (d *DB) GetAllChannelPermissionsForRole(ctx context.Context, roleID int64) 
 }
 
 // UpsertChannelOverride inserts or updates the allow/deny permission override
-// for a role on a channel.
+// for a role on a channel. A direct edit takes the channel out of sync with its
+// category (permissions_synced = 0) in the same transaction.
 func (d *DB) UpsertChannelOverride(ctx context.Context, channelID, roleID, allow, deny int64) error {
-	if err := d.q.UpsertChannelPermission(ctx, dbgen.UpsertChannelPermissionParams{
-		ChannelID: channelID,
-		RoleID:    roleID,
-		Allow:     allow,
-		Deny:      deny,
-	}); err != nil {
-		return fmt.Errorf("UpsertChannelOverride: %w", err)
-	}
-	return nil
+	return d.inWriteTx(ctx, "UpsertChannelOverride", func(q *dbgen.Queries) error {
+		if err := q.UpsertChannelPermission(ctx, dbgen.UpsertChannelPermissionParams{
+			ChannelID: channelID,
+			RoleID:    roleID,
+			Allow:     allow,
+			Deny:      deny,
+		}); err != nil {
+			return err
+		}
+		return q.UnsyncChannelPermissions(ctx, channelID)
+	})
 }
 
 // DeleteChannelOverride removes the permission override for a role on a
-// channel. Deleting a non-existent override is a no-op.
+// channel. Deleting a non-existent override is a no-op for the rows, but it is
+// still a direct edit, so the channel stops being synced to its category.
 func (d *DB) DeleteChannelOverride(ctx context.Context, channelID, roleID int64) error {
-	if err := d.q.DeleteChannelPermission(ctx, dbgen.DeleteChannelPermissionParams{
-		ChannelID: channelID,
-		RoleID:    roleID,
-	}); err != nil {
-		return fmt.Errorf("DeleteChannelOverride: %w", err)
-	}
-	return nil
+	return d.inWriteTx(ctx, "DeleteChannelOverride", func(q *dbgen.Queries) error {
+		if err := q.DeleteChannelPermission(ctx, dbgen.DeleteChannelPermissionParams{
+			ChannelID: channelID,
+			RoleID:    roleID,
+		}); err != nil {
+			return err
+		}
+		return q.UnsyncChannelPermissions(ctx, channelID)
+	})
 }
 
 // GetUserChannelPermissions returns the per-user allow/deny override bits for a
@@ -272,29 +293,35 @@ func (d *DB) GetChannelOverridesFor(ctx context.Context, roleID, userID int64) (
 }
 
 // UpsertChannelUserOverride inserts or updates the allow/deny permission
-// override for a single user on a channel.
+// override for a single user on a channel. Like UpsertChannelOverride it
+// unsyncs the channel in the same transaction.
 func (d *DB) UpsertChannelUserOverride(ctx context.Context, channelID, userID, allow, deny int64) error {
-	if err := d.q.UpsertChannelUserPermission(ctx, dbgen.UpsertChannelUserPermissionParams{
-		ChannelID: channelID,
-		UserID:    userID,
-		Allow:     allow,
-		Deny:      deny,
-	}); err != nil {
-		return fmt.Errorf("UpsertChannelUserOverride: %w", err)
-	}
-	return nil
+	return d.inWriteTx(ctx, "UpsertChannelUserOverride", func(q *dbgen.Queries) error {
+		if err := q.UpsertChannelUserPermission(ctx, dbgen.UpsertChannelUserPermissionParams{
+			ChannelID: channelID,
+			UserID:    userID,
+			Allow:     allow,
+			Deny:      deny,
+		}); err != nil {
+			return err
+		}
+		return q.UnsyncChannelPermissions(ctx, channelID)
+	})
 }
 
 // DeleteChannelUserOverride removes a user's permission override on a channel.
-// Deleting a non-existent override is a no-op.
+// Deleting a non-existent override is a no-op for the rows, but it is still a
+// direct edit, so the channel stops being synced to its category.
 func (d *DB) DeleteChannelUserOverride(ctx context.Context, channelID, userID int64) error {
-	if err := d.q.DeleteChannelUserPermission(ctx, dbgen.DeleteChannelUserPermissionParams{
-		ChannelID: channelID,
-		UserID:    userID,
-	}); err != nil {
-		return fmt.Errorf("DeleteChannelUserOverride: %w", err)
-	}
-	return nil
+	return d.inWriteTx(ctx, "DeleteChannelUserOverride", func(q *dbgen.Queries) error {
+		if err := q.DeleteChannelUserPermission(ctx, dbgen.DeleteChannelUserPermissionParams{
+			ChannelID: channelID,
+			UserID:    userID,
+		}); err != nil {
+			return err
+		}
+		return q.UnsyncChannelPermissions(ctx, channelID)
+	})
 }
 
 // GetChannelUserOverrides returns every per-user override on a channel, keyed

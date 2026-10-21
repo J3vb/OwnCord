@@ -39,8 +39,9 @@ type threadNoteEvt struct {
 	deleted  bool
 }
 
-func (e threadNoteEvt) EventType() string      { return MsgTypeThreadChanged }
-func (e threadNoteEvt) ThreadNote() threadNote { return threadNote(e) }
+func (e threadNoteEvt) EventType() string            { return MsgTypeThreadChanged }
+func (e threadNoteEvt) ThreadNote() threadNote       { return threadNote(e) }
+func (e threadNoteEvt) deliveryClass() deliveryClass { return classThreadNote }
 
 // threadTimer is one thread's coalescing state. window is true once the
 // leading frame went out, so the timer's next firing closes the window rather
