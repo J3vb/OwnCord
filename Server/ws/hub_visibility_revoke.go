@@ -9,8 +9,9 @@ import (
 // holds and the user's current role cannot read, before the caller answers its
 // request: a member's held channels are released as the role change returns.
 // It re-resolves the user from the database, bumps the visibility watermarks,
-// and takes none of the locks a role-refresh round holds across I/O. Admin
-// handlers call it for the users they name, ahead of EnqueueRoleRefresh.
+// and takes none of the locks a role-refresh round holds across I/O. The role
+// and moderation services call it (through PermissionChangeNotifier, WP 5.1a)
+// for the users they name, ahead of EnqueueRoleRefresh.
 func (h *Hub) RevokeUnreadableChannels(userID int64) {
 	h.revokeUnreadableChannels(userID)
 }

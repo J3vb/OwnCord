@@ -46,10 +46,9 @@ func (s *RoleService) CreateRole(ctx context.Context, actorID int64, in RoleInpu
 // UpdateRole applies a partial change to a role below the actor's rank and
 // returns the updated role and what the change actually moved.
 //
-// Members are read before the update: after it they are the same set, but
-// reading first keeps the invalidation correct even if a concurrent role
-// assignment lands in between (an extra id is a wasted eviction, a missing one
-// is a stale grant). Any edit drops the members' cached snapshots, not only a
+// Members are read before the update and again after it, and both lists are
+// evicted: a concurrent role assignment can land on either side of the write
+// (an extra id is a wasted eviction, a missing one is a stale grant). Any edit drops the members' cached snapshots, not only a
 // permission change: the cache also holds the role row itself (name, colour,
 // position), which GetRoleForUser serves without a store read. When the member
 // list was unreadable, per-user eviction cannot be trusted, so every cached
@@ -65,6 +64,18 @@ func (s *RoleService) UpdateRole(ctx context.Context, actorID, roleID int64, in 
 	updated, res, err = s.updateRoleLocked(ctx, actorID, roleID, in)
 	if err != nil {
 		return nil, RoleUpdateResult{}, err
+	}
+	// A member assigned between the first read and the commit can have cached
+	// the pre-edit mask after its own invalidation, so the holders are read
+	// again and the two lists merged. The write has committed: the re-read
+	// must not fail because the caller went away.
+	if affectedOK {
+		after, afterOK := s.AffectedUserIDs(context.WithoutCancel(ctx), roleID)
+		if afterOK {
+			affected = mergeUserIDs(affected, after)
+		} else {
+			affectedOK = false
+		}
 	}
 
 	if affectedOK {
@@ -123,4 +134,20 @@ func (s *RoleService) ReorderRoles(ctx context.Context, actorID int64, orderedID
 	}
 	s.notifyRoles(RoleFanout{Roles: true})
 	return updated, nil
+}
+
+// mergeUserIDs returns the ids in a or b, each once, a's order first.
+func mergeUserIDs(a, b []int64) []int64 {
+	seen := make(map[int64]struct{}, len(a)+len(b))
+	out := make([]int64, 0, len(a)+len(b))
+	for _, list := range [][]int64{a, b} {
+		for _, id := range list {
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			out = append(out, id)
+		}
+	}
+	return out
 }

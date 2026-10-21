@@ -57,8 +57,9 @@ func (s *ChannelService) ChannelPermissions(ctx context.Context, channelID int64
 }
 
 // OverrideResult carries the response row fields of an override mutation and
-// who had cached permissions invalidated (the service has already done it). AffectedAll means the narrow list could not be read — the
-// fail-safe is a full flush, because a missed eviction is a stale grant.
+// who had cached permissions invalidated (the service has already done it).
+// AffectedAll means the narrow list could not be read — the fail-safe is a
+// full flush, because a missed eviction is a stale grant.
 type OverrideResult struct {
 	Role          *db.Role
 	User          *db.User
