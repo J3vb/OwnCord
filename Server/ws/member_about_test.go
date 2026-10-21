@@ -12,7 +12,7 @@ import (
 
 func setAbout(t *testing.T, database *db.DB, u *db.User, about string) {
 	t.Helper()
-	if err := database.UpdateUserProfile(context.Background(), u.ID, u.Username, nil, nil, &about); err != nil {
+	if err := database.UpdateUserProfile(context.Background(), u.ID, u.Username, nil, nil, &about, nil, nil); err != nil {
 		t.Fatalf("UpdateUserProfile: %v", err)
 	}
 }

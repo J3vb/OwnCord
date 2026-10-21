@@ -24,6 +24,16 @@ func GroupIconURL(iconID string) string {
 	return fileURLPrefix + iconID
 }
 
+// BannerURL is the URL a profile banner image is served from, nil for none.
+// It is the same /api/v1/files/<id> shape as an avatar upload.
+func BannerURL(bannerID *string) *string {
+	if bannerID == nil || *bannerID == "" {
+		return nil
+	}
+	u := fileURLPrefix + *bannerID
+	return &u
+}
+
 // GetGroupDMMeta returns the owner (0 for none) and the icon attachment id
 // ("" for none) of a group DM. Both are zero values when the channel is not a
 // group.

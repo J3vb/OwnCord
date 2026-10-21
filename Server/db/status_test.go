@@ -170,7 +170,7 @@ func TestIsAvatarFileURL(t *testing.T) {
 	}
 
 	avatar := url
-	if err := database.UpdateUserProfile(ctx, id, "pfp", &avatar, nil, nil); err != nil {
+	if err := database.UpdateUserProfile(ctx, id, "pfp", &avatar, nil, nil, nil, nil); err != nil {
 		t.Fatalf("UpdateUserProfile: %v", err)
 	}
 	if inUse, err := database.IsAvatarFileURL(ctx, url); err != nil || !inUse {
@@ -179,7 +179,7 @@ func TestIsAvatarFileURL(t *testing.T) {
 
 	// Replacing the avatar revokes the old file's public readability.
 	other := "/api/v1/files/def-456"
-	if err := database.UpdateUserProfile(ctx, id, "pfp", &other, nil, nil); err != nil {
+	if err := database.UpdateUserProfile(ctx, id, "pfp", &other, nil, nil, nil, nil); err != nil {
 		t.Fatalf("UpdateUserProfile: %v", err)
 	}
 	if inUse, _ := database.IsAvatarFileURL(ctx, url); inUse {
@@ -215,7 +215,7 @@ func TestUpdateUserProfile_WritesDisplayNameAndAbout(t *testing.T) {
 	}
 
 	name, about := "Bio Person", "likes long walks"
-	if err := database.UpdateUserProfile(ctx, id, "bio", nil, &name, &about); err != nil {
+	if err := database.UpdateUserProfile(ctx, id, "bio", nil, &name, &about, nil, nil); err != nil {
 		t.Fatalf("UpdateUserProfile: %v", err)
 	}
 	u, _ := database.GetUserByID(ctx, id)
@@ -226,7 +226,7 @@ func TestUpdateUserProfile_WritesDisplayNameAndAbout(t *testing.T) {
 		t.Errorf("about = %v, want %q", u.About, about)
 	}
 
-	if err := database.UpdateUserProfile(ctx, id, "bio", nil, nil, nil); err != nil {
+	if err := database.UpdateUserProfile(ctx, id, "bio", nil, nil, nil, nil, nil); err != nil {
 		t.Fatalf("clear: %v", err)
 	}
 	u, _ = database.GetUserByID(ctx, id)

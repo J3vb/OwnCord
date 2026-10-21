@@ -718,9 +718,11 @@ export interface VoiceStatePayload {
   readonly server_deafened?: boolean;
 }
 
-/** Server -> Client: a moderator moved this client to another voice channel. */
+/** Server -> Client: the server moved this client to another voice channel,
+ *  by a moderator (no `reason`) or the AFK sweep (`reason: "afk"`). */
 export interface VoiceMovedPayload {
   readonly to_channel_id: number;
+  readonly reason?: "afk";
 }
 
 /** Server -> Client: a moderator removed this client from voice. */

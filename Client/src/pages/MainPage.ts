@@ -2012,15 +2012,17 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     container.appendChild(root);
 
-    // Voice is the only channel type that should keep the grid up; text, dm
-    // and announcement all mount a chat surface and must dismiss it, not just
-    // "text" (a dm/announcement switch used to leave the grid covering an
-    // unrelated channel's chat). The DM that owns the current call is the
-    // exception: its call panel shows the video above the chat (its own
-    // update re-seats the grid through onVideoHostChange).
+    // Only the channel that owns the current call keeps the grid up: the joined
+    // voice channel (its chat sits beside the grid, WP 6.1b) or the DM whose
+    // call panel shows the video above the chat (its own update re-seats the
+    // grid through onVideoHostChange). Every other channel mounts a chat
+    // surface and must dismiss it, another voice channel's chat opened from
+    // its menu included (WP 6.1d).
     const showChatFor = (active: { id: number; type: string }): void => {
-      const ownsCall = active.type === "dm" && voiceStore.getState().currentChannelId === active.id;
-      if (active.type !== "voice" && !ownsCall) videoModeCtrl?.showChat({ keepWatching: true });
+      const ownsCall =
+        (active.type === "dm" || active.type === "voice") &&
+        voiceStore.getState().currentChannelId === active.id;
+      if (!ownsCall) videoModeCtrl?.showChat({ keepWatching: true });
     };
     // A click on the channel already open under the stream view changes no
     // store, so the subscriber below never sees it.

@@ -1371,7 +1371,9 @@ CREATE TABLE IF NOT EXISTS users (
     display_name TEXT,
     about TEXT,
     custom_status TEXT,
-    custom_status_expires_at TEXT
+    custom_status_expires_at TEXT,
+    banner_id TEXT,
+    banner_color TEXT
 );
 
 -- Second-factor state (migration 032): the auth service persists its

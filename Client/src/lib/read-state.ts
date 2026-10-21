@@ -108,11 +108,26 @@ export function markChannelRead(channelId: number): void {
   clearDmUnread(channelId);
 }
 
-/** Whether a channel currently shows an unread or mention badge — what decides
- *  if "Mark as Read" is offered as an enabled action. */
+/** Whether a channel's row shows a badge. A voice row draws only the mention
+ *  badge (WP 6.1d), so its plain unread count never counts. */
+function showsBadge(ch: { type: string; unreadCount: number; mentionCount: number }): boolean {
+  return ch.mentionCount > 0 || (ch.type !== "voice" && ch.unreadCount > 0);
+}
+
+/** Whether a channel has anything unread, badge or not. The mark-read paths
+ *  use it, so a voice chat's plain unread is still marked read when seen. */
 export function hasUnread(channelId: number): boolean {
   const ch = channelsStore.getState().channels.get(channelId);
   if (ch !== undefined && (ch.unreadCount > 0 || ch.mentionCount > 0)) return true;
+  const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
+  return dm !== undefined && (dm.unreadCount > 0 || dm.mentionCount > 0);
+}
+
+/** Whether a channel currently shows an unread or mention badge — what decides
+ *  if "Mark as Read" is offered as an enabled action. */
+export function showsUnreadBadge(channelId: number): boolean {
+  const ch = channelsStore.getState().channels.get(channelId);
+  if (ch !== undefined && showsBadge(ch)) return true;
   const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
   return dm !== undefined && (dm.unreadCount > 0 || dm.mentionCount > 0);
 }
@@ -130,7 +145,7 @@ export function unreadChannelIds(opts: UnreadScope = {}): readonly number[] {
   const ids = new Set<number>();
   for (const ch of channelsStore.getState().channels.values()) {
     if (!includeDms && ch.type === "dm") continue;
-    if (ch.unreadCount > 0 || ch.mentionCount > 0) ids.add(ch.id);
+    if (showsBadge(ch)) ids.add(ch.id);
   }
   if (includeDms) {
     for (const dm of dmStore.getState().channels) {

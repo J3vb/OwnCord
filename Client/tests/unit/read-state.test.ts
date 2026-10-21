@@ -11,6 +11,7 @@ import {
   markChannelRead,
   markChannelsRead,
   hasUnread,
+  showsUnreadBadge,
   noteLiveMessageSeen,
   setMarkReadSender,
   unreadChannelIds,
@@ -82,6 +83,16 @@ describe("hasUnread", () => {
   it("is false for an unknown channel", () => {
     expect(hasUnread(999)).toBe(false);
   });
+
+  it("a voice channel's badge counts only its mentions", () => {
+    setChannels([
+      { ...channel(1, 4), type: "voice" },
+      { ...channel(2, 4, 1), type: "voice" },
+    ]);
+    expect(showsUnreadBadge(1)).toBe(false);
+    expect(showsUnreadBadge(2)).toBe(true);
+    expect(hasUnread(1)).toBe(true);
+  });
 });
 
 describe("markChannelRead", () => {
@@ -139,6 +150,22 @@ describe("unreadChannelIds / markAllRead", () => {
     setDmChannels([dm(50, 2), dm(51, 0)]);
 
     expect([...unreadChannelIds()].sort((a, b) => a - b)).toEqual([1, 3, 50]);
+  });
+
+  it("voice unread without a mention is not unread; a voice mention is", () => {
+    setChannels([
+      channel(1, 0),
+      { ...channel(2, 6), type: "voice" },
+      { ...channel(3, 6, 2), type: "voice" },
+    ]);
+    expect(unreadChannelIds({ includeDms: false })).toEqual([3]);
+    setChannels([channel(1, 0), { ...channel(2, 6), type: "voice" }]);
+    expect(unreadChannelIds()).toEqual([]);
+    expect(showsUnreadBadge(2)).toBe(false);
+    // Still unread for the mark-read paths, so viewing the chat clears it.
+    expect(hasUnread(2)).toBe(true);
+    setChannels([{ ...channel(3, 6, 2), type: "voice" }]);
+    expect(showsUnreadBadge(3)).toBe(true);
   });
 
   it("marks everything read and reports how many", () => {

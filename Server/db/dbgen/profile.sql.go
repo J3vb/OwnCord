@@ -44,6 +44,20 @@ func (q *Queries) CountUsersWithAvatar(ctx context.Context, avatar *string) (int
 	return count, err
 }
 
+const isBannerFile = `-- name: IsBannerFile :one
+SELECT EXISTS (SELECT 1 FROM users WHERE banner_id = ?) AS is_banner
+`
+
+// Authorization probe for the file route: an unlinked attachment is readable by
+// everyone exactly while some user's banner_id names it. Served by the partial
+// index idx_users_banner_id (migration 069).
+func (q *Queries) IsBannerFile(ctx context.Context, bannerID *string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, isBannerFile, bannerID)
+	var is_banner int64
+	err := row.Scan(&is_banner)
+	return is_banner, err
+}
+
 const listExpiredCustomStatuses = `-- name: ListExpiredCustomStatuses :many
 SELECT id, custom_status_expires_at FROM users
 WHERE custom_status_expires_at IS NOT NULL AND custom_status_expires_at <= ?
@@ -138,7 +152,8 @@ func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPassword
 
 const updateUserProfile = `-- name: UpdateUserProfile :execresult
 UPDATE users
-SET username = ?, avatar = ?, display_name = ?, about = ?
+SET username = ?, avatar = ?, display_name = ?, about = ?,
+    banner_id = ?, banner_color = ?
 WHERE id = ?
 `
 
@@ -147,6 +162,8 @@ type UpdateUserProfileParams struct {
 	Avatar      *string `json:"avatar"`
 	DisplayName *string `json:"displayName"`
 	About       *string `json:"about"`
+	BannerID    *string `json:"bannerId"`
+	BannerColor *string `json:"bannerColor"`
 	ID          int64   `json:"id"`
 }
 
@@ -156,6 +173,8 @@ func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfilePa
 		arg.Avatar,
 		arg.DisplayName,
 		arg.About,
+		arg.BannerID,
+		arg.BannerColor,
 		arg.ID,
 	)
 }

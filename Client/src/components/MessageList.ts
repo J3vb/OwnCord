@@ -1147,9 +1147,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // Render visible window
   // ---------------------------------------------------------------------------
 
-  function measureRendered(): void {
+  /** Record the heights of the rendered rows, or only those whose item index
+   *  lies in [from, to) (a slide measures just the rows that entered; every
+   *  other row was measured when it entered or by the ResizeObserver pass). */
+  function measureRendered(from: number = renderedStart, to: number = renderedEnd): void {
     if (contentContainer === null || renderedStart < 0) return;
     const children = contentContainer.children;
+    const first = Math.max(0, from - renderedStart);
+    const last = Math.min(children.length, to - renderedStart);
 
     // Pass 1 — pure reads: collect all heights without touching any styles.
     // Batching all getComputedStyle / offsetHeight reads before any writes
@@ -1161,7 +1166,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       readonly h: number;
     }
     const measurements: Measurement[] = [];
-    for (let i = 0; i < children.length; i++) {
+    for (let i = first; i < last; i++) {
       const globalIdx = renderedStart + i;
       if (globalIdx < 0 || (tree !== null && globalIdx >= tree.size)) continue;
       const el = children[i] as HTMLElement;
@@ -1295,8 +1300,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    *  rows that left, render only the rows that entered, keep the rest. */
   function shiftWindow(start: number, end: number): void {
     if (contentContainer === null) return;
-    // Record the rows' heights before any of them leave.
-    measureRendered();
+    // Rows that stay were measured when they entered or by the ResizeObserver
+    // pass, so only the rows that leave (here, before they are released: one
+    // may have grown since the last pass) and the rows that enter (below) are
+    // measured.
+    const prevStart = renderedStart;
+    const prevEnd = renderedEnd;
+    measureRendered(prevStart, start);
+    measureRendered(end, prevEnd);
     const rows = [...contentContainer.children] as HTMLElement[];
     // Rows entering above the view keep the first row that stays in place on
     // screen; rows leaving above it are measured, so their spacer share is exact.
@@ -1321,7 +1332,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     contentContainer.appendChild(tail);
     renderedStart = start;
     renderedEnd = end;
-    measureRendered();
+    measureRendered(start, prevStart);
+    measureRendered(prevEnd, end);
     updateSpacers();
     if (hold && kept.isConnected) holdRow(kept, keptEdge);
     refocusEditor();
