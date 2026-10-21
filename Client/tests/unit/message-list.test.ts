@@ -427,7 +427,7 @@ describe("MessageList", () => {
     const content = container.querySelector(".virtual-content");
     expect(content).not.toBeNull();
     // The virtual scroll renders items based on estimated heights.
-    // In jsdom with 0 clientHeight, renderWindow computes start=0, end=OVERSCAN+1.
+    // In jsdom with 0 clientHeight, renderWindow computes start=0, end=OVERSCAN_MAX_ROWS+1.
     // With only 4 items (2 dividers + 2 messages), all should be in the window.
     const dividers = container.querySelectorAll(".msg-day-divider");
     expect(dividers.length).toBe(2);
