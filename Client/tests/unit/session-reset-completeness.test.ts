@@ -6,6 +6,10 @@
  * commented EXEMPT list: a registration added in any module fails the
  * completeness test until it gets a probe or an exemption.
  */
+import {
+  claimForwardRequest,
+  isForwardRequest,
+} from "../../src/features/messaging/forwardRequests";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -489,6 +493,11 @@ const PROBES: readonly Probe[] = [
     name: "moderation:timeouts",
     mutate: () => setMemberTimeouts([{ user_id: 7, expires_at: "2099-01-01T00:00:00Z" }]),
     isInitial: () => memberTimeoutsStore.getState() === null,
+  },
+  {
+    name: "messaging:forwardRequests",
+    mutate: () => claimForwardRequest("fwd-probe"),
+    isInitial: () => !isForwardRequest("fwd-probe"),
   },
 ];
 

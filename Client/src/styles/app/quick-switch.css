@@ -186,3 +186,12 @@
   text-align: center;
   color: var(--text-muted);
 }
+
+/* Forward picker (WP 6.9a): reuses the switcher's rows; only the spacing is its own. */
+.forward-picker .form-input {
+  margin: 6px 0;
+}
+.forward-hint {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}

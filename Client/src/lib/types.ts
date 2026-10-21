@@ -553,6 +553,17 @@ export interface GroupEventInfo {
   readonly icon_removed?: boolean;
 }
 
+/**
+ * The snapshot link on a forwarded message (WP 6.9a). No author and no channel
+ * name ride on it; `source_message_id` is null once the original is deleted or
+ * purged, so the jump link is shown only while it is set.
+ */
+export interface ForwardInfo {
+  readonly source_channel_id: number;
+  readonly source_message_id: number | null;
+  readonly source_timestamp: string;
+}
+
 export interface ChatMessagePayload {
   readonly client_message_id?: string;
   readonly id: number;
@@ -590,6 +601,8 @@ export interface ChatMessagePayload {
   readonly call?: CallInfo;
   /** See GroupEventInfo; present on a group DM system row only. */
   readonly group_event?: GroupEventInfo;
+  /** Present on a forwarded message only (WP 6.9a). */
+  readonly forward?: ForwardInfo;
 }
 
 export interface ChatSendOkPayload {
@@ -599,6 +612,14 @@ export interface ChatSendOkPayload {
   readonly timestamp: string;
   /** Requested uploads the server did not attach (2A-3); absent from older servers. */
   readonly skipped_attachment_ids?: readonly string[];
+}
+
+/** The reply to `chat_forward`: `message_id` is the new message in `channel_id` (the target). */
+export interface ChatForwardOkPayload {
+  readonly message_id: number;
+  readonly channel_id: number;
+  readonly client_message_id: string;
+  readonly deduplicated: boolean;
 }
 
 export interface ChatEditedPayload {
@@ -1054,6 +1075,13 @@ export interface ChatSendPayload {
   readonly attachments: readonly string[];
 }
 
+/** Copy one message into one channel or DM; `client_message_id` is required (WP 6.9a). */
+export interface ChatForwardPayload {
+  readonly client_message_id: string;
+  readonly channel_id: number;
+  readonly message_id: number;
+}
+
 export interface ChatEditPayload {
   readonly message_id: number;
   readonly content: string;
@@ -1189,6 +1217,7 @@ export type ServerMessage =
   | (WsEnvelope<ReadyPayload> & { readonly type: "ready" })
   | (WsEnvelope<ChatMessagePayload> & { readonly type: "chat_message" })
   | (WsEnvelope<ChatSendOkPayload> & { readonly type: "chat_send_ok" })
+  | (WsEnvelope<ChatForwardOkPayload> & { readonly type: "chat_forward_ok" })
   | (WsEnvelope<ChatEditedPayload> & { readonly type: "chat_edited" })
   | (WsEnvelope<ChatDeletedPayload> & { readonly type: "chat_deleted" })
   | (WsEnvelope<ChatBulkDeletedPayload> & { readonly type: "chat_bulk_deleted" })
@@ -1239,6 +1268,7 @@ export type ServerMessage =
 export type ClientMessage =
   | (WsEnvelope<AuthPayload> & { readonly type: "auth" })
   | (WsEnvelope<ChatSendPayload> & { readonly type: "chat_send" })
+  | (WsEnvelope<ChatForwardPayload> & { readonly type: "chat_forward" })
   | (WsEnvelope<ChatEditPayload> & { readonly type: "chat_edit" })
   | (WsEnvelope<ChatDeletePayload> & { readonly type: "chat_delete" })
   | (WsEnvelope<ReactionAddPayload> & { readonly type: "reaction_add" })
@@ -1401,6 +1431,8 @@ export interface MessageResponse {
   readonly call?: CallInfo;
   /** See GroupEventInfo; present on a group DM system row only. */
   readonly group_event?: GroupEventInfo;
+  /** Present on a forwarded message only (WP 6.9a). */
+  readonly forward?: ForwardInfo;
 }
 
 /**

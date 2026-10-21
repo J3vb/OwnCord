@@ -5,6 +5,7 @@
 import type {
   CallInfo,
   GroupEventInfo,
+  ForwardInfo,
   ChatMessagePayload,
   MessageUser,
   Attachment,
@@ -67,6 +68,8 @@ export interface Message {
   readonly call?: CallInfo;
   /** The payload of a group DM system row (`kind` group_*); the render source, never `content`. */
   readonly groupEvent?: GroupEventInfo;
+  /** Set on a forwarded message (WP 6.9a): the snapshot's source, never an author. */
+  readonly forward?: ForwardInfo;
 }
 
 /** A reaction toggle applied optimistically, awaiting its server echo. Keyed
@@ -166,6 +169,7 @@ export function chatPayloadToMessage(payload: ChatMessagePayload): Message {
     ...(payload.kind !== undefined && { kind: payload.kind }),
     ...(payload.call !== undefined && { call: payload.call }),
     ...(payload.group_event !== undefined && { groupEvent: payload.group_event }),
+    ...(payload.forward !== undefined && { forward: payload.forward }),
   };
 }
 
@@ -193,6 +197,7 @@ export function messageResponseToMessage(response: MessageResponse): Message {
     ...(response.kind !== undefined && { kind: response.kind }),
     ...(response.call !== undefined && { call: response.call }),
     ...(response.group_event !== undefined && { groupEvent: response.group_event }),
+    ...(response.forward !== undefined && { forward: response.forward }),
   };
 }
 

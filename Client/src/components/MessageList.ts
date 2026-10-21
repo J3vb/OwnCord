@@ -134,6 +134,8 @@ export interface MessageListOptions {
   readonly onPinClick: (messageId: number, channelId: number, currentlyPinned: boolean) => void;
   /** Report someone else's message or one of its attachments (B9-10). No button without it. */
   readonly onReportClick?: (messageId: number) => void;
+  /** Opens the Forward picker for a message (WP 6.9a). Absent, the menu offers no Forward. */
+  readonly onForwardClick?: (messageId: number) => void;
   /** Retry a failed optimistic send (by its correlation id). */
   readonly onRetry?: (correlationId: string) => void;
   /** Discard a failed optimistic send without retrying. */

@@ -9,6 +9,7 @@ import {
   handleMessagingError,
   handleSendFailure,
 } from "./wsHandlers";
+import { claimForwardRequest } from "./forwardRequests";
 import {
   messagesStore,
   addMessage,
@@ -194,6 +195,12 @@ describe("handleChatPinned (F5)", () => {
 });
 
 describe("handleMessagingError", () => {
+  it("consumes the error of an in-flight Forward so only its picker row reports it", () => {
+    claimForwardRequest("fwd-1");
+    expect(handleMessagingError({ code: "FORBIDDEN", message: "" }, "fwd-1")).toBe(true);
+    expect(handleMessagingError({ code: "FORBIDDEN", message: "" }, "other")).toBe(false);
+  });
+
   it("consumes an error answering a pending send and fails that row", () => {
     pendingSend("corr-1");
 
