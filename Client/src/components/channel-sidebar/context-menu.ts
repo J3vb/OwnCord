@@ -22,7 +22,8 @@ import {
 import { Permission } from "@lib/types";
 import type { ChannelAccess } from "../../features/channels/channelRow.view";
 import { formatChannelLink } from "@lib/deep-link";
-import { markChannelRead, hasUnread } from "@lib/read-state";
+import { navigateToChannel } from "@lib/channel-navigation";
+import { markChannelRead, showsUnreadBadge } from "@lib/read-state";
 import {
   getChannelMute,
   muteChannel,
@@ -112,7 +113,11 @@ export function attachChannelContextMenu(
   // The link opens the channel's message view, so a voice channel has none to
   // offer (joining one is a click on its row, not a link).
   const showCopyLink = channel.type !== "voice";
+  // A voice channel's chat opens without joining (WP 6.1d); clicking the row
+  // still joins.
+  const showOpenChat = channel.type === "voice";
   const hasEntries =
+    showOpenChat ||
     showMarkRead ||
     showMute ||
     showEdit ||
@@ -165,10 +170,16 @@ export function attachChannelContextMenu(
       return item;
     };
 
+    if (showOpenChat) {
+      addItem(shellText("channel.openChat"), "context-menu-item", "ctx-open-chat", () =>
+        navigateToChannel(channel.id),
+      );
+    }
+
     if (showMarkRead) {
       // Disabled rather than hidden: a menu whose entries move between
       // right-clicks is harder to use than one with a greyed-out row.
-      const unread = hasUnread(channel.id);
+      const unread = showsUnreadBadge(channel.id);
       addItem(
         shellText("channel.markRead"),
         unread ? "context-menu-item" : "context-menu-item disabled",
@@ -331,7 +342,7 @@ export function attachChannelContextMenu(
     }
 
     if (
-      (showMarkRead || showMute || showMove || showCopyLink || showInvite) &&
+      (showOpenChat || showMarkRead || showMute || showMove || showCopyLink || showInvite) &&
       (showEdit || showDelete || canPurge)
     ) {
       menu.appendChild(createElement("div", { class: "context-menu-sep" }));

@@ -634,6 +634,34 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(chatArea.classList.contains("chat-area--call-chat")).toBe(false);
   });
 
+  it("opening another voice channel's chat while in a call dismisses the grid (WP 6.1d)", () => {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(1, textChannel(1, "general"));
+      ch.set(9, { ...textChannel(9, "lounge", 1), type: "voice" as const });
+      ch.set(10, { ...textChannel(10, "music", 2), type: "voice" as const });
+      return { ...prev, channels: ch, activeChannelId: 1 };
+    });
+
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 9,
+      voiceUsers: new Map([[9, new Map()]]),
+    }));
+    voiceStore.flush();
+    (mockCreateSidebarArea.mock.calls.at(-1)![0] as { onOpenCall: () => void }).onOpenCall();
+    const { slots } = capturedChatAreaRef.current!;
+    expect(slots.videoGridSlot.style.display).toBe("block");
+
+    setActiveChannel(10);
+    channelsStore.flush();
+    expect(slots.videoGridSlot.style.display).toBe("none");
+    expect(slots.messagesSlot.style.display).toBe("");
+  });
+
   it("does not clear a just-added remote video tile when a voice-channel switch left the camera/screenshare signature unchanged (OC-0207)", () => {
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);

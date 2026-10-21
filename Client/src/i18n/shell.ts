@@ -53,6 +53,7 @@ export const shellText = defineCatalog("shell", {
   "channel.copyLink": "Copy Link",
   "channel.invite": "Invite People",
   "channel.markRead": "Mark as Read",
+  "channel.openChat": "Open chat",
   "category.markRead": "Mark Category as Read",
   "category.collapse": "Collapse Category",
   "category.expand": "Expand Category",

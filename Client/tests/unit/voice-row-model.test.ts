@@ -13,6 +13,8 @@ import {
   type VoiceUserContext,
 } from "../../src/features/channels/voiceRowModel";
 import {
+  drawVoiceChannelChrome,
+  patchVoiceChannelChrome,
   drawVoiceUserRow,
   patchVoiceUserRow,
   VOICE_USER_PATCH_FIELDS,
@@ -255,6 +257,40 @@ describe("voiceChannelChrome", () => {
     expect(voiceChannelChrome(ch, inputs({ connectionStatus: "disconnected" })).frozenReason).toBe(
       "Not connected",
     );
+  });
+});
+
+describe("voiceChannelChrome mentions", () => {
+  it("carries the channel's mention count and never its unread count", () => {
+    const chrome = voiceChannelChrome(channel({ mentionCount: 3, unreadCount: 9 }), inputs());
+    expect(chrome.mentionCount).toBe(3);
+    expect("unread" in chrome).toBe(false);
+  });
+});
+
+describe("voice row mention badge", () => {
+  const chromeFor = (mentionCount: number) =>
+    voiceChannelChrome(channel({ mentionCount, unreadCount: 9 }), inputs());
+
+  it("draws the text row's mention badge markup, and no unread marker", () => {
+    const wrapper = drawVoiceChannelChrome(chromeFor(3));
+    const badge = wrapper.querySelector(".channel-item > .mention-badge");
+    expect(badge?.textContent).toBe("3");
+    expect(badge?.getAttribute("data-testid")).toBe("channel-mentions-10");
+    expect(badge?.getAttribute("title")).toBe("3 mentions");
+    expect(wrapper.querySelector(".unread")).toBeNull();
+    expect(drawVoiceChannelChrome(chromeFor(0)).querySelector(".mention-badge")).toBeNull();
+  });
+
+  it("patches the badge in, up and out, and keeps it after the capacity badge", () => {
+    const wrapper = drawVoiceChannelChrome(chromeFor(0));
+    patchVoiceChannelChrome(wrapper, chromeFor(2));
+    expect(wrapper.querySelector(".mention-badge")?.textContent).toBe("2");
+    patchVoiceChannelChrome(wrapper, chromeFor(5));
+    expect(wrapper.querySelectorAll(".mention-badge")).toHaveLength(1);
+    expect(wrapper.querySelector(".mention-badge")?.textContent).toBe("5");
+    patchVoiceChannelChrome(wrapper, chromeFor(0));
+    expect(wrapper.querySelector(".mention-badge")).toBeNull();
   });
 });
 
