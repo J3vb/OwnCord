@@ -3,7 +3,7 @@
 -- (CanReadContent) for the gate these back.
 --
 -- The reads and the revoke resolve a channel id through its parent first
--- (migration 073): a thread takes its parent's NSFW label, so it takes the
+-- (migration 074): a thread takes its parent's NSFW label, so it takes the
 -- parent's consent too. No row is keyed by a thread id: the acknowledge in
 -- db/nsfw_queries.go checks the row's own label, which is 0 on a thread.
 

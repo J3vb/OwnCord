@@ -314,7 +314,7 @@ type GetChannelPermissionRow struct {
 }
 
 // The single-channel override reads resolve a thread id to its parent first
-// (migration 073): a thread has no overrides of its own, it has its parent's.
+// (migration 074): a thread has no overrides of its own, it has its parent's.
 func (q *Queries) GetChannelPermission(ctx context.Context, arg GetChannelPermissionParams) (GetChannelPermissionRow, error) {
 	row := q.db.QueryRowContext(ctx, getChannelPermission, arg.ChannelID, arg.RoleID)
 	var i GetChannelPermissionRow

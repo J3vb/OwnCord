@@ -8,7 +8,7 @@ import (
 )
 
 // threadFixture is a text parent with one message and a thread started from
-// it, plus a user, as migration 073 shapes them.
+// it, plus a user, as migration 074 shapes them.
 type threadFixture struct {
 	db      *db.DB
 	user    int64

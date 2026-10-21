@@ -902,6 +902,10 @@ func (d *DB) scanAndEnrichMessages(ctx context.Context, rows *sql.Rows, requesti
 		return nil, fmt.Errorf("scanAndEnrichMessages forwards: %w", err)
 	}
 
+	if err := d.attachPolls(ctx, msgs, requestingUserID); err != nil {
+		return nil, fmt.Errorf("scanAndEnrichMessages polls: %w", err)
+	}
+
 	return d.attachReferencedMessages(ctx, msgs)
 }
 

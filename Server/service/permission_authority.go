@@ -11,7 +11,7 @@ import (
 // before it is looked up; an unresolved thread id would find no entry and get
 // the role's base bits, which is wrong whenever the parent narrows them.
 //
-// A channel's parent never changes after insert (the migration 073 trigger)
+// A channel's parent never changes after insert (the migration 074 trigger)
 // and channel ids are AUTOINCREMENT, never reused, so a resolved answer is
 // cached for the life of the process. Only found channels are cached: an id
 // that does not exist yet may become a thread later. Channel 0 (the

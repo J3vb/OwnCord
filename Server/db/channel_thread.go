@@ -1,6 +1,6 @@
 package db
 
-// ChannelThread is the thread half of a Channel (migration 073). A channel
+// ChannelThread is the thread half of a Channel (migration 074). A channel
 // whose ParentID is 0 is not a thread. A thread row's slow mode, archive and
 // NSFW fields already carry its parent's values (the channel queries merge
 // them), so callers that only read those see the parent without asking.

@@ -64,6 +64,16 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	exec(`INSERT INTO rate_lockouts (key, expires_at) VALUES ('login_user_lock:other-user', datetime('now', '+15 minutes'))`)
 	exec(`INSERT INTO reactions (message_id, user_id, emoji) VALUES (?, ?, 'x')`, otherMsg.ID, uid)
 	exec(`INSERT INTO reactions (message_id, user_id, emoji) VALUES (?, ?, 'y')`, msg.ID, other)
+	// A poll (migration 073, WP 6.9b) another user posted: the subject and a
+	// bystander each hold a vote, so class 10a is proved non-empty and the
+	// bystander's vote must survive the subject's erasure.
+	pollMsg, err := database.CreateMessageWithMentions(ctx, chID, other, "poll fallback", nil, nil, 0, false)
+	if err != nil {
+		t.Fatalf("CreateMessageWithMentions(poll): %v", err)
+	}
+	exec(`INSERT INTO polls (message_id, question, expires_at) VALUES (?, 'q', '2999-01-01T00:00:00Z')`, pollMsg.ID)
+	exec(`INSERT INTO poll_answers (message_id, answer_id, text) VALUES (?1, 1, 'a'), (?1, 2, 'b')`, pollMsg.ID)
+	exec(`INSERT INTO poll_votes (message_id, answer_id, user_id) VALUES (?1, 1, ?2), (?1, 2, ?3)`, pollMsg.ID, uid, third)
 	// The subject's send above already advanced their read state here
 	// (advanceAuthorReadState); OR IGNORE keeps the row seeded either way.
 	exec(`INSERT OR IGNORE INTO read_states (user_id, channel_id, last_message_id) VALUES (?, ?, 0)`, uid, chID)
@@ -274,8 +284,11 @@ func eraseEveryInventoryClassIsZero(t *testing.T) {
 		}
 		return n
 	}
-	if n := count(`SELECT COUNT(*) FROM messages WHERE user_id = ?`, sub.other); n != 1 {
-		t.Errorf("other user's messages = %d, want 1", n)
+	if n := count(`SELECT COUNT(*) FROM messages WHERE user_id = ?`, sub.other); n != 2 {
+		t.Errorf("other user's messages = %d, want 2 (a reply and a poll)", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM poll_votes`); n != 1 {
+		t.Errorf("poll votes left = %d, want only the bystander's", n)
 	}
 	if n := count(`SELECT COUNT(*) FROM message_delivery_receipts WHERE user_id = ?`, sub.other); n != 1 {
 		t.Errorf("other user's retry receipts = %d, want 1", n)

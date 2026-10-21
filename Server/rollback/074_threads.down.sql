@@ -1,4 +1,4 @@
--- Rollback of migration 073: threads go away.
+-- Rollback of migration 074: threads go away.
 --
 -- Cost: every thread and every message posted in one is deleted. An older
 -- binary has no thread type, and its type trigger would refuse the rows. The
@@ -63,4 +63,4 @@ ALTER TABLE channels DROP COLUMN thread_owner_id;
 ALTER TABLE channels DROP COLUMN thread_starter_message_id;
 ALTER TABLE channels DROP COLUMN parent_channel_id;
 
-DELETE FROM schema_versions WHERE version = '073_threads.sql';
+DELETE FROM schema_versions WHERE version = '074_threads.sql';

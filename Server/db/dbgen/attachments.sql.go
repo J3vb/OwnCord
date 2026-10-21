@@ -209,7 +209,7 @@ type GetAttachmentWithChannelRow struct {
 // NULL when the attachment is unlinked or its message/channel is gone, same
 // as c.type, so both are read through the caller's nil-safe mapping.
 // parent_nsfw is the parent's label when the channel is a thread (migration
-// 073), whose own nsfw is always 0; the gate reads either one being set.
+// 074), whose own nsfw is always 0; the gate reads either one being set.
 func (q *Queries) GetAttachmentWithChannel(ctx context.Context, id string) (GetAttachmentWithChannelRow, error) {
 	row := q.db.QueryRowContext(ctx, getAttachmentWithChannel, id)
 	var i GetAttachmentWithChannelRow

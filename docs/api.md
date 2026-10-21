@@ -1258,6 +1258,15 @@ purged. The block has no author and no channel name, and a deleted forward carri
 none. The forward's `content` and `attachments` are its own snapshot and copies,
 and it cannot be edited.
 
+A poll message (`poll_create`, see `docs/protocol.md`) carries a `poll` block,
+omitted for every other message and for a deleted one: `{"question", "answers":
+[{"answer_id", "text", "emoji"}], "allow_multiselect", "expires_at", "ended",
+"ended_at", "results": {"version", "total_voters", "counts": [{"answer_id",
+"count"}], "me"}}`. `me` is the requesting user's own answer ids. `ended` is true
+when the poll was ended or `expires_at` has passed, even before anything marked it
+ended. The poll's `content` is a readable fallback of the question and answers. A poll
+cannot be edited or forwarded.
+
 A group DM can also hold group event rows: `kind` is `group_add`, `group_remove`,
 `group_leave`, `group_rename` or `group_icon`, with a `group_event` block
 (`{"target_user_id"}` for add and remove, `{}` for leave, `{"name"}` for rename,

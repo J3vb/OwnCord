@@ -7,11 +7,11 @@ import (
 	"github.com/J3vb/OwnCord/Server/rollback"
 )
 
-// TestRollback073_Rehearsal reverses migration 073 on a database holding a
+// TestRollback074_Rehearsal reverses migration 074 on a database holding a
 // thread: the thread row and its messages go, the parent and its own messages
 // stay, and type 'thread' is refused again. It runs with foreign keys off, as
 // the sqlite3 shell runs a reversal, so nothing may depend on a cascade.
-func TestRollback073_Rehearsal(t *testing.T) {
+func TestRollback074_Rehearsal(t *testing.T) {
 	database := openMigratedMemoryInternal(t)
 	ctx := context.Background()
 	count := func(q string, args ...any) int {
@@ -64,7 +64,7 @@ func TestRollback073_Rehearsal(t *testing.T) {
 	}
 	t.Cleanup(func() { _, _ = database.writer.Exec(`PRAGMA foreign_keys = ON`) })
 
-	raw, err := rollback.FS.ReadFile("073_threads.down.sql")
+	raw, err := rollback.FS.ReadFile("074_threads.down.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestRollback073_Rehearsal(t *testing.T) {
 	if n := count(`SELECT COUNT(*) FROM sqlite_master WHERE name LIKE 'idx_channels_thread%' OR name = 'idx_channels_parent' OR name LIKE 'trg_channels_thread%'`); n != 0 {
 		t.Errorf("%d thread objects survived the reversal", n)
 	}
-	if n := count(`SELECT COUNT(*) FROM schema_versions WHERE version = '073_threads.sql'`); n != 0 {
+	if n := count(`SELECT COUNT(*) FROM schema_versions WHERE version = '074_threads.sql'`); n != 0 {
 		t.Error("schema_versions row survived the reversal")
 	}
 	if n := count(`SELECT COUNT(*) FROM channels WHERE id = ?`, thread); n != 0 {

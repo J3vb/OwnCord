@@ -9,7 +9,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// seedThread inserts a thread under parentID, as migration 073 shapes one.
+// seedThread inserts a thread under parentID, as migration 074 shapes one.
 func seedThread(t *testing.T, database *db.DB, id, parentID int64) {
 	t.Helper()
 	if _, err := database.ExecContext(context.Background(),

@@ -102,7 +102,7 @@ ON CONFLICT(channel_id, role_id) DO UPDATE SET
 
 -- name: GetChannelPermission :one
 -- The single-channel override reads resolve a thread id to its parent first
--- (migration 073): a thread has no overrides of its own, it has its parent's.
+-- (migration 074): a thread has no overrides of its own, it has its parent's.
 SELECT allow, deny FROM channel_overrides
 WHERE channel_id = (
     SELECT COALESCE(ac.parent_channel_id, ac.id) FROM channels ac WHERE ac.id = sqlc.arg(channel_id))

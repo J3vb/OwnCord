@@ -335,6 +335,28 @@ type PluginKv struct {
 	Value    []byte `json:"value"`
 }
 
+type Poll struct {
+	MessageID        int64   `json:"messageId"`
+	Question         string  `json:"question"`
+	AllowMultiselect int64   `json:"allowMultiselect"`
+	ExpiresAt        string  `json:"expiresAt"`
+	EndedAt          *string `json:"endedAt"`
+	Version          int64   `json:"version"`
+}
+
+type PollAnswer struct {
+	MessageID int64   `json:"messageId"`
+	AnswerID  int64   `json:"answerId"`
+	Text      string  `json:"text"`
+	Emoji     *string `json:"emoji"`
+}
+
+type PollVote struct {
+	MessageID int64 `json:"messageId"`
+	AnswerID  int64 `json:"answerId"`
+	UserID    int64 `json:"userId"`
+}
+
 type PushSubscription struct {
 	ID         int64  `json:"id"`
 	UserID     int64  `json:"userId"`
