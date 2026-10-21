@@ -102,7 +102,8 @@ func (s *ChannelService) ListVisibleChannels(ctx context.Context, userID int64) 
 func channelRefs(channels []db.Channel) []permissions.ChannelRef {
 	refs := make([]permissions.ChannelRef, len(channels))
 	for i := range channels {
-		refs[i] = permissions.ChannelRef{ID: channels[i].ID, Type: channels[i].Type, Archived: channels[i].Archived}
+		refs[i] = permissions.ChannelRef{ID: channels[i].ID, Type: channels[i].Type, Archived: channels[i].Archived,
+			NSFW: channels[i].NSFW, AuthorityID: channels[i].Thread.ParentID, ThreadLocked: channels[i].Thread.Locked}
 	}
 	return refs
 }
@@ -368,6 +369,12 @@ func (s *ChannelService) HandleChannelFocus(ctx context.Context, userID, channel
 func admitReadState(ctx context.Context, st Store, perms *PermissionService, userID, channelID int64) (*db.Channel, error) {
 	ch, err := st.GetChannel(ctx, channelID)
 	if err != nil || ch == nil {
+		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
+	}
+	if ch.IsThread() {
+		// A thread is never a socket's focused channel (6.9c): a parent's
+		// visibility refresh revokes the parent topic only, so a thread
+		// topic held here would outlive the parent's revocation.
 		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
 	sub, subErr := channelSubject(ctx, st, perms, userID, ch, false)

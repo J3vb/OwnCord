@@ -87,7 +87,8 @@ func (s *ChannelService) loadAccessMember(ctx context.Context, userID int64, ch 
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to resolve permissions: %w", ErrInternal, err)
 	}
-	sub.Channel = permissions.ChannelRef{ID: ch.ID, Type: ch.Type, Archived: ch.Archived, NSFW: ch.NSFW}
+	sub.Channel = permissions.ChannelRef{ID: ch.ID, Type: ch.Type, Archived: ch.Archived, NSFW: ch.NSFW,
+		AuthorityID: ch.Thread.ParentID, ThreadLocked: ch.Thread.Locked}
 	if ch.NSFW {
 		if sub.NSFWAcknowledged, err = s.st.HasNSFWAcknowledgement(ctx, user.ID, ch.ID); err != nil {
 			return nil, fmt.Errorf("%w: failed to read NSFW acknowledgement: %w", ErrInternal, err)

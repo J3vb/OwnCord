@@ -20,8 +20,9 @@ func (d *DB) ListUserMessageChannelsSince(ctx context.Context, userID int64, sin
 	rows, err := d.reader.QueryContext(ctx,
 		`SELECT DISTINCT m.channel_id
 		 FROM messages m JOIN channels c ON c.id = m.channel_id
+		 LEFT JOIN channels p ON p.id = c.parent_channel_id
 		 WHERE m.user_id = ? AND m.id >= ? AND m.timestamp >= ? AND m.deleted = 0
-		   AND c.type != 'dm' AND c.archived = 0
+		   AND c.type != 'dm' AND COALESCE(p.archived, c.archived) = 0
 		 ORDER BY m.channel_id`,
 		userID, floor, since,
 	)

@@ -121,7 +121,7 @@ func (d *DB) GetAttachmentWithChannel(ctx context.Context, id string) (*Attachme
 		UploaderID:  r.UploaderID,
 		ChannelID:   r.ChannelID,
 		ChannelType: derefString(r.Type),
-		ChannelNSFW: r.Nsfw != nil && *r.Nsfw != 0,
+		ChannelNSFW: (r.Nsfw != nil && *r.Nsfw != 0) || (r.ParentNsfw != nil && *r.ParentNsfw != 0),
 	}, nil
 }
 

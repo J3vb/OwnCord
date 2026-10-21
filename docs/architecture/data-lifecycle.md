@@ -206,6 +206,12 @@ forwarded belong to them and are unlinked and swept with their other attachments
 There is no owner decision behind this; it matches Discord and the report-evidence
 precedent (migration 048).
 
+**Threads (WP 6.9c, migration 074).** A thread is a channel row, so the erased
+user's messages in a thread go with the rest of their `messages`. A thread they
+started stays for its other participants: `thread_owner_id` goes `NULL`, and so does
+`thread_starter_message_id` when the starter message is deleted. Retention sweeps a
+thread under its parent's policy; a thread has no policy of its own.
+
 After commit the runner broadcasts `member_ban` (every client drops the
 user; the subject's socket is closed) and then purges the replay pipeline
 behind it (`Hub.PurgeUserFromReplay`, the job's first journaled step —

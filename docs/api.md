@@ -2404,10 +2404,11 @@ Idempotent. Sends the caller's other live sockets an `nsfw_ack` frame
 
 #### Errors
 
-| Status | Code        | Reason                                                     |
-| ------ | ----------- | ---------------------------------------------------------- |
-| 404    | `NOT_FOUND` | The channel does not exist or is not visible to the caller |
-| 409    | `NOT_NSFW`  | The channel is not labelled — nothing to acknowledge       |
+| Status | Code          | Reason                                                     |
+| ------ | ------------- | ---------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | The channel is a thread: its consent is its parent's       |
+| 404    | `NOT_FOUND`   | The channel does not exist or is not visible to the caller |
+| 409    | `NOT_NSFW`    | The channel is not labelled — nothing to acknowledge       |
 
 ---
 
@@ -2424,9 +2425,10 @@ with `"acknowledged": false`.
 
 #### Errors
 
-| Status | Code        | Reason                                                     |
-| ------ | ----------- | ---------------------------------------------------------- |
-| 404    | `NOT_FOUND` | The channel does not exist or is not visible to the caller |
+| Status | Code          | Reason                                                     |
+| ------ | ------------- | ---------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | The channel is a thread: its consent is its parent's       |
+| 404    | `NOT_FOUND`   | The channel does not exist or is not visible to the caller |
 
 ---
 
@@ -5513,6 +5515,10 @@ and then re-syncs connected clients with targeted `channel_create` /
 `channel_delete` messages, so sidebars converge without a reconnect.
 
 DM channels have no override surface: `400 INVALID_INPUT`.
+
+A thread has no overrides, NSFW label, archive flag or retention policy of its
+own: each is its parent channel's. Every `/admin/api/channels/{id}` route,
+retention included, answers a thread id with `400`.
 
 ### GET /admin/api/channels/{id}/permissions
 

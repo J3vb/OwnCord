@@ -50,9 +50,11 @@ const (
 	// outside the count, and Store did not grow (CategoryStore is a slice
 	// interface in service). 6.9b adds one (128 to 129):
 	// MessageAPIResponse.Poll, for the same reason as 6.9a's. The poll types
-	// live in db/polls.go and PollStore is a slice interface in service. Any
-	// further tag fails.
-	modelsJSONTagBaseline = 129
+	// live in db/polls.go and PollStore is a slice interface in service.
+	// 6.9c-a1 adds one (129 to 130): Channel.Thread, json:"-", a single
+	// nested struct so the thread columns stay off the wire; ChannelThread
+	// lives in db/channel_thread.go, outside the count. Any further tag fails.
+	modelsJSONTagBaseline = 130
 
 	// storeFullSurfaceBaseline is the compiler's own method count for Store,
 	// promoted methods from the cross-package embeds included (309 plus the 9
