@@ -94,6 +94,9 @@ status statements retain their `cbebd37c` baseline.
 follow. The per-member rows are keyed by user exactly like `channel_user_overrides`,
 so they join the account-erasure inventory (class 18c) and are deleted with the
 account; the per-role rows hold no personal data. No new data class beyond that.
+A new channel in a category copies the template without an actor check: every
+template row was guarded when it was written, and template rows stay in force
+after their writer is demoted.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each
 service are documented"). **Input to:** HP-5, and to the retention and
 erasure obligations every B5 step carries.

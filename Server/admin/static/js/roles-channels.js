@@ -517,7 +517,7 @@ async function syncChannelPerms(id,name){
   }catch(e){showToast(e.message,'error')}
 }
 
-/* ═══ Access explanation and change preview (RI-06) ═══
+/* ═══ Access explanation and change preview (RI-06) ═══ */
 /* Both ask the server, which runs the canonical authorization predicates over
    the member's live state — this panel never decides access itself, and
    neither request acts as the member. Both reads are audited. */

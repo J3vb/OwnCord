@@ -378,6 +378,9 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 		// The category was deleted between the check above and the write.
 		return nil, nil, fmt.Errorf("category_id does not exist%.0w", ErrBadRequest)
 	}
+	if errors.Is(writeErr, db.ErrUncategorized) {
+		return nil, nil, fmt.Errorf("channel has no category to sync with%.0w", ErrBadRequest)
+	}
 	if writeErr != nil {
 		return nil, nil, fmt.Errorf("%w: failed to update channel: %w", ErrInternal, writeErr)
 	}

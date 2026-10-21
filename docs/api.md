@@ -5515,7 +5515,10 @@ creator, so it is not blocked by bits the creator lacks. A direct write or delet
 of a channel override, or a `PATCH` that moves the channel to another category,
 sets `permissions_synced` to false and keeps its rows, unless the `PATCH` carries
 `sync_permissions: true`, which replaces its rows with the target category's
-template and marks it synced. Deleting a category drops its template; its
+template and marks it synced. `sync_permissions` on a `PATCH` works on both channel
+mounts (`/admin/api/channels/{id}` and `/api/v1/moderation/channels/{id}`); combined
+with a legacy `category` name that would create a new category it answers `400`,
+because a new category has no template to sync with. Deleting a category drops its template; its
 channels keep their rows and become unsynced. `permissions_synced` is on the
 admin channel list and on `GET /admin/api/channels/{id}/permissions`; it is not
 on the websocket channel payload.

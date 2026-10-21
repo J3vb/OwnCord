@@ -431,3 +431,60 @@ func TestChannelCategoryLookups(t *testing.T) {
 		t.Errorf("an unknown name = %+v, %v; want nil, nil", c, err)
 	}
 }
+
+// A create in the category racing a template write: whichever commits first,
+// the new channel ends with exactly the committed template row and is synced.
+func TestCategoryOverride_CreateRacingATemplateWrite(t *testing.T) {
+	t.Run("create queued behind the write", func(t *testing.T) {
+		f := newCatFixture(t, 0)
+		ctx := context.Background()
+		created := make(chan int64, 1)
+		_, err := f.database.WriteCategoryRoleOverride(ctx, f.cat, f.role, 2, 1, func(db.CategoryOverrideScope) error {
+			go func() {
+				id, err := f.database.CreateChannelIn(ctx, db.NewChannel{Name: "racer", Type: "text", CategoryID: f.cat})
+				if err != nil {
+					t.Errorf("create: %v", err)
+				}
+				created <- id
+			}()
+			time.Sleep(50 * time.Millisecond) // let the create reach the writer queue
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		id := <-created
+		if a, d := f.row(t, id); a != 2 || d != 1 || !f.synced(t, id) {
+			t.Errorf("new channel = (%d,%d) synced=%v, want the committed template (2,1) and synced", a, d, f.synced(t, id))
+		}
+	})
+	t.Run("create commits first", func(t *testing.T) {
+		f := newCatFixture(t, 0)
+		ctx := context.Background()
+		id, err := f.database.CreateChannelIn(ctx, db.NewChannel{Name: "racer", Type: "text", CategoryID: f.cat})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.database.WriteCategoryRoleOverride(ctx, f.cat, f.role, 2, 1, nil); err != nil {
+			t.Fatal(err)
+		}
+		if a, d := f.row(t, id); a != 2 || d != 1 || !f.synced(t, id) {
+			t.Errorf("new channel = (%d,%d) synced=%v, want (2,1) and synced", a, d, f.synced(t, id))
+		}
+	})
+}
+
+func TestAdminUpdateChannel_SyncWithoutACategoryIsUncategorized(t *testing.T) {
+	f := newCatFixture(t, 1)
+	err := f.database.AdminUpdateChannel(context.Background(), f.chs[0], db.ChannelUpdate{
+		Name:      "a",
+		SyncGuard: func(db.ChannelSyncPlan) error { return nil },
+		SyncPlan:  &db.ChannelSyncPlan{},
+	})
+	if !errors.Is(err, db.ErrUncategorized) {
+		t.Fatalf("a sync into no category = %v, want ErrUncategorized", err)
+	}
+	if !f.synced(t, f.chs[0]) {
+		t.Error("a refused update must leave the channel synced")
+	}
+}
