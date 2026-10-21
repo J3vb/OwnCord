@@ -104,8 +104,8 @@ function afkSelect(id,opts,cur,attrs){
   return'<select class="filter-select" id="'+id+'"'+attrs+'>'+opts.map(([val,label])=>'<option value="'+esc(val)+'"'+(val===cur?' selected':'')+'>'+esc(label)+'</option>').join('')+'</select>';
 }
 async function afkCard(timeout){
-  let channels=null;
-  try{const r=await api('GET','/channels');if(Array.isArray(r))channels=r}catch(e){}
+  let channels=null,chErr='';
+  try{const r=await api('GET','/channels');if(Array.isArray(r))channels=r}catch(e){chErr=e.message||''}
   const voice=(channels||[]).filter(c=>c.type==='voice');
   const current=voice.find(c=>c.afk)||null;
   state._afkChannel=current?current.id:null;
@@ -113,12 +113,12 @@ async function afkCard(timeout){
   const opts=[['','None']].concat(voice.filter(c=>!c.archived||c.afk).map(c=>[String(c.id),c.name+(c.archived?' (archived)':'')]));
   const chSel=channels
     ?afkSelect('s-afk_channel',opts,current?String(current.id):'',' aria-describedby="s-afk_channel-desc" data-change-action="saveAfkChannel"')
-    :afkSelect('s-afk_channel',[['','Needs Manage Channels']],'',' disabled aria-describedby="s-afk_channel-desc"');
+    :afkSelect('s-afk_channel',[['','Channels unavailable']],'',' disabled aria-describedby="s-afk_channel-desc"');
   const timeoutSel=afkSelect('s-afk_timeout_seconds',AFK_TIMEOUTS,timeout,' aria-describedby="s-afk_timeout_seconds-desc" data-change-action="markSettingsChanged"');
   const warnings=await afkWarningsHtml(current);
   return settingsCard('Voice: AFK',
     settingsRow('afk_channel','AFK channel','Members idle for 10 minutes, then the time below, are moved here and can only listen: no microphone, camera or screen sharing. Only idle members are moved, and anyone who could not join the channel stays where they are. Saves as soon as you choose.'
-      ,'<div class="afk-ctrl">'+chSel+'<span class="setting-desc" id="afkChannelState" role="status"></span></div>')
+      ,'<div class="afk-ctrl">'+chSel+'<span class="setting-desc" id="afkChannelState" role="status">'+(channels?'':esc((chErr||'Could not load channels')+' Choosing the AFK channel needs Manage Channels.'))+'</span></div>')
     +'<div id="afkWarnings" aria-live="polite">'+warnings+'</div>'
     +settingsRow('afk_timeout_seconds','Move after','How long a member must stay idle, on top of the 10 minutes the app waits before marking them idle',timeoutSel));
 }
@@ -130,7 +130,7 @@ async function afkWarningsHtml(ch){
     const roles=((await api('GET','/channels/'+ch.id+'/permissions'))||{}).roles||[];
     const def=roles.reduce((lo,r)=>!lo||r.position<lo.position?r:lo,null);
     if(def&&(def.permissions&ADMIN_BIT)===0&&(((def.permissions&~def.deny)|def.allow)&CONNECT_VOICE_BIT)===0)
-      out.push('"'+def.name+'" cannot connect to this channel, so members without another role that can will not be moved. Allow Connect for it in the channel access settings.');
+      out.push('"'+def.role_name+'" cannot connect to this channel, so members without another role that can will not be moved. Allow Connect for it in the channel access settings.');
   }catch(e){}
   return out.map(m=>'<div class="callout-warning" role="note">'+esc(m)+'</div>').join('');
 }
