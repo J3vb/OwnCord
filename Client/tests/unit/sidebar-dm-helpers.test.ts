@@ -19,6 +19,7 @@ import type { DmChannel } from "../../src/stores/dm.store";
 
 function resetStores(): void {
   channelsStore.setState(() => ({
+    categories: [],
     channels: new Map(),
     activeChannelId: null,
     roles: [],

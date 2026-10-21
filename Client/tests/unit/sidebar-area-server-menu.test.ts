@@ -97,7 +97,12 @@ describe("SidebarArea - server name menu", () => {
     localStorage.clear();
     sent = [];
     setMarkReadSender((id) => sent.push(id));
-    channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+    channelsStore.setState(() => ({
+      channels: new Map(),
+      activeChannelId: null,
+      roles: [],
+      categories: [],
+    }));
     dmStore.setState(() => ({ channels: [] }));
     membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
     uiStore.setState((prev) => ({
@@ -267,6 +272,7 @@ describe("SidebarArea - server name menu", () => {
       "Notification Settings",
       "Hide Muted Channels",
       "Create Channel",
+      "Create Category",
       "Server Settings",
     ]);
     const sep = document.querySelector(".server-menu [role='separator']")!;
@@ -283,7 +289,7 @@ describe("SidebarArea - server name menu", () => {
       ],
       [
         Permission.MANAGE_CHANNELS,
-        ["Notification Settings", "Hide Muted Channels", "Create Channel"],
+        ["Notification Settings", "Hide Muted Channels", "Create Channel", "Create Category"],
       ],
       [
         Permission.VIEW_AUDIT_LOG,
@@ -313,6 +319,7 @@ describe("SidebarArea - server name menu", () => {
       "Notification Settings",
       "Hide Muted Channels",
       "Create Channel",
+      "Create Category",
     ]);
     pressEscape();
 
@@ -374,8 +381,21 @@ describe("SidebarArea - server name menu", () => {
     await vi.dynamicImportSettled();
 
     expect(createModal).toHaveBeenCalledOnce();
-    expect(createModal.mock.calls[0]![0]).toMatchObject({ category: "" });
+    expect(createModal.mock.calls[0]![0]).toMatchObject({ category: { id: 0, name: "" } });
     expect(createModal.mock.results[0]!.value.mount).toHaveBeenCalledWith(document.body);
+  });
+
+  it("Create Category opens the category name dialog", async () => {
+    grant(Permission.MANAGE_CHANNELS);
+    mount();
+    open();
+
+    item("server-menu-create-category").click();
+    await vi.dynamicImportSettled();
+
+    expect(document.querySelector("[data-testid='create-category-modal']")).not.toBeNull();
+    expect(document.querySelector("[data-testid='category-name-input']")).not.toBeNull();
+    document.querySelectorAll("[data-testid='create-category-modal']").forEach((el) => el.remove());
   });
 
   it("Server Settings opens the admin panel with no section", () => {

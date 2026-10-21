@@ -47,7 +47,12 @@ const dm = (over: Partial<DmChannel> = {}): DmChannel => ({
 });
 
 beforeEach(() => {
-  channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  channelsStore.setState(() => ({
+    channels: new Map(),
+    activeChannelId: null,
+    roles: [],
+    categories: [],
+  }));
   dmStore.setState(() => ({ channels: [] }));
 });
 

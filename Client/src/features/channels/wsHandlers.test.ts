@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   applyReadyActiveChannel,
+  applyReadyChannels,
+  handleChannelCategories,
   handleChannelDelete,
   handleMemberBan,
   handleMemberUpdate,
@@ -72,6 +74,34 @@ afterEach(() => {
   resetChannelActivity();
   vi.useRealTimers();
   hasFocus.mockRestore();
+});
+
+describe("channel categories (WP 6.5a)", () => {
+  beforeEach(() => resetChannelsStore());
+
+  it("ready carries the managers' list into the store, and its absence empties it", () => {
+    const withList = {
+      channels: [],
+      members: [],
+      roles: [],
+      categories: [
+        { id: 2, name: "B", position: 1 },
+        { id: 1, name: "A", position: 0 },
+      ],
+    } as unknown as Payload<"ready">;
+    applyReadyChannels(withList);
+    expect(channelsStore.getState().categories.map((c) => c.id)).toEqual([1, 2]);
+
+    // A non-manager's (or an older server's) ready has no key at all.
+    applyReadyChannels({ channels: [], members: [], roles: [] } as unknown as Payload<"ready">);
+    expect(channelsStore.getState().categories).toEqual([]);
+  });
+
+  it("channel_categories replaces the list wholesale", () => {
+    handleChannelCategories({ categories: [{ id: 1, name: "A", position: 0 }] });
+    handleChannelCategories({ categories: [{ id: 5, name: "E", position: 0 }] });
+    expect(channelsStore.getState().categories).toEqual([{ id: 5, name: "E", position: 0 }]);
+  });
 });
 
 describe("applyReadyActiveChannel", () => {

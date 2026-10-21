@@ -75,6 +75,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Desktop UI**
 
+- Channel categories are now real: right-click a category header (with Manage Channels) for **Create Category**, **Rename Category**, **Move Category Up/Down** and **Delete Category** (its channels move to no category, nothing is deleted). **Create Category** is also in the server menu, a category with no channels stays visible to people who can manage channels, and a collapsed category stays collapsed after a rename. Create and Edit Channel now pick the category from a list. This needs a server with categories; on an older one the sidebar groups by name as before.
 - Opening a voice call now opens the voice channel's text chat beside the video grid (stacked under it in a narrow window); leaving the call keeps the chat, and moving to another voice channel follows to its chat. A **Hide chat** / **Show chat** button in the header (shown during a call on that channel) keeps the grid full width, and a voice channel now shows a speaker in its header instead of `#`.
 - A voice channel in the sidebar now shows a red mention badge when someone mentions you in its chat, and right-clicking it offers **Open chat** to read that chat without joining the call; clicking the row still joins. "Mark all read" no longer appears for unread voice chat that no row shows.
 - Opening a voice call now opens the voice channel's text chat beside the video grid (stacked under it in a narrow window); leaving the call keeps the chat, and moving to another voice channel follows to its chat.

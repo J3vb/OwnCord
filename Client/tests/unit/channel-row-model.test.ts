@@ -49,6 +49,7 @@ function inputs(over: Partial<ChannelListInputs> = {}): ChannelListInputs {
     activeChannelId: null,
     selfRole: "owner",
     roles: [],
+    categories: [],
     collapsed: new Set(),
     hideMuted: false,
     mute: {},
@@ -64,7 +65,13 @@ function ctx(
 }
 
 function group(name: string | null, channels: readonly Channel[]): ChannelGroup {
-  return { name, channels, orderIds: channels.map((c) => c.id).join(",") };
+  return {
+    key: name,
+    name,
+    categoryId: 0,
+    channels,
+    orderIds: channels.map((c) => c.id).join(","),
+  };
 }
 
 const NO_VOICE = { voiceUsers: new Map(), currentChannelId: null };
@@ -192,13 +199,22 @@ describe("category group model", () => {
       inputs({ collapsed: new Set(["x"]) }),
       ctx(),
     );
-    expect(model).toEqual({ name: null, label: "", collapsed: false, showCreate: false });
+    expect(model).toEqual({
+      key: null,
+      name: null,
+      categoryId: 0,
+      label: "",
+      collapsed: false,
+      showCreate: false,
+    });
   });
 
   it("a named group carries its label, collapse state and whether the + shows", () => {
     const g = group("Text", [ch(1)]);
     expect(categoryGroupModel(g, inputs(), ctx())).toEqual({
+      key: "Text",
       name: "Text",
+      categoryId: 0,
       label: "Text",
       collapsed: false,
       showCreate: true,
@@ -292,10 +308,24 @@ describe("channelGroups", () => {
       [4, ch(4, { type: "dm", position: 3 })],
     ]);
     const groups = channelGroups(inputs({ channels }));
+    // D7: the synthetic Voice group sits before the categories.
     expect(groups.map((g) => [g.name, g.orderIds])).toEqual([
-      ["Text", "1,2"],
       ["Voice", "3"],
+      ["Text", "1,2"],
     ]);
+  });
+
+  it("keys a real category by its id, so the key survives a rename", () => {
+    const row = (name: string) =>
+      new Map([[1, ch(1, { category: name, categoryId: 7, categoryPosition: 0 })]]);
+    const before = channelGroups(inputs({ channels: row("Games") }));
+    const after = channelGroups(inputs({ channels: row("Play") }));
+    expect(before.map((g) => g.key)).toEqual(["cat:7"]);
+    expect(after.map((g) => g.key)).toEqual(["cat:7"]);
+    expect(after[0]?.name).toBe("Play");
+    // Collapse is looked up by key: a set saved before the rename still hides the rows.
+    const list = inputs({ channels: row("Play"), collapsed: new Set(["cat:7"]) });
+    expect(categoryGroupModel(after[0]!, list, ctx()).collapsed).toBe(true);
   });
 });
 

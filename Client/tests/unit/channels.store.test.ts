@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   channelsStore,
   setChannels,
+  setCategories,
   setRoles,
   getRoleIdByName,
   addChannel,
@@ -27,6 +28,7 @@ import type { ReadyChannel, ChannelCreatePayload, ChannelUpdatePayload } from ".
 
 function resetStore(): void {
   channelsStore.setState(() => ({
+    categories: [],
     channels: new Map(),
     activeChannelId: null,
     roles: [],
@@ -79,6 +81,8 @@ describe("channels store", () => {
         name: "general",
         type: "text",
         category: "Text",
+        categoryId: 0,
+        categoryPosition: 0,
         position: 0,
         unreadCount: 3,
         mentionCount: 0,
@@ -100,6 +104,8 @@ describe("channels store", () => {
         name: "voice-lobby",
         type: "voice",
         category: "Voice",
+        categoryId: 0,
+        categoryPosition: 0,
         position: 0,
         unreadCount: 0,
         mentionCount: 0,
@@ -179,6 +185,8 @@ describe("channels store", () => {
         name: "new-channel",
         type: "text",
         category: "Text",
+        categoryId: 0,
+        categoryPosition: 0,
         position: 2,
         unreadCount: 0,
         mentionCount: 0,
@@ -427,6 +435,8 @@ describe("channels store", () => {
         name: "general",
         type: "text",
         category: "Text",
+        categoryId: 0,
+        categoryPosition: 0,
         position: 0,
         unreadCount: 0,
         mentionCount: 0,
@@ -576,7 +586,7 @@ describe("channels store", () => {
   });
 
   describe("getKnownCategories", () => {
-    it("returns distinct non-empty categories, sorted, DMs excluded", () => {
+    it("returns distinct non-empty categories in sidebar order, DMs excluded", () => {
       setChannels([
         { id: 1, name: "a", type: "text", category: "Zeta", position: 0 },
         { id: 2, name: "b", type: "voice", category: "Alpha", position: 1 },
@@ -586,7 +596,44 @@ describe("channels store", () => {
         { id: 6, name: "dm", type: "dm", category: "Hidden", position: 5 },
       ]);
 
-      expect(getKnownCategories()).toEqual(["Alpha", "Zeta"]);
+      // Name-only categories (no ids) keep the order of their first channel.
+      expect(getKnownCategories()).toEqual([
+        { id: 0, name: "Zeta" },
+        { id: 0, name: "Alpha" },
+      ]);
+    });
+
+    it("returns real categories by (position, id), a manager's empty ones included", () => {
+      setChannels([
+        {
+          id: 1,
+          name: "a",
+          type: "text",
+          category: "B",
+          category_id: 2,
+          category_position: 1,
+          position: 0,
+        },
+        {
+          id: 2,
+          name: "b",
+          type: "text",
+          category: "A",
+          category_id: 9,
+          category_position: 0,
+          position: 1,
+        },
+      ]);
+      setCategories([
+        { id: 2, name: "B", position: 1 },
+        { id: 9, name: "A", position: 0 },
+        { id: 4, name: "Empty", position: 2 },
+      ]);
+      expect(getKnownCategories()).toEqual([
+        { id: 9, name: "A" },
+        { id: 2, name: "B" },
+        { id: 4, name: "Empty" },
+      ]);
     });
 
     it("returns an empty list when nothing is categorized", () => {

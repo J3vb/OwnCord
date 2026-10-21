@@ -1,8 +1,12 @@
 /**
  * Category header context menu: Mark Category as Read, Collapse/Expand
- * Category and Collapse All Categories. All three touch only the caller's own
- * read state and collapse preferences, so none needs a permission. Opened by
- * right-click on the header or, on its arrow button, Shift+F10 / the Menu key.
+ * Category and Collapse All Categories touch only the caller's own read state
+ * and collapse preferences, so none needs a permission. A MANAGE_CHANNELS
+ * holder also gets Create Category and, on a real category (one with an id),
+ * Rename, Move Up / Move Down and Delete (WP 6.5b); the entries are decided each
+ * time the menu opens, from `canManageChannels` and from which callbacks the
+ * page wired. Opened by right-click on the header or, on its arrow button,
+ * Shift+F10 / the Menu key.
  *
  * The menu is mounted on document.body and shares the channel menu's class, so
  * opening either one removes the other.
@@ -10,7 +14,8 @@
 
 import { Disposable } from "@lib/disposable";
 import { createElement, setOwnedTimeout } from "@lib/dom";
-import { getChannelsByCategory } from "@stores/channels.store";
+import { getChannelsByCategory, type CategoryRef } from "@stores/channels.store";
+import { canManageChannels } from "@lib/permissions";
 import { collapseCategories, isCategoryCollapsed, toggleCategory } from "@stores/ui.store";
 import { hasUnread, markChannelsRead } from "@lib/read-state";
 import {
@@ -21,6 +26,20 @@ import {
   registerSidebarMenu,
 } from "@lib/context-menu";
 import { shellText } from "../../i18n/shell";
+import { canMoveCategory } from "../../features/channels/categoryActions";
+
+/** The header a menu belongs to: its group key (what collapse state is saved under) and category. */
+export interface CategoryMenuTarget extends CategoryRef {
+  readonly key: string;
+}
+
+/** The management callbacks the page wired; an absent one hides its entry. */
+export interface CategoryMenuActions {
+  readonly onCreateCategory?: (() => void) | undefined;
+  readonly onRenameCategory?: ((category: CategoryRef) => void) | undefined;
+  readonly onDeleteCategory?: ((category: CategoryRef) => void) | undefined;
+  readonly onMoveCategory?: ((category: CategoryRef, direction: -1 | 1) => void) | undefined;
+}
 
 /**
  * `signal` scopes the header-level listeners to the header's render owner;
@@ -30,7 +49,8 @@ import { shellText } from "../../i18n/shell";
 export function attachCategoryContextMenu(
   header: HTMLElement,
   keyboardTarget: HTMLElement,
-  category: string,
+  target: CategoryMenuTarget,
+  actions: CategoryMenuActions,
   signal: AbortSignal,
   lifetimeSignal: AbortSignal,
 ): void {
@@ -75,6 +95,7 @@ export function attachCategoryContextMenu(
 
     // Read live: the group's element is reused across renders, so the rows it
     // was built with may be stale by the time the menu opens.
+    const category = target.key;
     const groups = getChannelsByCategory();
     const unreadIds = (groups.get(category) ?? [])
       .filter((ch) => ch.type !== "voice" && hasUnread(ch.id))
@@ -100,6 +121,61 @@ export function attachCategoryContextMenu(
       "ctx-category-collapse-all",
       () => collapseCategories(names),
     );
+
+    // Management: read now, like every other gate, so a role change is current.
+    if (canManageChannels()) {
+      const ref: CategoryRef = { id: target.id, name: target.name };
+      const real = target.id > 0;
+      const { onCreateCategory, onRenameCategory, onDeleteCategory, onMoveCategory } = actions;
+      const manage: (() => void)[] = [];
+      if (onCreateCategory !== undefined) {
+        manage.push(() =>
+          addItem(
+            shellText("category.create"),
+            "context-menu-item",
+            "ctx-category-create",
+            onCreateCategory,
+          ),
+        );
+      }
+      if (real && onRenameCategory !== undefined) {
+        manage.push(() =>
+          addItem(shellText("category.rename"), "context-menu-item", "ctx-category-rename", () =>
+            onRenameCategory(ref),
+          ),
+        );
+      }
+      if (real && onMoveCategory !== undefined) {
+        for (const [direction, label, testId] of [
+          [-1, "category.moveUp", "ctx-category-move-up"],
+          [1, "category.moveDown", "ctx-category-move-down"],
+        ] as const) {
+          const can = canMoveCategory(target.id, direction);
+          manage.push(() =>
+            addItem(
+              shellText(label),
+              can ? "context-menu-item" : "context-menu-item disabled",
+              testId,
+              can ? () => onMoveCategory(ref, direction) : null,
+            ),
+          );
+        }
+      }
+      if (real && onDeleteCategory !== undefined) {
+        manage.push(() =>
+          addItem(
+            shellText("category.delete"),
+            "context-menu-item danger",
+            "ctx-category-delete",
+            () => onDeleteCategory(ref),
+          ),
+        );
+      }
+      if (manage.length > 0) {
+        menu.appendChild(createElement("div", { class: "context-menu-sep" }));
+        for (const add of manage) add();
+      }
+    }
 
     document.body.appendChild(menu);
     clampMenuToViewport(menu, anchorX, anchorY);

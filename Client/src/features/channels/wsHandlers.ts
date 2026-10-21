@@ -6,6 +6,7 @@ import {
   channelsStore,
   setChannels,
   setRoles,
+  setCategories,
   setActiveChannel,
   removeChannel,
   addChannel,
@@ -55,6 +56,9 @@ import { registerSessionReset } from "../../lib/sessionRegistry";
 /** The channel/role/member snapshot of `ready`. */
 export function applyReadyChannels(payload: Payload<"ready">): void {
   setChannels(payload.channels);
+  // Managers only; absent for everyone else and for older servers, which leaves
+  // the list empty so the groups come from the channels alone (WP 6.5a).
+  setCategories(payload.categories ?? []);
   setRoles(payload.roles ?? []);
   setMembers(payload.members);
 }
@@ -252,6 +256,11 @@ export function handleChannelCreate(payload: Payload<"channel_create">): void {
 
 export function handleChannelUpdate(payload: Payload<"channel_update">): void {
   updateChannel(payload);
+}
+
+/** The manager's category list changed: replace what we hold (WP 6.5a). */
+export function handleChannelCategories(payload: Payload<"channel_categories">): void {
+  setCategories(payload.categories);
 }
 
 /** Another device of this account acknowledged or revoked a labelled channel (B5-7). */

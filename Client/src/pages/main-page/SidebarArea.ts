@@ -8,7 +8,7 @@
 import { createElement, setText, clearChildren } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { createIcon, type IconName } from "@lib/icons";
-import { isTextLikeChannel } from "@lib/types";
+import { isTextLikeChannel, type ChannelType } from "@lib/types";
 import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
 import { type ApiClient, errorText } from "@lib/api";
@@ -21,6 +21,8 @@ import { createDmSidebar } from "@components/DmSidebar";
 import type { DmConversation, DmSidebar } from "@components/DmSidebar";
 import type { DmMenuActions } from "@components/dmContextMenu";
 import { createLazyScreen } from "@components/lazyScreen";
+import { createCategoryDialogs } from "./categoryDialogs";
+import { migrateCollapsedToCategoryIds } from "../../features/channels/collapsedMigration";
 import type { VoiceWidgetOptions } from "@components/VoiceWidget";
 import { createDeleteChannelModal } from "@components/DeleteChannelModal";
 import { createUserBar } from "@components/UserBar";
@@ -62,7 +64,13 @@ import { createSidebarDmSection } from "./SidebarDmSection";
 import { uiStore, setSidebarMode, loadCollapsedCategories, openSettings } from "@stores/ui.store";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { membersStore, getOnlineMembers } from "@stores/members.store";
-import { channelsStore, setActiveChannel, updateChannelPosition } from "@stores/channels.store";
+import {
+  channelsStore,
+  setActiveChannel,
+  updateChannelPosition,
+  NO_CATEGORY,
+  type CategoryRef,
+} from "@stores/channels.store";
 import { keepDmForCall, releaseKeptDm } from "../../features/direct-messages/keptCallDms";
 import { dmStore, closeDmLocally, restoreDmChannel } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
@@ -188,6 +196,17 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
 
   // Track active modal for channel create/edit/delete
   let activeModal: MountableComponent | null = null;
+  // Create / rename / delete category share the one modal slot with the channel dialogs.
+  const categoryDialogs = createCategoryDialogs({
+    api,
+    getToast,
+    slot: {
+      current: () => activeModal,
+      set: (modal) => {
+        activeModal = modal;
+      },
+    },
+  });
 
   // Remember the channel the user was on before entering DM mode
   let channelBeforeDm: number | null = null;
@@ -415,7 +434,8 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       },
       onMarkRead: () => markAllRead({ includeDms: false }),
       onNotificationSettings: () => openSettings("Notifications"), // i18n-exempt: settings tab id, not copy
-      onCreateChannel: () => openCreateChannelModal(""),
+      onCreateChannel: () => openCreateChannelModal(NO_CATEGORY),
+      onCreateCategory: () => categoryDialogs.create(),
       onServerSettings: () => openAdmin(),
     },
     serverMenuOwner.signal,
@@ -427,6 +447,18 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // defaults to "OwnCord Server" on every unmodified install, so keying on
   // it would collapse two different servers' saved state onto one entry.
   loadCollapsedCategories(api.getConfig().host);
+  // Collapsed state saved under a category NAME (before 6.5b) moves to the id
+  // key once the channel list says which name is which id. Done at once when
+  // the list is already here, else on the first channels write that fills it.
+  if (!migrateCollapsedToCategoryIds()) {
+    const unsubscribeTranslate = channelsStore.subscribeSelector(
+      (s) => s.channels,
+      () => {
+        if (migrateCollapsedToCategoryIds()) unsubscribeTranslate();
+      },
+    );
+    unsubscribers.push(unsubscribeTranslate);
+  }
 
   // Keep server name in sync with auth store
   const unsubServerName = authStore.subscribeSelector(
@@ -455,7 +487,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   sidebarWrapper.appendChild(contentSlot);
 
   // The category "+", the empty-state button and the server menu share this.
-  function openCreateChannelModal(category: string): void {
+  function openCreateChannelModal(category: CategoryRef, type?: ChannelType): void {
     if (activeModal !== null) return;
     // The placeholder holds the modal slot while the dialog loads: a second
     // click is refused, and a teardown or another modal in between drops the
@@ -472,6 +504,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         if (activeModal !== pending) return;
         const modal = screen.createCreateChannelModal({
           category,
+          type,
           onCreate: async (data) => {
             try {
               await api.adminCreateChannel(data);
@@ -510,6 +543,10 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         void headerInviteCtrl.open();
       },
       onCreateChannel: openCreateChannelModal,
+      onCreateCategory: categoryDialogs.create,
+      onRenameCategory: categoryDialogs.rename,
+      onDeleteCategory: categoryDialogs.remove,
+      onMoveCategory: categoryDialogs.move,
       onEditChannel: (channel) => {
         if (activeModal !== null) return;
         // The editor is admin-only and never on first paint, so it loads on
@@ -530,6 +567,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
               channelType: channel.type,
               channelTopic: stored?.topic ?? "",
               channelCategory: stored?.category ?? "",
+              channelCategoryId: stored?.categoryId ?? 0,
               channelSlowMode: stored?.slowMode ?? 0,
               channelNsfw: stored?.nsfw ?? false,
               channelVoiceMaxUsers: stored?.voiceMaxUsers ?? 0,

@@ -333,7 +333,12 @@ describe("main.ts beforeunload", () => {
   afterEach(() => {
     hasFocus.mockRestore();
     setMarkReadSender(null);
-    channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+    channelsStore.setState(() => ({
+      channels: new Map(),
+      activeChannelId: null,
+      roles: [],
+      categories: [],
+    }));
   });
 
   it("marks the active channel read, so messages read live do not return as unread", () => {

@@ -39,7 +39,12 @@ describe("category context menu", () => {
     vi.useFakeTimers();
     sent = [];
     setMarkReadSender((id) => sent.push(id));
-    channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+    channelsStore.setState(() => ({
+      channels: new Map(),
+      activeChannelId: null,
+      roles: [],
+      categories: [],
+    }));
     dmStore.setState(() => ({ channels: [] }));
     membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
     uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));
@@ -149,7 +154,12 @@ describe("category context menu", () => {
 
 describe("text before voice inside a category (N23)", () => {
   beforeEach(() => {
-    channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+    channelsStore.setState(() => ({
+      channels: new Map(),
+      activeChannelId: null,
+      roles: [],
+      categories: [],
+    }));
     setChannels([
       { id: 1, name: "lobby", type: "voice", category: "Mix", position: 0 },
       { id: 2, name: "chat", type: "text", category: "Mix", position: 1 },

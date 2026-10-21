@@ -238,6 +238,7 @@ describe("WS Dispatcher", () => {
       isAuthenticated: false,
     }));
     channelsStore.setState(() => ({
+      categories: [],
       channels: new Map(),
       activeChannelId: null,
       roles: [],
@@ -3061,6 +3062,54 @@ describe("WS Dispatcher", () => {
 
     const ch = channelsStore.getState().channels.get(10);
     expect(ch?.name).toBe("new-name");
+  });
+
+  it("wires channel_categories to the channels store, replacing the list wholesale", () => {
+    mock.dispatch("channel_categories", {
+      categories: [
+        { id: 7, name: "Later", position: 1 },
+        { id: 3, name: "Sooner", position: 0 },
+      ],
+    });
+    // Kept in the server's (position, id) order.
+    expect(channelsStore.getState().categories.map((c) => c.id)).toEqual([3, 7]);
+
+    mock.dispatch("channel_categories", { categories: [{ id: 7, name: "Later", position: 0 }] });
+    expect(channelsStore.getState().categories).toEqual([{ id: 7, name: "Later", position: 0 }]);
+  });
+
+  it("carries the category fields of channel_update into the channel", () => {
+    channelsStore.setState((prev) => ({
+      ...prev,
+      channels: new Map(prev.channels).set(31, {
+        id: 31,
+        name: "moved",
+        type: "text" as const,
+        category: null,
+        position: 0,
+        unreadCount: 0,
+        mentionCount: 0,
+        lastMessageId: null,
+        canSend: true,
+        topic: "",
+        slowMode: 0,
+        nsfw: false,
+        isPrivate: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
+      }),
+    }));
+    mock.dispatch("channel_update", {
+      id: 31,
+      category: "Games",
+      category_id: 6,
+      category_position: 2,
+    });
+    expect(channelsStore.getState().channels.get(31)).toMatchObject({
+      category: "Games",
+      categoryId: 6,
+      categoryPosition: 2,
+    });
   });
 
   it("wires channel_delete and redirects to first text channel when active is deleted", () => {
