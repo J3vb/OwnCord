@@ -6,11 +6,14 @@
    lives on Backups & restore. The owner-only upload file-type lists show
    config.yaml's value until the owner saves one here, which replaces it. */
 const EXT_KEYS=['upload_blocked_extensions','upload_allowed_extensions'];
-const SETTINGS_KEYS=['server_name','motd','registration_mode','require_2fa',...EXT_KEYS];
+const AFK_TIMEOUT_DEFAULT='300';
+const AFK_TIMEOUTS=[['60','1 minute'],['300','5 minutes'],['900','15 minutes'],['1800','30 minutes'],['3600','60 minutes']];
+const AFK_JOIN_BITS=0x202; /* READ_MESSAGES | CONNECT_VOICE: both are needed to join */
+const SETTINGS_KEYS=['server_name','motd','registration_mode','require_2fa','afk_timeout_seconds',...EXT_KEYS];
 /* An extension list as the server stores it: lower case, no dots, deduped,
    comma-separated; so a respelled but equal list is not a change. */
 function extListNorm(v){return[...new Set(String(v||'').split(/[\s,]+/).map(x=>x.replace(/^\.+/,'').toLowerCase()).filter(Boolean))].join(',')}
-function settingNorm(k,v){return k==='require_2fa'?((v==='1'||v==='true')?'true':'false'):EXT_KEYS.includes(k)?extListNorm(v):(v||'')}
+function settingNorm(k,v){return k==='afk_timeout_seconds'?(v||AFK_TIMEOUT_DEFAULT):k==='require_2fa'?((v==='1'||v==='true')?'true':'false'):EXT_KEYS.includes(k)?extListNorm(v):(v||'')}
 function settingsFormValues(keys){
   const out={};
   keys.forEach(k=>{
@@ -52,6 +55,7 @@ async function renderSettings(){
   html+=settingsCard('Access & registration',regModeCards(v('registration_mode')||'invite'));
   html+=settingsCard('Security',
     '<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-require_2fa-name">Require two-factor authentication</div><div class="setting-desc" id="s-require_2fa-desc">Every member must turn on 2FA before they can use the server</div></div><div class="setting-ctrl"><button class="toggle '+(on?'on':'')+'" id="s-require_2fa" role="switch" aria-checked="'+on+'" aria-labelledby="s-require_2fa-name" aria-describedby="s-require_2fa-desc" data-action="toggleSetting"></button></div></div>');
+  html+=await afkCard(v('afk_timeout_seconds')||AFK_TIMEOUT_DEFAULT);
   const owner=isOwner();
   const extInput=k=>'<input class="form-input" id="s-'+k+'" value="'+esc(v(k).split(',').filter(Boolean).join(', '))+'" aria-describedby="s-'+k+'-desc" data-input-action="markSettingsChanged"'+(owner?'':' disabled')+'>';
   html+=settingsCard('Upload file types',
@@ -90,6 +94,70 @@ async function renderSettings(){
     +'<button class="btn btn-ghost" id="discardSettingsBtn" data-action="discardSettings" disabled>Discard</button>'
     +'<button class="btn btn-accent" id="saveSettingsBtn" data-action="saveSettings" disabled>Save changes</button></div>';
   return html;
+}
+
+/* Voice: AFK. The timeout is an ordinary setting and rides the save bar. The
+   channel has its own endpoint, so its select saves on change and reports
+   beside itself; neither save claims the other. GET /channels is Manage
+   Channels, so a Manage Server admin without it sees the select disabled. */
+function afkSelect(id,opts,cur,attrs){
+  return'<select class="filter-select" id="'+id+'"'+attrs+'>'+opts.map(([val,label])=>'<option value="'+esc(val)+'"'+(val===cur?' selected':'')+'>'+esc(label)+'</option>').join('')+'</select>';
+}
+async function afkCard(timeout){
+  let channels=null,chErr='';
+  try{const r=await api('GET','/channels');if(Array.isArray(r))channels=r}catch(e){chErr=e.message||''}
+  const voice=(channels||[]).filter(c=>c.type==='voice');
+  const current=voice.find(c=>c.afk)||null;
+  state._afkChannel=current?current.id:null;
+  state._afkVoice=voice;
+  const opts=[['','None']].concat(voice.filter(c=>!c.archived||c.afk).map(c=>[String(c.id),c.name+(c.archived?' (archived)':'')]));
+  const chSel=channels
+    ?afkSelect('s-afk_channel',opts,current?String(current.id):'',' aria-describedby="s-afk_channel-desc" data-change-action="saveAfkChannel"')
+    :afkSelect('s-afk_channel',[['','Channels unavailable']],'',' disabled aria-describedby="s-afk_channel-desc"');
+  const timeoutSel=afkSelect('s-afk_timeout_seconds',AFK_TIMEOUTS,timeout,' aria-describedby="s-afk_timeout_seconds-desc" data-change-action="markSettingsChanged"');
+  const warnings=await afkWarningsHtml(current);
+  return settingsCard('Voice: AFK',
+    settingsRow('afk_channel','AFK channel','Members idle for 10 minutes, then the time below, are moved here and can only listen: no microphone, camera or screen sharing. Only idle members are moved, and anyone who could not join the channel stays where they are. Saves as soon as you choose.'
+      ,'<div class="afk-ctrl">'+chSel+'<span class="setting-desc" id="afkChannelState" role="status">'+(channels?'':esc((chErr||'Could not load channels')+' Choosing the AFK channel needs Manage Channels.'))+'</span></div>')
+    +'<div id="afkWarnings" aria-live="polite">'+warnings+'</div>'
+    +settingsRow('afk_timeout_seconds','Move after','How long a member must stay idle, on top of the 10 minutes the app waits before marking them idle',timeoutSel));
+}
+async function afkWarningsHtml(ch){
+  if(!ch)return'';
+  const out=[];
+  if(ch.voice_max_users>0)out.push('This channel has a user limit of '+ch.voice_max_users+'. When it is full, idle members stay where they are. Set the limit to 0 so nobody is skipped.');
+  try{
+    /* GET /roles is Manage Roles; without it the check is skipped. The
+       channel's list is sorted by position and does not mark the default. */
+    const defId=((await api('GET','/roles'))||[]).find(r=>r.is_default);
+    const roles=((await api('GET','/channels/'+ch.id+'/permissions'))||{}).roles||[];
+    const def=defId&&roles.find(r=>r.role_id===defId.id);
+    if(def&&(def.permissions&ADMIN_BIT)===0&&((((def.permissions&~def.deny)|def.allow)&AFK_JOIN_BITS)!==AFK_JOIN_BITS))
+      out.push('"'+def.role_name+'" cannot join this channel (it needs Read Messages and Connect), so members without another role that can will not be moved. Allow both for it in the channel access settings.');
+  }catch(e){}
+  return out.map(m=>'<div class="callout-warning" role="note">'+esc(m)+'</div>').join('');
+}
+async function saveAfkChannel(){
+  const sel=document.getElementById('s-afk_channel');
+  const st=document.getElementById('afkChannelState');
+  if(!(sel instanceof HTMLSelectElement))return;
+  const id=sel.value?parseInt(sel.value,10):null;
+  const prev=state._afkChannel;
+  sel.disabled=true;if(st){st.textContent='Saving…';st.style.color=''}
+  try{
+    await api('PUT','/afk-channel',{channel_id:id});
+    state._afkChannel=id;
+    if(st)st.textContent='Saved';
+    showToast(id===null?'AFK channel cleared':'AFK channel saved');
+    const w=document.getElementById('afkWarnings');
+    const ch=(state._afkVoice||[]).find(c=>c.id===id)||null;
+    const html=await afkWarningsHtml(ch);
+    if(w&&state._afkChannel===id)w.innerHTML=html;
+  }catch(e){
+    sel.value=prev===null||prev===undefined?'':String(prev);
+    if(st){st.textContent='Not saved: '+e.message;st.style.color='var(--text-danger)'}
+  }
+  sel.disabled=false;
 }
 
 /* Registration as four radio cards, each with what it means for someone
@@ -622,6 +690,6 @@ async function confirmApplyUpdate(){
 Object.assign(ACTIONS,{showPendingMembers,applyRetention,toggleRetentionEdit,applyUpdate,checkRestoreConfirm,clearChannelRetention,confirmApplyUpdate,
   confirmDeleteBackup,confirmRestore,createBackup,downloadArchive,downloadBackup,discardSettings,markBackupPolicyChanged,markSettingsChanged,
   openApplyRetention,openChannelRetention,openDeleteBackupModal,openRestoreModal,saveBackupPolicy,saveChannelRetention,
-  saveSettings,syncUpdateConfirm,
+  saveSettings,saveAfkChannel,syncUpdateConfirm,
   reloadPage(){location.reload()},
   toggleSetting(){toggleSwitch(this);markSettingsChanged()}});

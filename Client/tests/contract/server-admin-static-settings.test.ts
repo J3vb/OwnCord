@@ -260,6 +260,7 @@ describe("Server/admin/static — Settings page (AO-6)", () => {
       "General",
       "Access & registration",
       "Security",
+      "Voice: AFK",
       "Upload file types",
       "Running configuration",
     ]);
