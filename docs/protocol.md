@@ -148,13 +148,14 @@ After the WebSocket connection is established, the client sends the first messag
 }
 ```
 
-| Field               | Type   | Required | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| ------------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `token`             | string | Yes      | Session token obtained from `POST /api/v1/auth/login`                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `last_seq`          | uint64 | No       | Last sequence number received. If > 0, server attempts replay. Default 0.                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `active_channel_id` | int64  | No       | The channel the client had open when it disconnected. Honoured only on a resume (`last_seq > 0`) and only after the server re-checks read permission; an unknown or unreadable id is ignored. Omit when unknown.                                                                                                                                                                                                                                                                           |
-| `wake`              | bool   | No       | `true` marks a dial the client made on its own after its process was suspended (a laptop waking from sleep). The server refuses it with `ANOTHER_DEVICE_ACTIVE` (an `error` frame) when a different session of the same account holds the live connection or a call it parked in the voice grace window, so a woken device cannot silently displace another. Kept on every later dial (including a user's Retry) until one authenticates; only an explicit takeover ("Use here") omits it. |
-| `epoch`             | int    | No       | The wire epoch this client speaks (`PROTOCOL_EPOCH`, generated from `protocol/schema.json`). Absent means 0. See [Compatibility](#compatibility-protocol-epoch).                                                                                                                                                                                                                                                                                                                           |
+| Field               | Type     | Required | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ------------------- | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `token`             | string   | Yes      | Session token obtained from `POST /api/v1/auth/login`                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `last_seq`          | uint64   | No       | Last sequence number received. If > 0, server attempts replay. Default 0.                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `active_channel_id` | int64    | No       | The channel the client had open when it disconnected. Honoured only on a resume (`last_seq > 0`) and only after the server re-checks read permission; an unknown or unreadable id is ignored. Omit when unknown.                                                                                                                                                                                                                                                                           |
+| `wake`              | bool     | No       | `true` marks a dial the client made on its own after its process was suspended (a laptop waking from sleep). The server refuses it with `ANOTHER_DEVICE_ACTIVE` (an `error` frame) when a different session of the same account holds the live connection or a call it parked in the voice grace window, so a woken device cannot silently displace another. Kept on every later dial (including a user's Retry) until one authenticates; only an explicit takeover ("Use here") omits it. |
+| `epoch`             | int      | No       | The wire epoch this client speaks (`PROTOCOL_EPOCH`, generated from `protocol/schema.json`). Absent means 0. See [Compatibility](#compatibility-protocol-epoch).                                                                                                                                                                                                                                                                                                                           |
+| `features`          | string[] | No       | Optional capabilities this client can render, declared once per connection (see [Client features](#client-features)). Absent means none. Only `"forums"` is defined; unknown names are ignored. The list is untrusted input and only ever narrows what the socket is sent.                                                                                                                                                                                                                 |
 
 `active_channel_id` closes a resume-only gap. The hub restores a reconnecting
 client's channel subscription by copying it from the previous connection entry,
@@ -312,6 +313,28 @@ the range the server accepts, the payload is:
 `message` names which side to update; the numbers let a client decide for
 itself (`server_epoch > client_epoch` — the client is the older side). The
 close that follows is the same 1008.
+
+### Client features
+
+`auth` carries an optional `features: string[]` (additive within epoch 1; absent
+is `[]`). It is how a client says it can render something an older client could
+not, so the server can withhold that thing instead of showing the older client a
+broken one. The server keeps the parsed set on the connection for its life; every
+connection sends a fresh `auth`, so a client that updates re-declares. It is the
+first such declaration. Names the server does not know are ignored, the list is
+capped (32 names of at most 32 bytes each), and it grants nothing: it only
+narrows what the socket is sent.
+
+| Feature  | Declared by            | Effect on a socket that does **not** declare it                                                                                                                                                                                                         |
+| -------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `forums` | clients from WP 6.9d-b | No `type: "forum"` row in `ready.channels`, and no forum `channel_create` (channel creation, visibility refresh, timeout refresh and role refresh alike). Those frames are per recipient and unsequenced, so skipping one allocates no sequence number. |
+
+`channel_update` for a forum is **not** filtered: it is one shared sequenced
+frame, and dropping it for some sockets would allocate a sequence number and
+withhold it. A client without forums drops an update for a channel id it does not
+hold. `channel_delete` is a bare id and is equally harmless. REST
+`GET /api/v1/channels` is not used by those clients and lists forums with their
+type.
 
 ### Compatibility (protocol epoch)
 
@@ -490,7 +513,7 @@ These fields advertise retry-safe `chat_send` support. Older servers omit them;
 clients must not infer support from the protocol epoch or silently retry a
 durable pending message against a server that no longer advertises support.
 
-**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `category_id`, `category_position`, `topic`, `position`, `can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin`, `can_react`, `slow_mode`, `nsfw`, `afk`, `private`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text, announcement and voice), `last_message_id` (text, announcement and voice), `mention_count` (text, announcement and voice), `last_read_message_id` (text, announcement and voice)
+**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`/`forum`), `category`, `category_id`, `category_position`, `topic`, `position`, `can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin`, `can_react`, `slow_mode`, `nsfw`, `afk`, `private`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text, announcement and voice), `last_message_id` (text, announcement and voice), `mention_count` (text, announcement and voice), `last_read_message_id` (text, announcement and voice)
 
 `last_read_message_id` is the caller's own read pointer (`read_states.last_message_id`):
 the newest message id they have read, or `0` when they have no read state for the
@@ -506,6 +529,23 @@ client reads as `false`. The AFK channel is listen-only: the voice token for it
 screen-share publishing whatever the role allows. An admin sets or clears it
 with `PUT /admin/api/afk-channel`, and the previous and the new channel each
 get a `channel_update`.
+
+`forum` (migration `075`, WP 6.9d) is present on a `type: "forum"` channel and absent
+on every other: `{ "tags": [{ "id", "name", "emoji"?, "position" }], "require_tag": bool,
+"default_auto_archive_minutes": 60 | 1440 | 4320 | 10080 }`. It rides `ready`,
+`channel_create` and `channel_update`, is identical for every recipient (so the shared
+`channel_update` stays shared), and an older server omits it. A forum holds no messages,
+so it carries no `unread_count`, `last_message_id`, `mention_count` or
+`last_read_message_id`; its `can_send` means "may create a post". Its guidelines are its
+`topic`. A forum is sent only to sockets that declared the `forums`
+[client feature](#client-features). `chat_send` into a forum answers `BAD_REQUEST`, and
+`typing_start` into one is dropped silently. The forum's tags and settings are written
+with `PUT /admin/api/channels/{id}/forum` (and `/api/v1/moderation/channels/{id}/forum`):
+the body is the whole `forum` object, a tag without `id` is created, a listed `id` is
+renamed, re-emojied and repositioned (its place in the list), a tag missing from the list
+is deleted with its links to posts, and the result is one audit row and one
+`channel_update`. At most 20 tags per forum, names of 1 to 20 characters unique ignoring
+case, `emoji` an optional reaction emoji. Posts arrive in a later change.
 
 `nsfw`, `nsfw_acknowledged`, `voice_max_users` and `voice_max_video` are always
 present, with their column defaults on an unconfigured channel — `false`,

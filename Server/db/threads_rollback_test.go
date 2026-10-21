@@ -64,16 +64,20 @@ func TestRollback074_Rehearsal(t *testing.T) {
 	}
 	t.Cleanup(func() { _, _ = database.writer.Exec(`PRAGMA foreign_keys = ON`) })
 
-	raw, err := rollback.FS.ReadFile("074_threads.down.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, stmt := range splitStatements(string(raw)) {
-		if sqlText(stmt) == "" {
-			continue
+	// Newest first, as rollback.Order runs them: 075 (forums) rebuilt the
+	// thread triggers 074 created, so it has to be reversed before 074 can be.
+	for _, name := range []string{"075_forums.down.sql", "074_threads.down.sql"} {
+		raw, err := rollback.FS.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
 		}
-		if _, err := database.writer.ExecContext(ctx, stmt); err != nil {
-			t.Fatalf("reversal statement %q: %v", stmt, err)
+		for _, stmt := range splitStatements(string(raw)) {
+			if sqlText(stmt) == "" {
+				continue
+			}
+			if _, err := database.writer.ExecContext(ctx, stmt); err != nil {
+				t.Fatalf("%s statement %q: %v", name, stmt, err)
+			}
 		}
 	}
 	if n := count(`SELECT COUNT(*) FROM pragma_table_info('channels') WHERE name LIKE 'thread_%' OR name = 'parent_channel_id'`); n != 0 {

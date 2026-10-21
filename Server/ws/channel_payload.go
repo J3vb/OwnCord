@@ -59,6 +59,11 @@ type channelPayload struct {
 	CanDeleteOthers *bool `json:"can_delete_others,omitempty"`
 	CanPin          *bool `json:"can_pin,omitempty"`
 	CanReact        *bool `json:"can_react,omitempty"`
+	// Forum carries a forum channel's settings and tags (WP 6.9d). Present on
+	// a type 'forum' row only, and identical for every recipient, so the shared
+	// channel_update frame stays shared. Whether the frame is sent to a socket
+	// at all is client_features.go's concern, not this field's.
+	Forum *db.ChannelForum `json:"forum,omitempty"`
 }
 
 // channelPayloadFrom narrows a channel row to the wire shape shared by the
@@ -80,5 +85,6 @@ func channelPayloadFrom(ch *db.Channel, private bool) channelPayload {
 		Private:          private,
 		VoiceMaxUsers:    ch.VoiceMaxUsers,
 		VoiceMaxVideo:    ch.VoiceMaxVideo,
+		Forum:            ch.Forum,
 	}
 }

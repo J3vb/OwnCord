@@ -336,7 +336,7 @@ func readyNSFWAcknowledgements(ctx context.Context, database VisibilityReader, u
 // Per docs/protocol.md, channels include unread_count and last_message_id per
 // user plus the channelPayloadFrom fields (slow_mode, nsfw, voice_* caps);
 // archived is the one stored field deliberately not shipped.
-func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userID int64, role *db.Role) (*readyFields, error) {
+func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userID int64, role *db.Role, feat clientFeatures) (*readyFields, error) {
 	channels, err := database.ListChannels(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("buildReady ListChannels: %w", err)
@@ -390,7 +390,7 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 	// The lock is cosmetic: a failed read must not fail ready (nothing is
 	// private then, as on the single-channel frames).
 	privacy := h.privacySnapshot(ctx)
-	channelPayloads := readyChannelPayloads(visibleChannels, overrides, unreadMap, role, ackMap, sub.TimedOut, privacy)
+	channelPayloads := readyChannelPayloads(feat.filterChannels(visibleChannels), overrides, unreadMap, role, ackMap, sub.TimedOut, privacy)
 
 	// Load open DM channels for this user. Hoisted above the voice-state
 	// filter below so DM channel IDs can seed visibleSet — permissions.Checker

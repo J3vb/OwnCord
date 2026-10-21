@@ -188,6 +188,9 @@ func (h *Hub) RefreshUserChannels(userID int64) {
 		if live == nil {
 			return
 		}
+		if !live.sendsChannel(ch.Type) {
+			continue
+		}
 		live.sendMsg(buildChannelCreateFor(ch, privacy.Private(ch.ID), affordancesFor(sub)))
 	}
 }

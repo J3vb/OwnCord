@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 215 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 217 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -65,6 +65,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | PATCH   | `/admin/api/channels/{id}`                                           |
 | GET     | `/admin/api/channels/{id}/access/explain`                            |
 | POST    | `/admin/api/channels/{id}/access/preview`                            |
+| PUT     | `/admin/api/channels/{id}/forum`                                     |
 | GET     | `/admin/api/channels/{id}/permissions`                               |
 | DELETE  | `/admin/api/channels/{id}/permissions/{roleId}`                      |
 | PUT     | `/admin/api/channels/{id}/permissions/{roleId}`                      |
@@ -189,6 +190,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | PATCH   | `/api/v1/moderation/channels/categories/{id}`                        |
 | DELETE  | `/api/v1/moderation/channels/{id}`                                   |
 | PATCH   | `/api/v1/moderation/channels/{id}`                                   |
+| PUT     | `/api/v1/moderation/channels/{id}/forum`                             |
 | GET     | `/api/v1/moderation/members/`                                        |
 | PATCH   | `/api/v1/moderation/members/{id}`                                    |
 | DELETE  | `/api/v1/moderation/members/{id}/sessions`                           |
