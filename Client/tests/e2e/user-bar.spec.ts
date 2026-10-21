@@ -78,7 +78,10 @@ test.describe("User Bar", () => {
     await expect(card).toHaveCount(0);
 
     await page.locator("[data-testid='user-bar-name']").click();
-    await expect(card.locator("[data-testid='spc-until-dnd']")).toHaveText(/^Until \d{1,2}:\d{2}/);
+    await expect(card.locator("[data-testid='spc-until-dnd']")).toHaveText(
+      // Past midnight the end time carries a weekday ("Until Wed 12:19 AM").
+      /^Until (\p{L}+\.? )?\d{1,2}:\d{2}/u,
+    );
 
     // The timer is the client's own, kept next to the saved status so a
     // restart inside the hour still ends it.

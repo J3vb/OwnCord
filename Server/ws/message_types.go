@@ -116,4 +116,5 @@ const (
 	MessageKindGroupLeave  MessageKind = "group_leave"  // a group DM row: a member left, written only by the server
 	MessageKindGroupRename MessageKind = "group_rename" // a group DM row: the group name changed or was cleared, written only by the server
 	MessageKindGroupIcon   MessageKind = "group_icon"   // a group DM row: the group icon changed or was removed, written only by the server
+	MessageKindPinAdd      MessageKind = "pin_add"      // a row saying a member pinned a message; reply_to names the pinned message; written only by the server
 )

@@ -255,6 +255,12 @@
           "go": "MessageKindGroupIcon",
           "ts": "GROUP_ICON",
           "note": "a group DM row: the group icon changed or was removed, written only by the server"
+        },
+        {
+          "wire": "pin_add",
+          "go": "MessageKindPinAdd",
+          "ts": "PIN_ADD",
+          "note": "a row saying a member pinned a message; reply_to names the pinned message; written only by the server"
         }
       ]
     }

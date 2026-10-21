@@ -704,7 +704,7 @@ func TestSearchMessages_PinnedMessageStaysSearchable(t *testing.T) {
 	chID := seedChannel(t, database, "ch")
 
 	id, _ := database.CreateMessage(context.Background(), chID, userID, "pinworthy announcement", nil)
-	if err := database.SetMessagePinned(context.Background(), id, true); err != nil {
+	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: id, Pinned: true, UserID: 1}); err != nil {
 		t.Fatalf("SetMessagePinned: %v", err)
 	}
 
@@ -1490,7 +1490,7 @@ func TestGetPinnedMessages_Capped(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CreateMessage[%d]: %v", i, err)
 		}
-		if err := database.SetMessagePinned(context.Background(), id, true); err != nil {
+		if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: id, Pinned: true, UserID: 1}); err != nil {
 			t.Fatalf("SetMessagePinned[%d]: %v", i, err)
 		}
 	}
@@ -1524,7 +1524,7 @@ func TestGetPinnedMessages_OrdersByPinRecency(t *testing.T) {
 
 	// Pin the NEWER message first, then the OLDER one, so message-id order and
 	// pin-recency order disagree.
-	if err := database.SetMessagePinned(context.Background(), second, true); err != nil {
+	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: second, Pinned: true, UserID: 1}); err != nil {
 		t.Fatalf("pin second: %v", err)
 	}
 	// Windows' wall clock ticks coarsely, so two back-to-back pins can share a
@@ -1532,7 +1532,7 @@ func TestGetPinnedMessages_OrdersByPinRecency(t *testing.T) {
 	for start := time.Now().UnixNano(); time.Now().UnixNano() == start; {
 		time.Sleep(time.Millisecond)
 	}
-	if err := database.SetMessagePinned(context.Background(), first, true); err != nil {
+	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: first, Pinned: true, UserID: 1}); err != nil {
 		t.Fatalf("pin first: %v", err)
 	}
 

@@ -97,7 +97,7 @@ func newNSFWGateFixture(t *testing.T) *nsfwGateFixture {
 	if err != nil {
 		t.Fatalf("SendMessage(labelled): %v", err)
 	}
-	if err := svc.Messages.SetMessagePinned(ctx, authorID, labelledID, sent.MessageID, true); err != nil {
+	if _, err := svc.Messages.SetMessagePinned(ctx, authorID, labelledID, sent.MessageID, true); err != nil {
 		t.Fatalf("SetMessagePinned: %v", err)
 	}
 	if _, err := svc.Messages.AddReaction(ctx, authorID, sent.MessageID, "👍"); err != nil {
