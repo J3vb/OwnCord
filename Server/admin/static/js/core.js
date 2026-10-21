@@ -80,7 +80,11 @@ async function apiRes(method,path,body,headers){
   if(res.status===401){handleSessionExpired();throw new Error('Your session expired — sign in again.')}
   if(res.status===204)return{data:null,res};
   const data=await res.json();
-  if(!res.ok)throw new Error(data.message||res.statusText);
+  if(!res.ok){
+    /* status and code ride on the Error so a caller can tell a conflict from a
+       failure without parsing the message. */
+    throw Object.assign(new Error(data.message||res.statusText),{status:res.status,code:data.error});
+  }
   if(method==='GET')noteBadgeSource(path,data);
   return{data,res};
 }
