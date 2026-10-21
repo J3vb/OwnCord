@@ -399,7 +399,7 @@ func dmCreateToken(t *testing.T, database *db.DB, username string, roleID int) s
 func buildDMRouter(database *db.DB, broadcaster api.DMBroadcaster) http.Handler {
 	r := chi.NewRouter()
 	svc := service.New(database, auth.NewRateLimiter())
-	api.MountDMRoutes(r, database, svc, broadcaster, nil, nil)
+	api.MountDMRoutes(r, svc, broadcaster, nil, nil)
 	return r
 }
 

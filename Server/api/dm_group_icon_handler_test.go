@@ -91,7 +91,7 @@ func newIconFixture(t *testing.T) *iconFixture {
 	svc := service.New(database, limiter)
 	bc := &recordingBroadcaster{}
 	r := chi.NewRouter()
-	api.MountDMRoutes(r, database, svc, bc, limiter, gs)
+	api.MountDMRoutes(r, svc, bc, limiter, gs)
 	api.MountUploadRoutes(r, service.NewSessionService(database), gs, limiter, nil, svc.Uploads)
 
 	f := &iconFixture{database: database, router: r, bc: bc, store: gs, tokens: map[string]string{}, ids: map[string]int64{}}
@@ -278,7 +278,7 @@ func TestUploadGroupIcon_IsRateLimitedOnItsOwnKey(t *testing.T) {
 func TestUploadGroupIcon_RouteNotMountedWithoutStore(t *testing.T) {
 	f := newIconFixture(t)
 	r := chi.NewRouter()
-	api.MountDMRoutes(r, f.database, service.New(f.database, auth.NewRateLimiter()), f.bc, nil, nil)
+	api.MountDMRoutes(r, service.New(f.database, auth.NewRateLimiter()), f.bc, nil, nil)
 	body, contentType := makeMultipartFile(t, "file", "icon.png", makePNGBytes(t, 8, 8))
 	req := httptest.NewRequest(http.MethodPost, f.iconPath(), body)
 	req.Header.Set("Content-Type", contentType)

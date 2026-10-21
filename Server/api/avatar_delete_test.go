@@ -21,7 +21,7 @@ func buildAvatarDeleteRouter(database *db.DB, store *storage.Storage, spy *userU
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
-	api.MountProfileRoutes(r, database, svc, store, limiter, nil, spy, nil)
+	api.MountProfileRoutes(r, svc, store, limiter, nil, spy, nil)
 	api.MountUploadRoutes(r, service.NewSessionService(database), store, limiter, nil, svc.Uploads)
 	return r
 }

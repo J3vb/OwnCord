@@ -366,7 +366,7 @@ func buildChannelRouter(database *db.DB) http.Handler {
 	limiter := auth.NewRateLimiter()
 	st := database
 	svc := service.New(st, limiter)
-	api.MountChannelRoutes(r, database, svc, limiter, nil, nil)
+	api.MountChannelRoutes(r, svc, limiter, nil, nil)
 	return r
 }
 
@@ -864,7 +864,7 @@ func TestSearch_TrustedProxyRateLimitUsesForwardedIP(t *testing.T) {
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
-	api.MountChannelRoutes(r, database, svc, limiter, []string{"127.0.0.0/8"}, nil)
+	api.MountChannelRoutes(r, svc, limiter, []string{"127.0.0.0/8"}, nil)
 	token := chTestCreateToken(t, database, "proxysearch", 1)
 
 	for i := range 30 {
@@ -1295,7 +1295,7 @@ func buildPurgeRouter(t *testing.T) (http.Handler, *db.DB, *recordingPurgeBroadc
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
-	api.MountChannelRoutes(r, database, svc, limiter, nil, broadcaster)
+	api.MountChannelRoutes(r, svc, limiter, nil, broadcaster)
 	return r, database, broadcaster
 }
 
