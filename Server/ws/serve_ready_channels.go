@@ -5,13 +5,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// readyChannelPayloads builds the ready payload's channel objects — one entry
-// per visible channel, with the per-user unread fields folded in. ackMap
-// carries the caller's own acknowledgement per NSFW-labelled channel id
-// (readyNSFWAcknowledgements); a missing entry (an unlabelled channel never
-// gets one) reads as false, which is correct either way — nothing needs
-// acknowledging there. timedOut is the caller's current timeout verdict,
-// fed into every channel's affordances — see readyAffordances (OC-0434).
 // filterChannels is chs without the rows these features do not allow. It
 // returns chs itself when nothing is dropped, which is every server without a
 // forum, so the common path allocates nothing.
@@ -33,6 +26,13 @@ func (f clientFeatures) filterChannels(chs []db.Channel) []db.Channel {
 	return chs
 }
 
+// readyChannelPayloads builds the ready payload's channel objects — one entry
+// per visible channel, with the per-user unread fields folded in. ackMap
+// carries the caller's own acknowledgement per NSFW-labelled channel id
+// (readyNSFWAcknowledgements); a missing entry (an unlabelled channel never
+// gets one) reads as false, which is correct either way — nothing needs
+// acknowledging there. timedOut is the caller's current timeout verdict,
+// fed into every channel's affordances — see readyAffordances (OC-0434).
 func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.ChannelOverride, unreadMap map[int64]db.ChannelUnread, role *db.Role, ackMap map[int64]bool, timedOut bool, privacy service.ChannelPrivacySnapshot) []map[string]any {
 	channelPayloads := make([]map[string]any, 0, len(visibleChannels))
 	for i := range visibleChannels {
