@@ -41,11 +41,18 @@ func (a *App) startStatusExpiry() error {
 // runStatusExpirer starts expirer.Run on a child of parent and returns the
 // close step that cancels it and waits for it to exit.
 func runStatusExpirer(parent context.Context, expirer *service.CustomStatusExpirer) func(context.Context) error {
+	return runExpirerLoop(parent, "custom status expirer", expirer.Run)
+}
+
+// runExpirerLoop starts run on a child of parent and returns the close step
+// that cancels it and waits for it to exit. what names the loop in the error a
+// close step that ran out of time reports. The status and poll expirers share it.
+func runExpirerLoop(parent context.Context, what string, run func(context.Context)) func(context.Context) error {
 	ctx, cancel := context.WithCancel(parent)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		expirer.Run(ctx)
+		run(ctx)
 	}()
 	return func(closeCtx context.Context) error {
 		cancel()
@@ -53,7 +60,7 @@ func runStatusExpirer(parent context.Context, expirer *service.CustomStatusExpir
 		case <-done:
 			return nil
 		case <-closeCtx.Done():
-			return fmt.Errorf("custom status expirer did not exit: %w", closeCtx.Err())
+			return fmt.Errorf("%s did not exit: %w", what, closeCtx.Err())
 		}
 	}
 }

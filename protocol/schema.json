@@ -18,6 +18,18 @@
       "note": "post a poll as a message (WP 6.9b)"
     },
     {
+      "wire": "poll_vote",
+      "go": "MsgTypePollVote",
+      "ts": "POLL_VOTE",
+      "note": "set the sender's whole selection on a poll, [] removes the vote (WP 6.9b)"
+    },
+    {
+      "wire": "poll_end",
+      "go": "MsgTypePollEnd",
+      "ts": "POLL_END",
+      "note": "end a poll now: its author, or anyone who may delete the message (WP 6.9b)"
+    },
+    {
       "wire": "thread_create",
       "go": "MsgTypeThreadCreate",
       "ts": "THREAD_CREATE",
@@ -81,6 +93,8 @@
     { "wire": "chat_send_ok", "go": "MsgTypeChatSendOK", "ts": "CHAT_SEND_OK" },
     { "wire": "chat_forward_ok", "go": "MsgTypeChatForwardOK", "ts": "CHAT_FORWARD_OK" },
     { "wire": "poll_create_ok", "go": "MsgTypePollCreateOK", "ts": "POLL_CREATE_OK" },
+    { "wire": "poll_vote_ok", "go": "MsgTypePollVoteOK", "ts": "POLL_VOTE_OK" },
+    { "wire": "poll_end_ok", "go": "MsgTypePollEndOK", "ts": "POLL_END_OK" },
     { "wire": "thread_create_ok", "go": "MsgTypeThreadCreateOK", "ts": "THREAD_CREATE_OK" },
     { "wire": "thread_update_ok", "go": "MsgTypeThreadUpdateOK", "ts": "THREAD_UPDATE_OK" },
     {
@@ -105,6 +119,12 @@
     },
     { "wire": "chat_bulk_deleted", "go": "MsgTypeChatBulkDeleted", "ts": "CHAT_BULK_DELETED" },
     { "wire": "reaction_update", "go": "MsgTypeReactionUpdate", "ts": "REACTION_UPDATE" },
+    {
+      "wire": "poll_update",
+      "go": "MsgTypePollUpdate",
+      "ts": "POLL_UPDATE",
+      "note": "a poll's full counts and version after a vote or its end (WP 6.9b)"
+    },
     { "wire": "typing", "go": "MsgTypeTyping", "ts": "TYPING" },
     { "wire": "presence", "go": "MsgTypePresence", "ts": "PRESENCE" },
     {

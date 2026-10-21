@@ -14,6 +14,7 @@ func readyCapabilities(retryFloorMS int64, threads bool) map[string]any {
 		"user_notes":                   true,
 		"profile_banners":              true,
 		"dm_privacy":                   true,
+		"polls":                        true,
 		"threads":                      threads, // WP 6.9c: thread_* commands and frames
 	}
 }

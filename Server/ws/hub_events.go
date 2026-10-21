@@ -287,6 +287,7 @@ var messageFamily = map[string]struct{}{
 	MsgTypeChatDeleted:     {},
 	MsgTypeChatBulkDeleted: {},
 	MsgTypeReactionUpdate:  {},
+	MsgTypePollUpdate:      {},
 }
 
 // eventNamesMessage reports whether a wrapped broadcast frame is a

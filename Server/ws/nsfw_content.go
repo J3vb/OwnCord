@@ -98,6 +98,7 @@ var contentBearingKinds = map[string]bool{
 	MsgTypeChatMessage:     true,
 	MsgTypeChatEdited:      true,
 	MsgTypeReactionUpdate:  true,
+	MsgTypePollUpdate:      true, // names a message and carries its tallies, as reaction_update does
 	MsgTypePluginBroadcast: true, // plugin-authored content posted into a channel
 	MsgTypeThreadChanged:   true, // a thread's name, discloses what the parent's unacknowledged members may not read (WP 6.9c)
 
@@ -108,6 +109,8 @@ var contentBearingKinds = map[string]bool{
 	MsgTypeChatSendOK:          false, // direct to the sender, who already knows their own content
 	MsgTypeChatForwardOK:       false, // direct to the sender; ids only
 	MsgTypePollCreateOK:        false, // direct to the sender; ids only
+	MsgTypePollVoteOK:          false, // direct to the sender; ids only
+	MsgTypePollEndOK:           false, // direct to the sender; ids only
 	MsgTypeChatDeleted:         false, // ids only
 	MsgTypeThreadCreateOK:      false, // direct to the sender, who just named the thread
 	MsgTypeThreadUpdateOK:      false, // direct to the sender; the thread id only

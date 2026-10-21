@@ -476,8 +476,12 @@ func TestSweepAFK_FailedMovedSendClearsStash(t *testing.T) {
 	}
 	r.idle(a, time.Hour)
 	c := a.c
+	// Fill under c.mu, as the send paths do: a broadcast that finds the queue
+	// full closes c.send from another goroutine.
 	afkAfterEvictHook = func() {
-		for {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		for !c.sendClosed {
 			select {
 			case c.send <- []byte(`{"type":"filler"}`):
 			default:

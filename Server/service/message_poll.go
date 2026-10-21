@@ -17,13 +17,15 @@ import (
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
-// PollStore is the slice of the database CreatePoll and the forward gate read
-// beyond Store: a poll's own row (does this message have one) and its block as
-// a viewer sees it. *db.DB satisfies it. It is a slice interface declared here
+// PollStore is the slice of the database the poll commands use beyond Store: a
+// poll's own row (does this message have one), its block as a viewer sees it,
+// and the vote and end writes. *db.DB satisfies it. It is a slice interface declared here
 // so Store, whose size is pinned, does not grow.
 type PollStore interface {
 	GetPollMeta(ctx context.Context, messageID int64) (*db.PollMeta, error)
 	GetPollInfo(ctx context.Context, messageID, viewerID int64) (*db.PollInfo, error)
+	SetPollVote(ctx context.Context, messageID, userID int64, answerIDs []int64) (*db.PollVoteResult, error)
+	EndPoll(ctx context.Context, messageID int64) (*db.PollEndResult, error)
 }
 
 var _ PollStore = (*db.DB)(nil)
@@ -31,11 +33,20 @@ var _ PollStore = (*db.DB)(nil)
 // PollInfo is the poll block a chat_message frame carries.
 type PollInfo = db.PollInfo
 
-// pollDeps is what CreatePoll needs beyond Store. store is read through a slice
-// interface (nil disables polls).
+// PollCount is one answer's vote count in a poll_update.
+type PollCount = db.PollCount
+
+// pollDeps is what the poll commands need beyond Store. store is read through a
+// slice interface (nil disables polls). wake, when set, tells the expirer that a
+// poll was created, so it re-reads its next deadline.
 type pollDeps struct {
 	store PollStore
+	wake  func()
 }
+
+// SetPollWake installs the callback a committed poll calls so the expirer
+// re-reads its deadline. Call once at startup, before the service is shared.
+func (s *MessageService) SetPollWake(wake func()) { s.poll.wake = wake }
 
 // Poll caps, validated after SanitizeText and counted in runes.
 const (
@@ -151,6 +162,9 @@ func (s *MessageService) CreatePoll(ctx context.Context, p PollCreateParams) (*S
 	}
 	if duplicate {
 		return &SendMessageResult{MessageID: msg.ID, Timestamp: msg.Timestamp, Duplicate: true}, nil
+	}
+	if s.poll.wake != nil {
+		s.poll.wake()
 	}
 	return s.pollResult(ctx, sp, msg, content, ch), nil
 }

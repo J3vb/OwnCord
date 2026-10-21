@@ -98,13 +98,13 @@ The sequence number system enables reconnection with state recovery.
 
 | Category           | Has seq? | Examples                                                                                                                                                                                                                                                                                                  |
 | ------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`                                                                                                                                                                                                      |
+| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`, `poll_update`                                                                                                                                                                                       |
 | Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart`                                                                    |
 | Ephemeral          | No       | `typing`, `upload_policy` (see below), a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `member_timeouts` (see below), `channel_categories` (see below), `appeal_status`, `mention_count`, `read_state`, `channel_activity`, `channel_create` (targeted per recipient; see below) |
-| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                                                                                   |
+| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update`, `poll_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                                                                    |
 | DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                                                                                                |
 | Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                                                                                          |
-| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `chat_forward_ok`, `poll_create_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                                                                              |
+| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `chat_forward_ok`, `poll_create_ok`, `poll_vote_ok`, `poll_end_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                                               |
 
 **Presence is sequenced, but droppable.** Connect and disconnect presence
 arrives as `presence_batch` (one frame per coalescing window), a status change
@@ -486,7 +486,7 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
 
 ### Payload Fields
 
-**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true, "user_notes": true, "profile_banners": true, "dm_privacy": true, "threads": true }`. `threads` means the server supports the thread frames and `GET /api/v1/channels/{id}/threads` (see Threads); a client that does not see it shows no thread controls. `ready` never lists thread rows. `dm_privacy` means the server stores the two direct message privacy settings (`GET` and `PUT /api/v1/users/me/privacy`, body `{ "allow_member_dms": bool, "message_requests": bool }`, both required); a client that does not see it shows no privacy controls. The server applies them to direct messages (see `dm_request`). `profile_banners` means the server supports profile banners (`POST` and `DELETE /api/v1/users/me/banner`, `banner_color` on `PATCH /api/v1/users/me`); a client that does not see it shows no banner controls. `user_notes` means the server stores private profile notes (`GET` and `PUT /api/v1/users/me/notes/{userId}`); a client that does not see it keeps notes in local storage. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
+**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true, "user_notes": true, "profile_banners": true, "dm_privacy": true, "polls": true, "threads": true }`. `polls` means the server understands `poll_create`, `poll_vote` and `poll_end` and sends `poll_update`; a client that does not see it hides the Poll button. `threads` means the server supports the thread frames and `GET /api/v1/channels/{id}/threads` (see Threads); a client that does not see it shows no thread controls. `ready` never lists thread rows. `dm_privacy` means the server stores the two direct message privacy settings (`GET` and `PUT /api/v1/users/me/privacy`, body `{ "allow_member_dms": bool, "message_requests": bool }`, both required); a client that does not see it shows no privacy controls. The server applies them to direct messages (see `dm_request`). `profile_banners` means the server supports profile banners (`POST` and `DELETE /api/v1/users/me/banner`, `banner_color` on `PATCH /api/v1/users/me`); a client that does not see it shows no banner controls. `user_notes` means the server stores private profile notes (`GET` and `PUT /api/v1/users/me/notes/{userId}`); a client that does not see it keeps notes in local storage. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
 These fields advertise retry-safe `chat_send` support. Older servers omit them;
 clients must not infer support from the protocol epoch or silently retry a
 durable pending message against a server that no longer advertises support.
@@ -884,6 +884,121 @@ Direct response to the sender (no seq):
 `deduplicated: true` marks an acknowledgement answered from a receipt (a retry);
 nothing was stored or broadcast for it.
 
+### poll_vote (Client -> Server)
+
+Set the sender's whole selection on a poll (WP 6.9b). The payload is the new
+selection, not a delta, so the command is idempotent and needs no
+`client_message_id`:
+
+```json
+{
+  "type": "poll_vote",
+  "id": "550e8400-e29b-41d4-a716-446655440003",
+  "payload": { "message_id": 1104, "answer_ids": [2] }
+}
+```
+
+`answer_ids` is required. `[]` removes the sender's vote. The ids must be distinct
+answers of the poll, and at most one on a single-choice poll; otherwise the answer
+is `BAD_REQUEST` and nothing is written. A vote replaces the sender's earlier
+selection. A retry of the selection the sender already holds is acknowledged with
+the current version and nothing is broadcast, which covers a lost acknowledgement.
+
+Voting is reacting: the sender must be able to read the message, and a message
+that is missing, deleted, not a poll or in a channel the sender cannot read all
+answer `NOT_FOUND`, so voting leaks nothing. Then the reaction gates apply
+unchanged: `ADD_REACTIONS`, not timed out, the channel not archived, and for a DM
+membership and no block. A member who cannot send in an announcement channel can
+still vote there. A poll that was ended, or whose `expires_at` has passed (by the
+server clock, whether or not the expiry timer has run), refuses the vote with
+`POLL_ENDED`. A vote racing the end is either counted, and then in the final
+counts, or refused; never both. Votes and ends share one budget of 10 per 10
+seconds per user (`RATE_LIMITED`).
+
+### poll_vote_ok (Server -> Client)
+
+Direct response to the sender (no seq):
+
+```json
+{
+  "type": "poll_vote_ok",
+  "id": "550e8400-e29b-41d4-a716-446655440003",
+  "payload": { "message_id": 1104, "version": 3, "answer_ids": [2] }
+}
+```
+
+`version` is the poll's version after the vote (the current one for a no-op retry)
+and `answer_ids` the sender's stored selection, sorted.
+
+### poll_end (Client -> Server)
+
+End a poll now:
+
+```json
+{
+  "type": "poll_end",
+  "id": "550e8400-e29b-41d4-a716-446655440004",
+  "payload": { "message_id": 1104 }
+}
+```
+
+Ending follows the delete rule. The sender must be able to read the message
+(`NOT_FOUND` otherwise), the channel must not be archived, and the sender must be
+allowed to delete the message: its author, or a member with `MANAGE_MESSAGES` in
+the channel. A timed-out author can still end their own poll. In a DM only the
+author may end it. Anything else is `FORBIDDEN`. A poll that already ended gives
+`POLL_ENDED`. Ending removes nothing, so it writes no audit row.
+
+### poll_end_ok (Server -> Client)
+
+Direct response to the sender (no seq): `{ "message_id": 1104 }`. Every reader,
+the sender included, learns the final counts from the sequenced `poll_update`.
+
+### poll_update (Server -> Client)
+
+Sequenced and replayable like `reaction_update`, to the channel's subscribers or a
+DM's participants, and withheld from a member who has not acknowledged a labelled
+(NSFW) channel:
+
+```json
+{
+  "type": "poll_update",
+  "seq": 1042,
+  "payload": {
+    "channel_id": 9,
+    "message_id": 1104,
+    "version": 3,
+    "total_voters": 5,
+    "counts": [
+      { "answer_id": 1, "count": 2 },
+      { "answer_id": 2, "count": 3 }
+    ],
+    "ended": false,
+    "ended_at": null,
+    "user_id": 17,
+    "answer_ids": [2]
+  }
+}
+```
+
+Counts are absolute, never deltas, and every answer is listed. `user_id` and
+`answer_ids` are present only on a vote and name the voter and their new set
+(`[]` for a removal), which is how the voter's other devices learn their own
+selection. An end has neither, and carries `ended: true` and `ended_at`. It is sent
+when a poll is ended by `poll_end` and when the expiry timer ends one (including
+polls that expired while the server was down, which are announced before the server
+accepts connections).
+
+**The version rule.** `version` is per poll and rises by one on every vote change
+and on the end. Frames can reach a client out of order, because two commits are
+emitted by different handlers, so a client keeps the highest version it has seen
+for a poll and drops a frame below it. A frame with a higher version is a complete
+state, so no earlier frame is needed. A client also keeps a second watermark for
+its own selection: `me` changes only from a frame whose `user_id` is the viewer's
+and whose version is above the last such version. The `results.version` and `me`
+of a history read are both watermarks too, so a replayed `chat_message` (version 0) or an older history page never moves a poll back. A `poll_update` for a message
+the client has not loaded is dropped; loading it later brings fresh state.
+
 ### chat_forward_ok (Server -> Client)
 
 Direct response to the sender (no seq):
@@ -988,8 +1103,9 @@ shared by every reader and is sent at creation, so `counts` are zero and `me` is
 correct before anything marks the poll ended. `results.version` counts vote changes
 and the end, so a client that holds a higher version must not replace it with a
 lower one, such as a replayed creation frame. The block is the same shape on every
-message of `GET /channels/{id}/messages`. Voting, ending and expiry follow in a
-later release. A server does not advertise a `polls` capability until they do.
+message of `GET /channels/{id}/messages`. Votes, the end and expiry change the
+block only through `poll_update`, and the server advertises the `polls` capability
+in `ready`.
 
 A group DM can also hold group event rows (WP 3B-10): `kind` is one of
 `group_add`, `group_remove`, `group_leave`, `group_rename` and `group_icon`, and
@@ -3103,6 +3219,7 @@ warm resume served by replay never waits for a permit.
 | `CONFLICT`                 | Duplicate reaction or constraint violation                                                                                                                                                                                                                                       |
 | `ALREADY_DELETED`          | The target message is already soft-deleted (the WebSocket twin of REST's `409 ALREADY_DELETED`)                                                                                                                                                                                  |
 | `REACTION_LIMIT`           | A `reaction_add` with a new emoji on a message that already has 20 different ones. No `reaction_update` is sent. Refines `BAD_REQUEST`.                                                                                                                                          |
+| `POLL_ENDED`               | A `poll_vote` on a poll that was ended or whose time ran out, or a `poll_end` on one already ended. Nothing was written and no `poll_update` is sent. Refines `BAD_REQUEST`.                                                                                                     |
 | `ATTACHMENTS_UNAVAILABLE`  | A `chat_send` with no text whose every attachment was skipped (swept, foreign, already attached, a live avatar or group icon, or missing). No message is delivered and no ids are returned; the client holds the list. Refines `BAD_REQUEST`.                                    |
 | `SERVER_MUTED`             | Self-unmute refused: a moderator imposed the mute                                                                                                                                                                                                                                |
 | `SERVER_DEAFENED`          | Self-undeafen refused: a moderator imposed the deafen                                                                                                                                                                                                                            |
@@ -3156,31 +3273,32 @@ code treats it as an unknown error string.
 
 All rate limits are enforced server-side using a token bucket rate limiter.
 
-| Action                                   | Limit | Window                                     | Error Response       |
-| ---------------------------------------- | ----- | ------------------------------------------ | -------------------- |
-| Chat send                                | 10    | 1 second                                   | `RATE_LIMITED` error |
-| Chat edit                                | 10    | 1 second                                   | `RATE_LIMITED` error |
-| Chat delete                              | 10    | 1 second                                   | `RATE_LIMITED` error |
-| Typing                                   | 1     | 3 seconds                                  | Silently dropped     |
-| Presence                                 | 1     | 10 seconds                                 | `RATE_LIMITED` error |
-| Reactions                                | 5     | 1 second                                   | `RATE_LIMITED` error |
-| Voice join / leave                       | 5     | 1 second                                   | `RATE_LIMITED` error |
-| Voice camera                             | 2     | 1 second                                   | `RATE_LIMITED` error |
-| Voice screenshare                        | 2     | 1 second                                   | `RATE_LIMITED` error |
-| Voice token refresh                      | 1     | 60 seconds                                 | `RATE_LIMITED` error |
-| Voice E2EE announce                      | 5     | 1 second                                   | `RATE_LIMITED` error |
-| Voice E2EE offer                         | 64    | 1 second                                   | `RATE_LIMITED` error |
-| Voice moderation (mute/deafen/move/kick) | 5     | 1 second                                   | `RATE_LIMITED` error |
-| Call ring                                | 1     | 3 seconds                                  | `RATE_LIMITED` error |
-| Call decline                             | 1     | 3 seconds                                  | `RATE_LIMITED` error |
-| Forward (`chat_forward`)                 | 5     | 10 seconds                                 | `RATE_LIMITED` error |
-| Poll create (`poll_create`)              | 5     | 10 minutes                                 | `RATE_LIMITED` error |
-| Plugin command (`chat_command`)          | 5     | 1 second                                   | `RATE_LIMITED` error |
-| Channel focus                            | 5     | 1 second                                   | Deferred             |
-| Thread create                            | 5     | 10 minutes                                 | `RATE_LIMITED` error |
-| Thread focus                             | 5     | 1 second (own budget)                      | `RATE_LIMITED` error |
-| Mark read                                | 5     | 1 second (own budget, separate from focus) | Silently dropped     |
-| Ping                                     | 2     | 1 second                                   | Silently dropped     |
+| Action                                      | Limit | Window                                     | Error Response       |
+| ------------------------------------------- | ----- | ------------------------------------------ | -------------------- |
+| Chat send                                   | 10    | 1 second                                   | `RATE_LIMITED` error |
+| Chat edit                                   | 10    | 1 second                                   | `RATE_LIMITED` error |
+| Chat delete                                 | 10    | 1 second                                   | `RATE_LIMITED` error |
+| Typing                                      | 1     | 3 seconds                                  | Silently dropped     |
+| Presence                                    | 1     | 10 seconds                                 | `RATE_LIMITED` error |
+| Reactions                                   | 5     | 1 second                                   | `RATE_LIMITED` error |
+| Voice join / leave                          | 5     | 1 second                                   | `RATE_LIMITED` error |
+| Voice camera                                | 2     | 1 second                                   | `RATE_LIMITED` error |
+| Voice screenshare                           | 2     | 1 second                                   | `RATE_LIMITED` error |
+| Voice token refresh                         | 1     | 60 seconds                                 | `RATE_LIMITED` error |
+| Voice E2EE announce                         | 5     | 1 second                                   | `RATE_LIMITED` error |
+| Voice E2EE offer                            | 64    | 1 second                                   | `RATE_LIMITED` error |
+| Voice moderation (mute/deafen/move/kick)    | 5     | 1 second                                   | `RATE_LIMITED` error |
+| Call ring                                   | 1     | 3 seconds                                  | `RATE_LIMITED` error |
+| Call decline                                | 1     | 3 seconds                                  | `RATE_LIMITED` error |
+| Forward (`chat_forward`)                    | 5     | 10 seconds                                 | `RATE_LIMITED` error |
+| Poll create (`poll_create`)                 | 5     | 10 minutes                                 | `RATE_LIMITED` error |
+| Poll vote and end (`poll_vote`, `poll_end`) | 10    | 10 seconds (one shared budget)             | `RATE_LIMITED` error |
+| Plugin command (`chat_command`)             | 5     | 1 second                                   | `RATE_LIMITED` error |
+| Channel focus                               | 5     | 1 second                                   | Deferred             |
+| Thread create                               | 5     | 10 minutes                                 | `RATE_LIMITED` error |
+| Thread focus                                | 5     | 1 second (own budget)                      | `RATE_LIMITED` error |
+| Mark read                                   | 5     | 1 second (own budget, separate from focus) | Silently dropped     |
+| Ping                                        | 2     | 1 second                                   | Silently dropped     |
 
 The E2EE offer budget is deliberately higher than the announce budget: a key
 rotation fires one offer per peer in a single burst, so the limit is sized to
@@ -3213,6 +3331,8 @@ tables below add per-type behavioral notes.
 | `chat_send`           | 10/sec                               | + slow mode per channel                                         |
 | `chat_forward`        | 10/sec, then 5/10sec                 | One target per frame; `client_message_id` required; no pings    |
 | `poll_create`         | 10/sec, then 5/10min                 | `client_message_id` required; no pings                          |
+| `poll_vote`           | 10/10sec (shared with `poll_end`)    | Whole selection; idempotent                                     |
+| `poll_end`            | 10/10sec (shared with `poll_vote`)   | Author, or `MANAGE_MESSAGES`; DM author only                    |
 | `chat_edit`           | 10/sec                               | Own messages only                                               |
 | `chat_delete`         | 10/sec                               | Own or mod (non-DM)                                             |
 | `reaction_add`        | 5/sec                                |                                                                 |
@@ -3254,6 +3374,8 @@ tables below add per-type behavioral notes.
 | `chat_send_ok`        | No       | Direct to sender                                                                                       |
 | `chat_forward_ok`     | No       | Direct to sender                                                                                       |
 | `poll_create_ok`      | No       | Direct to sender                                                                                       |
+| `poll_vote_ok`        | No       | Direct to sender                                                                                       |
+| `poll_end_ok`         | No       | Direct to sender                                                                                       |
 | `thread_create_ok`    | No       | Direct to sender                                                                                       |
 | `thread_update_ok`    | No       | Direct to sender                                                                                       |
 | `thread_changed`      | Yes      | Parent channel (coalesced, at most 1 per thread per 2 s)                                               |
@@ -3263,6 +3385,7 @@ tables below add per-type behavioral notes.
 | `chat_bulk_deleted`   | Yes      | Channel                                                                                                |
 | `chat_pinned`         | Yes      | Channel                                                                                                |
 | `reaction_update`     | Yes      | Channel or DM participants                                                                             |
+| `poll_update`         | Yes      | Channel or DM participants                                                                             |
 | `typing`              | No       | Channel (excl. sender) or DM                                                                           |
 | `presence`            | Yes      | All clients                                                                                            |
 | `presence_batch`      | Yes      | All clients (a full snapshot: no, direct to one client)                                                |

@@ -213,7 +213,7 @@ func TestHandleMessage_DeadlineAfterCommitStillSucceeds(t *testing.T) {
 func TestCommandDeadline_EveryTypeClassified(t *testing.T) {
 	bound := []string{
 		"ping", "typing_start", "presence_update", "channel_focus", "mark_read",
-		"mark_unread", "reaction_add", "reaction_remove", "chat_send", "chat_forward", "poll_create", "chat_edit",
+		"mark_unread", "reaction_add", "reaction_remove", "chat_send", "chat_forward", "poll_create", "poll_vote", "poll_end", "chat_edit",
 		"chat_delete", "voice_join", "voice_leave", "voice_mute", "voice_deafen",
 		"voice_camera", "voice_screenshare", "voice_e2ee_announce",
 		"voice_e2ee_offer", "voice_watch", "voice_token_refresh", "call_ring", "call_decline",
