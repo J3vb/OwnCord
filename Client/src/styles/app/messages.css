@@ -497,6 +497,145 @@
   color: var(--text-muted);
 }
 
+/* A poll (WP 6.9b): question, answers (a form until voted, then results), footer. */
+.msg-poll {
+  max-width: 460px;
+  margin-top: 4px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+.msg-poll-question {
+  font-weight: 600;
+  color: var(--header-primary);
+  overflow-wrap: anywhere;
+}
+.msg-poll-hint {
+  margin: 2px 0 8px;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.msg-poll-answers {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.msg-poll-hint + .msg-poll-answers {
+  margin-top: 0;
+}
+.msg-poll-answer {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+}
+.msg-poll-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.msg-poll-choice:hover,
+.msg-poll-choice:has(input:checked) {
+  border-color: var(--accent);
+}
+.msg-poll-choice input {
+  accent-color: var(--accent);
+}
+.msg-poll-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.msg-poll-emoji .custom-emoji {
+  width: 18px;
+  height: 18px;
+  vertical-align: middle;
+}
+.msg-poll-result-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.msg-poll-meta {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.msg-poll-bar {
+  height: 6px;
+  margin-top: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-tertiary);
+  overflow: hidden;
+}
+.msg-poll-fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--text-faint);
+}
+.msg-poll-result.is-mine {
+  border-color: var(--accent);
+}
+.msg-poll-result.is-mine .msg-poll-fill,
+.msg-poll-result.is-winner .msg-poll-fill {
+  background: var(--accent);
+}
+.msg-poll-mine {
+  display: inline-flex;
+  color: var(--accent-text);
+}
+.msg-poll-winner {
+  font-size: var(--font-size-xxs);
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-positive);
+}
+.msg-poll-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+}
+.msg-poll-status {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.msg-poll-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.msg-poll-btn {
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--text-normal);
+}
+.msg-poll-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.msg-poll-btn-primary {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.msg-poll-btn-link {
+  color: var(--text-link);
+}
+.msg-poll-btn-danger {
+  color: var(--text-danger);
+}
+.msg-poll-error {
+  margin-top: 8px;
+  font-size: var(--font-size-xs);
+  color: var(--text-danger);
+}
+
 /* Reply */
 .msg-reply-ref {
   display: flex;

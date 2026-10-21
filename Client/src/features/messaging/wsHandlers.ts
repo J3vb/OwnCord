@@ -6,6 +6,8 @@ import { channelsStore, noteChannelMessage } from "../../stores/channels.store";
 import {
   addMessage,
   updateReaction,
+  updatePoll,
+  applyPollVoteOk,
   rollbackReaction,
   confirmSend,
   markSendFailed,
@@ -42,6 +44,7 @@ import { showToast } from "../../lib/toast";
 import { connectText } from "../../i18n/connect";
 import { readingAnchor } from "./readingAnchor";
 import { isForwardRequest } from "./forwardRequests";
+import { isPollRequest } from "./pollRequests";
 import { isChannelAway, noteAwayUnread } from "@lib/read-state";
 import {
   activatePendingMessages,
@@ -343,6 +346,16 @@ export function handleReactionUpdate(payload: Payload<"reaction_update">): void 
   invalidateReactionUsers(payload.message_id);
 }
 
+/** A poll's counts after a vote or its end (WP 6.9b); the store keeps them in version order. */
+export function handlePollUpdate(payload: Payload<"poll_update">): void {
+  updatePoll(payload, authStore.getState().user?.id ?? 0);
+}
+
+/** The sender's stored selection, so the card shows it before the poll_update that carries the counts. */
+export function handlePollVoteOk(payload: Payload<"poll_vote_ok">): void {
+  applyPollVoteOk(payload);
+}
+
 export function handleTyping(payload: Payload<"typing">): void {
   setTyping(payload.channel_id, payload.user_id);
 }
@@ -486,6 +499,8 @@ function hasSendRow(correlationId: string): boolean {
 export function handleMessagingError(payload: Payload<"error">, id: string | undefined): boolean {
   // A refused Forward is shown on its picker row; no toast on top.
   if (isForwardRequest(id)) return true;
+  // A refused poll create, vote or end is shown on its dialog or card.
+  if (isPollRequest(id)) return true;
   // 2A-3: a files-only send none of whose files could be attached stored
   // nothing, and a Retry with the same ids fails the same way. Its row goes,
   // even one already failed as unconfirmed; the channel controller puts its

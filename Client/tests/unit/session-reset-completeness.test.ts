@@ -10,6 +10,8 @@ import {
   claimForwardRequest,
   isForwardRequest,
 } from "../../src/features/messaging/forwardRequests";
+import { claimPollRequest, isPollRequest } from "../../src/features/messaging/pollRequests";
+import { pollCardState } from "../../src/components/message-list/pollCard";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -498,6 +500,18 @@ const PROBES: readonly Probe[] = [
     name: "messaging:forwardRequests",
     mutate: () => claimForwardRequest("fwd-probe"),
     isInitial: () => !isForwardRequest("fwd-probe"),
+  },
+  {
+    name: "messaging:pollRequests",
+    mutate: () => claimPollRequest("poll-probe"),
+    isInitial: () => !isPollRequest("poll-probe"),
+  },
+  {
+    name: "messages:pollCards",
+    mutate: () => {
+      pollCardState(901).selected = [2];
+    },
+    isInitial: () => pollCardState(901).selected.length === 0,
   },
 ];
 

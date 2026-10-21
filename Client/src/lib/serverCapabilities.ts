@@ -16,6 +16,7 @@ export interface ReadyCapabilityFlags {
   readonly user_notes?: boolean;
   readonly profile_banners?: boolean;
   readonly dm_privacy?: boolean;
+  readonly polls?: boolean;
 }
 
 /** The last full `ready`'s capabilities; null until one arrives. */
@@ -71,4 +72,14 @@ export function profileBannersEnabled(): boolean {
  */
 export function dmPrivacyEnabled(): boolean {
   return caps?.dm_privacy === true;
+}
+
+/**
+ * Whether the server understands polls (WP 6.9b): `poll_create`, `poll_vote`
+ * and `poll_end`, and the `poll_update` it sends. False hides the composer's
+ * Poll button; a poll message that still arrives is drawn as its fallback text
+ * only by a client that predates this, and as a card by this one.
+ */
+export function pollsEnabled(): boolean {
+  return caps?.polls === true;
 }
