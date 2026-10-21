@@ -650,6 +650,8 @@ export interface ChannelCreatePayload {
   /** Voice capacity limits (0 = unlimited). See ReadyChannel. */
   readonly voice_max_users?: number;
   readonly voice_max_video?: number;
+  /** See ReadyChannel.afk — absent means unchanged. */
+  readonly afk?: boolean;
   /**
    * This viewer's composer affordance — see ReadyChannel.can_send.
    *
@@ -691,6 +693,8 @@ export interface ChannelUpdatePayload {
   /** Voice capacity limits (0 = unlimited). See ReadyChannel. */
   readonly voice_max_users?: number;
   readonly voice_max_video?: number;
+  /** See ReadyChannel.afk — absent means unchanged. */
+  readonly afk?: boolean;
 }
 
 /** nsfw_ack — the caller acknowledged or revoked a labelled channel on another device (B5-7). */

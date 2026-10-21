@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { authStore } from "@stores/auth.store";
 import { createUserBar } from "@components/UserBar";
 import { voiceStore, resetVoiceStore, joinVoiceChannel } from "@stores/voice.store";
+import { channelsStore, setChannels, updateChannel } from "@stores/channels.store";
 import { cascadedDeclaration, keyword, varToken } from "../helpers/app-css";
 
 const connection = vi.hoisted(() => ({ status: "connected" }));
@@ -204,6 +205,67 @@ describe("UserBar mute and deafen", () => {
     // A moderator's mute still holds while the socket is down.
     setVoice({ localServerMuted: true });
     expect(mute.disabled).toBe(true);
+  });
+
+  describe("in the AFK channel", () => {
+    const channel = (id: number, afk: boolean) => ({
+      id,
+      name: `room-${id}`,
+      type: "voice" as const,
+      category: "Voice",
+      position: id,
+      afk,
+    });
+
+    beforeEach(() => {
+      setChannels([channel(4, false), channel(9, true)]);
+    });
+
+    afterEach(() => {
+      setChannels([]);
+      channelsStore.flush();
+    });
+
+    it("locks the mic muted with a tooltip that says why", () => {
+      const { mute } = mount();
+      joinVoiceChannel(9);
+      voiceStore.flush();
+
+      expect(voiceStore.getState().inAfkChannel).toBe(true);
+      expect(mute.disabled).toBe(true);
+      expect(mute.title).toBe("You can't speak in the AFK channel");
+      expect(icon(mute)).toBe("mic-off");
+      expect(mute.getAttribute("aria-pressed")).toBe("true");
+      // Deafening is still the user's own.
+      expect(
+        container.querySelector<HTMLButtonElement>('[data-testid="ub-deafen"]')!.disabled,
+      ).toBe(false);
+    });
+
+    it("unlocks on leaving for an ordinary channel", () => {
+      const { mute } = mount();
+      joinVoiceChannel(9);
+      voiceStore.flush();
+      joinVoiceChannel(4);
+      voiceStore.flush();
+
+      expect(voiceStore.getState().inAfkChannel).toBe(false);
+      expect(mute.disabled).toBe(false);
+      expect(mute.title).toBe("Mute");
+    });
+
+    it("follows the flag when an admin sets it while the user is inside", () => {
+      const { mute } = mount();
+      joinVoiceChannel(4);
+      voiceStore.flush();
+      expect(mute.disabled).toBe(false);
+
+      updateChannel({ id: 4, afk: true });
+      channelsStore.flush();
+      voiceStore.flush();
+
+      expect(mute.disabled).toBe(true);
+    });
   });
 
   it("stops following the store once destroyed", () => {

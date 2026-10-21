@@ -105,22 +105,26 @@ function renderVoiceControls(muteBtn: HTMLButtonElement, deafenBtn: HTMLButtonEl
   const userMuted = isSelfMuted(voice);
   const serverMuted = voice.localServerMuted === true;
   const serverDeafened = voice.localServerDeafened === true;
-  const listenOnly = inCall && voice.listenOnly && !serverMuted;
-  const pttGated = inCall && voice.pttGated === true && !userMuted && !listenOnly;
+  // The AFK channel is listen-only for everyone: the mic reads muted and is locked.
+  const afkLocked = inCall && voice.inAfkChannel === true;
+  const listenOnly = inCall && voice.listenOnly && !serverMuted && !afkLocked;
+  const pttGated = inCall && voice.pttGated === true && !userMuted && !listenOnly && !afkLocked;
 
   muteBtn.classList.toggle("active-ctrl", userMuted);
   muteBtn.classList.toggle("ptt-gated", pttGated);
   muteBtn.classList.toggle("ub-listen-only", listenOnly);
-  swapIcon(muteBtn, userMuted || listenOnly ? "mic-off" : "mic");
-  muteBtn.setAttribute("aria-pressed", String(userMuted));
-  muteBtn.disabled = serverMuted || listenOnly;
+  swapIcon(muteBtn, userMuted || listenOnly || afkLocked ? "mic-off" : "mic");
+  muteBtn.setAttribute("aria-pressed", String(userMuted || afkLocked));
+  muteBtn.disabled = serverMuted || listenOnly || afkLocked;
   muteBtn.title = serverMuted
     ? voiceText("widget.mutedByModerator")
-    : listenOnly
-      ? voiceText("widget.control.listenOnly")
-      : pttGated
-        ? voiceText("widget.control.pttGated")
-        : voiceText(userMuted ? "widget.control.unmute" : "widget.control.mute");
+    : afkLocked
+      ? voiceText("widget.control.afkLocked")
+      : listenOnly
+        ? voiceText("widget.control.listenOnly")
+        : pttGated
+          ? voiceText("widget.control.pttGated")
+          : voiceText(userMuted ? "widget.control.unmute" : "widget.control.mute");
 
   deafenBtn.classList.toggle("active-ctrl", voice.localDeafened);
   swapIcon(deafenBtn, voice.localDeafened ? "headphones-off" : "headphones");
@@ -141,6 +145,7 @@ function voiceControlsKey(s: VoiceState): string {
     s.localServerDeafened === true,
     s.listenOnly,
     s.pttGated === true,
+    s.inAfkChannel === true,
   ].join("|");
 }
 

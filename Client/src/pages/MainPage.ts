@@ -321,6 +321,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   /** Inactivity watcher that flips the status to idle after ten quiet
    *  minutes. Started once the socket is up, torn down with the page. */
   let autoIdle: AutoIdleController | null = null;
+  let speakingActivityTimer: ReturnType<typeof setInterval> | null = null;
   let statusTimerWatcher: StatusTimerWatcher | null = null;
 
   // Toast container for user-facing error feedback
@@ -923,6 +924,30 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onStatusChange: (status) => applyPresence(status),
       systemIdleMs: () => desktop.systemIdle.idleMs(),
     });
+    // Talking in a call is being here even with hands off the keyboard and
+    // mouse, which neither the window nor (for another app) the OS poll sees.
+    // The local ring is the same on web and native (voice.store withLocalRing).
+    unsubscribers.push(
+      voiceStore.subscribeSelector(
+        (v) => {
+          const uid = authStore.getState().user?.id ?? 0;
+          const ch = v.currentChannelId;
+          return ch !== null && v.voiceUsers.get(ch)?.get(uid)?.speaking === true;
+        },
+        (speaking) => {
+          if (speakingActivityTimer !== null) clearInterval(speakingActivityTimer);
+          speakingActivityTimer = null;
+          if (!speaking) return;
+          autoIdle?.notifyActivity();
+          // Talking for longer than the idle delay must keep counting.
+          speakingActivityTimer = setInterval(() => autoIdle?.notifyActivity(), 60_000);
+        },
+      ),
+      () => {
+        if (speakingActivityTimer !== null) clearInterval(speakingActivityTimer);
+        speakingActivityTimer = null;
+      },
+    );
 
     unsubscribers.push(
       ws.on("server_restart", (payload) => {

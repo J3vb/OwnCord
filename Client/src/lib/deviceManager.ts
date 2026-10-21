@@ -34,7 +34,12 @@ const DEVICE_CHANGE_DEBOUNCE_MS = 500;
  *  gate instead of each re-deriving it. */
 export function isMicPolicyGated(): boolean {
   const s = voiceStore.getState();
-  return s.localMuted === true || s.localDeafened === true || s.localServerMuted === true;
+  return (
+    s.localMuted === true ||
+    s.localDeafened === true ||
+    s.localServerMuted === true ||
+    s.inAfkChannel === true
+  );
 }
 
 export class DeviceManager {

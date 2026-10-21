@@ -10,6 +10,8 @@ const mockVoiceState = vi.hoisted(() => ({
   localCamera: false,
   localScreenshare: false,
   pttGated: false,
+  // The AFK channel is listen-only: no microphone is published there.
+  inAfkChannel: false,
   // OC-0009: the real store's currentChannelId is set by joinVoiceChannel()
   // before the voice_join/voice_token round trip that produces the token a
   // test then hands to handleVoiceToken — default it to the channel id used
@@ -377,6 +379,7 @@ describe("LiveKitSession", () => {
     mockVoiceState.localCamera = false;
     mockVoiceState.localScreenshare = false;
     mockVoiceState.pttGated = false;
+    mockVoiceState.inAfkChannel = false;
     mockVoiceState.currentChannelId = 1;
     mockVoiceState.voiceConfigs = new Map();
     mockVoiceState.voiceStatus = "idle";
@@ -1052,6 +1055,34 @@ describe("LiveKitSession", () => {
         autoSubscribe: false,
       });
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+    });
+
+    it("publishes no microphone in the AFK channel and keeps the session up", async () => {
+      mockVoiceState.inAfkChannel = true;
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+
+      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalledWith(true);
+      expect(mockRoom.disconnect).not.toHaveBeenCalled();
+      // Not a failed microphone: no listen-only notice, nothing to retry.
+      expect(setListenOnly).not.toHaveBeenCalledWith(true);
+    });
+
+    it("refuses to unmute in the AFK channel", async () => {
+      mockVoiceState.inAfkChannel = true;
+      mockVoiceState.localMuted = true;
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+      vi.mocked(setLocalMuted).mockClear();
+
+      session.setMuted(false);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(setLocalMuted).not.toHaveBeenCalled();
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalledWith(true);
     });
 
     it("uses proxy URL for non-local hosts", async () => {

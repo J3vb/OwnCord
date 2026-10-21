@@ -23,6 +23,7 @@ const mockVoiceState = vi.hoisted(() => ({
   localScreenshare: false,
   pttGated: false,
   listenOnly: false,
+  inAfkChannel: false,
   currentChannelId: 1 as number | null,
   voiceConfigs: new Map<number, { bitrate: number }>(),
   // The server still holds our membership, so the reconnect loop reuses the
@@ -298,6 +299,7 @@ describe("LiveKitSession on the Linux native backend", () => {
     mockVoiceState.localMuted = false;
     mockVoiceState.localDeafened = false;
     mockVoiceState.currentChannelId = 1;
+    mockVoiceState.inAfkChannel = false;
     nativeCounters.openRooms = 0;
     nativeCounters.listeners = 0;
     nativeCounters.rust = null;
@@ -359,6 +361,20 @@ describe("LiveKitSession on the Linux native backend", () => {
     expect(session.getSessionDebugInfo()).toMatchObject({
       native: { rust: { rooms: 1, localTracks: 1, threads: 41 } },
     });
+  });
+
+  it("publishes no microphone when joining the AFK channel and keeps the session up", async () => {
+    mockVoiceState.inAfkChannel = true;
+    await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+    // The capture is never switched on (only the disable the facade always
+    // issues), and the join still completes.
+    expect(host.commands.filter(([n]) => n === "setMicrophone")).not.toContainEqual([
+      "setMicrophone",
+      [1, true],
+    ]);
+    expect(names()).not.toContain("disconnect");
+    expect(setVoiceStatus).toHaveBeenLastCalledWith("connected");
+    expect(setListenOnly).not.toHaveBeenCalledWith(true);
   });
 
   it("honours the saved input and output devices at join through the native session", async () => {
