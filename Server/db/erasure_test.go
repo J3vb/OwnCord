@@ -220,6 +220,13 @@ func eraseEveryInventoryClassIsZero(t *testing.T) {
 			t.Fatalf("seed note %d about %d: ok=%v err=%v", n.owner, n.target, ok, err)
 		}
 	}
+	// DM privacy settings (migration 070): the subject's row, plus one for an
+	// unrelated user that must survive. Class 16b is proved non-empty.
+	for _, uid := range []int64{sub.id, witness} {
+		if err := database.SetUserPrivacy(ctx, uid, db.UserPrivacy{}); err != nil {
+			t.Fatalf("seed privacy %d: %v", uid, err)
+		}
+	}
 	before, err := database.TakeInventory(ctx, sub.id, sub.username)
 	if err != nil {
 		t.Fatalf("TakeInventory: %v", err)
@@ -302,6 +309,9 @@ func eraseEveryInventoryClassIsZero(t *testing.T) {
 	}
 	if n := count(`SELECT COUNT(*) FROM user_notes WHERE owner_id = ? AND target_id = ?`, sub.other, witness); n != 1 {
 		t.Errorf("a note between two other users = %d rows, want 1", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM user_privacy WHERE user_id = ?`, witness); n != 1 {
+		t.Errorf("an unrelated user's privacy row = %d rows, want 1", n)
 	}
 	// The other user's reaction on the subject's message cascaded with it.
 	if n := count(`SELECT COUNT(*) FROM users WHERE banner_id IS NOT NULL`); n != 0 {

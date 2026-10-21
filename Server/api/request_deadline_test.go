@@ -251,6 +251,7 @@ var deadlineBound = []string{
 	"GET /api/v1/server-info",
 	"GET /api/v1/users/me/moderation",
 	"GET /api/v1/users/me/notes/{userId}",
+	"GET /api/v1/users/me/privacy",
 	"GET /api/v1/users/me/recovery-kit",
 	"GET /api/v1/users/me/sessions",
 	"GET /health",
@@ -324,6 +325,7 @@ var deadlineBound = []string{
 	"PUT /api/v1/gif/favorites",
 	"PUT /api/v1/users/me/notes/{userId}",
 	"PUT /api/v1/users/me/password",
+	"PUT /api/v1/users/me/privacy",
 }
 
 // deadlineExempt lists every walked route the exempt table must skip, with the
