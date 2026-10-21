@@ -229,6 +229,13 @@ type MessageDeliveryReceipt struct {
 	ExpiresAtMs     int64  `json:"expiresAtMs"`
 }
 
+type MessageForward struct {
+	MessageID       int64  `json:"messageId"`
+	SourceMessageID *int64 `json:"sourceMessageId"`
+	SourceChannelID int64  `json:"sourceChannelId"`
+	SourceTimestamp string `json:"sourceTimestamp"`
+}
+
 type MessageGroupEvent struct {
 	MessageID    int64   `json:"messageId"`
 	TargetUserID *int64  `json:"targetUserId"`

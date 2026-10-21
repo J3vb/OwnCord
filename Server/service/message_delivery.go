@@ -52,7 +52,10 @@ func messageDeliveryParams(p SendMessageParams, floorMS int64) (*db.MessageDeliv
 		// omitempty keeps a false ping hashing exactly as the struct did before
 		// the field existed, so receipts written earlier still match.
 		ReplyPing bool `json:",omitempty"`
-	}{p.ChannelID, p.Content, p.ReplyTo, attachments, p.ReplyPing})
+		// Same for the forwarded message's id (WP 6.9a): zero for every send
+		// that predates forwarding.
+		ForwardOf int64 `json:",omitempty"`
+	}{p.ChannelID, p.Content, p.ReplyTo, attachments, p.ReplyPing, p.ForwardOf})
 	if err != nil {
 		return nil, fmt.Errorf("%w: fingerprint message: %w", ErrInternal, err)
 	}
@@ -167,6 +170,9 @@ func messageDeliveryError(err error) error {
 		return ErrDeletedMessage
 	case errors.Is(err, db.ErrMessageDeliveryEmpty):
 		return errAllAttachmentsSkipped()
+	case errors.Is(err, db.ErrForwardSourceGone):
+		// The message being forwarded was deleted after the gates passed.
+		return fmt.Errorf("%w: message not found", ErrNotFound)
 	case errors.Is(err, db.ErrMessageDeliveryExpired):
 		return fmt.Errorf("%w: client_message_id expired", ErrBadRequest)
 	case errors.Is(err, db.ErrMessageDeliveryBeforeRestore):

@@ -42,6 +42,9 @@ type chatMessagePayload struct {
 	// GroupEvent is set only on a group DM row (WP 3B-10): the same shape as
 	// the history payload's db.GroupEventInfo.
 	GroupEvent *groupEventBlock `json:"group_event,omitempty"`
+	// Forward is set only on a forwarded message (WP 6.9a): the same shape as
+	// the history payload's db.ForwardInfo, static, so it replays as is.
+	Forward *service.ForwardInfo `json:"forward,omitempty"`
 }
 
 // groupEventBlock is the group_event object of a group DM row. Add and remove
@@ -85,6 +88,8 @@ type chatMessageArgs struct {
 	Call *callBlock
 	// GroupEvent is set only for a group DM row.
 	GroupEvent *groupEventBlock
+	// Forward is set only for a forwarded message.
+	Forward *service.ForwardInfo
 }
 
 // buildChatMessage constructs a chat_message broadcast envelope.
@@ -124,6 +129,7 @@ func buildChatMessage(a chatMessageArgs) []byte {
 			Kind:              a.Kind,
 			Call:              a.Call,
 			GroupEvent:        a.GroupEvent,
+			Forward:           a.Forward,
 		},
 	})
 }

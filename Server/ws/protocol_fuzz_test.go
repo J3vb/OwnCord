@@ -224,6 +224,8 @@ var commandPayloadSeeds = []struct {
 	{MsgTypeChatSend, `{"channel_id":1,"content":"hello"}`},
 	{MsgTypeChatSend, `{"channel_id":"1","content":"","attachments":[],"reply_to":null}`},
 	{MsgTypeChatSend, `{"channel_id":1,"user_id":999,"content":"spoof"}`},
+	{MsgTypeChatForward, `{"client_message_id":"x","channel_id":0,"message_id":-1}`},
+	{MsgTypeChatForward, `{"client_message_id":"","channel_id":1,"message_id":1}`},
 	{MsgTypeChatEdit, `{"message_id":1,"content":"edited"}`},
 	{MsgTypeChatDelete, `{"message_id":1}`},
 	{MsgTypeTypingStart, `{"channel_id":0}`},

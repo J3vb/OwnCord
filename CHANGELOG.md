@@ -60,6 +60,7 @@ and only when it changes something a contributor or fork holder must do
 
 - A member who turns off "allow member DMs" can no longer be reached in a one-to-one DM by someone they have not accepted: that person cannot open a DM, send, edit, react, pin, ring or join the DM call, and sees the same short refusal ("you can't message this user") a block gives. Anyone you accepted, wrote to first or were already talking to still reaches you, and group DMs are covered separately. The setting is read from the server; clients get a switch for it in a later release.
 - Pinning a message now leaves a line in the chat for everyone who can read it ("X pinned a message to this channel"), in channels, DMs and group DMs. It makes no sound and is never a mention; pinning the same message again within 10 minutes adds no second line. The pinner (or Manage Messages in a channel) can delete the line. Clients without the matching update show it as plain text.
+- The server can now forward a message to a channel or DM (`chat_forward`, one target at a time). The forward is a new message from the person forwarding, with a copy of the text and files, so editing or deleting the original later changes nothing; it never mentions anyone and a channel gets no push. You can only forward what you can read to somewhere you can post, a message from an 18+ channel only goes to another 18+ channel, and the copied files count against your storage quota. A forward cannot be edited. Forwarding is limited to 5 per 10 seconds. Clients start offering it in a later release.
 
 **Voice**
 

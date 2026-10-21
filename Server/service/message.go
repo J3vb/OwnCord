@@ -65,6 +65,11 @@ type SendMessageParams struct {
 	// without ReplyTo and for a reply to your own message.
 	ReplyPing     bool
 	AttachmentIDs []string
+	// ForwardOf is the id of the message a forward copies (WP 6.9a), 0 for an
+	// ordinary send. It only binds a retry to its receipt: Content and
+	// AttachmentIDs stay empty at hash time, so an original edited between two
+	// tries never turns the retry into a conflict.
+	ForwardOf int64
 }
 
 // ReferencedMessage is the reply-parent snippet a chat_message frame carries.
@@ -145,6 +150,10 @@ type SendMessageResult struct {
 	// deleted = 0 preview even if a delete races the frame; nil if the
 	// message was already gone by the time of that read.
 	RequestPreview *DMRequestPreview
+
+	// Forward is the forward block of the broadcast, set only by
+	// ForwardMessage.
+	Forward *db.ForwardInfo
 }
 
 // DMRequestPreview is the message preview a dm_request frame carries on
@@ -277,6 +286,8 @@ type MessageService struct {
 	// with no hub) means no frame is pushed, exactly the pre-DP-27 behaviour.
 	// The ws layer installs the hub-backed implementation in NewHub.
 	mentionNotifier MentionCountNotifier
+	// forward backs ForwardMessage (WP 6.9a); see message_forward.go.
+	forward forwardDeps
 }
 
 // SetMessageRequests wires the first-contact gate and delivery-audience
@@ -310,12 +321,19 @@ var backgroundJobTimeout = pushDispatchTimeout
 
 // NewMessageService creates a MessageService.
 func NewMessageService(st Store, perms *PermissionService, limiter *auth.RateLimiter) *MessageService {
-	return &MessageService{
+	s := &MessageService{
 		st:      st,
 		perms:   perms,
 		limiter: limiter,
 	}
+	s.forward.store, _ = st.(ForwardStore)
+	return s
 }
+
+// SetUploads gives the service the upload service a forward clones files
+// through. service.New calls it; without it a forward that carries files is
+// refused.
+func (s *MessageService) SetUploads(u *UploadService) { s.forward.uploads = u }
 
 // RunBackgroundInlineForTest makes the fallback mention write (used when no
 // mention worker is running) and Web Push dispatch run synchronously on the

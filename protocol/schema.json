@@ -5,6 +5,12 @@
   "client_to_server": [
     { "wire": "auth", "go": "MsgTypeAuth", "ts": "AUTH" },
     { "wire": "chat_send", "go": "MsgTypeChatSend", "ts": "CHAT_SEND" },
+    {
+      "wire": "chat_forward",
+      "go": "MsgTypeChatForward",
+      "ts": "CHAT_FORWARD",
+      "note": "forward one message to one target channel or DM (WP 6.9a)"
+    },
     { "wire": "chat_edit", "go": "MsgTypeChatEdit", "ts": "CHAT_EDIT" },
     { "wire": "chat_delete", "go": "MsgTypeChatDelete", "ts": "CHAT_DELETE" },
     { "wire": "reaction_add", "go": "MsgTypeReactionAdd", "ts": "REACTION_ADD" },
@@ -52,6 +58,7 @@
     { "wire": "ready", "go": "MsgTypeReady", "ts": "READY" },
     { "wire": "chat_message", "go": "MsgTypeChatMessage", "ts": "CHAT_MESSAGE" },
     { "wire": "chat_send_ok", "go": "MsgTypeChatSendOK", "ts": "CHAT_SEND_OK" },
+    { "wire": "chat_forward_ok", "go": "MsgTypeChatForwardOK", "ts": "CHAT_FORWARD_OK" },
     { "wire": "chat_edited", "go": "MsgTypeChatEdited", "ts": "CHAT_EDITED" },
     { "wire": "chat_deleted", "go": "MsgTypeChatDeleted", "ts": "CHAT_DELETED" },
     {

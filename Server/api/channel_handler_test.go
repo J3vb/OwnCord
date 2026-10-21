@@ -147,6 +147,14 @@ CREATE TABLE IF NOT EXISTS message_mentions (
     PRIMARY KEY (message_id, mentioned_user_id)
 );
 
+-- History reads look up forward blocks on every page (migration 071).
+CREATE TABLE IF NOT EXISTS message_forwards (
+    message_id        INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+    source_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+    source_channel_id INTEGER NOT NULL,
+    source_timestamp  TEXT    NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, id DESC);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(

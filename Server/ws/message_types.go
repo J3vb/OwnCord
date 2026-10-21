@@ -14,6 +14,7 @@ const ProtocolEpoch = 1
 const (
 	MsgTypeAuth              = "auth"
 	MsgTypeChatSend          = "chat_send"
+	MsgTypeChatForward       = "chat_forward" // forward one message to one target channel or DM (WP 6.9a)
 	MsgTypeChatEdit          = "chat_edit"
 	MsgTypeChatDelete        = "chat_delete"
 	MsgTypeReactionAdd       = "reaction_add"
@@ -49,6 +50,7 @@ const (
 	MsgTypeReady               = "ready"
 	MsgTypeChatMessage         = "chat_message"
 	MsgTypeChatSendOK          = "chat_send_ok"
+	MsgTypeChatForwardOK       = "chat_forward_ok"
 	MsgTypeChatEdited          = "chat_edited"
 	MsgTypeChatDeleted         = "chat_deleted"
 	MsgTypeChatPinned          = "chat_pinned" // a message was pinned or unpinned in a channel the recipient can read

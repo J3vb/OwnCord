@@ -39,8 +39,13 @@ const (
 	//
 	// 12 of these were added after the 2026-10-10 architecture audit
 	// (113 tags) and are accepted debt: 3D-5b (113 to 114), 3B-9a (114 to 120)
-	// 3B-10a (120 to 124) and 6.10a (124 to 125, channels.afk). Any further tag fails.
-	modelsJSONTagBaseline = 125
+	// 3B-10a (120 to 124), 6.10a (124 to 125, channels.afk) and 6.9a (125 to 126,
+	// MessageAPIResponse.Forward). The 6.9a tag is unavoidable: the history row
+	// is this struct and its forward block is a field of it. ForwardInfo and
+	// ForwardRow live in db/message_forwards.go, outside the count, and Store
+	// did not grow (ForwardStore is a slice interface in service). Any further
+	// tag fails.
+	modelsJSONTagBaseline = 126
 
 	// storeFullSurfaceBaseline is the compiler's own method count for Store,
 	// promoted methods from the cross-package embeds included (309 plus the 9

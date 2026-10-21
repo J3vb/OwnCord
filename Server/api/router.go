@@ -434,6 +434,9 @@ func wireAuth(svc *service.Services, authSvc *service.AuthService, store *storag
 		if svc.Retention != nil {
 			svc.Retention.SetFiles(store)
 		}
+		if svc.Uploads != nil {
+			svc.Uploads.SetFileCloner(store) // forwarded files (WP 6.9a)
+		}
 	}
 	if hub != nil {
 		if svc.Erasure != nil {

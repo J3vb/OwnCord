@@ -50,6 +50,7 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (M
 
 const editMessageContent = `-- name: EditMessageContent :one
 UPDATE messages SET content = ?, edited_at = datetime('now') WHERE id = ? AND deleted = 0 AND kind = 0
+  AND NOT EXISTS (SELECT 1 FROM message_forwards f WHERE f.message_id = messages.id)
 RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
           mentions_everyone, pinned_at, kind
 `
@@ -64,7 +65,8 @@ type EditMessageContentParams struct {
 // tombstone. No row comes back when it loses, which the wrapper reports as
 // ErrNotFound rather than a silent success (OC-0358). kind = 0 keeps a call log
 // row (kind 1) read-only: only the server rewrites its content, through
-// call_log.sql.
+// call_log.sql. A forward (WP 6.9a) is read-only too: its text is a snapshot of
+// another message, so no row comes back and the wrapper reports "cannot edit".
 func (q *Queries) EditMessageContent(ctx context.Context, arg EditMessageContentParams) (Message, error) {
 	row := q.db.QueryRowContext(ctx, editMessageContent, arg.Content, arg.ID)
 	var i Message
