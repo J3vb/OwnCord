@@ -228,8 +228,8 @@ func TestPatchUser_DeleteSecondsWithoutBanned_400(t *testing.T) {
 	if u.RoleID != 4 {
 		t.Errorf("role_id = %d, want 4 (a refused request changes nothing)", u.RoleID)
 	}
-	if len(e.hub.events) != 0 || len(e.hub.memberUpdates) != 0 {
-		t.Errorf("broadcasts = %v / %v, want none", e.hub.events, e.hub.memberUpdates)
+	if len(e.hub.events) != 0 || len(e.hub.roleRefreshes) != 0 {
+		t.Errorf("broadcasts = %v / %v, want none", e.hub.events, e.hub.roleRefreshes)
 	}
 	if n := e.count(t, `SELECT COUNT(*) FROM messages WHERE user_id = ? AND deleted = 1`, targetID); n != 0 {
 		t.Errorf("%d messages deleted by refused requests", n)

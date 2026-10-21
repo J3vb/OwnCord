@@ -330,7 +330,8 @@ refuses anything else with `protocol_epoch_unsupported`.
   The client half replays each server→client frame through the real dispatcher
   and asserts its store effect (`Client/tests/contract/protocol-fixtures.test.ts`,
   ARCH-02), so a rename or retype on the wire fails a client test and not only
-  the server's.
+  the server's. The previous release's client is held to the same fixtures in
+  CI (ARCH-027); see [N-1 compatibility](../protocol/README.md#n-1-compatibility).
 - **A breaking change is a new epoch.** Bump `protocol_epoch`, regenerate, and
   set `minClientEpoch` (`Server/ws/messages.go`) to the new value: the server
   accepts exactly one epoch by policy. Epoch 1 additionally accepts an absent

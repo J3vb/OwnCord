@@ -3,6 +3,7 @@ package admin_test
 import (
 	"context"
 	"net/http"
+	"slices"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/admin"
@@ -75,17 +76,14 @@ func TestAdminAPI_PatchUser_RoleChangeRefreshesVisibility(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
 
-	if hub.allVisibilityRefreshes != 1 {
-		t.Fatalf("RefreshAllChannelVisibility calls = %d, want 1", hub.allVisibilityRefreshes)
+	if hub.visibilityEnqueues() != 1 {
+		t.Fatalf("visibility refresh enqueues = %d, want 1", hub.visibilityEnqueues())
 	}
-	found := false
-	for _, mu := range hub.memberUpdates {
-		if mu.userID == targetUID {
-			found = true
-		}
+	if got := hub.roleRefreshes[0].Visibility; len(got) != 1 || got[0] != targetUID {
+		t.Fatalf("visibility refresh users = %v, want just [%d]", got, targetUID)
 	}
-	if !found {
-		t.Fatalf("expected a member_update for the role change, got %+v", hub.memberUpdates)
+	if !slices.Contains(hub.memberUpdateIDs(), targetUID) {
+		t.Fatalf("expected a member_update for the role change, got %+v", hub.roleRefreshes)
 	}
 }
 
@@ -107,9 +105,8 @@ func (r *roleDeletingInvalidator) InvalidateUser(int64) {
 }
 func (r *roleDeletingInvalidator) InvalidateAll() {}
 
-// A role demotion's live-subscription revocation (BroadcastMemberUpdate ->
-// revokeUnreadableChannels) and visibility re-derivation
-// (RefreshAllChannelVisibility) must run whenever ChangeUserRole actually
+// A role demotion's live-subscription revocation and visibility re-derivation
+// (one EnqueueRoleRefresh) must run whenever ChangeUserRole actually
 // committed the role change, not only when a second, purely-cosmetic re-read
 // of the role (done only to get its name) happens to still succeed. If the
 // role is deleted out from under that re-read — a real admin racing a role
@@ -137,16 +134,13 @@ func TestAdminAPI_PatchUser_RoleChangeBroadcastsEvenIfRoleReReadFails(t *testing
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
 
-	if hub.allVisibilityRefreshes != 1 {
-		t.Fatalf("RefreshAllChannelVisibility calls = %d, want 1 (role change committed regardless of the re-read)", hub.allVisibilityRefreshes)
+	if hub.visibilityEnqueues() != 1 {
+		t.Fatalf("visibility refresh enqueues = %d, want 1 (role change committed regardless of the re-read)", hub.visibilityEnqueues())
 	}
-	found := false
-	for _, mu := range hub.memberUpdates {
-		if mu.userID == targetUID {
-			found = true
-		}
+	if !slices.Equal(hub.revokedIDs, []int64{targetUID}) {
+		t.Fatalf("members released directly = %v, want [%d]", hub.revokedIDs, targetUID)
 	}
-	if !found {
-		t.Fatalf("expected a member_update for the role change despite the concurrent role deletion, got %+v", hub.memberUpdates)
+	if !slices.Contains(hub.memberUpdateIDs(), targetUID) {
+		t.Fatalf("expected a member_update for the role change despite the concurrent role deletion, got %+v", hub.roleRefreshes)
 	}
 }

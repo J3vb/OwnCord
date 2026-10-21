@@ -41,17 +41,21 @@ type HubBroadcaster interface {
 	// BroadcastChatBulkDeleted tells a channel's subscribers that messageIDs
 	// were deleted at once (one committed batch of a ban's message purge).
 	BroadcastChatBulkDeleted(channelID int64, messageIDs []int64)
-	BroadcastMemberUpdate(userID int64, roleName string)
 	// RefreshChannelVisibility sends targeted channel_create/channel_delete
 	// messages after a channel permission override change so each connected
 	// client's sidebar reflects its new visibility without a reconnect.
 	RefreshChannelVisibility(ch *db.Channel)
-	// RefreshAllChannelVisibility is RefreshChannelVisibility across every
-	// non-DM channel. A role's permission mask is the base every channel's
-	// effective permission derives from, so a role edit can change visibility
-	// of all of them at once — unlike a channel_overrides edit, which touches
-	// exactly one.
-	RefreshAllChannelVisibility()
+	// RevokeUnreadableChannels releases the channel topics a user's live
+	// client holds that the user's current role cannot read. Handlers call it
+	// for the users they name, after invalidating the permission cache and
+	// before the request answers; EnqueueRoleRefresh carries the rest.
+	RevokeUnreadableChannels(userID int64)
+	// EnqueueRoleRefresh hands a committed role mutation's fan-out to the
+	// hub's background worker and returns at once (WP 4.4b): held topics,
+	// sidebar, affordances and timeout view for the users whose role changed,
+	// a paced member_update, and one roles_update. The caller commits and
+	// invalidates the permission cache first.
+	EnqueueRoleRefresh(r ws.RoleRefresh)
 	// BroadcastRolesUpdate ships the full role list to every connected client
 	// after a role mutation, so name colors and permission-gated affordances
 	// converge without a reconnect.

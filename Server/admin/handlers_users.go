@@ -12,6 +12,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // ─── User Handlers ───────────────────────────────────────────────────────────
@@ -240,7 +241,7 @@ func patchUserApplyRole(w http.ResponseWriter, r *http.Request, hub HubBroadcast
 		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
 		return false
 	}
-	newRole, err := mod.ChangeUserRole(r.Context(), actor, id, *req.RoleID)
+	_, err := mod.ChangeUserRole(r.Context(), actor, id, *req.RoleID)
 	if err != nil {
 		writeModerationErr(w, err)
 		return false
@@ -248,23 +249,17 @@ func patchUserApplyRole(w http.ResponseWriter, r *http.Request, hub HubBroadcast
 	if permInvalidator != nil {
 		permInvalidator.InvalidateUser(id)
 	}
-	// Use the role ChangeUserRole already loaded and validated rather
-	// than re-reading it: a re-read can race a concurrent role delete
-	// (or a transient read error) and silently skip this whole
-	// fan-out, leaving the demoted user's socket subscribed to
-	// channels it can no longer read (OC-0045). The role change
-	// itself already committed, so the fan-out must not be
-	// conditional on anything past that point.
+	// The role change already committed, so the fan-out must not be
+	// conditional on anything past that point (OC-0045): it is one enqueue,
+	// whatever the role's name or a later read says. The hub's worker revokes
+	// the subscriptions the new role cannot read, re-derives the sidebar
+	// (including channels the user newly gained), and announces the role name
+	// it reads at send time -- off this request goroutine, so the response does
+	// not wait on it.
 	if hub != nil {
-		hub.BroadcastMemberUpdate(id, newRole.Name)
-		// BroadcastMemberUpdate only revokes subscriptions the new
-		// role can no longer read (hub_broadcast.go's
-		// revokeUnreadableChannels); it never grants the ones the
-		// new role newly gained READ_MESSAGES on. Without this,
-		// a promoted user's sidebar is missing channels until
-		// their next reconnect, unlike a role permission edit or
-		// a role delete, which both re-derive visibility fully.
-		hub.RefreshAllChannelVisibility()
+		// The user's held channels are released before the request answers.
+		hub.RevokeUnreadableChannels(id)
+		hub.EnqueueRoleRefresh(ws.RoleRefresh{Visibility: []int64{id}, MemberUpdate: []int64{id}})
 	}
 	return true
 }
