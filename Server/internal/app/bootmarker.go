@@ -193,4 +193,5 @@ func (a *App) recordBootStatus(svc *service.Services) {
 		return
 	}
 	svc.Attention.RecordBootStatus(a.prevBoot)
+	svc.Attention.RecordRestoreOutcome(a.restoreOutcome)
 }

@@ -189,6 +189,56 @@ func TestAddGroupMembers_BannedTargetNotFound(t *testing.T) {
 	}
 }
 
+func TestAddGroupMembers_NonActiveNotFound(t *testing.T) {
+	for _, status := range []string{db.RegistrationPending, db.RegistrationDenied} {
+		t.Run(status, func(t *testing.T) {
+			f := newGroupMembershipFixture(t)
+			ctx := context.Background()
+			seedUser(t, f.database, &db.User{ID: 900, Username: "applicant"})
+			setRegistrationStatus(t, f.database, 900, status)
+			before := f.rowCount(t)
+			if _, err := f.dms.AddGroupMembers(ctx, fixtureMember, f.dm, []int64{900}); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("err = %v, want ErrNotFound", err)
+			}
+			if slices.Contains(f.members(t), 900) {
+				t.Error("non-active account was added to the group")
+			}
+			if got := f.rowCount(t); got != before {
+				t.Errorf("group rows = %d, want %d", got, before)
+			}
+			for _, q := range []string{`SELECT COUNT(*) FROM dm_participants WHERE user_id = 900`, `SELECT COUNT(*) FROM dm_open_state WHERE user_id = 900`} {
+				if n := countRows(t, f.database, q); n != 0 {
+					t.Errorf("%s = %d, want 0", q, n)
+				}
+			}
+		})
+	}
+}
+
+func TestCreateGroupDM_NonActiveRecipientNotFound(t *testing.T) {
+	for _, status := range []string{db.RegistrationPending, db.RegistrationDenied} {
+		t.Run(status, func(t *testing.T) {
+			f := newGroupMembershipFixture(t)
+			ctx := context.Background()
+			seedUser(t, f.database, &db.User{ID: 900, Username: "applicant"})
+			setRegistrationStatus(t, f.database, 900, status)
+			before := countRows(t, f.database, `SELECT COUNT(*) FROM channels`)
+			_, err := f.dms.CreateGroupDM(ctx, fixtureMember, []int64{fixtureMember2, 900}, "Other")
+			if !errors.Is(err, ErrNotFound) {
+				t.Fatalf("err = %v, want ErrNotFound", err)
+			}
+			if got := countRows(t, f.database, `SELECT COUNT(*) FROM channels`); got != before {
+				t.Errorf("channels = %d, want %d", got, before)
+			}
+			for _, q := range []string{`SELECT COUNT(*) FROM dm_participants WHERE user_id = 900`, `SELECT COUNT(*) FROM dm_open_state WHERE user_id = 900`} {
+				if n := countRows(t, f.database, q); n != 0 {
+					t.Errorf("%s = %d, want 0", q, n)
+				}
+			}
+		})
+	}
+}
+
 func TestAddGroupMembers_BlockedPairForbidden(t *testing.T) {
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()

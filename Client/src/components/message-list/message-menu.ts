@@ -100,13 +100,31 @@ function buildItems(
   const items: (ContextMenuItem | ContextMenuSeparator)[] = [];
   const sep: ContextMenuSeparator = { separator: true };
 
-  // A server row (call log, group event) offers nothing but Copy ID (developer mode).
+  // A server row (call log, group event) offers nothing but Copy ID (developer
+  // mode); a pin row also offers Delete when the viewer may delete it.
   if (isServerRowKind(msg.kind)) {
     if (gates.copyId.shown) {
       items.push({
         label: messageMenuText("copyId"),
         testId: "msg-menu-copy-id",
         onClick: () => copyWithToast(String(msg.id), "toast.idCopied", "toast.idCopyFailed"),
+      });
+    }
+    if (gates.delete.shown) {
+      if (items.length > 0) items.push(sep);
+      items.push({
+        label: messageMenuText("delete"),
+        testId: "msg-menu-delete",
+        danger: true,
+        disabled: gates.delete.disabled,
+        ...(gates.delete.reason !== null ? { title: gates.delete.reason } : {}),
+        onClick: (e: MouseEvent) => {
+          const found = findMessage(msg.channelId, msg.id);
+          if (found === undefined || found.deleted) return;
+          // The socket may have dropped since the menu opened.
+          if (deleteLockReason() !== null) return;
+          opts.onDeleteClick(found.id, e.shiftKey);
+        },
       });
     }
     return { items, group: null };
@@ -368,7 +386,10 @@ export function openMessageMenu(req: MessageMenuRequest): void {
   const current = findMessage(msg.channelId, msg.id);
   if (current === undefined || current.deleted) return;
   // Nothing to offer on a server row outside developer mode: no empty menu.
-  if (isServerRowKind(current.kind) && !messageActionGates(current, req.opts).copyId.shown) return;
+  if (isServerRowKind(current.kind)) {
+    const serverGates = messageActionGates(current, req.opts);
+    if (!serverGates.copyId.shown && !serverGates.delete.shown) return;
+  }
   closeMessageMenu();
 
   const row = rowOf(msg.id);

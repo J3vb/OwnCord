@@ -155,6 +155,7 @@ export function voiceChannelChrome(
     name: channel.name,
     nsfw: channel.nsfw,
     private: channel.isPrivate,
+    afk: channel.afk === true,
     joined,
     frozenReason,
     timeoutReason,
@@ -165,5 +166,6 @@ export function voiceChannelChrome(
             title: shellText("channel.voiceCapacity", { connected, max }),
           }
         : null,
+    mentionCount: channel.mentionCount,
   };
 }

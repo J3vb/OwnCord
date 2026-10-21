@@ -63,10 +63,13 @@ and only when it changes something a contributor or fork holder must do
 
 - Members who stay idle in a server voice channel are now moved to the AFK channel once it is set, after the AFK timeout on top of the client's own idle delay. A member who could not join the AFK channel, a DM or group call, and a member who comes back first are left alone. A moderator mute or deafen is kept through the move, and the member returns by joining a channel themselves. The client does not show why yet and the admin panel has no card for it.
 - The admin panel's Settings page now has a Voice: AFK card to choose the AFK channel (or none) and the extra idle time (1, 5, 15, 30 or 60 minutes), with a warning when members cannot connect to the chosen channel or it has a user limit, and the Channels page marks the AFK channel with a badge. Choosing the channel needs Manage Channels as well as Manage Server.
+- The client now shows when it was moved to the AFK channel (a short note once the move is done), marks the AFK channel in the channel list, and keeps the microphone off there with the mic button locked. Speaking or typing counts as activity again, also while in a call.
 
 **Desktop UI**
 
 - Opening a voice call now opens the voice channel's text chat beside the video grid (stacked under it in a narrow window); leaving the call keeps the chat, and moving to another voice channel follows to its chat. A **Hide chat** / **Show chat** button in the header (shown during a call on that channel) keeps the grid full width, and a voice channel now shows a speaker in its header instead of `#`.
+- A voice channel in the sidebar now shows a red mention badge when someone mentions you in its chat, and right-clicking it offers **Open chat** to read that chat without joining the call; clicking the row still joins. "Mark all read" no longer appears for unread voice chat that no row shows.
+- Opening a voice call now opens the voice channel's text chat beside the video grid (stacked under it in a narrow window); leaving the call keeps the chat, and moving to another voice channel follows to its chat.
 - Images and videos can now be sent as spoilers. A **Mark as spoiler** button on each pending attachment renames the file to `SPOILER_<name>` and uploads it again (press it again to undo), and a file you already named `SPOILER_...` shows as marked. In the chat a spoiler image or video, alone or inside an image grid, is blurred under a **Spoiler** cover that opens with a click, Enter or Space; until then it cannot be opened in the viewer, saved or copied, and it stays out of the viewer's previous/next sequence. It is covered again whenever the message is redrawn.
 - The member list now sits on the right; Appearance > Member list position puts it back under the channels.
 - A group DM now has a member list on the right (a **Show Member List** button in the header toggles it) showing everyone with a crown on the owner. Anyone can add people with **Add People** while the group has fewer than 10, and the owner can **Remove From Group** or **Make Group Owner** from a member's right-click or ⋯ menu, each after a confirm. Added, removed, left, renamed and icon-changed events show as quiet lines in the chat that make no sound, and the leave confirm now says someone can add you back. These need a server with 3B-10 group DM support; on an older server the list shows but the add and owner actions stay hidden.
@@ -235,6 +238,7 @@ and only when it changes something a contributor or fork holder must do
 
 - New logins now stay signed in by default (Auto connect starts ticked). The password is saved only when Remember password is ticked; Auto connect alone keeps just the sign-in token.
 - The server's load test at 1,000 and 2,000 people online has now been run and published: 1,000 online holds steady chat and a burst of messages with room to spare on a 2 vCPU / 4 GB server, but a burst of 500 logins and a full reconnect of everyone are slower than their targets, and the 2,000 run was not valid, so 2,000 stays an estimate (see [Capacity](docs/capacity.md#scale-profile)).
+- When the server's database is stuck behind a long write, an ordinary request now gives up after 15 seconds and answers "service unavailable" with a short retry hint, instead of hanging until the connection drops. Uploads, downloads, the live connection, voice, backups and account deletion are not cut short.
 
 **Notifications**
 
@@ -269,6 +273,7 @@ and only when it changes something a contributor or fork holder must do
 **Accounts & admin**
 
 - Downloading a backup from the admin panel stopped partway through when it took longer than 30 seconds, leaving a failed download and a spent link. It now keeps going while data is flowing, and ends only if the browser stops receiving it.
+- Restoring a backup from the admin panel no longer copies over the database while the server is running. The server now stages a checked copy beside the database and restarts, and the next start swaps it in before anything opens the database. A crash or power loss in the middle is picked up on the next start, and a restored file that fails its check is rolled back so the server keeps running on the data it had. The Dashboard's attention panel shows what happened (restored, or failed with the previous data kept), and the audit log records it. A restore that is staged but never followed by a restart is applied at the next start; deleting `<database>.restore-pending.json` cancels it. The "database is busy" refusal (`DATABASE_BUSY`) no longer happens.
 - After a backup is restored from the admin panel or the restore command, connected apps now fetch everything fresh instead of resuming from older events. When you move a data folder by hand, copy the `.ws-seq-floor` file beside the database along with it.
 - After a backup is restored from the admin panel or the restore command, connected apps now fetch everything fresh instead of resuming from older events. When you move a data folder by hand, copy the `.ws-seq-floor` file beside the database along with it; the same goes when you restore another machine's backup to move a server.
 - "Update now" on a server whose install folder the service cannot write to failed with a vague download error after the download. The Updates page now says the server cannot replace its own program file and to install the release by hand, and nothing is downloaded or restarted.
@@ -282,6 +287,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Messaging**
 
+- Direct messages and group DMs can only be started with active accounts.
 - A video in chat now takes the shape of the clip once played, like an image, instead of sitting in a wide black box. Small and portrait videos no longer have black bars beside them.
 - Losing permission to send in a channel also stopped you deleting your own messages there. You can now delete your own messages with read access alone.
 - An upload or send error under the message box now has a close button, so it can be dismissed without typing or sending something first.

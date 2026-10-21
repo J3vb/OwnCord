@@ -482,6 +482,43 @@ describe("createPinnedPanelController", () => {
     expect(mockPinnedMessagesMount).toHaveBeenCalledWith(root);
   });
 
+  it("open() opens a closed panel and never closes or rebuilds an open one", async () => {
+    const api = makeMockApi();
+    const controller = createPinnedPanelController({
+      api: api as never,
+      getRoot: () => root,
+      getCurrentChannelId: () => 42,
+    });
+
+    await controller.open();
+    expect(createPinnedMessages).toHaveBeenCalledOnce();
+    expect(mockPinnedMessagesMount).toHaveBeenCalledOnce();
+
+    await controller.open();
+    await controller.open();
+    expect(createPinnedMessages).toHaveBeenCalledOnce();
+    expect(mockPinnedMessagesDestroy).not.toHaveBeenCalled();
+    expect(api.getPins).toHaveBeenCalledOnce();
+
+    // toggle still closes it, and open() then reopens it.
+    await controller.toggle();
+    expect(mockPinnedMessagesDestroy).toHaveBeenCalledOnce();
+    await controller.open();
+    expect(createPinnedMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it("concurrent open() calls fetch once", async () => {
+    const api = makeMockApi();
+    const controller = createPinnedPanelController({
+      api: api as never,
+      getRoot: () => root,
+      getCurrentChannelId: () => 42,
+    });
+    await Promise.all([controller.open(), controller.open()]);
+    expect(api.getPins).toHaveBeenCalledOnce();
+    expect(createPinnedMessages).toHaveBeenCalledOnce();
+  });
+
   it("does not open, fetch or toast behind an NSFW consent gate", async () => {
     const api = makeMockApi();
     const controller = createPinnedPanelController({

@@ -104,6 +104,9 @@ type App struct {
 	// start-up.
 	bootMarker *bootMarker
 	prevBoot   service.BootStatus
+	// restoreOutcome is the staged backup restore this start applied or
+	// refused (WP 5.5), folded into the attention panel with prevBoot.
+	restoreOutcome service.RestoreOutcome
 	// pushVAPIDKey is loaded by startPushVAPIDKey and installed on svc.Push
 	// by startHub once the service layer exists (B5-4).
 	pushVAPIDKey *ecdh.PrivateKey

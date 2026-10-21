@@ -272,9 +272,9 @@ func openFile(path string, maxReaders int, takeLock bool) (*DB, error) {
 			release()
 		}
 	}()
-	retryFloor, err := readMessageDeliveryFloor(path)
+	retryFloor, err := prepareOpen(path, takeLock)
 	if err != nil {
-		return nil, fmt.Errorf("loading message retry cutoff: %w", err)
+		return nil, err
 	}
 
 	base := path

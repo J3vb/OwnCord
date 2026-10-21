@@ -671,7 +671,10 @@ export class LiveKitSession {
     this._audioPipeline.setPttGated(pttArmed);
     const muted = state.localMuted || state.localDeafened;
     const deafened = state.localDeafened;
-    const shouldEnableMicrophone = !muted;
+    // The AFK channel is listen-only: publish nothing there, and do not read
+    // the empty mic as a failure (no listen-only notice, nothing to retry).
+    // enableMicrophone(false) is a no-op publish, so nothing can be refused.
+    const shouldEnableMicrophone = !muted && state.inAfkChannel !== true;
 
     try {
       await this._media.enableMicrophone(room, shouldEnableMicrophone);

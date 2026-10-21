@@ -19,7 +19,8 @@ import { ensureIdentityKeyPublished } from "../../lib/identity";
 import { showToast } from "../../lib/toast";
 import { noteJoinFailed } from "./joinBackoff";
 import { noteJoinSent, takeJoinRefusal } from "./joinRequest";
-import { noteVoiceMoved } from "./moveHint";
+import { noteVoiceMoved, noteAfkMove, takeAfkMove, clearAfkMove } from "./moveHint";
+import { channelsStore } from "../../stores/channels.store";
 import { livekitSession, cancelVoiceRejoin } from "../connection/dispatchContext";
 import type {
   DispatchApi,
@@ -124,6 +125,9 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
   const prevSelfServerDeafened = voiceStore.getState().localServerDeafened ?? false;
   return (ws, payload) => {
     setVoiceStates(payload.voice_states);
+    // A reconnect supersedes any AFK move still awaiting its join
+    // acknowledgement: that move was abandoned, so it earns no toast.
+    clearAfkMove();
 
     // Defense-in-depth: if the ready payload shows us in a voice channel
     // but we have no LiveKit session (e.g. after F5 reload), send
@@ -237,6 +241,15 @@ export function handleVoiceState(ws: DispatchWs, payload: Payload<"voice_state">
   updateVoiceState(payload);
   if (!isSelf) return;
   joinVoiceChannel(payload.channel_id);
+  // The server's answer to the join that followed an AFK move: only now is
+  // the move real, so only now does the user hear why.
+  if (takeAfkMove(payload.channel_id)) {
+    const name = channelsStore.getState().channels.get(payload.channel_id)?.name;
+    showToast(
+      connectText("voice.movedAfk", { channel: name ?? connectText("voice.afkChannelFallback") }),
+      "info",
+    );
+  }
   enforceModeratorAudioState(
     ws,
     payload.server_muted === true,
@@ -265,6 +278,8 @@ export function handleVoiceMoved(
   // Noted at once, so the leave sound queued by the voice_leave just before
   // this frame sees the move and stays silent.
   noteVoiceMoved(payload.to_channel_id);
+  if (payload.reason === "afk") noteAfkMove(payload.to_channel_id);
+  else clearAfkMove();
   void livekitSession().then(({ leaveVoice }) => {
     void leaveVoice(false);
     leaveVoiceChannel();
@@ -305,6 +320,7 @@ export function handleVoiceDisconnected(
   // RT-12: a kick is a deliberate membership change, so a pending
   // restart-rejoin must not put the user back.
   cancelVoiceRejoin(clock);
+  clearAfkMove();
   log.info("Disconnected from voice by a moderator", { channelId: payload.channel_id });
   void livekitSession().then(({ leaveVoice }) => leaveVoice(false));
   leaveVoiceChannel();
@@ -332,6 +348,9 @@ export function handleVoiceLeave(payload: Payload<"voice_leave">, clock: Reconne
   // leaveVoiceChannel() below clears currentChannelId.
   const sameChannel = voiceStore.getState().currentChannelId === payload.channel_id;
   const shouldTeardownSession = isSelf && sameChannel;
+  // Leaving after an AFK move was noted ends the move; the leave that
+  // precedes the voice_moved frame arrives before the note is made.
+  if (isSelf) clearAfkMove();
   // Notify E2EE state machine so key holder can rotate the room key, and
   // (when applicable) tear down the media session — both through one lazy
   // import so the two effects cannot land in different ticks.
@@ -463,6 +482,8 @@ export function handleVoiceJoinRollback(payload: Payload<"error">, id: string | 
   // already tolerates a null Room, aborting the in-flight attempt at its
   // next checkpoint.
   if (voiceStore.getState().voiceStatus === "joining" && takeJoinRefusal(payload.code, id)) {
+    // A refused join abandons an AFK move: nothing to explain.
+    clearAfkMove();
     // A refused join (often before any voice token) is a failed join: back
     // off the next one, or every click re-sends voice_join.
     noteJoinFailed();

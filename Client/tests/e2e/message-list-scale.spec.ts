@@ -9,7 +9,7 @@ import {
   MOCK_PINNED_MESSAGES,
 } from "./helpers";
 
-// Chat scroll-up guard (chat-scroll-perf PRs c, e and f). A channel of 600 messages is
+// Chat scroll-up guard (chat-scroll-perf PRs c, e, f and g). A channel of 600 messages is
 // served in 50-row pages, newest first, exactly as the server does; the spec
 // scrolls to the top with the mouse wheel and counts what the list did, not how
 // long it took: every history page must land without the window being rebuilt,
@@ -316,9 +316,15 @@ test.describe("Message list scrolling up through 600 messages", () => {
 
     // Scroll up until at least 5 history pages have landed (the store keeps
     // 500 rows, so the window slides as they do), or give up.
+    let maxRows = 0;
+    const sampleRows = async (): Promise<void> => {
+      const n = await page.locator(".virtual-content").evaluate((el) => el.children.length);
+      maxRows = Math.max(maxRows, n);
+    };
     for (let tick = 0; tick < 400; tick++) {
       await page.mouse.wheel(0, -700);
       await page.waitForTimeout(25);
+      await sampleRows();
       if ((await scale(page)).pages - first.pages >= 5) break;
     }
     // Let the last page and its slide settle.
@@ -339,11 +345,14 @@ test.describe("Message list scrolling up through 600 messages", () => {
     );
     test.info().annotations.push({
       type: "message-list-scale",
-      description: `pages=${pages} rebuilds=${rebuilds} slides=${done.slides} overBudgetSlides=${done.overBudgetSlides} maxExtraHeightReads=${done.maxExtraReads} brokerImageCalls=${brokerCalls.length - brokerBefore} imageLoads=${done.imageLoads} imageLoadShifts=${done.imageLoadShifts} firstSightingMountShifts=${done.firstMountShifts}/${done.firstLoads} longTasksOver50ms=${longTasks.filter((d) => d > 50).length} (soft report)`,
+      description: `pages=${pages} rebuilds=${rebuilds} slides=${done.slides} overBudgetSlides=${done.overBudgetSlides} maxExtraHeightReads=${done.maxExtraReads} brokerImageCalls=${brokerCalls.length - brokerBefore} imageLoads=${done.imageLoads} imageLoadShifts=${done.imageLoadShifts} firstSightingMountShifts=${done.firstMountShifts}/${done.firstLoads} maxRowsInWindow=${maxRows} longTasksOver50ms=${longTasks.filter((d) => d > 50).length} (soft report)`,
     });
 
     expect(pages, "history pages that landed").toBeGreaterThanOrEqual(5);
     expect(rebuilds, "full window rebuilds while pages landed").toBe(0);
+    // Overscan is a viewport of distance each side, not 20 rows (chat-scroll-perf
+    // PR g): measured 30 rows in this 1280x720 channel, 51 with the row count.
+    expect(maxRows, "most rows ever rendered in the window").toBeLessThanOrEqual(36);
     // A scroll slide measures the rows that entered and nothing else
     // (chat-scroll-perf PR f): offsetHeight reads <= rows entered + rows departed + 2. A
     // history page landing is the one other slide, and it re-records the whole

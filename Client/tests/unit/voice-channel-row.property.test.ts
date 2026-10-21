@@ -25,10 +25,12 @@ const capacity = fc.record({ label: text, title: text });
 
 /** The patchable part of a chrome model. */
 const patchable = fc.record({
+  afk: fc.boolean(),
   joined: fc.boolean(),
   frozenReason: fc.option(text, { nil: null }),
   timeoutReason: fc.option(text, { nil: null }),
   capacity: fc.option(capacity, { nil: null }),
+  mentionCount: fc.integer({ min: 0, max: 120 }),
 });
 
 const createOnly = fc.record({
@@ -52,6 +54,8 @@ function mutateChrome(model: VoiceChannelChromeModel, field: string): VoiceChann
       return { ...model, nsfw: !model.nsfw };
     case "private":
       return { ...model, private: !model.private };
+    case "afk":
+      return { ...model, afk: !model.afk };
     case "joined":
       return { ...model, joined: !model.joined };
     case "frozenReason":
@@ -66,6 +70,8 @@ function mutateChrome(model: VoiceChannelChromeModel, field: string): VoiceChann
             ? { label: "1/5", title: "1 of 5" }
             : { label: `${model.capacity.label}x`, title: `${model.capacity.title}x` },
       };
+    case "mentionCount":
+      return { ...model, mentionCount: model.mentionCount + 1 };
     default:
       throw new Error(`no mutation for ${field}`);
   }
@@ -113,9 +119,11 @@ describe("voice channel row view", () => {
 
   it("the patch fields are exactly the ones patchVoiceChannelChrome handles", () => {
     expect(VOICE_CHROME_PATCH_FIELDS.toSorted()).toEqual([
+      "afk",
       "capacity",
       "frozenReason",
       "joined",
+      "mentionCount",
       "timeoutReason",
     ]);
   });

@@ -100,3 +100,11 @@ func SetErasureChunkSizesForTest(chunk, window int) (restore func()) {
 	erasureChunk, erasureScanWindow = chunk, window
 	return func() { erasureChunk, erasureScanWindow = prevChunk, prevWindow }
 }
+
+// TakeRestoreResult reads and then clears the staged-restore result, for tests
+// that have nothing to do between the two.
+func TakeRestoreResult(dbPath string) (res RestoreResult, found bool, err error) {
+	res, found, err = ReadRestoreResult(dbPath)
+	_ = ClearRestoreResult(dbPath)
+	return res, found, err
+}

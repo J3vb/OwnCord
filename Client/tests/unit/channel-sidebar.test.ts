@@ -3598,6 +3598,39 @@ describe("ChannelSidebar channel feature flags", () => {
     });
   });
 
+  describe("AFK channel marker", () => {
+    const afkTestId = "[data-testid='channel-afk-5']";
+
+    it("shows a moon and an AFK label on the AFK channel only", () => {
+      setChannels([
+        { id: 5, name: "parking", type: "voice", category: "Voice", position: 0, afk: true },
+        { id: 6, name: "lounge", type: "voice", category: "Voice", position: 1 },
+      ]);
+      sidebar.mount(container);
+
+      const badge = container.querySelector(afkTestId);
+      expect(badge?.textContent).toBe("AFK");
+      expect(badge?.querySelector("svg")?.getAttribute("data-icon")).toBe("moon");
+      expect(container.querySelector("[data-testid='channel-afk-6']")).toBeNull();
+    });
+
+    it("appears and disappears in place when the flag changes", () => {
+      setChannels([{ id: 5, name: "parking", type: "voice", category: "Voice", position: 0 }]);
+      sidebar.mount(container);
+      expect(container.querySelector(afkTestId)).toBeNull();
+      const wrapper = container.querySelector("[data-testid='channel-5']")!.parentElement;
+
+      updateChannel({ id: 5, afk: true });
+      channelsStore.flush();
+      expect(container.querySelector(afkTestId)?.textContent).toBe("AFK");
+      expect(container.querySelector("[data-testid='channel-5']")!.parentElement).toBe(wrapper);
+
+      updateChannel({ id: 5, afk: false });
+      channelsStore.flush();
+      expect(container.querySelector(afkTestId)).toBeNull();
+    });
+  });
+
   describe("voice capacity readout", () => {
     it("shows connected/limit when the channel has a user limit", () => {
       setChannels([

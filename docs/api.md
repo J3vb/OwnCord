@@ -284,9 +284,25 @@ endpoints return plain-text errors — see their section):
 | `GIF_DISABLED`                  | 503         | GIF proxy is not configured on this server (no `gif.api_key`)                                                                                                                                                                                    |
 | `GIF_FAVORITES_FULL`            | 409         | You have reached the favorite GIF limit (250)                                                                                                                                                                                                    |
 | `PUSH_DISABLED`                 | 503         | Web Push is not enabled on this server (`push.enabled` is false)                                                                                                                                                                                 |
+| `SERVICE_UNAVAILABLE`           | 503         | The request ran past the server's 15 s request deadline and failed (`Retry-After: 2`; see Request deadline below), or the auth store was unavailable while resolving a token                                                                     |
 | `NSFW_ACKNOWLEDGEMENT_REQUIRED` | 403         | Content from a labelled channel requested before the caller acknowledged it (history, around, pins, reaction users, search, attachment bytes — B5-7)                                                                                             |
 | `NOT_NSFW`                      | 409         | `PUT /api/v1/channels/{id}/nsfw-acknowledgement` on a channel that is not labelled                                                                                                                                                               |
 | `CHANNEL_NAME_TAKEN`            | 409         | Admin channel create or rename onto a name the same type already has in that category                                                                                                                                                            |
+
+### Request deadline
+
+Every REST route except the streaming and long-running ones carries a 15 s
+deadline on its request context. A handler that answers 500 or 503 after that
+deadline passed (a database call cancelled behind a stalled writer, say) is
+answered `503 {"error":"SERVICE_UNAVAILABLE","message":"the server is busy; try again"}` with `Retry-After: 2` in place
+of its own error body; a retry is safe, as the server finishes or undoes any partial step.
+The clock starts when the request arrives, so it includes reading the request
+body. Any other status, including a 2xx written after the deadline and a
+specific 5xx such as 502 or 507, is never rewritten. Exempt, with no deadline of their own beyond the transfer and
+archive progress deadlines: the WebSocket upgrade, the LiveKit proxy, file
+uploads and downloads, avatar, banner, emoji and group-icon uploads, client-update, the admin
+log stream, archive, backup, restore, update-apply and restart routes, plugin
+install, enable and disable, and account erasure.
 
 ---
 
@@ -4081,7 +4097,7 @@ Nothing here is exported off the host.
   both `0`).
   It is never reported as healthy and neither raises nor clears a warning.
 - `signals` ids: `disk`, `db_writer_wait`, `reconnects`, `delivery`, `voice`,
-  `certificate`, `last_exit`, `backup`, and `job:<name>` for each maintenance
+  `certificate`, `last_exit`, `last_restore`, `backup`, and `job:<name>` for each maintenance
   step.
 - `certificate` reports the served TLS certificate's expiry. A `self_signed`
   or `manual` certificate is `ok` with 21 days or more left, `warning` inside
@@ -4099,6 +4115,11 @@ Nothing here is exported off the host.
   start time as `value` and the last panic it recovered, if any, in `detail`;
   `unknown` on a first start, when there was no marker to read. A planned
   (clean) restart clears the marker, so it recovers this warning.
+- `last_restore` appears only on a start that handled a staged backup restore
+  (WP 5.5), and is read once from the result the boot-time apply left: `ok`
+  with the backup name and time as `value` when it was applied, `warning`
+  when it was rolled back or refused and the previous database is still in use,
+  with the reason in `detail`.
 - `voice` reports LiveKit. An OwnCord-managed companion reports its
   supervisor's local state — `running`, plus a `not running` warning when it is
   down and a `gave up` critical when the backoff stopped restarting it; a
@@ -4910,11 +4931,12 @@ other-file token or a principal that no longer qualifies.
 
 ### POST /admin/api/backups/{name}/restore
 
-Restore the database from a backup. The server first writes a
+Restore the database from a backup. The server checks the backup, writes a
 `pre_restore_<timestamp>.db` safety backup (the restore is aborted if that
-fails), broadcasts a `server_restart` to connected clients, checkpoints and
-closes the database, copies the backup over it, responds, and then restarts
-itself.
+fails), stages a checked copy and a marker beside the database, responds, and
+restarts itself through the normal shutdown. The database that is running is
+not written. The next start swaps the staged copy in before the database
+opens, checks it, and keeps the previous database if the check fails.
 
 **Auth:** Owner role
 
@@ -4922,10 +4944,14 @@ itself.
 
 ```json
 {
-  "message": "database restored — server restarting",
+  "message": "restore staged — server restarting",
   "backup": "chatserver_20260804_120000.db"
 }
 ```
+
+A `500 INTERNAL_ERROR` ("could not stage the backup — database untouched")
+means the copy could not be written, for example because the database volume
+is full; nothing restarts. `409 DATABASE_BUSY` is no longer returned.
 
 ---
 

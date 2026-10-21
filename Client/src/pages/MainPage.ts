@@ -321,6 +321,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   /** Inactivity watcher that flips the status to idle after ten quiet
    *  minutes. Started once the socket is up, torn down with the page. */
   let autoIdle: AutoIdleController | null = null;
+  let speakingActivityTimer: ReturnType<typeof setInterval> | null = null;
   let statusTimerWatcher: StatusTimerWatcher | null = null;
 
   // Toast container for user-facing error feedback
@@ -923,6 +924,30 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onStatusChange: (status) => applyPresence(status),
       systemIdleMs: () => desktop.systemIdle.idleMs(),
     });
+    // Talking in a call is being here even with hands off the keyboard and
+    // mouse, which neither the window nor (for another app) the OS poll sees.
+    // The local ring is the same on web and native (voice.store withLocalRing).
+    unsubscribers.push(
+      voiceStore.subscribeSelector(
+        (v) => {
+          const uid = authStore.getState().user?.id ?? 0;
+          const ch = v.currentChannelId;
+          return ch !== null && v.voiceUsers.get(ch)?.get(uid)?.speaking === true;
+        },
+        (speaking) => {
+          if (speakingActivityTimer !== null) clearInterval(speakingActivityTimer);
+          speakingActivityTimer = null;
+          if (!speaking) return;
+          autoIdle?.notifyActivity();
+          // Talking for longer than the idle delay must keep counting.
+          speakingActivityTimer = setInterval(() => autoIdle?.notifyActivity(), 60_000);
+        },
+      ),
+      () => {
+        if (speakingActivityTimer !== null) clearInterval(speakingActivityTimer);
+        speakingActivityTimer = null;
+      },
+    );
 
     unsubscribers.push(
       ws.on("server_restart", (payload) => {
@@ -1736,6 +1761,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onContentGated: closeActiveLightbox,
       focusFallback: focusReachable,
       onJoinCall: joinDmCall,
+      onOpenPins: () => {
+        void chatAreaResult.openPinnedPanel();
+      },
     });
 
     // Wire voice error callback to toast
@@ -2009,15 +2037,17 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     container.appendChild(root);
 
-    // Voice is the only channel type that should keep the grid up; text, dm
-    // and announcement all mount a chat surface and must dismiss it, not just
-    // "text" (a dm/announcement switch used to leave the grid covering an
-    // unrelated channel's chat). The DM that owns the current call is the
-    // exception: its call panel shows the video above the chat (its own
-    // update re-seats the grid through onVideoHostChange).
+    // Only the channel that owns the current call keeps the grid up: the joined
+    // voice channel (its chat sits beside the grid, WP 6.1b) or the DM whose
+    // call panel shows the video above the chat (its own update re-seats the
+    // grid through onVideoHostChange). Every other channel mounts a chat
+    // surface and must dismiss it, another voice channel's chat opened from
+    // its menu included (WP 6.1d).
     const showChatFor = (active: { id: number; type: string }): void => {
-      const ownsCall = active.type === "dm" && voiceStore.getState().currentChannelId === active.id;
-      if (active.type !== "voice" && !ownsCall) videoModeCtrl?.showChat({ keepWatching: true });
+      const ownsCall =
+        (active.type === "dm" || active.type === "voice") &&
+        voiceStore.getState().currentChannelId === active.id;
+      if (!ownsCall) videoModeCtrl?.showChat({ keepWatching: true });
     };
     // A click on the channel already open under the stream view changes no
     // store, so the subscriber below never sees it.
