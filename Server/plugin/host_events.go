@@ -106,8 +106,9 @@ func (s *EventSink) UnsubscribeAll(inst *Instance) {
 // Dispatch already has a production caller: ws/hub.go calls it on every
 // broadcast message when an operator has enabled plugins (api/router.go wires
 // h.pluginSink whenever the registry is non-nil). That call site runs on the
-// hub's broadcast goroutine while seqMu is held, so anything this function
-// does is on the hub's hot path and must not block or re-enter the hub.
+// hub's dispatch goroutine after seqMu is released, so it no longer extends
+// the seqMu hold, but anything this function does is still on the dispatch
+// path and must not block or re-enter the hub.
 //
 // Guest delivery is nonetheless NOT implemented in either build: the loop
 // below touches no module, and no production code calls Subscribe (only this
@@ -121,8 +122,8 @@ func (s *EventSink) UnsubscribeAll(inst *Instance) {
 //   - a per-plugin delivery rate limit (drop, never block the caller), and
 //   - the same per-call CPU-budget deadline invokeCommand applies
 //     (sandbox_wazero.go), and
-//   - delivery off the hub's broadcast goroutine so a slow guest cannot
-//     backpressure fan-out to WS clients or extend the seqMu hold.
+//   - delivery off the hub's dispatch goroutine so a slow guest cannot
+//     backpressure fan-out to WS clients.
 //
 // Until then this stays inert on purpose.
 func (s *EventSink) Dispatch(ctx context.Context, topic string, payload []byte) {
