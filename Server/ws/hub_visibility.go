@@ -310,6 +310,12 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 		}
 
 		if visible {
+			// A socket without the forums feature is sent no forum row
+			// (client_features.go). Nothing is allocated for the skipped send:
+			// this frame is per recipient and unsequenced.
+			if !live.sendsChannel(ch.Type) {
+				continue
+			}
 			// Idempotent add on the client; also refreshes channel metadata.
 			// Addressed per client so it can carry this recipient's own
 			// affordance verdicts — the whole point of this fan-out is that

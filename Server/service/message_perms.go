@@ -144,7 +144,17 @@ func (s *MessageService) checkSendPermission(ctx context.Context, userID int64, 
 	if err != nil {
 		return err
 	}
-	return denial(permissions.CanSendMessage(sub))
+	if err := denial(permissions.CanSendMessage(sub)); err != nil {
+		return err
+	}
+	// A forum holds no messages: its posts are threads, and a post is created
+	// through the forum post path. Refused after the permission verdict so a
+	// caller who cannot read the forum learns nothing about its type; the
+	// messages trigger (migration 075) is the schema-level backstop.
+	if ch.Type == db.ForumTypeName {
+		return fmt.Errorf("%w: a forum holds no messages, post in one of its posts", ErrBadRequest)
+	}
+	return nil
 }
 
 // channelSubject resolves what the channel predicates need for userID in ch:

@@ -94,7 +94,7 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	exec(`INSERT INTO user_blocks (blocker_id, blocked_id) VALUES (?, ?)`, uid, other)
 	exec(`INSERT INTO user_blocks (blocker_id, blocked_id) VALUES (?, ?)`, other, uid)
 	exec(`INSERT INTO channel_user_overrides (channel_id, user_id, allow, deny) VALUES (?, ?, 1, 0)`, chID, uid)
-	// Category permission templates (migration 075, class 18c): the subject's
+	// Category permission templates (migration 076, class 18c): the subject's
 	// row is erased, another user's on the same category survives.
 	exec(`INSERT INTO channel_categories (id, name) VALUES (770, 'Erase Template')`)
 	exec(`INSERT INTO category_user_overrides (category_id, user_id, allow, deny) VALUES (770, ?, 1, 0)`, uid)

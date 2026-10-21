@@ -104,6 +104,7 @@ func mountChannelActionRoutes(r chi.Router, base string, channels *service.Chann
 		r.Delete(base+"/categories/{id}", handleDeleteCategory(channels, hub))
 		r.Patch(base+"/{id}", handlePatchChannel(channels, hub))
 		r.Delete(base+"/{id}", handleDeleteChannel(channels, hub))
+		r.Put(base+"/{id}/forum", handlePutForumSettings(channels, hub))
 	})
 }
 

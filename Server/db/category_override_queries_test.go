@@ -10,7 +10,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// Category permission templates (migration 075, WP 6.5d) at the db seam.
+// Category permission templates (migration 076, WP 6.5d) at the db seam.
 
 type catFixture struct {
 	database *db.DB
@@ -69,14 +69,14 @@ func (f *catFixture) move(t *testing.T, ch, category int64) {
 	}
 }
 
-func TestMigrate_075NothingIsSynced(t *testing.T) {
+func TestMigrate_076NothingIsSynced(t *testing.T) {
 	database := openMemory(t)
 	ctx := context.Background()
-	if err := db.MigrateFS(database, migrationsUpTo(t, "075_")); err != nil {
-		t.Fatalf("MigrateFS() building pre-075 schema: %v", err)
+	if err := db.MigrateFS(database, migrationsUpTo(t, "076_")); err != nil {
+		t.Fatalf("MigrateFS() building pre-076 schema: %v", err)
 	}
 	if columnExists(t, database, "channels", "permissions_synced") {
-		t.Fatal("the pre-075 schema should not have permissions_synced")
+		t.Fatal("the pre-076 schema should not have permissions_synced")
 	}
 	if _, err := database.ExecContext(ctx, `INSERT INTO channel_categories (id, name) VALUES (1, 'Games')`); err != nil {
 		t.Fatal(err)
@@ -88,7 +88,7 @@ func TestMigrate_075NothingIsSynced(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate() applying 075: %v", err)
+		t.Fatalf("Migrate() applying 076: %v", err)
 	}
 	if ok, err := database.ChannelPermissionsSynced(ctx, 1); err != nil || ok {
 		t.Errorf("existing channel synced = %v, %v; the backfill must sync nothing", ok, err)

@@ -39,7 +39,7 @@ const (
 // channel's CATEGORY deliberately constrains nothing: grouping is a display
 // concern, so the server validates the type alone (see the admin handler's
 // original rationale, kept verbatim through the B3-8 move).
-var validChannelTypes = []string{"text", "voice", "announcement"}
+var validChannelTypes = []string{"text", "voice", "announcement", "forum"}
 
 // ChannelMeta is the cleaned, validated name/topic/category triple every
 // channel write goes through.
@@ -167,7 +167,7 @@ func (s *ChannelService) AdminCreateChannel(ctx context.Context, actorID int64, 
 		req.Type = "text"
 	}
 	if !slices.Contains(validChannelTypes, req.Type) {
-		return nil, nil, fmt.Errorf("type must be one of text, voice, announcement%.0w", ErrBadRequest)
+		return nil, nil, fmt.Errorf("type must be one of text, voice, announcement, forum%.0w", ErrBadRequest)
 	}
 	// category_id wins over the legacy string, so the string is not even
 	// looked at when an id is sent.

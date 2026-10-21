@@ -193,7 +193,7 @@ var erasureStatements = []struct {
 	{"user_privacy", `DELETE FROM user_privacy WHERE user_id = ?1`},
 	{"user_blocks", `DELETE FROM user_blocks WHERE blocker_id = ?1 OR blocked_id = ?1`},
 	{"channel_user_overrides", `DELETE FROM channel_user_overrides WHERE user_id = ?`},
-	// Category permission templates (migration 075, class 18c): the per-member
+	// Category permission templates (migration 076, class 18c): the per-member
 	// rows of a category's template. The users delete below would cascade them,
 	// but this is the explicit statement the inventory's zero is proved against.
 	{"category_user_overrides", `DELETE FROM category_user_overrides WHERE user_id = ?`},

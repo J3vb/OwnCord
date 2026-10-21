@@ -62,7 +62,7 @@ func TestCreateChannel_UnknownTypeRejected(t *testing.T) {
 
 	body := map[string]any{
 		"name":     "weird",
-		"type":     "forum",
+		"type":     "stage",
 		"category": "Chat",
 	}
 	w := doRequest(t, handler, http.MethodPost, "/channels", token, body)
@@ -74,6 +74,39 @@ func TestCreateChannel_UnknownTypeRejected(t *testing.T) {
 		if resp["error"] != "INVALID_INPUT" {
 			t.Errorf("error code = %q, want INVALID_INPUT", resp["error"])
 		}
+	}
+}
+
+// A forum is a creatable type (WP 6.9d): the channel comes back typed forum,
+// with its settings at their defaults and an empty tag list.
+func TestCreateChannel_ForumAccepted(t *testing.T) {
+	// The real migrations: the shared test schema has no forum tables.
+	database := openMigratedAdminDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	token := createAdminUser(t, database)
+
+	w := doRequest(t, handler, http.MethodPost, "/channels", token, map[string]any{
+		"name": "ideas", "type": "forum",
+	})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Type  string `json:"type"`
+		Forum *struct {
+			Tags                      []any `json:"tags"`
+			RequireTag                bool  `json:"require_tag"`
+			DefaultAutoArchiveMinutes int   `json:"default_auto_archive_minutes"`
+		} `json:"forum"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Type != "forum" || resp.Forum == nil {
+		t.Fatalf("created %+v, want a forum carrying its settings", resp)
+	}
+	if resp.Forum.RequireTag || resp.Forum.DefaultAutoArchiveMinutes != 4320 || resp.Forum.Tags == nil || len(resp.Forum.Tags) != 0 {
+		t.Errorf("forum defaults = %+v, want require_tag false, 4320 minutes, tags []", resp.Forum)
 	}
 }
 

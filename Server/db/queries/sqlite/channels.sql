@@ -15,7 +15,9 @@ SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
        c.afk,
        COALESCE(c.parent_channel_id, 0) AS parent_channel_id,
        c.thread_archived,
-       c.thread_locked
+       c.thread_locked,
+       c.forum_require_tag,
+       c.forum_default_auto_archive_minutes
 FROM channels c
 LEFT JOIN channels p ON p.id = c.parent_channel_id
 LEFT JOIN channel_categories cc ON cc.id = c.category_id
@@ -39,7 +41,9 @@ SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
        c.afk,
        COALESCE(c.parent_channel_id, 0) AS parent_channel_id,
        c.thread_archived,
-       c.thread_locked
+       c.thread_locked,
+       c.forum_require_tag,
+       c.forum_default_auto_archive_minutes
 FROM channels c
 LEFT JOIN channels p ON p.id = c.parent_channel_id
 LEFT JOIN channel_categories cc ON cc.id = c.category_id WHERE c.id = ?;
@@ -61,7 +65,9 @@ SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
        c.afk,
        COALESCE(c.parent_channel_id, 0) AS parent_channel_id,
        c.thread_archived,
-       c.thread_locked
+       c.thread_locked,
+       c.forum_require_tag,
+       c.forum_default_auto_archive_minutes
 FROM channels c
 LEFT JOIN channels p ON p.id = c.parent_channel_id
 LEFT JOIN channel_categories cc ON cc.id = c.category_id WHERE c.afk = 1;

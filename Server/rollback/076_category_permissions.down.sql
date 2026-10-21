@@ -1,4 +1,4 @@
--- Rollback of migration 075: category permission templates are forgotten.
+-- Rollback of migration 076: category permission templates are forgotten.
 --
 -- Cost: every category's template rows (category_overrides and
 -- category_user_overrides) are dropped, and every channel forgets whether it
@@ -15,4 +15,4 @@ DROP TABLE IF EXISTS category_user_overrides;
 
 DROP TABLE IF EXISTS category_overrides;
 
-DELETE FROM schema_versions WHERE version = '075_category_permissions.sql';
+DELETE FROM schema_versions WHERE version = '076_category_permissions.sql';

@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 221 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 223 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -70,6 +70,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | PATCH   | `/admin/api/channels/{id}`                                           |
 | GET     | `/admin/api/channels/{id}/access/explain`                            |
 | POST    | `/admin/api/channels/{id}/access/preview`                            |
+| PUT     | `/admin/api/channels/{id}/forum`                                     |
 | GET     | `/admin/api/channels/{id}/permissions`                               |
 | POST    | `/admin/api/channels/{id}/permissions/sync`                          |
 | DELETE  | `/admin/api/channels/{id}/permissions/{roleId}`                      |
@@ -195,6 +196,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | PATCH   | `/api/v1/moderation/channels/categories/{id}`                        |
 | DELETE  | `/api/v1/moderation/channels/{id}`                                   |
 | PATCH   | `/api/v1/moderation/channels/{id}`                                   |
+| PUT     | `/api/v1/moderation/channels/{id}/forum`                             |
 | GET     | `/api/v1/moderation/members/`                                        |
 | PATCH   | `/api/v1/moderation/members/{id}`                                    |
 | DELETE  | `/api/v1/moderation/members/{id}/sessions`                           |
@@ -5491,6 +5493,13 @@ touched categories, so the server re-broadcasts `channel_update` for each of
 them and then sends `channel_categories` to connected managers (see
 [protocol.md](protocol.md#channel_categories-server---client)).
 
+A name already used by another channel of the same `type` in the same
+category (`category_id`) is refused with `409 CHANNEL_NAME_TAKEN`, ignoring case: a create,
+or a `PATCH` that changes the name or the category. It is a check at write
+time, not a database constraint, so channels that already share a name are
+left as they are, and a `PATCH` that leaves both name and category alone still
+saves.
+
 ### Category permissions (WP 6.5d)
 
 A category carries permission overrides that its channels can stay **synced**
@@ -5533,13 +5542,6 @@ because a new category has no template to sync with. Deleting a category drops i
 channels keep their rows and become unsynced. `permissions_synced` is on the
 admin channel list and on `GET /admin/api/channels/{id}/permissions`; it is not
 on the websocket channel payload.
-
-A name already used by another channel of the same `type` in the same
-category (`category_id`) is refused with `409 CHANNEL_NAME_TAKEN`, ignoring case: a create,
-or a `PATCH` that changes the name or the category. It is a check at write
-time, not a database constraint, so channels that already share a name are
-left as they are, and a `PATCH` that leaves both name and category alone still
-saves.
 
 ---
 

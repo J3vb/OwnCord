@@ -81,8 +81,8 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 }
 
 // buildReady reads and encodes the ready server→client message.
-func (h *Hub) buildReady(ctx context.Context, database ReadySnapshotReader, userID int64, role *db.Role) (*readyPayload, error) {
-	f, err := h.readReady(ctx, database, userID, role)
+func (h *Hub) buildReady(ctx context.Context, database ReadySnapshotReader, userID int64, role *db.Role, feat clientFeatures) (*readyPayload, error) {
+	f, err := h.readReady(ctx, database, userID, role, feat)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +141,7 @@ func (h *Hub) writeReadyMembers(w *bufio.Writer, roster *memberRoster, viewerID 
 // carries (commitReadyTimeouts).
 func (h *Hub) buildFreshReady(ctx context.Context, database ReadySnapshotReader, c *Client, role *db.Role) (*readyPayload, error) {
 	gen := h.timeoutViewGenNow()
-	ready, err := h.buildReady(ctx, database, c.userID, role)
+	ready, err := h.buildReady(ctx, database, c.userID, role, c.features)
 	if ready != nil {
 		h.commitReadyTimeouts(c, gen, ready.timeoutsFull)
 	}
