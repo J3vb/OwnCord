@@ -707,3 +707,90 @@
   gap: 8px;
   cursor: pointer;
 }
+
+/* Poll composer (WP 6.9b). */
+.modal.poll-composer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  width: min(520px, 94vw);
+}
+.poll-composer .modal-header {
+  flex: none;
+  padding-bottom: 12px;
+}
+.poll-composer .modal-footer {
+  flex: none;
+}
+.poll-composer .modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.poll-field,
+.poll-answer-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.poll-answers {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.poll-composer .form-input {
+  flex: 1;
+  min-width: 0;
+}
+.poll-counter {
+  min-width: 44px;
+  text-align: right;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.poll-counter.over {
+  color: var(--text-danger);
+  font-weight: 700;
+}
+.poll-emoji-btn {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-muted);
+}
+.poll-add {
+  align-self: flex-start;
+}
+.poll-options {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.poll-options select {
+  flex: 0 0 auto;
+}
+.poll-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.poll-note {
+  min-height: 1.2em;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.poll-note.is-error {
+  color: var(--text-danger);
+}
+.poll-emoji-pop {
+  position: absolute;
+  right: 16px;
+  bottom: 70px;
+  z-index: 5;
+}

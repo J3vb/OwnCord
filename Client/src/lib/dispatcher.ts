@@ -63,6 +63,8 @@ import {
   handleChatMessage,
   handleChatSendOk,
   handleMessagingError,
+  handlePollUpdate,
+  handlePollVoteOk,
   handleReactionUpdate,
   handleSendFailure,
   handleTyping,
@@ -253,6 +255,11 @@ export function wireDispatcher(
   // ── Reactions ───────────────────────────────────────────
 
   unsubs.push(ws.on(S.REACTION_UPDATE, handleReactionUpdate));
+
+  // ── Polls ───────────────────────────────────────────────
+
+  unsubs.push(ws.on(S.POLL_UPDATE, handlePollUpdate));
+  unsubs.push(ws.on(S.POLL_VOTE_OK, handlePollVoteOk));
 
   // ── Typing ────────────────────────────────────────────
 
