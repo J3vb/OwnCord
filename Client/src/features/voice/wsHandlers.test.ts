@@ -428,7 +428,7 @@ describe("handleVoiceMoved toast", () => {
     await vi.waitFor(() => expect(socket.send).toHaveBeenCalled());
     noteJoinSent("join-1");
     setVoiceStatus("joining");
-    handleVoiceJoinRollback({ code: "FORBIDDEN", message: "no" } as Payload<"error">, "join-1");
+    handleVoiceJoinRollback({ code: "FORBIDDEN", message: "no" }, "join-1");
     joinVoiceChannel(4);
     ack(4);
     expect(showToast).not.toHaveBeenCalled();
