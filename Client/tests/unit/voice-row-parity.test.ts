@@ -168,7 +168,12 @@ describe("voice row view matches today's renderVoiceChannelItem", () => {
     localMuted.clear();
     volumes.clear();
     resetSafetyStore();
-    channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+    channelsStore.setState(() => ({
+      channels: new Map(),
+      activeChannelId: null,
+      roles: [],
+      categories: [],
+    }));
     authStore.setState(() => ({
       token: "tok",
       user: { id: SELF, username: "user1", avatar: null, role: "member" },

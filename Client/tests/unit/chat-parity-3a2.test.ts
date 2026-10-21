@@ -50,7 +50,12 @@ beforeAll(async () => {
 
 beforeEach(() => {
   localStorage.clear();
-  channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  channelsStore.setState(() => ({
+    channels: new Map(),
+    activeChannelId: null,
+    roles: [],
+    categories: [],
+  }));
   setChannels(CHANNELS);
   membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
   clearCustomEmoji();

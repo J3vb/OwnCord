@@ -98,6 +98,10 @@ test("native privacy journey: consent gates the broker, a warm re-entry does not
         await nativeLoginAndReady(page);
         await waitForMessages(page);
         await expect(channelItem(page, "privacy-other")).toBeVisible();
+        // An uncategorized channel sorts above the seeded categories, so it is
+        // the one selected on login; the journey starts in "general".
+        await channelItem(page, "general").click();
+        await waitForMessages(page);
         // REST rides the Rust TOFU tunnel pinned to the server, so the
         // renderer's only first-party destination is that tunnel's loopback
         // host. start_http_proxy reuses a live tunnel, returning its port.

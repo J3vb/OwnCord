@@ -65,7 +65,12 @@ function resetStores(): void {
     listenOnly: false,
     voiceStatus: "idle",
   }));
-  channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  channelsStore.setState(() => ({
+    channels: new Map(),
+    activeChannelId: null,
+    roles: [],
+    categories: [],
+  }));
   membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
   setConnectionStatus("connected");
 }

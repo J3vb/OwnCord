@@ -33,7 +33,12 @@ function resetStores(): void {
     detachedChannels: new Set(),
   }));
   membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
-  channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  channelsStore.setState(() => ({
+    channels: new Map(),
+    activeChannelId: null,
+    roles: [],
+    categories: [],
+  }));
 }
 
 function makeMessage(id: number): Message {

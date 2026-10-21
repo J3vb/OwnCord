@@ -142,7 +142,12 @@ describe("dmStore", () => {
 
   describe("closeDmLocally", () => {
     beforeEach(() => {
-      channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+      channelsStore.setState(() => ({
+        channels: new Map(),
+        activeChannelId: null,
+        roles: [],
+        categories: [],
+      }));
     });
 
     it("removes the channel and does not run the fallback when it was not active", () => {

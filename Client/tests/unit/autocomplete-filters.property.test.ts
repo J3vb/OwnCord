@@ -68,7 +68,12 @@ function signInAs(role: string, permissions: number): void {
     motd: null,
     isAuthenticated: true,
   }));
-  channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  channelsStore.setState(() => ({
+    channels: new Map(),
+    activeChannelId: null,
+    roles: [],
+    categories: [],
+  }));
   setRoles([{ id: 1, name: role, color: null, permissions }]);
   channelsStore.flush();
 }

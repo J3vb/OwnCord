@@ -369,7 +369,12 @@ import {
 } from "../../src/features/direct-messages/callAlerts";
 
 function resetStores(): void {
-  channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  channelsStore.setState(() => ({
+    channels: new Map(),
+    activeChannelId: null,
+    roles: [],
+    categories: [],
+  }));
   authStore.setState(() => ({
     token: "t",
     user: { id: 1, username: "alice", avatar: null, role: "member" },

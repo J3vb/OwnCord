@@ -243,7 +243,12 @@ export const shards = {
   // mutant there is static, so each one re-runs the whole suite; on runs
   // 38902717516 and 38926807609 they used most of lib-rest-1's 90 minutes.
   // This shard skips static mutants (see ignoreStaticShards below).
-  "lib-rest-9": ["src/lib/icons.ts", "src/lib/imageHeader.ts"],
+  "lib-rest-9": [
+    "src/lib/icons.ts",
+    "src/lib/imageHeader.ts",
+    "src/features/channels/categoryActions.ts",
+    "src/features/channels/collapsedMigration.ts",
+  ], // the 6.5b category calls and the collapsed-name migration (about 100 lines together) joined the smallest shard
   "stores-1": [
     "src/stores/auth.store.ts",
     "src/stores/emoji.store.ts",

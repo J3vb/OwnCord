@@ -6,6 +6,7 @@ import {
   channelsStore,
   setChannels,
   setRoles,
+  setCategories,
   setActiveChannel,
   removeChannel,
   addChannel,
@@ -55,8 +56,46 @@ import { registerSessionReset } from "../../lib/sessionRegistry";
 /** The channel/role/member snapshot of `ready`. */
 export function applyReadyChannels(payload: Payload<"ready">): void {
   setChannels(payload.channels);
+  // Managers only; absent for everyone else and for older servers, which leaves
+  // the list empty so the groups come from the channels alone (WP 6.5a).
+  setCategories(payload.categories ?? []);
   setRoles(payload.roles ?? []);
   setMembers(payload.members);
+}
+
+/** The first text-like channel in sidebar order (D7): uncategorized rows
+ *  first, then categories by (category_position, category_id), each by
+ *  (position, id). An older server without category ids sorts by position. */
+type ReadyChannel = Payload<"ready">["channels"][number];
+
+function sidebarSortKey(ch: ReadyChannel): number[] {
+  const cat = ch.category_id ?? 0;
+  return cat === 0
+    ? [0, 0, 0, ch.position, ch.id]
+    : [1, ch.category_position ?? 0, cat, ch.position, ch.id];
+}
+
+function sortsBefore(a: number[], b: number[]): boolean {
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i] ?? 0;
+    const y = b[i] ?? 0;
+    if (x !== y) return x < y;
+  }
+  return false;
+}
+
+function firstTextInSidebarOrder(channels: Payload<"ready">["channels"]): ReadyChannel | undefined {
+  let best: ReadyChannel | undefined;
+  let bestKey: number[] = [];
+  for (const ch of channels) {
+    if (!isTextLikeChannel(ch)) continue;
+    const k = sidebarSortKey(ch);
+    if (best === undefined || sortsBefore(k, bestKey)) {
+      best = ch;
+      bestKey = k;
+    }
+  }
+  return best;
 }
 
 /**
@@ -93,7 +132,7 @@ export function applyReadyActiveChannel(payload: Payload<"ready">): number | nul
     if (rememberedVisible) {
       setActiveChannel(remembered, { clearUnread: false });
     } else {
-      const firstText = payload.channels.find((ch) => isTextLikeChannel(ch));
+      const firstText = firstTextInSidebarOrder(payload.channels);
       if (firstText !== undefined) {
         setActiveChannel(firstText.id, { clearUnread: false });
       }
@@ -252,6 +291,11 @@ export function handleChannelCreate(payload: Payload<"channel_create">): void {
 
 export function handleChannelUpdate(payload: Payload<"channel_update">): void {
   updateChannel(payload);
+}
+
+/** The manager's category list changed: replace what we hold (WP 6.5a). */
+export function handleChannelCategories(payload: Payload<"channel_categories">): void {
+  setCategories(payload.categories);
 }
 
 /** Another device of this account acknowledged or revoked a labelled channel (B5-7). */

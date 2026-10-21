@@ -1,27 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import {
-  CHANNEL_TYPES,
-  defaultTypeForCategory,
-  createCreateChannelModal,
-} from "@components/CreateChannelModal";
+import { CHANNEL_TYPES, createCreateChannelModal } from "@components/CreateChannelModal";
 import type { CreateChannelModalOptions } from "@components/CreateChannelModal";
-import { setChannels, UNCATEGORIZED_VOICE_CATEGORY } from "@stores/channels.store";
-
-// ---------------------------------------------------------------------------
-// Pure function tests
-// ---------------------------------------------------------------------------
-
-describe("defaultTypeForCategory", () => {
-  it("defaults to voice only in the synthetic uncategorized-voice group", () => {
-    expect(defaultTypeForCategory(UNCATEGORIZED_VOICE_CATEGORY)).toBe("voice");
-  });
-
-  it("defaults to text everywhere else, voice-sounding names included", () => {
-    for (const category of ["Voice Channels", "VOICE CHANNELS", "Text Channels", "Chat", ""]) {
-      expect(defaultTypeForCategory(category)).toBe("text");
-    }
-  });
-});
+import { NO_CATEGORY, setChannels, type CategoryRef } from "@stores/channels.store";
 
 describe("CHANNEL_TYPES", () => {
   it("offers every channel type, regardless of category", () => {
@@ -47,9 +27,14 @@ describe("CreateChannelModal", () => {
     document.querySelectorAll("[data-testid='create-channel-modal']").forEach((el) => el.remove());
   });
 
-  function makeModal(category: string, overrides?: Partial<CreateChannelModalOptions>) {
+  /** A bare string is a name-only category (a server that sends no ids). */
+  function makeModal(
+    category: string | CategoryRef,
+    overrides?: Partial<CreateChannelModalOptions>,
+  ) {
     const options: CreateChannelModalOptions = {
-      category,
+      category: typeof category === "string" ? { id: 0, name: category } : category,
+      ...(overrides?.type === undefined ? {} : { type: overrides.type }),
       onCreate: overrides?.onCreate ?? vi.fn(async () => {}),
       onClose: overrides?.onClose ?? vi.fn(),
     };
@@ -65,7 +50,7 @@ describe("CreateChannelModal", () => {
         ...((container.querySelector(`[data-testid='${testId}']`) as HTMLInputElement).labels ??
           []),
       ].map((l) => l.textContent);
-    expect(labelOf("channel-category-input")).toEqual(["Category"]);
+    expect(labelOf("channel-category-select")).toEqual(["Category"]);
     expect(labelOf("channel-name-input")).toEqual(["Name"]);
     expect(labelOf("channel-type-select")).toEqual(["Type"]);
     modal.destroy?.();
@@ -104,39 +89,79 @@ describe("CreateChannelModal", () => {
     modal.destroy?.();
   });
 
-  it("pre-fills the category as editable text", () => {
-    const { modal } = makeModal("Gaming");
-    const input = container.querySelector(
-      "[data-testid='channel-category-input']",
-    ) as HTMLInputElement;
-    expect(input.value).toBe("Gaming");
-    expect(input.hasAttribute("disabled")).toBe(false);
+  const categoryChannels = [
+    {
+      id: 1,
+      name: "general",
+      type: "text",
+      category: "Chat",
+      category_id: 2,
+      category_position: 0,
+      position: 0,
+    },
+    {
+      id: 2,
+      name: "lounge",
+      type: "voice",
+      category: "Gaming",
+      category_id: 5,
+      category_position: 1,
+      position: 1,
+    },
+    { id: 3, name: "loose", type: "text", category: null, position: 2 },
+  ] as const;
+  const select = () =>
+    container.querySelector("[data-testid='channel-category-select']") as HTMLSelectElement;
+
+  it("pre-selects the category the create was opened from", () => {
+    setChannels(categoryChannels);
+    const { modal } = makeModal({ id: 5, name: "Gaming" });
+    expect(select().value).toBe("id:5");
+    expect(select().hasAttribute("disabled")).toBe(false);
     modal.destroy?.();
   });
 
-  it("suggests the categories already in use via a datalist", () => {
-    setChannels([
-      { id: 1, name: "general", type: "text", category: "Chat", position: 0 },
-      { id: 2, name: "lounge", type: "voice", category: "Gaming", position: 1 },
-      { id: 3, name: "loose", type: "text", category: null, position: 2 },
+  it("pre-selects No category from the server menu", () => {
+    setChannels(categoryChannels);
+    const { modal } = makeModal(NO_CATEGORY);
+    expect(select().value).toBe("");
+    modal.destroy?.();
+  });
+
+  it("offers No category first, then the known categories", () => {
+    setChannels(categoryChannels);
+    const { modal } = makeModal({ id: 2, name: "Chat" });
+    expect(Array.from(select().options).map((o) => [o.value, o.textContent])).toEqual([
+      ["", "No category"],
+      ["id:2", "Chat"],
+      ["id:5", "Gaming"],
     ]);
-    const { modal } = makeModal("Chat");
-    const list = container.querySelector("#create-channel-categories");
-    const values = Array.from(list?.querySelectorAll("option") ?? []).map((o) =>
-      o.getAttribute("value"),
-    );
-    expect(values).toEqual(["Chat", "Gaming"]);
     modal.destroy?.();
   });
 
-  it("submits an edited category rather than the one it opened on", async () => {
+  it("offers the free-text categories of a server that sends no ids, by name", () => {
+    setChannels([{ id: 1, name: "general", type: "text", category: "Chat", position: 0 }]);
+    const { modal } = makeModal("Chat");
+    expect(select().value).toBe("name:Chat");
+    modal.destroy?.();
+  });
+
+  it("pre-selects the type hint it was given", () => {
+    const { modal } = makeModal(NO_CATEGORY, { type: "voice" });
+    expect(
+      (container.querySelector("[data-testid='channel-type-select']") as HTMLSelectElement).value,
+    ).toBe("voice");
+    modal.destroy?.();
+  });
+
+  it("submits the chosen category id rather than the one it opened on", async () => {
+    setChannels(categoryChannels);
     const onCreate = vi.fn(async () => {});
-    const { modal } = makeModal("Chat", { onCreate });
+    const { modal } = makeModal({ id: 2, name: "Chat" }, { onCreate });
 
     (container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement).value =
       "lounge";
-    (container.querySelector("[data-testid='channel-category-input']") as HTMLInputElement).value =
-      "  Gaming  ";
+    select().value = "id:5";
     (container.querySelector("[data-testid='channel-type-select']") as HTMLSelectElement).value =
       "voice";
     (container.querySelector("[data-testid='channel-create-submit']") as HTMLButtonElement).click();
@@ -145,10 +170,22 @@ describe("CreateChannelModal", () => {
       expect(onCreate).toHaveBeenCalledWith({
         name: "lounge",
         type: "voice",
-        category: "Gaming",
+        category_id: 5,
         position: expect.any(Number),
       });
     });
+    modal.destroy?.();
+  });
+
+  it("No category sends both fields, so a server from before categories clears it too", async () => {
+    setChannels(categoryChannels);
+    const onCreate = vi.fn(async (_data: object) => {});
+    const { modal } = makeModal({ id: 2, name: "Chat" }, { onCreate });
+    (container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement).value = "x";
+    select().value = "";
+    (container.querySelector("[data-testid='channel-create-submit']") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(onCreate).toHaveBeenCalled());
+    expect(onCreate.mock.calls[0]![0]).toMatchObject({ category_id: 0, category: "" });
     modal.destroy?.();
   });
 
@@ -292,7 +329,9 @@ describe("CreateChannelModal", () => {
       { id: 2, name: "b", type: "voice", category: "Chat", position: 7 },
       { id: 3, name: "c", type: "text", category: "Other", position: 40 },
     ]);
-    const onCreate = vi.fn(async (_data: { position: number; category: string }) => {});
+    const onCreate = vi.fn(
+      async (_data: { position: number; category?: string; category_id?: number }) => {},
+    );
     const { modal } = makeModal("Chat", { onCreate });
     (container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement).value =
       "fresh";
@@ -308,8 +347,10 @@ describe("CreateChannelModal", () => {
       { id: 2, name: "v2", type: "voice", category: "", position: 5 },
       { id: 3, name: "t", type: "text", category: null, position: 9 },
     ]);
-    const onCreate = vi.fn(async (_data: { position: number; category: string }) => {});
-    const { modal } = makeModal(UNCATEGORIZED_VOICE_CATEGORY, { onCreate });
+    const onCreate = vi.fn(
+      async (_data: { position: number; category?: string; category_id?: number }) => {},
+    );
+    const { modal } = makeModal(NO_CATEGORY, { onCreate, type: "voice" });
     (container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement).value =
       "fresh";
     (container.querySelector("[data-testid='channel-create-submit']") as HTMLButtonElement).click();
@@ -318,9 +359,27 @@ describe("CreateChannelModal", () => {
     modal.destroy?.();
   });
 
+  it("sends position one past the highest in a category chosen by id", async () => {
+    setChannels([
+      { id: 1, name: "a", type: "text", category: "Chat", category_id: 2, position: 3 },
+      { id: 2, name: "b", type: "voice", category: "Chat", category_id: 2, position: 7 },
+      { id: 3, name: "c", type: "text", category: "Other", category_id: 3, position: 40 },
+    ]);
+    const onCreate = vi.fn(async (_data: { position: number; category_id?: number }) => {});
+    const { modal } = makeModal({ id: 2, name: "Chat" }, { onCreate });
+    (container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement).value =
+      "fresh";
+    (container.querySelector("[data-testid='channel-create-submit']") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(onCreate).toHaveBeenCalled());
+    expect(onCreate.mock.calls[0]![0]).toMatchObject({ category_id: 2, position: 8 });
+    modal.destroy?.();
+  });
+
   it("sorts the first channel of a brand-new category below every other channel", async () => {
     setChannels([{ id: 1, name: "a", type: "text", category: "Chat", position: 3 }]);
-    const onCreate = vi.fn(async (_data: { position: number; category: string }) => {});
+    const onCreate = vi.fn(
+      async (_data: { position: number; category?: string; category_id?: number }) => {},
+    );
     const { modal } = makeModal("Brand New", { onCreate });
     (container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement).value =
       "fresh";

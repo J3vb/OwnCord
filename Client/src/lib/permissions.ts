@@ -131,6 +131,16 @@ export function canManageChannels(): boolean {
 }
 
 /**
+ * The manager's category list, but only while the viewer currently holds
+ * MANAGE_CHANNELS. A viewer demoted mid-session keeps the stale list in the
+ * store until the next ready, so every reader goes through this: without the
+ * bit it is empty and the groups come from the channels' own fields.
+ */
+export function visibleCategories(): ChannelsState["categories"] {
+  return canManageChannels() ? channelsStore.getState().categories : [];
+}
+
+/**
  * Whether the signed-in user's role holds VIEW_AUDIT_LOG. Gates the desktop
  * entry point into the admin panel's audit log; the panel re-checks the bit
  * on every request.
