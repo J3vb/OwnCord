@@ -15,7 +15,7 @@
 import { Disposable } from "@lib/disposable";
 import { createElement, setOwnedTimeout } from "@lib/dom";
 import { getChannelsByCategory, type CategoryRef } from "@stores/channels.store";
-import { canManageChannels } from "@lib/permissions";
+import { canManageChannels, visibleCategories } from "@lib/permissions";
 import { collapseCategories, isCategoryCollapsed, toggleCategory } from "@stores/ui.store";
 import { hasUnread, markChannelsRead } from "@lib/read-state";
 import {
@@ -96,7 +96,7 @@ export function attachCategoryContextMenu(
     // Read live: the group's element is reused across renders, so the rows it
     // was built with may be stale by the time the menu opens.
     const category = target.key;
-    const groups = getChannelsByCategory();
+    const groups = getChannelsByCategory(visibleCategories());
     const unreadIds = (groups.get(category) ?? [])
       .filter((ch) => ch.type !== "voice" && hasUnread(ch.id))
       .map((ch) => ch.id);

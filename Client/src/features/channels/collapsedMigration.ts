@@ -8,6 +8,7 @@
  */
 
 import { categoryGroups, channelsStore } from "../../stores/channels.store";
+import { visibleCategories } from "../../lib/permissions";
 import { migrateCollapsedCategoryNames } from "../../stores/ui.store";
 
 /**
@@ -16,7 +17,8 @@ import { migrateCollapsedCategoryNames } from "../../stores/ui.store";
  * channels write.
  */
 export function migrateCollapsedToCategoryIds(): boolean {
-  const { channels, categories } = channelsStore.getState();
+  const { channels } = channelsStore.getState();
+  const categories = visibleCategories();
   if (channels.size === 0) return false;
   const keysByName = new Map<string, string>();
   for (const g of categoryGroups(channels, categories)) {

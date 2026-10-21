@@ -28,6 +28,8 @@ import {
 } from "../../src/stores/ui.store";
 import { voiceStore } from "../../src/stores/voice.store";
 import { membersStore } from "../../src/stores/members.store";
+import { channelGroups } from "../../src/features/channels/channelRowModel";
+import { visibleCategories } from "../../src/lib/permissions";
 import { migrateCollapsedToCategoryIds } from "../../src/features/channels/collapsedMigration";
 import {
   CATEGORY_LIST_STALE,
@@ -47,7 +49,7 @@ function ch(row: Row, category: string | null = null): ReadyChannel {
 }
 
 function keys(): (string | null)[] {
-  return [...getChannelsByCategory().keys()];
+  return [...getChannelsByCategory([]).keys()];
 }
 
 beforeEach(() => {
@@ -92,7 +94,7 @@ describe("grouping and order (D7)", () => {
       ),
     ]);
     expect(
-      getChannelsByCategory()
+      getChannelsByCategory([])
         .get("cat:2")
         ?.map((c) => c.id),
     ).toEqual([2, 3, 1]);
@@ -132,7 +134,7 @@ describe("grouping and order (D7)", () => {
       ["cat:8", "Empty", 0],
       ["cat:2", "Renamed", 1],
     ]);
-    expect(getKnownCategories().map((k) => k.name)).toEqual(["Empty", "Renamed"]);
+    expect(getKnownCategories(categories).map((k) => k.name)).toEqual(["Empty", "Renamed"]);
   });
 
   it("a non-manager derives groups from channels alone and never sees an empty one", () => {
@@ -165,6 +167,55 @@ describe("grouping and order (D7)", () => {
       ["cat:9", "Fresh"],
     ]);
     expect(groups[1]?.channels.map((c) => c.id)).toEqual([2]);
+  });
+
+  it("a viewer demoted mid-session drops the stale list: empty categories vanish, channel fields rule", () => {
+    setChannels([
+      ch(
+        { id: 1, name: "a", type: "text", position: 0, category_id: 2, category_position: 5 },
+        "Real name",
+      ),
+      ch(
+        { id: 2, name: "b", type: "text", position: 1, category_id: 3, category_position: 6 },
+        "Other",
+      ),
+    ]);
+    setCategories([
+      { id: 3, name: "Stale other", position: 0 },
+      { id: 2, name: "Stale name", position: 1 },
+      { id: 4, name: "Empty", position: 2 },
+    ]);
+    const { channels, roles } = channelsStore.getState();
+    const list = (selfRole: string) => ({
+      channels,
+      roles,
+      selfRole,
+      categories: channelsStore.getState().categories,
+    });
+    // Still a manager: the list wins and the empty category shows.
+    expect(channelGroups(list("owner")).map((g) => [g.key, g.name])).toEqual([
+      ["cat:3", "Stale other"],
+      ["cat:2", "Stale name"],
+      ["cat:4", "Empty"],
+    ]);
+    // Demoted: the same store still holds the list, but it no longer counts.
+    expect(channelGroups(list("member")).map((g) => [g.key, g.name])).toEqual([
+      ["cat:2", "Real name"],
+      ["cat:3", "Other"],
+    ]);
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 2, username: "Me", avatar: null, role: "member" },
+      serverName: "S",
+      motd: null,
+      isAuthenticated: true,
+    }));
+    expect(visibleCategories()).toEqual([]);
+    expect(getKnownCategories(visibleCategories()).map((k) => k.name)).toEqual([
+      "Real name",
+      "Other",
+    ]);
+    expect([...getChannelsByCategory(visibleCategories()).keys()]).toEqual(["cat:2", "cat:3"]);
   });
 
   it("a reconnect's ready restates the list wholesale", () => {
@@ -220,7 +271,7 @@ describe("collapse state follows the category id", () => {
 
     // Renamed elsewhere; this client reconnects and the ready carries the new name.
     setChannels(games("Play"));
-    expect(getChannelsByCategory().has("cat:5")).toBe(true);
+    expect(getChannelsByCategory([]).has("cat:5")).toBe(true);
     expect(isCategoryCollapsed("cat:5")).toBe(true);
     expect(JSON.parse(localStorage.getItem("owncord:collapsed:host") ?? "[]")).toEqual(["cat:5"]);
   });

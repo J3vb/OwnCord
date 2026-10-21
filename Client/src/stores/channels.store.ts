@@ -527,9 +527,9 @@ export interface KnownCategory {
   readonly name: string;
 }
 
-export function getKnownCategories(): KnownCategory[] {
+export function getKnownCategories(categories: readonly ChannelCategory[]): KnownCategory[] {
   return channelsStore.select((s) =>
-    categoryGroups(s.channels, s.categories)
+    categoryGroups(s.channels, categories)
       .filter((g) => g.name !== null && g.key !== UNCATEGORIZED_VOICE_CATEGORY)
       .map((g) => ({ id: g.categoryId, name: g.name ?? "" })),
   );
@@ -543,7 +543,8 @@ export function getKnownCategories(): KnownCategory[] {
  * — the server's `ORDER BY position, id` — with text-type channels before
  * voice (N23).
  *
- * `categories` is the manager's list: it adds the categories with no channel
+ * `categories` is the manager's list (callers pass `visibleCategories()`, which is
+ * empty once the viewer has lost MANAGE_CHANNELS): it adds the categories with no channel
  * and is authoritative for the name and position of the ones that have some.
  * A non-manager passes none, and a channel whose category the list never named
  * still draws its group from the channel's own category fields.
@@ -625,14 +626,16 @@ export function categoryGroups(
 }
 
 /** The groups keyed by `CategoryGroup.key`, in sidebar order. */
-export function getChannelsByCategory(): Map<string | null, readonly Channel[]> {
-  return channelsStore.select((s) => groupChannelsByCategory(s.channels, s.categories));
+export function getChannelsByCategory(
+  categories: readonly ChannelCategory[],
+): Map<string | null, readonly Channel[]> {
+  return channelsStore.select((s) => groupChannelsByCategory(s.channels, categories));
 }
 
 /** `getChannelsByCategory` over a channel map the caller already holds. */
 export function groupChannelsByCategory(
   channels: ReadonlyMap<number, Channel>,
-  categories: readonly ChannelCategory[] = [],
+  categories: readonly ChannelCategory[],
 ): Map<string | null, readonly Channel[]> {
   return new Map(categoryGroups(channels, categories).map((g) => [g.key, g.channels]));
 }

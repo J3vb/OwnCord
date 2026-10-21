@@ -170,16 +170,16 @@ describe("text before voice inside a category (N23)", () => {
   });
 
   it("lists text-type channels first, each kind in position order", () => {
-    const grouped = getChannelsByCategory();
+    const grouped = getChannelsByCategory([]);
     expect(grouped.get("Mix")!.map((c) => c.id)).toEqual([2, 3, 1, 4]);
   });
 
   it("keeps the category order the position sort gave", () => {
-    expect([...getChannelsByCategory().keys()]).toEqual(["Only Voice", "Mix"]);
+    expect([...getChannelsByCategory([]).keys()]).toEqual(["Only Voice", "Mix"]);
   });
 
   it("Move Up/Down swaps only within the same kind", () => {
-    const live = getChannelsByCategory().get("Mix")!;
+    const live = getChannelsByCategory([]).get("Mix")!;
     const onReorder = vi.fn();
     const el = document.createElement("div");
     document.body.appendChild(el);

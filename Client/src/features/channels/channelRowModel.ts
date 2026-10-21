@@ -103,9 +103,12 @@ export function channelAccess(list: Pick<ChannelListInputs, "roles" | "selfRole"
 /** One entry per group, in sidebar order (D7); the null key is the uncategorized
  *  group. A manager's empty categories are groups with no channels. */
 export function channelGroups(
-  list: Pick<ChannelListInputs, "channels" | "categories">,
+  list: Pick<ChannelListInputs, "channels" | "categories" | "roles" | "selfRole">,
 ): ChannelGroup[] {
-  return categoryGroups(list.channels, list.categories).map((g) => ({
+  // The list is the managers'; a viewer who lost MANAGE_CHANNELS mid-session
+  // still holds it in the store, so it only counts while the role has the bit.
+  const categories = channelAccess(list).manageChannels ? list.categories : [];
+  return categoryGroups(list.channels, categories).map((g) => ({
     ...g,
     orderIds: g.channels.map((c) => c.id).join(","),
   }));

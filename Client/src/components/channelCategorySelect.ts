@@ -10,6 +10,7 @@
 
 import { createElement } from "@lib/dom";
 import { getKnownCategories } from "@stores/channels.store";
+import { visibleCategories } from "@lib/permissions";
 import { shellText } from "../i18n/shell";
 
 /** The option value for a channel's (or a ref's) category. */
@@ -26,7 +27,7 @@ export function buildCategorySelect(
 ): HTMLSelectElement {
   const select = createElement("select", { id, class: "form-input", "data-testid": testId });
   select.appendChild(createElement("option", { value: "" }, shellText("channelForm.noCategory")));
-  for (const known of getKnownCategories()) {
+  for (const known of getKnownCategories(visibleCategories())) {
     select.appendChild(
       createElement("option", { value: categoryOptionValue(known.id, known.name) }, known.name),
     );
