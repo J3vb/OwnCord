@@ -365,11 +365,10 @@ export function createGifPicker(options: GifPickerOptions): {
     if (showingFavorites) return;
     const query = activeQuery;
     const generation = pager.generation();
-    const fresh = await pager.loadMore(
-      (pos): Promise<GifPage> =>
-        query.length > 0
-          ? searchGifs(options.api, query, GIF_LIMIT, pos)
-          : getTrendingGifs(options.api, GIF_LIMIT, pos),
+    const fresh = await pager.loadMore((pos): Promise<GifPage> =>
+      query.length > 0
+        ? searchGifs(options.api, query, GIF_LIMIT, pos)
+        : getTrendingGifs(options.api, GIF_LIMIT, pos),
     );
     // A newer query, the favorites tab or destroy() owns the grid now.
     if (signal.aborted || showingFavorites || generation !== pager.generation()) return;
