@@ -83,13 +83,30 @@ first), or copy the file in by hand if that is what you meant to do.
 	// A restore the panel staged (or one that stopped half way) would be applied
 	// at the next boot over whatever this run restores, so it must finish or be
 	// cancelled first.
-	if err := db.RestorePending(dbPath); err != nil {
+	// The lock follows the configured path, as the server's does; the files
+	// are replaced beside the real database a symlinked path points at.
+	configured := dbPath
+	if real, err := filepath.EvalSymlinks(dbPath); err == nil {
+		dbPath = real
+	}
+	if err := errors.Join(db.RestorePending(configured), db.RestorePending(dbPath)); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v — database untouched.\n", err)
+		marker := configured + ".restore-pending.json"
 		if _, statErr := os.Stat(dbPath + ".restore-pending.json"); statErr == nil {
-			fmt.Fprintf(os.Stderr, "Start the server to finish it, or delete %s.restore-pending.json to cancel it, then run this again.\n", dbPath)
+			marker = dbPath + ".restore-pending.json"
+		}
+		if _, statErr := os.Stat(marker); statErr == nil {
+			fmt.Fprintf(os.Stderr, "Start the server to finish it, or delete %s to cancel it, then run this again.\n", marker)
 		} else {
 			fmt.Fprintln(os.Stderr, "A swap was interrupted. Start the server once so it puts the previous database back, then run this again.")
 		}
+		return 1
+	}
+
+	// Staging clears leftovers under these names first, so a source among
+	// them would be deleted before it is read.
+	if real, err := filepath.EvalSymlinks(source); err == nil && strings.HasPrefix(real, dbPath+".restore-") {
+		fmt.Fprintf(os.Stderr, "error: %s is one of the restore's own working files; copy it elsewhere and restore from the copy\n", source)
 		return 1
 	}
 

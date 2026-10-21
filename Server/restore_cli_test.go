@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -617,5 +618,79 @@ func TestRestoreCLI_AppliedLeavesOnlyTheResult(t *testing.T) {
 	}
 	if res.Status != db.RestoreStatusApplied || res.Backup != "backup.db" {
 		t.Fatalf("result = %+v, want status applied for backup.db", res)
+	}
+}
+
+// TestRestoreCLI_KeepsLiveMode: the restored file is a renamed-in copy, so it
+// takes the live database's mode (and owner) rather than the copy's default.
+func TestRestoreCLI_KeepsLiveMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no Unix file modes on Windows")
+	}
+	cfgPath, dbPath, _ := restoreCLIFixture(t)
+	if err := os.Chmod(dbPath, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	backup := makeBackup(t, t.TempDir(), "backup.db", "restored-user")
+
+	if code := runRestoreCLI(cfgPath, []string{"--force", backup}); code != 0 {
+		t.Fatalf("restore --force exited %d, want 0", code)
+	}
+	info, err := os.Stat(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o640 {
+		t.Fatalf("restored database mode = %o, want 640", got)
+	}
+}
+
+// TestRestoreCLI_RestoresThroughSymlink: a symlinked database path keeps its
+// link; the database it points at is the one replaced.
+func TestRestoreCLI_RestoresThroughSymlink(t *testing.T) {
+	cfgPath, dbPath, _ := restoreCLIFixture(t)
+	real := filepath.Join(t.TempDir(), "real.db")
+	if err := os.Rename(dbPath, real); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, dbPath); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	backup := makeBackup(t, t.TempDir(), "backup.db", "restored-user")
+
+	if code := runRestoreCLI(cfgPath, []string{"--force", backup}); code != 0 {
+		t.Fatalf("restore --force exited %d, want 0", code)
+	}
+	if info, err := os.Lstat(dbPath); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("the database path is no longer a symlink (%v)", err)
+	}
+	if !userExists(t, real, "restored-user") {
+		t.Fatal("the symlink's target was not restored")
+	}
+}
+
+// TestRestoreCLI_RefusesSourceAmongRestoreFiles: staging clears leftover
+// working files first, so a source with one of those names is refused, not
+// deleted.
+func TestRestoreCLI_RefusesSourceAmongRestoreFiles(t *testing.T) {
+	cfgPath, dbPath, _ := restoreCLIFixture(t)
+	backup := makeBackup(t, t.TempDir(), "backup.db", "restored-user")
+	source := dbPath + ".restore-staged"
+	data, err := os.ReadFile(backup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if code := runRestoreCLI(cfgPath, []string{"--force", source}); code != 1 {
+		t.Fatalf("restore from a working-file name exited %d, want 1", code)
+	}
+	if !fileExists(source) {
+		t.Fatal("the source was deleted")
+	}
+	if !userExists(t, dbPath, "existing-owner") {
+		t.Fatal("the live database changed despite the refusal")
 	}
 }

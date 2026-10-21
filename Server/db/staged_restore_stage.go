@@ -62,6 +62,10 @@ func stageCopy(ctx context.Context, p restorePaths, src string, m *StagedRestore
 	if err != nil {
 		return fmt.Errorf("create staged copy: %w", err)
 	}
+	if err := matchLiveOwner(p.db, out); err != nil {
+		_ = out.Close()
+		return err
+	}
 	h := sha256.New()
 	if _, err := io.Copy(io.MultiWriter(out, h), in); err != nil {
 		_ = out.Close()
