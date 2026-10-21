@@ -16,7 +16,8 @@
 //! tested everywhere; only the Win32/COM capture is `cfg(windows)`.
 //!
 //! Error codes of `start_app_audio`: `unavailable`, `not_window`,
-//! `own_window`, `not_found`, `ambiguous`, `activation_failed`, `internal`.
+//! `own_window`, `ancestor`, `not_found`, `ambiguous`, `activation_failed`,
+//! `superseded` (a newer start or a stop overtook this one), `internal`.
 //!
 //! Unverified on real hardware (no Windows machine in the build environment):
 //! which label WebView2 gives a window, and process-loopback activation on
@@ -91,6 +92,10 @@ pub struct WindowInfo {
 pub enum ResolveError {
     /// The window belongs to OwnCord's own process tree.
     OwnWindow,
+    /// The window belongs to a process that OwnCord descends from (explorer,
+    /// a terminal, a launcher). Its process tree contains OwnCord and the
+    /// WebView2 renderer, so capturing it would echo the call to viewers.
+    Ancestor,
     NotFound,
     /// Several windows share the title in different processes.
     Ambiguous,
@@ -100,6 +105,7 @@ impl ResolveError {
     pub fn code(self) -> &'static str {
         match self {
             Self::OwnWindow => "own_window",
+            Self::Ancestor => "ancestor",
             Self::NotFound => "not_found",
             Self::Ambiguous => "ambiguous",
         }
@@ -115,16 +121,21 @@ impl ResolveError {
 ///    several windows; windows in different processes are ambiguous and we
 ///    give up rather than capture the wrong app.
 ///
-/// The result is never in `own`, OwnCord's own process tree.
+/// The result is never in `own` (OwnCord's own process tree) nor in
+/// `ancestors` (the processes OwnCord descends from): process loopback
+/// includes the target's whole tree, which for an ancestor contains us.
 pub fn pick_target_pid(
     label: &str,
     hwnd_pid: impl Fn(u64) -> Option<u32>,
     windows: &[WindowInfo],
     own: &HashSet<u32>,
+    ancestors: &HashSet<u32>,
 ) -> Result<u32, ResolveError> {
     let checked = |pid: u32| {
         if own.contains(&pid) {
             Err(ResolveError::OwnWindow)
+        } else if ancestors.contains(&pid) {
+            Err(ResolveError::Ancestor)
         } else {
             Ok(pid)
         }
@@ -144,6 +155,27 @@ pub fn pick_target_pid(
         return Err(ResolveError::Ambiguous);
     }
     checked(first)
+}
+
+/// The processes `own_pid` descends from (parent, grandparent, ...), not
+/// `own_pid` itself. Hop-capped and cycle-safe like [`own_process_tree`].
+pub fn own_process_ancestors(own_pid: u32, parent_of: &HashMap<u32, u32>) -> HashSet<u32> {
+    let mut ancestors = HashSet::new();
+    let mut current = own_pid;
+    for _ in 0..64 {
+        match parent_of.get(&current) {
+            Some(&parent)
+                if parent != 0
+                    && parent != own_pid
+                    && parent != current
+                    && ancestors.insert(parent) =>
+            {
+                current = parent;
+            }
+            _ => break,
+        }
+    }
+    ancestors
 }
 
 /// `own_pid` and every process descended from it, given a pid -> parent pid
@@ -436,17 +468,63 @@ impl Drop for Capture {
     }
 }
 
+/// The single capture slot with an epoch, so the last *call* wins, not the
+/// last start to finish. `begin` and `cancel` bump the epoch; `install` only
+/// succeeds for the epoch its start was given, so a slow start that a newer
+/// start or a stop overtook is rejected instead of replacing the newer one.
+pub struct Slot<T> {
+    epoch: u64,
+    current: Option<T>,
+}
+
+impl<T> Default for Slot<T> {
+    fn default() -> Self {
+        Self {
+            epoch: 0,
+            current: None,
+        }
+    }
+}
+
+impl<T> Slot<T> {
+    /// A start begins: supersede everything earlier and take the running
+    /// capture, which the caller stops. Returns this start's epoch.
+    pub fn begin(&mut self) -> (u64, Option<T>) {
+        self.epoch += 1;
+        (self.epoch, self.current.take())
+    }
+
+    /// A stop: supersede in-flight starts and take the running capture.
+    pub fn cancel(&mut self) -> Option<T> {
+        self.epoch += 1;
+        self.current.take()
+    }
+
+    pub fn is_current(&self, epoch: u64) -> bool {
+        self.epoch == epoch
+    }
+
+    /// Install a finished start. A superseded one gets its item back.
+    pub fn install(&mut self, epoch: u64, item: T) -> Result<Option<T>, T> {
+        if self.epoch == epoch {
+            Ok(self.current.replace(item))
+        } else {
+            Err(item)
+        }
+    }
+}
+
 /// Tauri state: at most one capture at a time.
 #[derive(Default)]
-pub struct AppAudioState(Mutex<Option<Capture>>);
+pub struct AppAudioState(Mutex<Slot<Capture>>);
 
 impl AppAudioState {
     pub fn new() -> Self {
         Self::default()
     }
 
-    fn replace(&self, next: Option<Capture>) -> Option<Capture> {
-        std::mem::replace(&mut *self.0.lock().unwrap_or_else(|p| p.into_inner()), next)
+    fn slot(&self) -> std::sync::MutexGuard<'_, Slot<Capture>> {
+        self.0.lock().unwrap_or_else(|p| p.into_inner())
     }
 }
 
@@ -488,11 +566,16 @@ pub async fn start_app_audio(
     if !platform::available() {
         return Err("unavailable".into());
     }
+    // A fast change of source: the old capture and its socket go first, and
+    // any start still in flight is superseded.
+    let (epoch, old) = state.slot().begin();
+    stop_capture(old).await;
     let pid = tauri::async_runtime::spawn_blocking(move || platform::resolve_pid(&label))
         .await
         .map_err(|_| "internal".to_string())??;
-    // A fast change of source: the old capture and its socket go first.
-    stop_capture(state.replace(None)).await;
+    if !state.slot().is_current(epoch) {
+        return Err("superseded".into());
+    }
     let shared = Shared::new();
     let (url, server) = spawn_server(shared.clone()).await.map_err(|e| {
         log::warn!("[app_audio] {e}");
@@ -518,15 +601,26 @@ pub async fn start_app_audio(
         thread: Some(thread),
         server,
     };
-    // A concurrent start may have installed its own capture meanwhile.
-    stop_capture(state.replace(Some(capture))).await;
-    Ok(StartedAppAudio { url })
+    // Install only if no newer start or stop overtook this one; either way the
+    // capture that loses is dropped outside the lock.
+    let installed = state.slot().install(epoch, capture);
+    match installed {
+        Ok(previous) => {
+            stop_capture(previous).await;
+            Ok(StartedAppAudio { url })
+        }
+        Err(superseded) => {
+            stop_capture(Some(superseded)).await;
+            Err("superseded".into())
+        }
+    }
 }
 
 /// Stop the running capture, if any.
 #[tauri::command]
 pub async fn stop_app_audio(state: State<'_, AppAudioState>) -> Result<(), String> {
-    stop_capture(state.replace(None)).await;
+    let old = state.slot().cancel();
+    stop_capture(old).await;
     Ok(())
 }
 
@@ -567,7 +661,7 @@ mod windows_impl {
     use std::time::Duration;
 
     use windows::core::{Interface as _, PROPVARIANT};
-    use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
+    use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
     use windows::Win32::Media::Audio::{
         ActivateAudioInterfaceAsync, IActivateAudioInterfaceCompletionHandler, IAudioCaptureClient,
         IAudioClient, AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED,
@@ -588,7 +682,8 @@ mod windows_impl {
     };
     use windows_sys::Win32::System::SystemInformation::OSVERSIONINFOW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetWindowTextW, GetWindowThreadProcessId, IsWindow, IsWindowVisible,
+        EnumWindows, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindow,
+        IsWindowVisible,
     };
 
     use super::*;
@@ -635,15 +730,15 @@ mod windows_impl {
         // duration of its EnumWindows call.
         let windows = unsafe { &mut *(lparam as *mut Vec<WindowInfo>) };
         let mut pid = 0u32;
-        let mut buf = [0u16; 512];
-        // SAFETY: plain Win32 queries on a handle EnumWindows just gave us,
-        // with a buffer whose length is passed alongside it.
-        let (visible, len) = unsafe {
+        // SAFETY: plain Win32 queries on a handle EnumWindows just gave us.
+        // The buffer is sized from the title length plus the terminator and
+        // its length is passed alongside it, so a long title is not cut.
+        let (visible, buf, len) = unsafe {
             GetWindowThreadProcessId(hwnd, &mut pid);
-            (
-                IsWindowVisible(hwnd) != 0,
-                GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32),
-            )
+            let want = GetWindowTextLengthW(hwnd).clamp(0, 32_768) as usize;
+            let mut buf = vec![0u16; want + 1];
+            let len = GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32);
+            (IsWindowVisible(hwnd) != 0, buf, len)
         };
         windows.push(WindowInfo {
             hwnd: hwnd as usize as u64,
@@ -691,12 +786,22 @@ mod windows_impl {
 
     /// The process to capture for a shared window's label (decision 1).
     pub fn resolve_pid(label: &str) -> Result<u32, String> {
-        let own = own_process_tree(std::process::id(), &parent_map()?);
-        pick_target_pid(label, hwnd_pid, &enumerate_windows(), &own)
+        let parents = parent_map()?;
+        let me = std::process::id();
+        let own = own_process_tree(me, &parents);
+        let ancestors = own_process_ancestors(me, &parents);
+        pick_target_pid(label, hwnd_pid, &enumerate_windows(), &own, &ancestors)
             .map_err(|e| e.code().to_string())
     }
 
     // -- process loopback activation -----------------------------------------
+
+    #[derive(Debug, PartialEq, Eq)]
+    enum Wait {
+        Signalled,
+        TimedOut,
+        Failed,
+    }
 
     /// A Win32 event handle, closed on drop. Event handles are usable from any
     /// thread.
@@ -715,10 +820,17 @@ mod windows_impl {
                 .map_err(|e| format!("CreateEventW: {e}"))
         }
 
-        /// Wait up to `ms`; true when signalled.
-        fn wait(&self, ms: u32) -> bool {
+        /// Wait up to `ms`.
+        fn wait(&self, ms: u32) -> Wait {
             // SAFETY: the handle is a live event owned by `self`.
-            unsafe { WaitForSingleObject(self.0, ms) == WAIT_OBJECT_0 }
+            let result = unsafe { WaitForSingleObject(self.0, ms) };
+            if result == WAIT_OBJECT_0 {
+                Wait::Signalled
+            } else if result == WAIT_TIMEOUT {
+                Wait::TimedOut
+            } else {
+                Wait::Failed
+            }
         }
     }
 
@@ -775,6 +887,10 @@ mod windows_impl {
         cb_size: u32,
         blob: *mut u8,
     }
+
+    // The hand-built blob must be exactly the size of the real PROPVARIANT.
+    const _: () =
+        assert!(std::mem::size_of::<BlobPropVariant>() == std::mem::size_of::<PROPVARIANT>());
 
     struct Client {
         audio: IAudioClient,
@@ -835,8 +951,12 @@ mod windows_impl {
             )
         }
         .map_err(|e| activation_failed("ActivateAudioInterfaceAsync", &e))?;
-        if !done.wait(ACTIVATION_TIMEOUT_MS) {
-            log::warn!("[app_audio] activation timed out");
+        // A completion that arrives after this timeout is expected and
+        // harmless: the handler only sets `done`, which it keeps alive through
+        // its own Arc, and nothing reads the operation any more.
+        let waited = done.wait(ACTIVATION_TIMEOUT_MS);
+        if waited != Wait::Signalled {
+            log::warn!("[app_audio] activation did not complete: {waited:?}");
             return Err("activation_failed".into());
         }
         let mut result = windows::core::HRESULT(0);
@@ -951,8 +1071,13 @@ mod windows_impl {
     fn capture_loop(client: &Client, shared: &Shared) {
         let mut framer = Framer::default();
         while !shared.stopped() {
-            if !client.ready.wait(STOP_POLL.as_millis() as u32) {
-                continue;
+            match client.ready.wait(STOP_POLL.as_millis() as u32) {
+                Wait::Signalled => {}
+                Wait::TimedOut => continue,
+                Wait::Failed => {
+                    log::warn!("[app_audio] waiting for audio failed, stopping");
+                    break;
+                }
             }
             if let Err(e) = drain(client, &mut framer, shared) {
                 log::warn!("[app_audio] capture ended: {e}");
@@ -1039,14 +1164,26 @@ mod tests {
     fn hwnd_label_wins_over_title() {
         let windows = [win(10, 100, "window:10:0", true), win(11, 200, "x", true)];
         let own = HashSet::new();
-        let pid = pick_target_pid("window:11:0", |h| (h == 11).then_some(300), &windows, &own);
+        let pid = pick_target_pid(
+            "window:11:0",
+            |h| (h == 11).then_some(300),
+            &windows,
+            &own,
+            &HashSet::new(),
+        );
         assert_eq!(pid, Ok(300));
     }
 
     #[test]
     fn dead_hwnd_falls_back_to_title() {
         let windows = [win(10, 100, "window:10:0", true)];
-        let pid = pick_target_pid("window:10:0", none, &windows, &HashSet::new());
+        let pid = pick_target_pid(
+            "window:10:0",
+            none,
+            &windows,
+            &HashSet::new(),
+            &HashSet::new(),
+        );
         assert_eq!(pid, Ok(100));
     }
 
@@ -1055,11 +1192,11 @@ mod tests {
         let windows = [win(10, 100, "Notepad", true)];
         let own = HashSet::new();
         assert_eq!(
-            pick_target_pid("window:5:0", none, &windows, &own),
+            pick_target_pid("window:5:0", none, &windows, &own, &HashSet::new()),
             Err(ResolveError::NotFound)
         );
         assert_eq!(
-            pick_target_pid("", none, &windows, &own),
+            pick_target_pid("", none, &windows, &own, &HashSet::new()),
             Err(ResolveError::NotFound)
         );
     }
@@ -1072,7 +1209,7 @@ mod tests {
             win(3, 102, "notepad", true),
         ];
         assert_eq!(
-            pick_target_pid("Notepad", none, &windows, &HashSet::new()),
+            pick_target_pid("Notepad", none, &windows, &HashSet::new(), &HashSet::new()),
             Err(ResolveError::NotFound)
         );
     }
@@ -1085,7 +1222,7 @@ mod tests {
             win(3, 100, "Doc", false),
         ];
         assert_eq!(
-            pick_target_pid("Doc", none, &windows, &HashSet::new()),
+            pick_target_pid("Doc", none, &windows, &HashSet::new(), &HashSet::new()),
             Ok(100)
         );
     }
@@ -1094,7 +1231,7 @@ mod tests {
     fn different_pids_give_up() {
         let windows = [win(1, 100, "Doc", true), win(2, 200, "Doc", true)];
         assert_eq!(
-            pick_target_pid("Doc", none, &windows, &HashSet::new()),
+            pick_target_pid("Doc", none, &windows, &HashSet::new(), &HashSet::new()),
             Err(ResolveError::Ambiguous)
         );
     }
@@ -1103,7 +1240,7 @@ mod tests {
     fn a_hidden_twin_does_not_cause_ambiguity() {
         let windows = [win(1, 100, "Doc", true), win(2, 200, "Doc", false)];
         assert_eq!(
-            pick_target_pid("Doc", none, &windows, &HashSet::new()),
+            pick_target_pid("Doc", none, &windows, &HashSet::new(), &HashSet::new()),
             Ok(100)
         );
     }
@@ -1113,23 +1250,90 @@ mod tests {
         let own = HashSet::from([7, 8]);
         let windows = [win(1, 8, "OwnCord", true)];
         assert_eq!(
-            pick_target_pid("OwnCord", none, &windows, &own),
+            pick_target_pid("OwnCord", none, &windows, &own, &HashSet::new()),
             Err(ResolveError::OwnWindow)
         );
         assert_eq!(
-            pick_target_pid("window:1:0", |_| Some(7), &windows, &own),
+            pick_target_pid("window:1:0", |_| Some(7), &windows, &own, &HashSet::new()),
             Err(ResolveError::OwnWindow)
         );
         // An own twin among other processes is ambiguous, never picked.
         let twins = [win(1, 8, "Doc", true), win(2, 200, "Doc", true)];
         assert_eq!(
-            pick_target_pid("Doc", none, &twins, &own),
+            pick_target_pid("Doc", none, &twins, &own, &HashSet::new()),
             Err(ResolveError::Ambiguous)
         );
     }
 
     #[test]
+    fn never_an_ancestor_of_ours() {
+        // own 7 was launched by explorer 3, itself under 1.
+        let parents = HashMap::from([(7, 3), (3, 1), (1, 0), (50, 3)]);
+        let ancestors = own_process_ancestors(7, &parents);
+        assert_eq!(ancestors, HashSet::from([3, 1]));
+        let own = own_process_tree(7, &parents);
+        let windows = [win(1, 3, "Explorer", true), win(2, 50, "Sibling", true)];
+        assert_eq!(
+            pick_target_pid("Explorer", none, &windows, &own, &ancestors),
+            Err(ResolveError::Ancestor)
+        );
+        assert_eq!(
+            pick_target_pid("window:1:0", |_| Some(3), &windows, &own, &ancestors),
+            Err(ResolveError::Ancestor)
+        );
+        // A sibling is neither ours nor an ancestor.
+        assert_eq!(
+            pick_target_pid("Sibling", none, &windows, &own, &ancestors),
+            Ok(50)
+        );
+    }
+
+    #[test]
+    fn ancestors_survive_cycles_and_roots() {
+        let cyc = HashMap::from([(7, 3), (3, 7)]);
+        assert_eq!(own_process_ancestors(7, &cyc), HashSet::from([3]));
+        let cyc2 = HashMap::from([(7, 3), (3, 4), (4, 3)]);
+        assert_eq!(own_process_ancestors(7, &cyc2), HashSet::from([3, 4]));
+        assert!(own_process_ancestors(7, &HashMap::new()).is_empty());
+        assert!(own_process_ancestors(7, &HashMap::from([(7, 0)])).is_empty());
+    }
+
+    #[test]
+    fn a_late_start_does_not_replace_a_newer_one() {
+        let mut slot = Slot::<&str>::default();
+        let (a, old) = slot.begin();
+        assert_eq!(old, None);
+        let (b, _) = slot.begin();
+        assert!(!slot.is_current(a));
+        assert_eq!(slot.install(b, "B"), Ok(None));
+        // A finishes late: rejected, B stays.
+        assert_eq!(slot.install(a, "A"), Err("A"));
+        assert_eq!(slot.begin().1, Some("B"));
+    }
+
+    #[test]
+    fn a_start_overtaken_by_a_stop_is_superseded() {
+        let mut slot = Slot::<&str>::default();
+        let (a, _) = slot.begin();
+        assert_eq!(slot.cancel(), None);
+        assert_eq!(slot.install(a, "A"), Err("A"));
+        assert_eq!(slot.cancel(), None);
+    }
+
+    #[test]
+    fn a_new_start_takes_the_running_capture_to_stop_it() {
+        let mut slot = Slot::<&str>::default();
+        let (a, _) = slot.begin();
+        assert_eq!(slot.install(a, "A"), Ok(None));
+        let (b, old) = slot.begin();
+        assert_eq!(old, Some("A"));
+        assert_eq!(slot.install(b, "B"), Ok(None));
+        assert_eq!(slot.cancel(), Some("B"));
+    }
+
+    #[test]
     fn error_codes_are_stable() {
+        assert_eq!(ResolveError::Ancestor.code(), "ancestor");
         assert_eq!(ResolveError::OwnWindow.code(), "own_window");
         assert_eq!(ResolveError::NotFound.code(), "not_found");
         assert_eq!(ResolveError::Ambiguous.code(), "ambiguous");
