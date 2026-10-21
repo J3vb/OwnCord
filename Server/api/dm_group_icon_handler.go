@@ -51,11 +51,11 @@ func handleUploadGroupIcon(svc *service.Services, broadcaster DMBroadcaster, sto
 		}
 		defer file.Close() //nolint:errcheck
 
-		raw, mimeType, width, height, ok := avatarUploadReadImage(w, file)
+		raw, mimeType, width, height, ok := readProfileImage(w, file, avatarImageLimits)
 		if !ok {
 			return
 		}
-		fileID, written, ok := avatarStoreAndRecord(r.Context(), w, svc, store, user.ID, sanitizeUploadFilename(header.Filename), raw, mimeType, width, height)
+		fileID, written, ok := avatarStoreAndRecord(r.Context(), w, svc, store, user.ID, sanitizeUploadFilename(header.Filename), raw, mimeType, "avatar", width, height)
 		if !ok {
 			return
 		}

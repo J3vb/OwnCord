@@ -226,6 +226,20 @@ const (
 	// user_update out to every connected session and orphans the previous file.
 	avatarUploadRateLimitPerMinute = 5
 
+	// maxBannerFileBytes is the largest profile banner image accepted (1 MiB),
+	// and maxBannerWidth by maxBannerHeight the largest it may measure (WP
+	// 6.11b). The client crops to 5:2 and scales down before uploading.
+	maxBannerFileBytes = 1 << 20
+	maxBannerWidth     = 1920
+	maxBannerHeight    = 960
+
+	// maxBannerColorLen is the longest valid banner colour (#rrggbb).
+	maxBannerColorLen = 7
+
+	// bannerUploadRateLimitPerMinute is the avatar's rate: every accepted banner
+	// fans a user_update out to every connected session.
+	bannerUploadRateLimitPerMinute = avatarUploadRateLimitPerMinute
+
 	// maxUserNoteLen is the rune cap on a private profile note (migration 069).
 	maxUserNoteLen = service.MaxUserNoteRunes
 

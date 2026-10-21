@@ -78,24 +78,9 @@ func userFromGen(u dbgen.User) *User {
 		RegistrationStatus: u.RegistrationStatus,
 
 		CustomStatusExpiresAt: u.CustomStatusExpiresAt,
+		BannerID:              u.BannerID,
+		BannerColor:           u.BannerColor,
 	}
-}
-
-// userFromRow maps the explicit-column user row. Migration 069 added users
-// columns (the banner) that these SELECT lists do not read yet, so sqlc emits a
-// row type of its own and not dbgen.User. GetUserByUsername and GetOwnerUser
-// keep the same list as GetUserByID, so their rows convert to its type.
-func userFromRow(r dbgen.GetUserByIDRow) *User {
-	return userFromGen(dbgen.User{
-		ID: r.ID, Username: r.Username, Password: r.Password, Avatar: r.Avatar,
-		RoleID: r.RoleID, TotpSecret: r.TotpSecret, Status: r.Status,
-		CreatedAt: r.CreatedAt, LastSeen: r.LastSeen, Banned: r.Banned,
-		BanReason: r.BanReason, BanExpires: r.BanExpires,
-		IdentityPublicKey: r.IdentityPublicKey, DisplayName: r.DisplayName,
-		About: r.About, CustomStatus: r.CustomStatus,
-		RegistrationStatus:    r.RegistrationStatus,
-		CustomStatusExpiresAt: r.CustomStatusExpiresAt,
-	})
 }
 
 // apiTokenFromGen maps a generated api_tokens row to the domain APIToken model.

@@ -124,6 +124,9 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 	messageRequests := NewMessageRequestService(st, blocks)
 	messages.SetMessageRequests(messageRequests)
 	uploads := NewUploadService(st, permSvc)
+	if bs, ok := st.(BannerFileStore); ok {
+		uploads.banners = bs
+	}
 	channels := NewChannelService(st, permSvc)
 	statusExpiry := NewCustomStatusExpirer(st)
 	channels.SetExpiryWake(statusExpiry.Wake)

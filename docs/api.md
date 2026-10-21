@@ -25,7 +25,7 @@ In mount order (`Server/api/router.go`):
 5. **Request Logger** -- structured logging of method, path, status, duration.
 6. **Telemetry HTTP middleware** -- OpenTelemetry tracing; a no-op unless the server was built with `-tags otel` and telemetry is enabled.
 7. **SecurityHeadersWithTLS** -- (adds `Strict-Transport-Security` when TLS is on) sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 0`, `Referrer-Policy: strict-origin-when-cross-origin`, `Content-Security-Policy: default-src 'self'`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, `Cache-Control: no-store`.
-8. **MaxBodySize** -- 1 MiB default for all routes except `/api/v1/uploads` (100 MiB, or `upload.max_size_mb` plus 1 MiB when larger), `/api/v1/admin/plugins/install` (16 MiB envelope), and `/api/v1/users/me/avatar` (2 MiB envelope).
+8. **MaxBodySize** -- 1 MiB default for all routes except `/api/v1/uploads` (100 MiB, or `upload.max_size_mb` plus 1 MiB when larger), `/api/v1/admin/plugins/install` (16 MiB envelope), and `/api/v1/users/me/avatar` and `/api/v1/users/me/banner` (2 MiB envelope).
 9. **Coraza WAF** (optional) -- OWASP Core Rule Set request filtering, mounted only when `server.waf_enabled: true` (see `docs/server-configuration.md`).
 
 Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are resolved from `X-Forwarded-For` only when the peer is listed in `server.trusted_proxies`.
@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 201 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 203 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -205,6 +205,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | PATCH   | `/api/v1/users/me/`                                                  |
 | DELETE  | `/api/v1/users/me/avatar`                                            |
 | POST    | `/api/v1/users/me/avatar`                                            |
+| DELETE  | `/api/v1/users/me/banner`                                            |
+| POST    | `/api/v1/users/me/banner`                                            |
 | GET     | `/api/v1/users/me/moderation`                                        |
 | GET     | `/api/v1/users/me/notes/{userId}`                                    |
 | PUT     | `/api/v1/users/me/notes/{userId}`                                    |
@@ -560,6 +562,8 @@ Get the current authenticated user's profile.
   "avatar": "/api/v1/files/uuid",
   "display_name": "Alex",
   "about": "A short bio.",
+  "banner": "/api/v1/files/uuid",
+  "banner_color": "#5865f2",
   "custom_status": "building things",
   "custom_status_expires_at": "2026-10-15T18:00:00Z",
   "status": "online",
@@ -579,6 +583,8 @@ login and the TOTP challenge.
 | `avatar`                   | string       | Avatar URL (`/api/v1/files/{id}` after an upload, or an `https://` URL), or empty string                                                                                                                          |
 | `display_name`             | string\|null | Nickname rendered instead of `username`; null when unset                                                                                                                                                          |
 | `about`                    | string\|null | Profile bio, max 300 characters; null when unset                                                                                                                                                                  |
+| `banner`                   | string\|null | Profile banner image path (`/api/v1/files/{id}`), set with `POST /api/v1/users/me/banner`; null when unset                                                                                                        |
+| `banner_color`             | string\|null | Profile banner colour, `#rgb` or `#rrggbb` in lower case; null when unset                                                                                                                                         |
 | `custom_status`            | string\|null | Free-text status line, max 128 characters, one line (no control characters, line breaks, invisible characters or stacked combining marks); null when unset. Set over WebSocket (`presence_update`), not over REST |
 | `custom_status_expires_at` | string\|null | RFC 3339 UTC instant the custom status clears itself; null when it has no expiry. Set with `presence_update`'s `custom_status_expires_in`; only the owner is told it                                              |
 | `status`                   | string       | One of: `online`, `idle`, `dnd`, `invisible`, `offline`. **This is the caller's own true status**, so `invisible` appears here; every payload describing this user to _anyone else_ reports `offline` instead     |
@@ -812,7 +818,8 @@ event replaces the client's copy rather than patching it).
   "username": "newname",
   "avatar": "https://example.com/pic.png",
   "display_name": "New Name",
-  "about": "A short bio."
+  "about": "A short bio.",
+  "banner_color": "#5865f2"
 }
 ```
 
@@ -822,6 +829,7 @@ event replaces the client's copy rather than patching it).
 | `avatar`              | Optional. Must be an `https://` URL (max 512 chars) or `""` to clear. An avatar on the server's own host must be `/api/v1/files/<uuid>`; any other same-host path is rejected with 400. Upload a file instead with `POST /api/v1/users/me/avatar`.                                                                         |
 | `display_name`        | Optional, 1–32 characters, counted after runs of spaces are collapsed to one. Shown instead of `username` everywhere; `""` clears it and falls back to the username. Rejected if it contains control characters or line breaks, invisible (bidi-override, zero-width) characters, or more than 2 combining marks in a row. |
 | `about`               | Optional, max 300 characters. `""` clears it.                                                                                                                                                                                                                                                                              |
+| `banner_color`        | Optional, `#rgb` or `#rrggbb` (case-insensitive; stored lower-case). `""` clears it. There is deliberately no banner id or URL field: a banner image can only be set by uploading it with `POST /api/v1/users/me/banner`.                                                                                                  |
 | `identity_public_key` | Optional, base64, max 128 characters. Publishes the client's long-term E2EE identity public key for voice TOFU pinning (see [protocol.md](protocol.md), Voice End-to-End Encryption).                                                                                                                                      |
 
 Omitting a field leaves it unchanged; sending `""` clears the nullable ones.
@@ -903,6 +911,61 @@ users. An older server answers 405; fall back to the `PATCH`.
 #### Response 200 OK
 
 The same user object `PATCH /api/v1/users/me` returns, with no `avatar` key.
+
+### POST /api/v1/users/me/banner
+
+Upload a profile banner image and point the authenticated user's banner at it.
+Broadcasts a `user_update` on success. It is the avatar upload with other
+limits: the bytes are stored as an ordinary attachment with no channel
+(counted against the uploader's storage quota), and `users.banner_id` names it.
+`GET /api/v1/files/{id}` admits the file to every authenticated user for
+exactly as long as `banner_id` names it, and refuses it to everyone but the
+uploader once the banner is replaced or removed; the orphan sweep then
+reclaims it. A banner file can never be attached to a message. If the profile
+update fails after the bytes were stored, the unlinked attachment row and the
+stored file are removed and the storage charge is released. The upload sends no
+username, so a rename or About edit made meanwhile is kept.
+
+Not registered when the server has no working storage backend.
+
+**Auth:** Required
+**Rate limit:** 5 uploads/minute per user
+
+#### Request
+
+`multipart/form-data` with a single `file` part.
+
+| Rule       | Value                                                                                                                 |
+| ---------- | --------------------------------------------------------------------------------------------------------------------- |
+| Type       | `image/png`, `image/jpeg` or `image/webp`, sniffed from the file's own bytes (the client's `Content-Type` is ignored) |
+| Size       | 1 MiB                                                                                                                 |
+| Dimensions | At most 1920x960, measured from the sniffed image                                                                     |
+
+GIF and SVG are refused for the reasons given for avatars. The server does not
+re-encode or crop; the client is expected to crop and scale before uploading.
+
+#### Response 201 Created
+
+The same shape as the avatar upload, with `url` set to `/api/v1/files/{id}`.
+
+#### Errors
+
+| Status | Code           | Cause                                                          |
+| ------ | -------------- | -------------------------------------------------------------- |
+| 400    | `BAD_REQUEST`  | Missing `file` part, wrong type, too large, or too many pixels |
+| 429    | `RATE_LIMITED` | Too many uploads                                               |
+
+### DELETE /api/v1/users/me/banner
+
+Remove the authenticated user's banner image. The colour is separate: clear it
+with `PATCH /api/v1/users/me` and `"banner_color": ""`. It shares the `PATCH`
+rate limit and is idempotent: with no banner it still answers 200. Everyone
+receives a `user_update` with `banner: null`. The old file stops being served to
+other users.
+
+#### Response 200 OK
+
+The same user object `PATCH /api/v1/users/me` returns, with `banner: null`.
 
 | Status | Code           | Cause             |
 | ------ | -------------- | ----------------- |

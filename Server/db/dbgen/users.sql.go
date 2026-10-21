@@ -129,6 +129,8 @@ SET registration_status = 'denied',
     avatar = NULL,
     display_name = NULL,
     about = NULL,
+    banner_id = NULL,
+    banner_color = NULL,
     custom_status = NULL,
     custom_status_expires_at = NULL,
     status = 'offline'
@@ -160,34 +162,14 @@ func (q *Queries) GetMemberGeneration(ctx context.Context) (int64, error) {
 const getUserByID = `-- name: GetUserByID :one
 SELECT id, username, password, avatar, role_id, totp_secret, status,
        created_at, last_seen, banned, ban_reason, ban_expires, identity_public_key,
-       display_name, about, custom_status, registration_status, custom_status_expires_at
+       display_name, about, custom_status, registration_status, custom_status_expires_at,
+       banner_id, banner_color
 FROM users WHERE id = ?
 `
 
-type GetUserByIDRow struct {
-	ID                    int64   `json:"id"`
-	Username              string  `json:"username"`
-	Password              string  `json:"password"`
-	Avatar                *string `json:"avatar"`
-	RoleID                int64   `json:"roleId"`
-	TotpSecret            *string `json:"totpSecret"`
-	Status                string  `json:"status"`
-	CreatedAt             string  `json:"createdAt"`
-	LastSeen              *string `json:"lastSeen"`
-	Banned                int64   `json:"banned"`
-	BanReason             *string `json:"banReason"`
-	BanExpires            *string `json:"banExpires"`
-	IdentityPublicKey     *string `json:"identityPublicKey"`
-	DisplayName           *string `json:"displayName"`
-	About                 *string `json:"about"`
-	CustomStatus          *string `json:"customStatus"`
-	RegistrationStatus    string  `json:"registrationStatus"`
-	CustomStatusExpiresAt *string `json:"customStatusExpiresAt"`
-}
-
-func (q *Queries) GetUserByID(ctx context.Context, id int64) (GetUserByIDRow, error) {
+func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
 	row := q.db.QueryRowContext(ctx, getUserByID, id)
-	var i GetUserByIDRow
+	var i User
 	err := row.Scan(
 		&i.ID,
 		&i.Username,
@@ -207,6 +189,8 @@ func (q *Queries) GetUserByID(ctx context.Context, id int64) (GetUserByIDRow, er
 		&i.CustomStatus,
 		&i.RegistrationStatus,
 		&i.CustomStatusExpiresAt,
+		&i.BannerID,
+		&i.BannerColor,
 	)
 	return i, err
 }
@@ -214,34 +198,14 @@ func (q *Queries) GetUserByID(ctx context.Context, id int64) (GetUserByIDRow, er
 const getUserByUsername = `-- name: GetUserByUsername :one
 SELECT id, username, password, avatar, role_id, totp_secret, status,
        created_at, last_seen, banned, ban_reason, ban_expires, identity_public_key,
-       display_name, about, custom_status, registration_status, custom_status_expires_at
+       display_name, about, custom_status, registration_status, custom_status_expires_at,
+       banner_id, banner_color
 FROM users WHERE username = ? COLLATE NOCASE
 `
 
-type GetUserByUsernameRow struct {
-	ID                    int64   `json:"id"`
-	Username              string  `json:"username"`
-	Password              string  `json:"password"`
-	Avatar                *string `json:"avatar"`
-	RoleID                int64   `json:"roleId"`
-	TotpSecret            *string `json:"totpSecret"`
-	Status                string  `json:"status"`
-	CreatedAt             string  `json:"createdAt"`
-	LastSeen              *string `json:"lastSeen"`
-	Banned                int64   `json:"banned"`
-	BanReason             *string `json:"banReason"`
-	BanExpires            *string `json:"banExpires"`
-	IdentityPublicKey     *string `json:"identityPublicKey"`
-	DisplayName           *string `json:"displayName"`
-	About                 *string `json:"about"`
-	CustomStatus          *string `json:"customStatus"`
-	RegistrationStatus    string  `json:"registrationStatus"`
-	CustomStatusExpiresAt *string `json:"customStatusExpiresAt"`
-}
-
-func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUserByUsernameRow, error) {
+func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User, error) {
 	row := q.db.QueryRowContext(ctx, getUserByUsername, username)
-	var i GetUserByUsernameRow
+	var i User
 	err := row.Scan(
 		&i.ID,
 		&i.Username,
@@ -261,6 +225,8 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUs
 		&i.CustomStatus,
 		&i.RegistrationStatus,
 		&i.CustomStatusExpiresAt,
+		&i.BannerID,
+		&i.BannerColor,
 	)
 	return i, err
 }
@@ -268,7 +234,7 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUs
 const listMembers = `-- name: ListMembers :many
 SELECT u.id, u.username, u.avatar, u.status, LOWER(r.name), u.identity_public_key,
        u.display_name, u.about, CAST(COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', u.created_at), u.created_at) AS TEXT) AS created_at,
-       u.custom_status
+       u.banner_id, u.banner_color, u.custom_status
 FROM users u
 JOIN roles r ON u.role_id = r.id
 WHERE (u.banned = 0 OR (u.ban_expires IS NOT NULL AND replace(u.ban_expires, ' ', 'T') <= strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))
@@ -286,6 +252,8 @@ type ListMembersRow struct {
 	DisplayName       *string `json:"displayName"`
 	About             *string `json:"about"`
 	CreatedAt         string  `json:"createdAt"`
+	BannerID          *string `json:"bannerId"`
+	BannerColor       *string `json:"bannerColor"`
 	CustomStatus      *string `json:"customStatus"`
 }
 
@@ -313,6 +281,8 @@ func (q *Queries) ListMembers(ctx context.Context) ([]ListMembersRow, error) {
 			&i.DisplayName,
 			&i.About,
 			&i.CreatedAt,
+			&i.BannerID,
+			&i.BannerColor,
 			&i.CustomStatus,
 		); err != nil {
 			return nil, err

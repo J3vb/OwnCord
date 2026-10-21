@@ -31,7 +31,7 @@ func TestWriteReady_MatchesLegacyEncoderByteForByte(t *testing.T) {
 			t.Fatalf("UpdateUserCustomStatus: %v", err)
 		}
 	}
-	if err := database.UpdateUserProfile(ctx, odd.ID, odd.Username, new("a<&>.png"), new("Ödd \u2028 \\"), nil); err != nil {
+	if err := database.UpdateUserProfile(ctx, odd.ID, odd.Username, new("a<&>.png"), new("Ödd \u2028 \\"), nil, nil, nil); err != nil {
 		t.Fatalf("UpdateUserProfile: %v", err)
 	}
 	if err := database.UpdateUserIdentityKey(ctx, odd.ID, new("k+/=<>")); err != nil {
