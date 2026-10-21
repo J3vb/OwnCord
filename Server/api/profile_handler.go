@@ -183,6 +183,12 @@ func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, st
 				Put("/notes/{userId}", handlePutUserNote(svc.UserNotes))
 		}
 
+		if svc.Privacy != nil {
+			r.Get("/privacy", handleGetPrivacy(svc.Privacy))
+			r.With(RateLimitMiddleware(limiter, "profile:", profileUpdateRateLimitPerMinute, time.Minute, trustedProxies)).
+				Put("/privacy", handlePutPrivacy(svc.Privacy))
+		}
+
 		r.Get("/sessions", handleListSessions(svc))
 
 		r.With(RateLimitMiddleware(limiter, "own_moderation:", ownModerationRateLimitPerMinute, time.Minute, trustedProxies)).

@@ -513,6 +513,13 @@ type UserNote struct {
 	UpdatedAt string `json:"updatedAt"`
 }
 
+type UserPrivacy struct {
+	UserID          int64  `json:"userId"`
+	AllowMemberDms  int64  `json:"allowMemberDms"`
+	MessageRequests int64  `json:"messageRequests"`
+	UpdatedAt       string `json:"updatedAt"`
+}
+
 type UserRole struct {
 	UserID int64 `json:"userId"`
 	RoleID int64 `json:"roleId"`

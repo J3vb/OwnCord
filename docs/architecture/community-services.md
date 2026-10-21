@@ -70,6 +70,10 @@ private to the user who wrote it: no other user, administrator or moderator rout
 reads it, and it is removed with either user (lifecycle row 16a in
 `data-lifecycle.md`). The banner columns are public profile fields like the
 avatar, unused until the banner endpoints land. They add no community service.
+**Amended 2026-10-21 (DM privacy):** `070_user_privacy.sql` adds `user_privacy`, one
+row per user holding the two direct message settings (WP 6.8b). The row is read and
+written only through the owner's session and is removed with the account (lifecycle
+row 16b in `data-lifecycle.md`). It adds no community service.
 Other historical
 status statements retain their `cbebd37c` baseline.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each

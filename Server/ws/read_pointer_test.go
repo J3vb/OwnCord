@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -462,5 +463,34 @@ func TestMarkUnread_DMParticipantOnly(t *testing.T) {
 	}
 	if _, _, found := f.readStateOf(t, outsider, dmCh); found {
 		t.Error("a refused non-participant left a read_states row")
+	}
+}
+
+func TestReady_CapabilityDMPrivacyAndNoSettingsInPayload(t *testing.T) {
+	f := newActivityFixture(t)
+	a := f.user(t, "priv-a", permissions.MemberRoleID)
+	b := f.user(t, "priv-b", permissions.MemberRoleID)
+	if err := f.db.SetUserPrivacy(context.Background(), a.ID, db.UserPrivacy{}); err != nil {
+		t.Fatalf("SetUserPrivacy: %v", err)
+	}
+	raw, err := f.hub.readyBytes(f.db, b.ID, nil)
+	if err != nil {
+		t.Fatalf("readyBytes: %v", err)
+	}
+	var env struct {
+		Payload struct {
+			Capabilities map[string]any `json:"capabilities"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		t.Fatalf("unmarshal ready: %v", err)
+	}
+	if got, ok := env.Payload.Capabilities["dm_privacy"].(bool); !ok || !got {
+		t.Errorf("capabilities.dm_privacy = %v, want true", env.Payload.Capabilities["dm_privacy"])
+	}
+	for _, key := range []string{"allow_member_dms", "message_requests"} {
+		if strings.Contains(string(raw), key) {
+			t.Errorf("ready payload carries %q: another member's setting must not reach a viewer", key)
+		}
 	}
 }

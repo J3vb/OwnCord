@@ -85,6 +85,10 @@ type Services struct {
 	// when the Store does not also satisfy UserNoteStore (a test double), and
 	// the profile routes then leave the note routes out.
 	UserNotes *UserNoteService
+	// Privacy is the per-user DM privacy setting (migration 070). It is nil
+	// when the Store does not also satisfy PrivacyStore (a test double), and
+	// the profile routes then leave the privacy routes out.
+	Privacy *PrivacyService
 	// PushDispatch is Web Push dispatch (B5-11, behind HP-5), nil unless
 	// the composition root constructed it — which it does only when both
 	// push.enabled and push.dispatch_enabled are true. Exists on Services
@@ -138,8 +142,13 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 	if ns, ok := st.(UserNoteStore); ok {
 		userNotes = NewUserNoteService(ns)
 	}
+	var privacy *PrivacyService
+	if ps, ok := st.(PrivacyStore); ok {
+		privacy = NewPrivacyService(ps)
+	}
 	return &Services{
 		UserNotes:       userNotes,
+		Privacy:         privacy,
 		CallLog:         callLog,
 		Erasure:         erasure,
 		Retention:       NewRetentionService(st),

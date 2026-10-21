@@ -471,7 +471,6 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 	if h.db != nil {
 		retryFloorMS = h.readers.Ready.MessageDeliveryFloorMS()
 	}
-
 	return &readyFields{
 		head: readyHead{
 			Capabilities: map[string]any{
@@ -481,6 +480,7 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 				"read_pointer":                 true,
 				"user_notes":                   true,
 				"profile_banners":              true,
+				"dm_privacy":                   true,
 			},
 			Channels:   channelPayloads,
 			DMChannels: dmChannels,
