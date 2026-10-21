@@ -760,6 +760,9 @@ function openRoleModal(id){
   const role=id===null?null:state.roleList.find(r=>r.id===id);
   if(id!==null&&!role){showToast('Role not found','error');return}
   state.roleEditId=role?role.id:null;
+  /* The mask as loaded into this editor; saveRole sends it back so the server
+     can refuse an edit made from a copy that has since moved (WP 5.1b). */
+  state.roleEditLoadedPerms=role?role.permissions:null;
   const name=role?role.name:'';
   const color=(role&&role.color)?role.color:'';
   const perms=role?role.permissions:0;
@@ -842,9 +845,25 @@ async function saveRole(id){
   };
   try{
     if(id===null)await api('POST','/roles',body);
-    else await api('PATCH','/roles/'+id,body);
+    else await api('PATCH','/roles/'+id,Object.assign({expected_permissions:state.roleEditLoadedPerms},body));
     closeModal();showToast(id===null?'Role created':'Role updated');renderContent();
-  }catch(e){showToast(e.message,'error')}
+  }catch(e){
+    if(e.status===409&&e.code==='ROLE_CONFLICT'){await reloadRoleAfterConflict(id);return}
+    showToast(e.message,'error');
+  }
+}
+
+/* Another admin changed this role's permissions after the editor loaded it, so
+   the save was refused and nothing was written. Reload the list and reopen the
+   editor on the latest copy; the edit is not carried over, so it is applied
+   again on purpose rather than on top of a mask the admin has not seen. */
+async function reloadRoleAfterConflict(id){
+  try{
+    state.roleList=(await api('GET','/roles'))||[];
+    if(state.roleList.some(r=>r.id===id))openRoleModal(id);
+    else{closeModal();renderContent()}
+  }catch(e){closeModal();renderContent()}
+  showToast('Someone else changed this role. The latest version is loaded; apply your change again.','error');
 }
 
 function openDeleteRole(id){

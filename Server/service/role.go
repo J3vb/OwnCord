@@ -63,6 +63,10 @@ type RoleInput struct {
 	Color       *string // points at "" to clear the color
 	Permissions *int64
 	Position    *int
+	// ExpectedPermissions is the mask the caller loaded before editing. Only
+	// UpdateRole reads it: when set and the stored mask differs, the edit is
+	// refused with ErrConflict and nothing is written. Nil skips the check.
+	ExpectedPermissions *int64
 }
 
 // RoleWithMembers is a role plus how many users currently hold it. The count
@@ -289,6 +293,15 @@ type RoleUpdateResult struct {
 	Renamed bool
 }
 
+// checkExpectedPermissions refuses an edit made from a stale copy: nil skips
+// the check, anything else must equal the stored mask.
+func checkExpectedPermissions(expected *int64, role *db.Role) error {
+	if expected != nil && *expected != role.Permissions {
+		return fmt.Errorf("%w: role permissions changed since it was loaded", ErrConflict)
+	}
+	return nil
+}
+
 // updateRoleLocked applies a partial change to a role below the actor's rank.
 // Returns the updated role and what the change actually moved.
 func (s *RoleService) updateRoleLocked(ctx context.Context, actorID, roleID int64, in RoleInput) (updated *db.Role, res RoleUpdateResult, err error) {
@@ -306,6 +319,11 @@ func (s *RoleService) updateRoleLocked(ctx context.Context, actorID, roleID int6
 		return nil, RoleUpdateResult{}, fmt.Errorf("%w: role not found", ErrNotFound)
 	}
 	if err := requireBelowActor(actor, role); err != nil {
+		return nil, RoleUpdateResult{}, err
+	}
+	// Compared under s.mu against the row just read, so two editors holding
+	// the same copy cannot both win: the second sees the first's mask.
+	if err := checkExpectedPermissions(in.ExpectedPermissions, role); err != nil {
 		return nil, RoleUpdateResult{}, err
 	}
 

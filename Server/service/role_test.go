@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -699,4 +700,94 @@ func assertAudit(t *testing.T, database *db.DB, action string) {
 		}
 	}
 	t.Errorf("no %q audit entry written", action)
+}
+
+// ─── Expected permissions (WP 5.1b) ──────────────────────────────────────────
+
+func TestUpdateRole_ExpectedPermissions(t *testing.T) {
+	svc, database := newRoleCRUDService(t)
+	ctx := context.Background()
+	created, err := svc.CreateRole(ctx, 1, RoleInput{Name: new("Bots"), Permissions: new(permissions.ReadMessages)})
+	if err != nil {
+		t.Fatalf("CreateRole: %v", err)
+	}
+
+	// Stale: refused with ErrConflict, and neither the row nor the audit log moves.
+	_, _, err = svc.UpdateRole(ctx, 1, created.ID, RoleInput{
+		Name:                new("Renamed"),
+		Permissions:         new(permissions.ReadMessages | permissions.SendMessages),
+		ExpectedPermissions: new(permissions.SendMessages),
+	})
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale expected: err = %v, want ErrConflict", err)
+	}
+	got, err := database.GetRoleByID(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetRoleByID: %v", err)
+	}
+	if got.Name != "Bots" || got.Permissions != permissions.ReadMessages {
+		t.Errorf("stale edit wrote: name=%q perms=%#x", got.Name, got.Permissions)
+	}
+
+	// Matching: applied.
+	_, _, err = svc.UpdateRole(ctx, 1, created.ID, RoleInput{
+		Permissions:         new(permissions.ReadMessages | permissions.SendMessages),
+		ExpectedPermissions: new(permissions.ReadMessages),
+	})
+	if err != nil {
+		t.Fatalf("matching expected: %v", err)
+	}
+
+	// Absent: today's behaviour.
+	if _, _, err = svc.UpdateRole(ctx, 1, created.ID, RoleInput{Name: new("Plain")}); err != nil {
+		t.Fatalf("absent expected: %v", err)
+	}
+}
+
+// Two editors loaded the same mask and each submit a different one: the first
+// to take the lock wins, the other is told the role moved, and the stored mask
+// is the winner's.
+func TestUpdateRole_ExpectedPermissionsRaceHasOneWinner(t *testing.T) {
+	svc, database := newRoleCRUDService(t)
+	ctx := context.Background()
+	loaded := permissions.ReadMessages
+	created, err := svc.CreateRole(ctx, 1, RoleInput{Name: new("Bots"), Permissions: new(loaded)})
+	if err != nil {
+		t.Fatalf("CreateRole: %v", err)
+	}
+	masks := []int64{permissions.ReadMessages | permissions.SendMessages, permissions.ReadMessages | permissions.AttachFiles}
+	errs := make([]error, len(masks))
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i, m := range masks {
+		wg.Go(func() {
+			<-start
+			_, _, errs[i] = svc.UpdateRole(ctx, 1, created.ID, RoleInput{Permissions: new(m), ExpectedPermissions: new(loaded)})
+		})
+	}
+	close(start)
+	wg.Wait()
+
+	winner := -1
+	for i, e := range errs {
+		switch {
+		case e == nil:
+			if winner != -1 {
+				t.Fatalf("both edits succeeded")
+			}
+			winner = i
+		case !errors.Is(e, ErrConflict):
+			t.Fatalf("edit %d: err = %v, want nil or ErrConflict", i, e)
+		}
+	}
+	if winner == -1 {
+		t.Fatalf("no edit won: %v", errs)
+	}
+	got, err := database.GetRoleByID(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetRoleByID: %v", err)
+	}
+	if got.Permissions != masks[winner] {
+		t.Errorf("stored mask = %#x, want the winner's %#x", got.Permissions, masks[winner])
+	}
 }
