@@ -10,7 +10,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -242,32 +241,6 @@ func CheckBackupIntegrity(ctx context.Context, path string) error {
 	return nil
 }
 
-// CopyDatabaseFile streams src over dst without loading it into memory,
-// truncating dst, and syncs it before closing so a power loss cannot leave a
-// partially-written database behind. Both restore paths — the admin endpoint
-// and the `chatserver restore` CLI — swap the live file through it.
-func CopyDatabaseFile(src, dst string) error {
-	in, err := os.Open(src) //nolint:gosec // G304: a sanitized backup path or an operator-supplied one
-	if err != nil {
-		return fmt.Errorf("open source: %w", err)
-	}
-	defer in.Close() //nolint:errcheck
-
-	out, err := os.Create(dst) //nolint:gosec // G304: the configured database path
-	if err != nil {
-		return fmt.Errorf("create destination: %w", err)
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		_ = out.Close()
-		return fmt.Errorf("copy: %w", err)
-	}
-	if err := out.Sync(); err != nil {
-		_ = out.Close()
-		return fmt.Errorf("sync: %w", err)
-	}
-	return out.Close()
-}
-
 // uriPathEscaper escapes the characters SQLite gives meaning in a file: URI
 // path: % starts an escape, ? the query and # the fragment. Left raw, a path
 // such as "backup#2.db" opens (and creates) "backup" instead.
@@ -277,58 +250,4 @@ var uriPathEscaper = strings.NewReplacer("%", "%25", "?", "%3F", "#", "%23")
 // the checks that verify a file before it is restored.
 func readOnlyURI(abs string) string {
 	return "file:" + uriPathEscaper.Replace(filepath.ToSlash(abs)) + "?mode=ro&_pragma=busy_timeout(2000)"
-}
-
-// CheckpointForRestore runs wal_checkpoint(TRUNCATE) on the writer and reports
-// whether the log is empty afterwards. The admin restore refuses when it is
-// not: a reader still inside a snapshot kept the checkpoint from finishing,
-// and nothing has been closed or overwritten yet, so refusing costs nothing.
-func (d *DB) CheckpointForRestore(ctx context.Context) (bool, error) {
-	conn, err := d.writer.Conn(ctx)
-	if err != nil {
-		return false, fmt.Errorf("restore WAL checkpoint: %w", err)
-	}
-	defer conn.Close() //nolint:errcheck
-	busy, logFrames, checkpointed, err := walCheckpointTRUNCATE(ctx, conn)
-	if err != nil {
-		return false, fmt.Errorf("restore WAL checkpoint: %w", err)
-	}
-	return walTruncated(busy, logFrames, checkpointed), nil
-}
-
-// WaitConnsClosed waits until every connection of both pools is closed, or
-// ctx ends. Close closes only idle connections; one still running a query
-// closes when that query returns. The last SQLite connection to close
-// checkpoints its log into the main file, so a restore must not copy a new
-// file in while any connection is still open.
-func (d *DB) WaitConnsClosed(ctx context.Context) error {
-	tick := time.NewTicker(10 * time.Millisecond)
-	defer tick.Stop()
-	for {
-		open := d.writer.Stats().OpenConnections
-		if d.reader != d.writer {
-			open += d.reader.Stats().OpenConnections
-		}
-		if open == 0 {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("%d database connection(s) still open: %w", open, ctx.Err())
-		case <-tick.C:
-		}
-	}
-}
-
-// RemoveWALSidecars deletes dbPath's -wal and -shm files. Both restore paths
-// call it after the database is closed and before a backup is copied over
-// it: SQLite would replay a leftover log onto the restored file at the next
-// open. A missing file is not an error.
-func RemoveWALSidecars(dbPath string) error {
-	for _, suffix := range []string{"-wal", "-shm"} {
-		if err := os.Remove(dbPath + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("removing %s: %w", dbPath+suffix, err)
-		}
-	}
-	return nil
 }
