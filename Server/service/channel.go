@@ -368,6 +368,12 @@ func admitReadState(ctx context.Context, st Store, perms *PermissionService, use
 	if err != nil || ch == nil {
 		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
+	if ch.IsThread() {
+		// A thread is never a socket's focused channel (6.9c): a parent's
+		// visibility refresh revokes the parent topic only, so a thread
+		// topic held here would outlive the parent's revocation.
+		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
+	}
 	sub, subErr := channelSubject(ctx, st, perms, userID, ch, false)
 	if subErr != nil {
 		return nil, fmt.Errorf("%w: access denied", ErrForbidden)

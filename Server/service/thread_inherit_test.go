@@ -163,3 +163,21 @@ func TestThreadRefusedOnParentOnlySurfaces(t *testing.T) {
 		t.Errorf("retentionChannel(thread) = %v, want ErrBadRequest", err)
 	}
 }
+
+// A socket cannot focus a thread: the parent's visibility refresh would not
+// revoke the thread topic, so channel_focus, mark_read and mark_unread refuse
+// a thread id as if it did not exist.
+func TestThreadNotFocusable(t *testing.T) {
+	channels, _, database := newOverrideFixture(t)
+	ctx := context.Background()
+	seedThread(t, database, 21, 10)
+	if _, err := channels.AdmitChannelFocus(ctx, 1, 21); !errors.Is(err, ErrNotFound) {
+		t.Errorf("AdmitChannelFocus(thread) = %v, want ErrNotFound", err)
+	}
+	if _, err := channels.HandleChannelFocus(ctx, 1, 21); !errors.Is(err, ErrNotFound) {
+		t.Errorf("HandleChannelFocus(thread) = %v, want ErrNotFound", err)
+	}
+	if _, err := channels.AdmitChannelFocus(ctx, 1, 10); err != nil {
+		t.Errorf("AdmitChannelFocus(parent) = %v", err)
+	}
+}
