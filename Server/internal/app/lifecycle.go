@@ -334,6 +334,7 @@ func (a *App) startHub() error {
 // cleanup); the hub it serves is stopped by the step above.
 func (a *App) startRouter() error {
 	a.runtime.SetupToken = rand.Text()
+	a.runtime.TOTPKey = a.totpKey
 	router, cleanup := api.NewRouter(a.cfg, a.database, a.deps.Version, a.deps.LogBuf, a.plugins, a.runtime)
 	a.router = router
 	// Print the token only while setup is still open. A failed check prints
