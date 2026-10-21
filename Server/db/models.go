@@ -178,6 +178,7 @@ type Channel struct {
 	AFK bool `json:"afk"`
 	// Thread is set on a thread row only (migration 074); never on the wire.
 	Thread ChannelThread `json:"-"`
+	Forum  *ChannelForum `json:"forum,omitempty"` // forum rows only (migration 075)
 }
 
 // Message represents a row in the messages table.

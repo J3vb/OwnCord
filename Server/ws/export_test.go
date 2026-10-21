@@ -308,7 +308,7 @@ func (h *Hub) readyBytes(database ReadySnapshotReader, userID int64, role *db.Ro
 // WriteReadyForTest emits userID's ready payload to w as the handshake
 // emits it to the socket, so a test can measure the whole emit.
 func (h *Hub) WriteReadyForTest(database ReadySnapshotReader, userID int64, role *db.Role, w io.Writer) error {
-	ready, err := h.buildReady(context.Background(), database, userID, role)
+	ready, err := h.buildReady(context.Background(), database, userID, role, clientFeatures{})
 	if err != nil {
 		return err
 	}
@@ -320,7 +320,7 @@ func (h *Hub) WriteReadyForTest(database ReadySnapshotReader, userID int64, role
 // json.Marshal of a map, members included, so a golden test can hold the
 // streamed frame to it byte for byte.
 func (h *Hub) LegacyReadyForTest(database ReadySnapshotReader, userID int64, role *db.Role) ([]byte, error) {
-	f, err := h.readReady(context.Background(), database, userID, role)
+	f, err := h.readReady(context.Background(), database, userID, role, clientFeatures{})
 	if err != nil {
 		return nil, err
 	}

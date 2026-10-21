@@ -53,8 +53,13 @@ const (
 	// live in db/polls.go and PollStore is a slice interface in service.
 	// 6.9c-a1 adds one (129 to 130): Channel.Thread, json:"-", a single
 	// nested struct so the thread columns stay off the wire; ChannelThread
-	// lives in db/channel_thread.go, outside the count. Any further tag fails.
-	modelsJSONTagBaseline = 130
+	// lives in db/channel_thread.go, outside the count. 6.9d-a1 adds one (130
+	// to 131): Channel.Forum, a pointer set on a forum row only so the admin
+	// channel list and the create and PUT responses carry the forum's settings
+	// and tags straight from this struct. ChannelForum and ForumTag live in
+	// db/channel_forum.go, outside the count, and Store did not grow
+	// (ForumStore is a slice interface in service). Any further tag fails.
+	modelsJSONTagBaseline = 131
 
 	// storeFullSurfaceBaseline is the compiler's own method count for Store,
 	// promoted methods from the cross-package embeds included (309 plus the 9
