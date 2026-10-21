@@ -48,3 +48,15 @@ func (d *DB) SetUserPrivacy(ctx context.Context, userID int64, p UserPrivacy) er
 	}
 	return nil
 }
+
+// DMRefusesSender reports whether recipientID has turned off direct messages
+// from members and holds no trust row for senderID. A recipient with no saved
+// privacy row never refuses. Trust in any source (accepted, sent_first,
+// grandfathered) keeps a conversation reachable.
+func (d *DB) DMRefusesSender(ctx context.Context, recipientID, senderID int64) (bool, error) {
+	n, err := d.q.DMRefusesSender(ctx, dbgen.DMRefusesSenderParams{SenderID: senderID, RecipientID: recipientID})
+	if err != nil {
+		return false, fmt.Errorf("DMRefusesSender: %w", err)
+	}
+	return n > 0, nil
+}

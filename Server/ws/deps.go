@@ -248,7 +248,7 @@ func channelSubject(ctx context.Context, database DispatchReader, perms *permiss
 	}
 	sub.DMParticipant = ok
 	if ok && withBlock {
-		switch err := service.RequireDMNotBlocked(ctx, database, userID, ch.ID); {
+		switch err := service.RequireDMReachable(ctx, database, userID, ch.ID); {
 		case errors.Is(err, service.ErrBlocked):
 			sub.DMBlocked = true
 		case err != nil:
@@ -268,7 +268,7 @@ func joinDenial(err error) ClientError {
 	case errors.Is(err, permissions.ErrArchived):
 		return ClientError{Code: ErrCodeBadRequest, Message: "channel is archived"}
 	case errors.Is(err, permissions.ErrBlocked):
-		return ClientError{Code: ErrCodeForbidden, Message: "cannot join voice: blocked"}
+		return ClientError{Code: ErrCodeForbidden, Message: "cannot join this call"}
 	case errors.Is(err, permissions.ErrTimedOut):
 		return ClientError{Code: ErrCodeTimedOut, Message: "you are timed out"}
 	default:

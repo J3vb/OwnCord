@@ -182,7 +182,7 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 	// whoever is inside), and for a DM membership plus no block (blocking
 	// never touches dm_participants, so membership alone would let a blocked
 	// user into the blocker's call — same rule as every other DM sink,
-	// service.requireDMNotBlocked, group DMs exempt). The same predicate
+	// service.RequireDMReachable, group DMs exempt). The same predicate
 	// gates the token refresh and a moderator move's destination.
 	sub, subErr := channelSubject(ctx, h.readers.Dispatch, h.permChecker, h.perms, c.userID, ch, true)
 	if subErr != nil {

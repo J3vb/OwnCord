@@ -657,6 +657,10 @@ payload (`BAD_REQUEST`). The ping is stored with the message and kept when the
 message is edited; deleting the message takes back the badge it raised. An
 edit never raises a badge. Older servers ignore the field.
 
+In a two-person DM `chat_send` is also refused with `FORBIDDEN` when the other
+participant cannot be reached by the sender (see _Refusing a 1:1 interaction_
+under DM Authorization), before anything is stored.
+
 `chat_send` also accepts optional `client_message_id`: exactly
 `<13-digit Unix milliseconds>:<lowercase UUID v4>` (50 characters), generated
 once for the logical message and kept unchanged across transport retries.
@@ -1926,6 +1930,10 @@ Voice uses LiveKit as the SFU. WebSocket messages handle signaling (join/leave/s
 and omits it on automatic rejoins (voice reconnect, resume, `voice_moved`). It
 only exempts the join from a moderator's rejoin block (see `voice_mod_kick`).
 
+In a two-person DM the join is refused with `FORBIDDEN` (`cannot join this call`)
+when the other participant cannot be reached by the caller (see _Refusing a 1:1
+interaction_ under DM Authorization).
+
 The caller needs `CONNECT_VOICE` in the channel and, outside a DM,
 `READ_MESSAGES` too: a voice channel hidden from the caller is not joinable.
 
@@ -2517,6 +2525,20 @@ All handlers that touch a channel check the channel type and branch to participa
 Group DMs need no special case: `dm_participants` holds one row per
 participant, and every check is a lookup on `(user_id, channel_id)`.
 
+**Refusing a 1:1 interaction.** `chat_send`, `chat_edit`, `reaction_add` /
+`reaction_remove`, `call_ring` and `voice_join` (with `voice_token_refresh`) in
+a two-person DM are refused with `FORBIDDEN` when the other participant cannot
+be reached by the sender, and `typing_start` is dropped silently. That is the
+case when either has blocked the other, and also when the other participant has
+turned off direct messages from members (`allow_member_dms`, see `GET
+/api/v1/users/me/privacy`) and holds no trust row for the sender (accepted,
+sent first, or grandfathered). Every cause produces the same code and message
+on a given command (`you can't message this user`; `cannot join this call` for
+`voice_join`), so the frame says nothing about which cause applies. A refused
+send writes no message and no message request, and the recipient receives no
+frame. On `chat_send`, `call_ring` and `voice_join`, a failed read of the setting is answered `INTERNAL`, not `FORBIDDEN`.
+Group DMs are covered separately.
+
 **Blocks are a 1:1 rule.** A block refuses DM creation and gates every
 interaction sink in a two-person DM, but is _not_ consulted inside a group: a
 group is a shared room, and dropping one member's messages for one other member
@@ -2543,7 +2565,9 @@ dangling, in exchange for information the presence already carries.
 }
 ```
 
-Only a participant of the DM may ring it (`FORBIDDEN` otherwise), and not
+Only a participant of the DM may ring it (`FORBIDDEN` otherwise, which also
+covers a counterpart who cannot be reached by the caller, see _Refusing a 1:1
+interaction_ under DM Authorization), and not
 while timed out (`TIMED_OUT`; `call_decline` still works). A 1:1 ring to
 someone who has not accepted the caller (a pending, ignored or deleted message
 request alike) is refused at once with `CALL_REQUIRES_ACCEPTANCE` and never

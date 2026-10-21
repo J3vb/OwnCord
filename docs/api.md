@@ -1807,6 +1807,13 @@ user, `POST /api/v1/dms` accepts it, atomically: trusts the sender, opens the
 conversation and marks the request `accepted`, and sends the caller's other
 devices the `dm_channel_open` and `dm_request` frames `accept` sends.
 
+If either user has blocked the other, or the recipient has turned off direct
+messages from members (`allow_member_dms` in `/users/me/privacy`) and has no
+trust row for the caller (accepted, written to first, or grandfathered), the
+call is refused with `403 FORBIDDEN` and the same body for every cause:
+`you can't message this user`. A recipient who does not exist or whose account
+is not active is `404 NOT_FOUND`.
+
 ---
 
 ### GET /api/v1/dms

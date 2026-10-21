@@ -49,8 +49,8 @@ type Subject struct {
 	Override  ChannelOverride
 	Channel   ChannelRef // Type and Archived; ID is not consulted
 	// DMParticipant and DMBlocked are consulted only when Channel.Type is
-	// "dm". Group DMs pass DMBlocked=false — blocks are enforced at group
-	// creation, not per message (service.requireDMNotBlocked).
+	// "dm". DMBlocked means the 1:1 counterpart cannot be reached by this
+	// actor (service.RequireDMReachable). Group DMs pass DMBlocked=false.
 	DMParticipant bool
 	DMBlocked     bool
 	// NSFWAcknowledged is consulted only when Channel.NSFW is set: whether

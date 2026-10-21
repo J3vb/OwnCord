@@ -15,3 +15,16 @@ ON CONFLICT (user_id) DO UPDATE
    SET allow_member_dms = excluded.allow_member_dms,
        message_requests = excluded.message_requests,
        updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now');
+
+-- name: DMRefusesSender :one
+-- 1 when the recipient has turned direct messages from members off and has no
+-- trust row for the sender, else 0. A missing user_privacy row is "on". The
+-- trust check is an anti-join because sqlc does not bind parameters that sit
+-- inside an EXISTS subquery.
+SELECT CAST(COUNT(*) AS INTEGER) AS refuses
+FROM user_privacy AS up
+LEFT JOIN trusted_senders AS ts
+  ON ts.recipient_id = up.user_id AND ts.sender_id = sqlc.arg(sender_id)
+WHERE up.user_id = sqlc.arg(recipient_id)
+  AND up.allow_member_dms = 0
+  AND ts.recipient_id IS NULL;

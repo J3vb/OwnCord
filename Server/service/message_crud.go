@@ -445,7 +445,7 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 	// not fall through with chanType="", which routes into the non-DM
 	// permission branch below. That branch passes on the base role mask alone
 	// (SEND_MESSAGES|READ_MESSAGES, no per-channel override exists for a DM),
-	// skipping both the DM-participant check and RequireDMNotBlocked entirely.
+	// skipping both the DM-participant check and RequireDMReachable entirely.
 	ch, chErr := s.st.GetChannel(ctx, msg.ChannelID)
 	if chErr != nil || ch == nil {
 		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
