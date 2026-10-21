@@ -81,6 +81,33 @@ func (s *ChannelService) applyOverrideEffects(res OverrideResult, ch *db.Channel
 	}
 }
 
+// invalidatePermEffect drops the cached permissions a PermEffect names: the
+// listed users, or every cached mask when the narrow list could not be read.
+func (s *ChannelService) invalidatePermEffect(e PermEffect) {
+	if s.perms == nil {
+		return
+	}
+	if e.AffectedAll {
+		s.perms.InvalidateAll()
+		return
+	}
+	invalidateUsers(s.perms, e.AffectedUsers)
+}
+
+// notifyAudience re-derives who can see ch. Callers invalidate first.
+func (s *ChannelService) notifyAudience(ch *db.Channel) {
+	if s.notifier != nil {
+		s.notifier.ChannelAudienceChanged(ch)
+	}
+}
+
+// notifyAudienceIf is notifyAudience when applied is true.
+func (s *ChannelService) notifyAudienceIf(applied bool, ch *db.Channel) {
+	if applied {
+		s.notifyAudience(ch)
+	}
+}
+
 // SetPermissionNotifier installs the live fan-out port for role assignment.
 // It is separate from SetNotifier (the mod_action frame): different port,
 // different lifecycle. Call it before the server starts serving.

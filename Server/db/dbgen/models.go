@@ -59,6 +59,20 @@ type AuditLog struct {
 	ActorToken   *string `json:"actorToken"`
 }
 
+type CategoryOverride struct {
+	CategoryID int64 `json:"categoryId"`
+	RoleID     int64 `json:"roleId"`
+	Allow      int64 `json:"allow"`
+	Deny       int64 `json:"deny"`
+}
+
+type CategoryUserOverride struct {
+	CategoryID int64 `json:"categoryId"`
+	UserID     int64 `json:"userId"`
+	Allow      int64 `json:"allow"`
+	Deny       int64 `json:"deny"`
+}
+
 type Channel struct {
 	ID                             int64   `json:"id"`
 	Name                           string  `json:"name"`
@@ -89,6 +103,7 @@ type Channel struct {
 	ForumRequireTag                int64   `json:"forumRequireTag"`
 	ForumDefaultAutoArchiveMinutes int64   `json:"forumDefaultAutoArchiveMinutes"`
 	ThreadPostMessageID            *int64  `json:"threadPostMessageId"`
+	PermissionsSynced              int64   `json:"permissionsSynced"`
 }
 
 type ChannelCategory struct {

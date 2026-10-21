@@ -141,6 +141,7 @@ input,select,textarea{font-family:inherit;border:none}
 
 .btn{padding:8px 16px;border-radius:var(--radius-sm);font-size:13px;font-weight:600;transition:all .15s;display:inline-flex;align-items:center;gap:6px}
 .btn svg{width:16px;height:16px}
+.btn-sm{padding:3px 10px;font-size:12px}
 .btn-accent,.btn-primary{background:var(--accent);color:var(--on-accent)}.btn-accent:hover,.btn-primary:hover{background:var(--accent-hover)}
 .btn-danger{background:var(--danger-fill);color:var(--on-fill)}.btn-danger:hover{background:var(--danger-fill-hover)}
 .btn-ghost{background:var(--bg-hover);color:var(--text-muted)}.btn-ghost:hover{background:var(--bg-active);color:var(--text-normal)}

@@ -47,6 +47,10 @@ func resolveGuildChannel(channels *service.ChannelService, w http.ResponseWriter
 // Validation failures answer INVALID_INPUT with the service's own message —
 // the S-03 contract's wording is the response body.
 func writeChannelErr(w http.ResponseWriter, err error) {
+	if errors.Is(err, service.ErrPermsChanged) {
+		writeErr(w, http.StatusConflict, "PERMISSIONS_CHANGED", err.Error())
+		return
+	}
 	if errors.Is(err, service.ErrConflict) {
 		writeErr(w, http.StatusConflict, "CHANNEL_NAME_TAKEN", err.Error())
 		return
@@ -60,7 +64,7 @@ func handleListChannels(channels *service.ChannelService) http.HandlerFunc {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "channel service unavailable")
 			return
 		}
-		guildChannels, err := channels.AdminListChannels(r.Context())
+		guildChannels, err := channels.AdminListChannelsSynced(r.Context())
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list channels")
 			return
@@ -145,6 +149,10 @@ type updateChannelRequest struct {
 	// 0 = unlimited.
 	VoiceMaxUsers int `json:"voice_max_users"`
 	VoiceMaxVideo int `json:"voice_max_video"`
+	// SyncPermissions replaces the channel's overrides with the template of the
+	// category it ends up in and marks it synced (WP 6.5d). Without it, moving
+	// a channel to another category keeps its overrides and unsyncs it.
+	SyncPermissions bool `json:"sync_permissions"`
 }
 
 // patchChannelPostCommitHook mirrors createChannelPostCommitHook for the
@@ -196,12 +204,14 @@ func handlePatchChannel(channels *service.ChannelService, hub HubBroadcaster) ht
 			NSFW:          req.NSFW,
 			VoiceMaxUsers: req.VoiceMaxUsers,
 			VoiceMaxVideo: req.VoiceMaxVideo,
+
+			SyncPermissions: req.SyncPermissions,
+			ActorRole:       actorRoleFromContext(r),
 		}, patchChannelPostCommitHook)
 		if err != nil {
 			writeChannelErr(w, err)
 			return
 		}
-
 		if hub != nil {
 			hub.BroadcastChannelUpdate(updated)
 			if newCats != nil {

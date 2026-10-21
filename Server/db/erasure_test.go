@@ -94,6 +94,11 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	exec(`INSERT INTO user_blocks (blocker_id, blocked_id) VALUES (?, ?)`, uid, other)
 	exec(`INSERT INTO user_blocks (blocker_id, blocked_id) VALUES (?, ?)`, other, uid)
 	exec(`INSERT INTO channel_user_overrides (channel_id, user_id, allow, deny) VALUES (?, ?, 1, 0)`, chID, uid)
+	// Category permission templates (migration 076, class 18c): the subject's
+	// row is erased, another user's on the same category survives.
+	exec(`INSERT INTO channel_categories (id, name) VALUES (770, 'Erase Template')`)
+	exec(`INSERT INTO category_user_overrides (category_id, user_id, allow, deny) VALUES (770, ?, 1, 0)`, uid)
+	exec(`INSERT INTO category_user_overrides (category_id, user_id, allow, deny) VALUES (770, ?, 0, 1)`, other)
 	exec(`INSERT INTO voice_states (user_id, channel_id, joined_at) VALUES (?, ?, datetime('now'))`, uid, chID)
 	exec(`INSERT INTO channel_retention (channel_id, days, updated_by) VALUES (?, 30, ?)`, chID, uid)
 	// Message requests and trusted senders (migration 046, B5-6, classes 14c
@@ -415,6 +420,9 @@ func eraseEveryInventoryClassIsZero(t *testing.T) {
 	}
 	if n := count(`SELECT COUNT(*) FROM gif_favorites`); n != 1 {
 		t.Errorf("gif favorites left = %d, want 1 (the other user's)", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM category_user_overrides`); n != 1 {
+		t.Errorf("category user overrides left = %d, want 1 (the other user's)", n)
 	}
 }
 

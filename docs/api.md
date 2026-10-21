@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 217 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 223 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -61,12 +61,18 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | PUT     | `/admin/api/channels/categories/order`                               |
 | DELETE  | `/admin/api/channels/categories/{id}`                                |
 | PATCH   | `/admin/api/channels/categories/{id}`                                |
+| GET     | `/admin/api/channels/categories/{id}/permissions`                    |
+| DELETE  | `/admin/api/channels/categories/{id}/permissions/{roleId}`           |
+| PUT     | `/admin/api/channels/categories/{id}/permissions/{roleId}`           |
+| DELETE  | `/admin/api/channels/categories/{id}/user-permissions/{userId}`      |
+| PUT     | `/admin/api/channels/categories/{id}/user-permissions/{userId}`      |
 | DELETE  | `/admin/api/channels/{id}`                                           |
 | PATCH   | `/admin/api/channels/{id}`                                           |
 | GET     | `/admin/api/channels/{id}/access/explain`                            |
 | POST    | `/admin/api/channels/{id}/access/preview`                            |
 | PUT     | `/admin/api/channels/{id}/forum`                                     |
 | GET     | `/admin/api/channels/{id}/permissions`                               |
+| POST    | `/admin/api/channels/{id}/permissions/sync`                          |
 | DELETE  | `/admin/api/channels/{id}/permissions/{roleId}`                      |
 | PUT     | `/admin/api/channels/{id}/permissions/{roleId}`                      |
 | DELETE  | `/admin/api/channels/{id}/retention`                                 |
@@ -304,6 +310,7 @@ endpoints return plain-text errors — see their section):
 | `CHANNEL_NAME_TAKEN`            | 409         | Admin channel create or rename onto a name the same type already has in that category                                                                                                                                                            |
 | `CATEGORY_NAME_TAKEN`           | 409         | Category create or rename onto a name another category already has, ignoring case                                                                                                                                                                |
 | `CATEGORY_LIST_STALE`           | 409         | `PUT .../categories/order` with an id set that is not exactly the current set of categories; nothing is written                                                                                                                                  |
+| `PERMISSIONS_CHANGED`           | 409         | A channel sync found override rows it had not checked (they changed under it); nothing is written, retry                                                                                                                                         |
 
 ### Request deadline
 
@@ -5492,6 +5499,49 @@ or a `PATCH` that changes the name or the category. It is a check at write
 time, not a database constraint, so channels that already share a name are
 left as they are, and a `PATCH` that leaves both name and category alone still
 saves.
+
+### Category permissions (WP 6.5d)
+
+A category carries permission overrides that its channels can stay **synced**
+to. They are a template that is copied onto channels, never inherited: a
+channel's effective access is still computed from its own override rows alone.
+The routes are on `/admin/api` only, behind `MANAGE_CHANNELS` like the channel
+override routes:
+
+| Route                                                      | Body            | Result                                                                                              |
+| ---------------------------------------------------------- | --------------- | --------------------------------------------------------------------------------------------------- |
+| `GET  /admin/api/channels/categories/{id}/permissions`     | none            | `200` `{category_id, roles, users}`: every role (zero masks when it has no row), existing user rows |
+| `PUT  .../categories/{id}/permissions/{roleId}`            | `{allow, deny}` | `200` the role row. Writes the category row and the same row on every synced channel                |
+| `DELETE .../categories/{id}/permissions/{roleId}`          | none            | `204`. Removes the category row and the row on every synced channel                                 |
+| `PUT/DELETE .../categories/{id}/user-permissions/{userId}` | as above        | the same for one member                                                                             |
+| `POST /admin/api/channels/{id}/permissions/sync`           | none            | `200` `{channel_id, permissions_synced}`. Replaces the channel's rows with its category's template  |
+
+A write runs the channel override guards over everything it touches: the
+escalation guard covers the bits written, the bits already on the category row
+and the bits already on every synced channel row it overwrites (a role cannot
+set or clear a bit its own role lacks), and the hierarchy rules apply to a role
+or member target. Any refusal is `403` and nothing is written; the category row
+and the channel rows are written in one transaction, and the channel set is read
+inside it. A sync, or a `PATCH` with `sync_permissions: true`, is guarded the
+same way over the union of the rows it removes and the rows it writes, and
+answers `400` when the channel has no category. A changed set of rows under a
+sync answers `409 PERMISSIONS_CHANGED` (retry). Writes are audited
+(`category_perms_update`, `category_perms_clear`, `category_user_perms_update`,
+`category_user_perms_clear`, `channel_perms_sync`).
+
+Sync lifecycle: a channel created in a category (by `category_id` or the legacy
+name) starts as a copy of the template and synced; copying is not a grant by the
+creator, so it is not blocked by bits the creator lacks. A direct write or delete
+of a channel override, or a `PATCH` that moves the channel to another category,
+sets `permissions_synced` to false and keeps its rows, unless the `PATCH` carries
+`sync_permissions: true`, which replaces its rows with the target category's
+template and marks it synced. `sync_permissions` on a `PATCH` works on both channel
+mounts (`/admin/api/channels/{id}` and `/api/v1/moderation/channels/{id}`); combined
+with a legacy `category` name that would create a new category it answers `400`,
+because a new category has no template to sync with. Deleting a category drops its template; its
+channels keep their rows and become unsynced. `permissions_synced` is on the
+admin channel list and on `GET /admin/api/channels/{id}/permissions`; it is not
+on the websocket channel payload.
 
 ---
 
