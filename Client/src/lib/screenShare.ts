@@ -647,6 +647,19 @@ export interface ScreenTrackState extends GenerationGuarded {
   preferred?: PublishCodec;
   /** The codec the share's video is published with now. */
   published?: PublishCodec;
+  /** The picker's "Share the app's sound" switch was on for this share
+   *  (Windows web path, WP 6.7b). Change source reads it for the new window. */
+  appAudioOn?: boolean;
+  /** The app's sound going out as this share's audio, until the share stops. */
+  appAudio?: AppAudioRelease;
+}
+
+/** What a share holds to end its app-audio capture (`lib/appAudioShare.ts`,
+ *  a lazy module: only this shape is needed on the stop paths). */
+export interface AppAudioRelease {
+  /** Close the page side, and stop the host capture unless a newer start
+   *  already replaced it. Idempotent. */
+  close(): void;
 }
 
 /** A share whose video track changes its own source under the publication
@@ -723,6 +736,10 @@ export function watchScreenEnded(
 
 export function stopManualScreenTracks(state: ScreenTrackState, room: Room | null): void {
   state.screenTrackEndedCleanup?.();
+  // Every stop path ends here: the app's sound and the host capture go too.
+  const appAudio = state.appAudio;
+  state.appAudio = undefined;
+  appAudio?.close();
   state.quality = undefined;
   state.fps = undefined;
   if (state.manualScreenTracks.length === 0 || room === null) return;
@@ -743,7 +760,7 @@ async function pickWebShareQuality(
   showPicker: ScreenSourcePicker,
   quality: StreamQuality,
   fps: number,
-): Promise<{ quality: StreamQuality; fps: number } | null> {
+): Promise<{ quality: StreamQuality; fps: number; appAudio: boolean } | null> {
   try {
     const pick = await showPicker({
       sources: [],
@@ -752,11 +769,13 @@ async function pickWebShareQuality(
       defaultQuality: quality,
       defaultFps: fps,
     });
-    return pick === null ? null : { quality: pick.quality, fps: pick.fps };
+    return pick === null
+      ? null
+      : { quality: pick.quality, fps: pick.fps, appAudio: pick.audio === true };
   } catch (err) {
     // The dialog's chunk failed to load: share at the defaults rather than not at all.
     log.warn("Screen share quality step unavailable", err);
-    return { quality, fps };
+    return { quality, fps, appAudio: false };
   }
 }
 
@@ -775,6 +794,7 @@ export async function enableScreenshare(
   const generation = state.generation ?? 0;
   let quality = getScreenShareQuality();
   let fps = getScreenShareFps();
+  let appAudioOn = false;
   // Linux picks inside its own capture; a headless run (no dialog registered)
   // keeps the saved defaults.
   const showPicker = isLinuxDesktop() ? null : getScreenSourcePicker();
@@ -787,6 +807,7 @@ export async function enableScreenshare(
       return;
     }
     ({ quality, fps } = pick);
+    appAudioOn = pick.appAudio;
   }
   const effectiveFps = getEffectiveScreenShareFps(quality, fps);
   const maxBitrate = getScreenShareMaxBitrate(quality, fps);
@@ -863,6 +884,32 @@ export async function enableScreenshare(
           t.stop();
         }
         if (state.manualScreenTracks === screenTracks) state.manualScreenTracks = [];
+        return;
+      }
+    }
+    state.appAudioOn = appAudioOn;
+    if (
+      appAudioOn &&
+      videoTrack !== undefined &&
+      !isLinuxDesktop() &&
+      !screenTracks.some((t) => t.kind === Track.Kind.Audio)
+    ) {
+      // Windows web path (WP 6.7b): a shared window gets its app's sound. A
+      // stop or newer share meanwhile has released everything it made.
+      const outcome = await import("./appAudioShare")
+        .then((m) =>
+          m.publishAppAudio(state, room, screenTracks, videoTrack, generation, {
+            ...SCREENSHARE_AUDIO_PUBLISH,
+            source: Track.Source.ScreenShareAudio,
+            simulcast: false,
+          }),
+        )
+        .catch((err: unknown) => {
+          log.warn("App audio unavailable; the video share goes on", err);
+          return "done" as const;
+        });
+      if (outcome === "stale" || (state.generation ?? 0) !== generation) {
+        removeEndedListener?.();
         return;
       }
     }
