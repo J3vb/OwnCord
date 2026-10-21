@@ -13,7 +13,7 @@ import (
 // failure surfaces as `starting totp-key: ...` before either exists. The
 // loader is auth.LoadOrGenerateTOTPKey, unchanged: same environment variable,
 // same <data dir>/totp.key, same mode, same fail-closed rules.
-// startRouter hands the key to NewRouter through Runtime.TOTPKey.
+// startHub hands the key to StartRuntime, which builds the AuthService.
 func (a *App) startTOTPKey() error {
 	key, err := auth.LoadOrGenerateTOTPKey(a.cfg.Server.DataDir)
 	if err != nil {

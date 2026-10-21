@@ -51,7 +51,7 @@ func setupRouterWithServices(t *testing.T, configure func(*service.Services, *db
 		},
 	}
 
-	rt, rtErr := app.StartRuntime(cfg, database, nil)
+	rt, rtErr := app.StartRuntime(cfg, database, nil, testRuntimeInputs(cfg))
 	if rtErr != nil {
 		t.Fatalf("app.StartRuntime: %v", rtErr)
 	}
@@ -515,7 +515,7 @@ func TestAPIV1ServerInfoIsCached(t *testing.T) {
 		t.Fatalf("blank server_name: %v", err)
 	}
 	cfg := &config.Config{Server: config.ServerConfig{Name: "First Name", Port: 8443}}
-	rt, rtErr := app.StartRuntime(cfg, database, nil)
+	rt, rtErr := app.StartRuntime(cfg, database, nil, testRuntimeInputs(cfg))
 	if rtErr != nil {
 		t.Fatalf("app.StartRuntime: %v", rtErr)
 	}

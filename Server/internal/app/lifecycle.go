@@ -188,7 +188,11 @@ func (a *App) startMigrate() error {
 // the migrated database before anything can serve (B4-10): what a restored
 // backup brought back is erased again here. Its close releases the file.
 func (a *App) startErasureMarkers() error {
-	markers, err := openMarkers(context.Background(), a.log, a.cfg, a.database)
+	// The one upload store (WP 5.6g): opened here because the replay below
+	// removes erased accounts' files, and handed on to StartRuntime so the
+	// router and the maintenance loop share the instance.
+	a.storage = OpenStorage(a.log, a.cfg)
+	markers, err := openMarkers(context.Background(), a.log, a.cfg, a.database, a.storage)
 	if err != nil {
 		return err
 	}
@@ -260,11 +264,13 @@ func pushDispatchEnabled(cfg *config.Config) bool {
 // return from Run and a supervised livekit-server process is never orphaned
 // (OC-0027).
 func (a *App) startHub() error {
-	rt, err := StartRuntime(a.cfg, a.database, a.plugins)
+	rt, err := StartRuntime(a.cfg, a.database, a.plugins,
+		RuntimeInputs{Version: a.deps.Version, TOTPKey: a.totpKey, Storage: a.storage})
 	if err != nil {
 		return err
 	}
 	a.runtime = rt
+	a.startLimiterCleanup(rt.Limiter)
 	a.hub = a.runtime.Hub
 	a.afterHubStart(rt.Services)
 	// The emergency restart path must stop LiveKit even when an earlier
@@ -330,11 +336,11 @@ func (a *App) startHub() error {
 }
 
 // startRouter mounts the HTTP handler over the already-built collaborators.
-// Its close step stops the router's own background goroutine (rate-limiter
-// cleanup); the hub it serves is stopped by the step above.
+// It owns no goroutine (the limiter cleanup is startLimiterCleanup's, WP
+// 5.6g), but keeps its close step for NewRouter's cleanup hook; the hub it
+// serves is stopped by the step above.
 func (a *App) startRouter() error {
 	a.runtime.SetupToken = rand.Text()
-	a.runtime.TOTPKey = a.totpKey
 	router, cleanup := api.NewRouter(a.cfg, a.database, a.deps.Version, a.deps.LogBuf, a.plugins, a.runtime)
 	a.router = router
 	// Print the token only while setup is still open. A failed check prints
@@ -382,7 +388,7 @@ func (a *App) startAuditWriter() error {
 // in-flight tick (which can hold the writer — scheduled backups run VACUUM
 // INTO) is not still using the database when the handle closes.
 func (a *App) startMaintenance() error {
-	stop := startMaintenanceLoop(a.bgCtx, a.log, a.cfg, a.database, a.runtime.Services)
+	stop := startMaintenanceLoop(a.bgCtx, a.log, a.cfg, a.database, a.runtime.Services, a.runtime.Storage)
 	a.onClose("maintenance", func(context.Context) error {
 		stop()
 		return nil

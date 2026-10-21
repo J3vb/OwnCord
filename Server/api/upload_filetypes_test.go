@@ -101,7 +101,7 @@ func TestNewRouter_FirstAuthOKCarriesConfigFileTypes(t *testing.T) {
 		Server: config.ServerConfig{Name: "Test Server", Port: 8443, DataDir: t.TempDir(), AllowedOrigins: []string{"*"}},
 		Upload: config.UploadConfig{MaxSizeMB: 10, StorageDir: t.TempDir(), BlockedExtensions: []string{"bat", "ps1"}, AllowedExtensions: []string{"txt"}},
 	}
-	rt, err := app.StartRuntime(cfg, database, nil)
+	rt, err := app.StartRuntime(cfg, database, nil, testRuntimeInputs(cfg))
 	if err != nil {
 		t.Fatalf("app.StartRuntime: %v", err)
 	}

@@ -1,6 +1,6 @@
-package api
+package app
 
-// wireAuth is unexported, so these live in package api (not api_test) to
+// wireAuth is unexported, so these live in package app (not app_test) to
 // call it directly. They pin OC-0404's two halves: the nil-Erasure guard
 // used to dominate RetentionService's file/hub wiring below it, and
 // UseErasure's nil case used to leave AuthService silently degraded on its

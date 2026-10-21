@@ -272,6 +272,12 @@ and only when it changes something a contributor or fork holder must do
 
 - The server now keeps only the newest 3 pre-restore and 3 pre-migration safety copies, so repeated upgrades and restores no longer fill the backup disk. Copy any older one you want to keep before upgrading.
 
+**Server (operators)**
+
+- The shipped systemd unit (`deploy/owncord.service`) now runs a root-owned `/opt/owncord/chatserver` with config and data in `/var/lib/owncord` (`StateDirectory=`), so the service can no longer rewrite its own program file. Your installed unit keeps working until you re-copy it; if you do, follow [Migrating from the /opt/owncord data layout](docs/deployment.md#migrating-from-the-optowncord-data-layout) first, because the unit refuses to start while `/opt/owncord/data` exists.
+- `CAP_NET_BIND_SERVICE` is now commented out in the unit. If you use `tls.mode: acme`, uncomment the line, or the server cannot bind port 80 and logs `ACME HTTP server error`.
+- Admin-panel self-update under systemd is now opt-in: with the new unit, "Update now" shows that the server cannot replace its own program file. [Opt in to admin-panel updates](docs/deployment.md#opt-in-to-admin-panel-updates) with a two-line drop-in and a `chown`, or install new releases by hand.
+
 ### Fixed
 
 **Messages & files**

@@ -27,6 +27,11 @@ func TestContentFrameLoss_ResumingClientTakesFullReadyAndRecoversMessage(t *test
 	}
 	triggers := []trigger{
 		{name: "topic limiter above 100 frames/s", lose: func(t *testing.T, h *Hub, emit func() int64) int64 {
+			// The whole burst must land in one limiter window; a loaded
+			// -race runner can take over a second to commit 105 rows.
+			saved := topicRateWindow.Load()
+			topicRateWindow.Store(int64(time.Hour))
+			t.Cleanup(func() { topicRateWindow.Store(saved) })
 			go h.Run()
 			var last int64
 			for range topicRateLimitPerSecond + 5 {
