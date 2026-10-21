@@ -15,7 +15,9 @@ import { assertEveryFieldDraws } from "../helpers/rowModelProperty";
 const text = fc.stringMatching(/^[A-Za-z0-9]{1,8}$/);
 
 const groupModel: fc.Arbitrary<CategoryGroupModel> = fc.record({
+  key: text,
   name: text,
+  categoryId: fc.integer({ min: 0, max: 50 }),
   label: text,
   collapsed: fc.boolean(),
   showCreate: fc.boolean(),
@@ -23,6 +25,11 @@ const groupModel: fc.Arbitrary<CategoryGroupModel> = fc.record({
 
 function mutate(model: CategoryGroupModel, field: string): CategoryGroupModel {
   switch (field) {
+    case "key":
+      return { ...model, key: `${model.key}x` };
+    case "categoryId":
+      // 0 draws no id; any positive id draws one, so step between the two kinds.
+      return { ...model, categoryId: model.categoryId === 0 ? 1 : 0 };
     case "name":
       return { ...model, name: `${model.name}x` };
     case "label":

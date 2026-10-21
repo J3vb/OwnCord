@@ -5355,6 +5355,18 @@ Partial update — every field is optional and an omitted one is left alone.
 Same body and same errors as `POST`, plus `404 NOT_FOUND` for a missing role.
 Editing a role at or above your own position is `403`.
 
+`expected_permissions` (optional integer) is the permission mask the editor
+loaded. When present and the role's stored mask is different, nothing is
+written and the response is `409` with code `ROLE_CONFLICT`: another admin
+changed the role since it was loaded, so reload it and apply the change again.
+Omit the field to skip the check (the admin panel always sends it). The
+comparison and the write happen under one lock, so two edits that carry the
+same `expected_permissions` cannot both succeed.
+
+| Status | Code            | When                                                       |
+| ------ | --------------- | ---------------------------------------------------------- |
+| 409    | `ROLE_CONFLICT` | `expected_permissions` differs from the role's stored mask |
+
 A permission change additionally invalidates the cached permissions of that
 role's members and re-syncs their channel visibility (the server sends targeted
 `channel_create`/`channel_delete`), because a role's mask is the base every

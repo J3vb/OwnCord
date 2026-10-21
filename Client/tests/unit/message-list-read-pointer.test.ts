@@ -56,7 +56,12 @@ function resetStores(): void {
     detachedChannels: new Set(),
   }));
   membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
-  channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  channelsStore.setState(() => ({
+    channels: new Map(),
+    activeChannelId: null,
+    roles: [],
+    categories: [],
+  }));
 }
 
 /** Spaced past the 7-minute group window, so grouping never merges rows. */

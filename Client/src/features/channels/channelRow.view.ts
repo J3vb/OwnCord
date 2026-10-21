@@ -55,7 +55,12 @@ export type TextChannelRowModel = {
 /** A category's header; `name` null is the uncategorized group, which draws
  *  no header. */
 export type CategoryGroupModel = {
+  /** The group key (`cat:<id>` for a real category), drawn as `data-category-key`; null is the uncategorized group. */
+  readonly key: string | null;
+  /** The category's name, drawn as `data-category`. */
   readonly name: string | null;
+  /** The category's id (0 when it is not a real category), drawn as `data-category-id`. */
+  readonly categoryId: number;
   readonly label: string;
   readonly collapsed: boolean;
   /** The header's "+" button. */
@@ -166,7 +171,12 @@ export function drawCategoryGroup(model: CategoryGroupModel): HTMLDivElement {
       class: model.collapsed ? "category collapsed" : "category",
     });
     header.dataset.category = model.name;
-    const labelId = `category-name-${model.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+    if (model.key !== null) header.dataset.categoryKey = model.key;
+    if (model.categoryId > 0) header.dataset.categoryId = String(model.categoryId);
+    // Unique per category even when two names slug alike (a rename can make one).
+    const labelId = `category-name-${model.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}${
+      model.categoryId > 0 ? `-${model.categoryId}` : ""
+    }`;
 
     // The arrow is the keyboard-operated collapse control; the header div
     // itself keeps its mouse click handler. A real <button> here (rather

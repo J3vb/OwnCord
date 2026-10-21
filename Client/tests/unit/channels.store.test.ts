@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   channelsStore,
   setChannels,
+  setCategories,
   setRoles,
   getRoleIdByName,
   addChannel,
@@ -27,6 +28,7 @@ import type { ReadyChannel, ChannelCreatePayload, ChannelUpdatePayload } from ".
 
 function resetStore(): void {
   channelsStore.setState(() => ({
+    categories: [],
     channels: new Map(),
     activeChannelId: null,
     roles: [],
@@ -79,6 +81,8 @@ describe("channels store", () => {
         name: "general",
         type: "text",
         category: "Text",
+        categoryId: 0,
+        categoryPosition: 0,
         position: 0,
         unreadCount: 3,
         mentionCount: 0,
@@ -100,6 +104,8 @@ describe("channels store", () => {
         name: "voice-lobby",
         type: "voice",
         category: "Voice",
+        categoryId: 0,
+        categoryPosition: 0,
         position: 0,
         unreadCount: 0,
         mentionCount: 0,
@@ -179,6 +185,8 @@ describe("channels store", () => {
         name: "new-channel",
         type: "text",
         category: "Text",
+        categoryId: 0,
+        categoryPosition: 0,
         position: 2,
         unreadCount: 0,
         mentionCount: 0,
@@ -427,6 +435,8 @@ describe("channels store", () => {
         name: "general",
         type: "text",
         category: "Text",
+        categoryId: 0,
+        categoryPosition: 0,
         position: 0,
         unreadCount: 0,
         mentionCount: 0,
@@ -457,8 +467,8 @@ describe("channels store", () => {
         { id: 9, name: "loose", type: "text", category: null, position: 4 },
         { id: 10, name: "lounge", type: "voice", category: null, position: 3 },
       ]);
-      const viaStore = getChannelsByCategory();
-      const pure = groupChannelsByCategory(channelsStore.getState().channels);
+      const viaStore = getChannelsByCategory([]);
+      const pure = groupChannelsByCategory(channelsStore.getState().channels, []);
       expect(Array.from(pure.keys())).toEqual(Array.from(viaStore.keys()));
       expect(Array.from(pure.values())).toEqual(Array.from(viaStore.values()));
     });
@@ -466,7 +476,7 @@ describe("channels store", () => {
     it("groups channels by category and sorts by position", () => {
       setChannels(readyChannels);
 
-      const grouped = getChannelsByCategory();
+      const grouped = getChannelsByCategory([]);
 
       expect(grouped.size).toBe(2);
 
@@ -485,12 +495,12 @@ describe("channels store", () => {
     // change must give the same answer, not keep the first-load group order.
     it("reorders categories live when a position change moves a category's first channel", () => {
       setChannels(readyChannels);
-      expect(Array.from(getChannelsByCategory().keys())).toEqual(["Text", "Voice"]);
+      expect(Array.from(getChannelsByCategory([]).keys())).toEqual(["Text", "Voice"]);
 
       updateChannel({ id: 1, position: 5 });
       updateChannel({ id: 3, position: 6 });
 
-      expect(Array.from(getChannelsByCategory().keys())).toEqual(["Voice", "Text"]);
+      expect(Array.from(getChannelsByCategory([]).keys())).toEqual(["Voice", "Text"]);
     });
 
     it("breaks position ties by channel id, as the server does", () => {
@@ -503,7 +513,7 @@ describe("channels store", () => {
       updateChannel({ id: 3, position: 3 });
 
       expect(
-        getChannelsByCategory()
+        getChannelsByCategory([])
           .get("Text")
           ?.map((c) => c.id),
       ).toEqual([1, 2, 3]);
@@ -512,13 +522,13 @@ describe("channels store", () => {
     it("handles null category", () => {
       setChannels([{ id: 1, name: "uncategorized", type: "text", category: null, position: 0 }]);
 
-      const grouped = getChannelsByCategory();
+      const grouped = getChannelsByCategory([]);
       expect(grouped.has(null)).toBe(true);
       expect(grouped.get(null)).toHaveLength(1);
     });
 
     it("returns empty map when no channels", () => {
-      const grouped = getChannelsByCategory();
+      const grouped = getChannelsByCategory([]);
       expect(grouped.size).toBe(0);
     });
 
@@ -530,7 +540,7 @@ describe("channels store", () => {
         { id: 2, name: "lounge", type: "voice", category: "Gaming", position: 1 },
       ]);
 
-      const grouped = getChannelsByCategory();
+      const grouped = getChannelsByCategory([]);
       expect(grouped.size).toBe(1);
       expect(grouped.get("Gaming")?.map((c) => c.name)).toEqual(["chat", "lounge"]);
     });
@@ -542,7 +552,7 @@ describe("channels store", () => {
         { id: 3, name: "blank-voice", type: "voice", category: "", position: 2 },
       ]);
 
-      const grouped = getChannelsByCategory();
+      const grouped = getChannelsByCategory([]);
       expect(grouped.get(null)?.map((c) => c.name)).toEqual(["loose-text"]);
       expect(grouped.get(UNCATEGORIZED_VOICE_CATEGORY)?.map((c) => c.name)).toEqual([
         "loose-voice",
@@ -555,7 +565,7 @@ describe("channels store", () => {
         { id: 1, name: "chat", type: "text", category: "Gaming", position: 0 },
         { id: 2, name: "dm", type: "dm", category: null, position: 0 },
       ]);
-      const grouped = getChannelsByCategory();
+      const grouped = getChannelsByCategory([]);
       expect(grouped.size).toBe(1);
       expect(grouped.has(null)).toBe(false);
     });
@@ -576,7 +586,7 @@ describe("channels store", () => {
   });
 
   describe("getKnownCategories", () => {
-    it("returns distinct non-empty categories, sorted, DMs excluded", () => {
+    it("returns distinct non-empty categories in sidebar order, DMs excluded", () => {
       setChannels([
         { id: 1, name: "a", type: "text", category: "Zeta", position: 0 },
         { id: 2, name: "b", type: "voice", category: "Alpha", position: 1 },
@@ -586,12 +596,49 @@ describe("channels store", () => {
         { id: 6, name: "dm", type: "dm", category: "Hidden", position: 5 },
       ]);
 
-      expect(getKnownCategories()).toEqual(["Alpha", "Zeta"]);
+      // Name-only categories (no ids) keep the order of their first channel.
+      expect(getKnownCategories([])).toEqual([
+        { id: 0, name: "Zeta" },
+        { id: 0, name: "Alpha" },
+      ]);
+    });
+
+    it("returns real categories by (position, id), a manager's empty ones included", () => {
+      setChannels([
+        {
+          id: 1,
+          name: "a",
+          type: "text",
+          category: "B",
+          category_id: 2,
+          category_position: 1,
+          position: 0,
+        },
+        {
+          id: 2,
+          name: "b",
+          type: "text",
+          category: "A",
+          category_id: 9,
+          category_position: 0,
+          position: 1,
+        },
+      ]);
+      setCategories([
+        { id: 2, name: "B", position: 1 },
+        { id: 9, name: "A", position: 0 },
+        { id: 4, name: "Empty", position: 2 },
+      ]);
+      expect(getKnownCategories(channelsStore.getState().categories)).toEqual([
+        { id: 9, name: "A" },
+        { id: 2, name: "B" },
+        { id: 4, name: "Empty" },
+      ]);
     });
 
     it("returns an empty list when nothing is categorized", () => {
       setChannels([{ id: 1, name: "a", type: "text", category: null, position: 0 }]);
-      expect(getKnownCategories()).toEqual([]);
+      expect(getKnownCategories([])).toEqual([]);
     });
   });
 
@@ -931,7 +978,7 @@ describe("channels store", () => {
         { id: 2, name: "dm-channel", type: "dm", category: null, position: 0 },
       ]);
 
-      const grouped = getChannelsByCategory();
+      const grouped = getChannelsByCategory([]);
       // DM channels should be filtered out
       expect(grouped.size).toBe(1);
       expect(grouped.has("Text")).toBe(true);
@@ -950,7 +997,7 @@ describe("channels store", () => {
         { id: 3, name: "b-channel", type: "text", category: "Text", position: 1 },
       ]);
 
-      const grouped = getChannelsByCategory();
+      const grouped = getChannelsByCategory([]);
       const textChannels = grouped.get("Text")!;
       expect(textChannels[0]!.name).toBe("a-channel");
       expect(textChannels[1]!.name).toBe("b-channel");

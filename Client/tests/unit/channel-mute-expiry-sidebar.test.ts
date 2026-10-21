@@ -27,7 +27,12 @@ describe("timed mute expiry redraws the sidebar", () => {
     invalidateMuteCache();
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 9, 17, 12, 0, 0));
-    channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+    channelsStore.setState(() => ({
+      channels: new Map(),
+      activeChannelId: null,
+      roles: [],
+      categories: [],
+    }));
     dmStore.setState(() => ({ channels: [] }));
     membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
     uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));

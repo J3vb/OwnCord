@@ -148,7 +148,12 @@ describe("read pointer through the dispatcher", () => {
   beforeEach(() => {
     mockShowToast.mockClear();
     hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
-    channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+    channelsStore.setState(() => ({
+      channels: new Map(),
+      activeChannelId: null,
+      roles: [],
+      categories: [],
+    }));
     dmStore.setState(() => ({ channels: [] }));
     messagesStore.setState(() => ({
       messagesByChannel: new Map(),
