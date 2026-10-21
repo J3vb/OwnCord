@@ -435,9 +435,9 @@ func (s *RoleService) DeleteRole(ctx context.Context, actorID, roleID int64) (de
 	}
 
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "role_delete", "role", role.ID,
-		fmt.Sprintf("deleted role %s (%d members reassigned to %s)", role.Name, len(movedUserIDs), fallback.Name))
+		fmt.Sprintf("deleted role %s (%d members held it; those left with no role now have %s)", role.Name, len(movedUserIDs), fallback.Name))
 	slog.Warn("role deleted", "actor_id", actorID, "role_id", role.ID, "name", role.Name,
-		"members_reassigned", len(movedUserIDs))
+		"members_affected", len(movedUserIDs))
 	return role, fallback, movedUserIDs, nil
 }
 
