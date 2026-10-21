@@ -810,6 +810,12 @@ export interface VoiceE2EEOfferPayload {
   readonly iv: string;
 }
 
+/** Server→Client: whose screen shares a member of the voice channel watches. */
+export interface VoiceWatchingPayload {
+  readonly user_id: number;
+  readonly user_ids: readonly number[];
+}
+
 /** One user's presence in a presence_batch. */
 export interface PresenceBatchEntry {
   readonly user_id: number;
@@ -1203,6 +1209,7 @@ export type ServerMessage =
   | (WsEnvelope<VoiceDisconnectedPayload> & { readonly type: "voice_disconnected" })
   | (WsEnvelope<VoiceE2EEAnnouncePayload> & { readonly type: "voice_e2ee_announce" })
   | (WsEnvelope<VoiceE2EEOfferPayload> & { readonly type: "voice_e2ee_offer" })
+  | (WsEnvelope<VoiceWatchingPayload> & { readonly type: "voice_watching" })
   | (WsEnvelope<MemberJoinPayload> & { readonly type: "member_join" })
   | (WsEnvelope<MemberUpdatePayload> & { readonly type: "member_update" })
   | (WsEnvelope<UserUpdatePayload> & { readonly type: "user_update" })
@@ -1258,6 +1265,7 @@ export type ClientMessage =
   | (WsEnvelope<{ target_user_id: number; encrypted_key: string; iv: string }> & {
       readonly type: "voice_e2ee_offer";
     })
+  | (WsEnvelope<{ user_ids: readonly number[] }> & { readonly type: "voice_watch" })
   | (WsEnvelope<CallSignalRequestPayload> & { readonly type: "call_ring" })
   | (WsEnvelope<CallSignalRequestPayload> & { readonly type: "call_decline" });
 

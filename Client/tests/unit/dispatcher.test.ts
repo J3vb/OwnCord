@@ -73,6 +73,7 @@ vi.mock("@lib/livekitSession", () => ({
   disableCamera: vi.fn(async () => {}),
   disableScreenshare: vi.fn(async () => {}),
   reconcileVideoFlags: vi.fn(),
+  resendWatching: vi.fn(),
 }));
 // The handlers load the voice module lazily and fire-and-forget
 // (`void livekitSession().then(...)`). A dynamic import resolves through the

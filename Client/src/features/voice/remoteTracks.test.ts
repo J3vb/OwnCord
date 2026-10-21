@@ -305,4 +305,58 @@ describe("RemoteTracks", () => {
       expect(tracks.isWatched(7, "screenshare")).toBe(false);
     });
   });
+  describe("onWatchingChange", () => {
+    it("fires with the sorted screen-share ids only when the set changes", () => {
+      const tracks = new RemoteTracks(
+        () => null,
+        () => false,
+      );
+      const cb = vi.fn();
+      tracks.onWatchingChange = cb;
+      tracks.watch(7, "screenshare", true);
+      tracks.watch(3, "screenshare", true);
+      expect(cb.mock.calls).toEqual([[[7]], [[3, 7]]]);
+      // Watching the same stream again changes nothing.
+      tracks.watch(3, "screenshare", true);
+      expect(cb).toHaveBeenCalledTimes(2);
+      tracks.watch(7, "screenshare", false);
+      expect(cb).toHaveBeenLastCalledWith([3]);
+    });
+
+    it("never counts cameras", () => {
+      const tracks = new RemoteTracks(
+        () => null,
+        () => false,
+      );
+      const cb = vi.fn();
+      tracks.onWatchingChange = cb;
+      tracks.watch(5, "camera", true);
+      tracks.watch(5, "camera", false);
+      tracks.forgetWatch(5, "camera");
+      expect(cb).not.toHaveBeenCalled();
+    });
+
+    it("fires from forgetWatch, dropUnpublishedWatches and clearWatched", () => {
+      const tracks = new RemoteTracks(
+        () => null,
+        () => false,
+      );
+      const cb = vi.fn();
+      tracks.watch(4, "screenshare", true);
+      tracks.watch(9, "screenshare", true);
+      tracks.onWatchingChange = cb;
+      tracks.forgetWatch(4, "screenshare");
+      expect(cb).toHaveBeenLastCalledWith([9]);
+      // No room: nothing is published, so the remaining watch is dropped.
+      tracks.dropUnpublishedWatches();
+      expect(cb).toHaveBeenLastCalledWith([]);
+      tracks.watch(2, "screenshare", true);
+      tracks.clearWatched();
+      expect(cb).toHaveBeenLastCalledWith([]);
+      expect(cb).toHaveBeenCalledTimes(4);
+      // Clearing an already-empty set is silent.
+      tracks.clearWatched();
+      expect(cb).toHaveBeenCalledTimes(4);
+    });
+  });
 });

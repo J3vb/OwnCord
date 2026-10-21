@@ -6,6 +6,8 @@ import {
   handleVoiceLeave,
   handleVoiceMoved,
   handleVoiceState,
+  handleVoiceWatching,
+  handleVoiceWatchError,
   snapshotReadyVoice,
 } from "./wsHandlers";
 import {
@@ -16,9 +18,13 @@ import {
   setVoiceStatus,
   setLocalDeafened,
   clearPeerVerifications,
+  streamViewers,
+  isWatchingResync,
+  clearPeerWatching,
 } from "../../stores/voice.store";
 import { authStore } from "../../stores/auth.store";
 import { channelsStore } from "../../stores/channels.store";
+import { noteWatchSent, resetWatchRequest } from "../../lib/watchRequest";
 import { clearAfkMove } from "./moveHint";
 import { joinRetryInMs, noteJoinSucceeded } from "./joinBackoff";
 import { noteJoinSent, resetJoinRequest } from "./joinRequest";
@@ -35,6 +41,8 @@ vi.mock("../../lib/livekitSession", () => ({
   isAutoReconnecting: vi.fn(() => false),
   failPendingRejoin: vi.fn(),
   reconcileVideoFlags: vi.fn(),
+  resendWatching: vi.fn(),
+  retryWatching: vi.fn(),
 }));
 vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
 import {
@@ -42,6 +50,8 @@ import {
   setDeafened,
   handleParticipantLeft,
   handleE2EEAnnounce,
+  resendWatching,
+  retryWatching,
 } from "../../lib/livekitSession";
 import { showToast } from "../../lib/toast";
 
@@ -103,6 +113,15 @@ describe("snapshotReadyVoice", () => {
 
     await vi.waitFor(() => expect(handleParticipantLeft).toHaveBeenCalledWith(7));
     expect(handleParticipantLeft).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-sends our watch set after a full resync that keeps us in voice", async () => {
+    joinVoiceChannel(4);
+    setVoiceStatus("connected");
+    snapshotReadyVoice()(socketStub(), readyWith([voiceState({})]));
+
+    await vi.waitFor(() => expect(resendWatching).toHaveBeenCalledTimes(1));
+    expect(isWatchingResync()).toBe(true);
   });
 
   it("restates a mute toggled while the socket was down", () => {
@@ -443,5 +462,149 @@ describe("handleVoiceMoved toast", () => {
     snapshotReadyVoice()(socketStub(), readyWith([]));
     ack(4);
     expect(showToast).not.toHaveBeenCalled();
+  });
+});
+
+const member = (userId: number, screenshare = false) => ({
+  userId,
+  username: `u${String(userId)}`,
+  muted: false,
+  deafened: false,
+  speaking: false,
+  camera: false,
+  screenshare,
+});
+const frame = (user_id: number, user_ids: number[]) =>
+  ({ user_id, user_ids }) as Payload<"voice_watching">;
+
+const err = (code: string) => ({ code, message: "m" }) as Payload<"error">;
+
+describe("handleVoiceWatching (6.6b)", () => {
+  const clock = { voiceRejoinChannelId: null } as ReconnectClock;
+
+  beforeEach(() => {
+    resetVoiceStore();
+    authStore.setState((prev) => ({ ...prev, user: { id: 1, username: "me" } as never }));
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 4,
+      voiceUsers: new Map([
+        [
+          4,
+          new Map([
+            [1, member(1)],
+            [2, member(2, true)],
+            [5, member(5)],
+          ]),
+        ],
+      ]),
+    }));
+  });
+
+  it("records a channel member's set", () => {
+    handleVoiceWatching(frame(5, [2]));
+    expect(voiceStore.getState().peerWatching?.get(5)).toEqual([2]);
+  });
+
+  it("ignores a frame for a user not in our channel's roster", () => {
+    handleVoiceWatching(frame(99, [2]));
+    expect(voiceStore.getState().peerWatching?.size).toBe(0);
+  });
+
+  it("ignores a frame that arrives after that user's voice_leave", () => {
+    handleVoiceWatching(frame(5, [2]));
+    handleVoiceLeave({ channel_id: 4, user_id: 5 }, clock);
+    expect(voiceStore.getState().peerWatching?.has(5)).toBe(false);
+    handleVoiceWatching(frame(5, [2]));
+    expect(voiceStore.getState().peerWatching?.has(5)).toBe(false);
+  });
+
+  it("drops non-integer ids, sorts and dedupes, and clears on an empty list", () => {
+    handleVoiceWatching({
+      user_id: 5,
+      user_ids: [9, 2, 2, "x", 1.5],
+    } as unknown as Payload<"voice_watching">);
+    expect(voiceStore.getState().peerWatching?.get(5)).toEqual([2, 9]);
+    handleVoiceWatching(frame(5, []));
+    expect(voiceStore.getState().peerWatching?.has(5)).toBe(false);
+  });
+
+  it("clears with leaveVoiceChannel and resetVoiceStore", () => {
+    handleVoiceWatching(frame(5, [2]));
+    leaveVoiceChannel();
+    expect(voiceStore.getState().peerWatching?.size).toBe(0);
+    joinVoiceChannel(4);
+    voiceStore.setState((prev) => ({
+      ...prev,
+      voiceUsers: new Map([[4, new Map([[5, member(5)]])]]),
+    }));
+    handleVoiceWatching(frame(5, [2]));
+    resetVoiceStore();
+    expect(voiceStore.getState().peerWatching?.size).toBe(0);
+  });
+
+  it("a resync forgets entries the server does not re-send", () => {
+    handleVoiceWatching(frame(5, [2]));
+    clearPeerWatching();
+    expect(voiceStore.getState().peerWatching?.size).toBe(0);
+    handleVoiceWatching(frame(5, [2]));
+    expect(voiceStore.getState().peerWatching?.get(5)).toEqual([2]);
+  });
+
+  it("a direct channel switch drops the old channel's entries", () => {
+    handleVoiceWatching(frame(5, [2]));
+    joinVoiceChannel(6);
+    expect(voiceStore.getState().peerWatching?.size).toBe(0);
+  });
+
+  describe("handleVoiceWatchError", () => {
+    beforeEach(() => {
+      resetWatchRequest();
+      vi.mocked(retryWatching).mockClear();
+    });
+
+    it("ignores other frames", () => {
+      expect(handleVoiceWatchError(err("RATE_LIMITED"), "x")).toBe(false);
+      expect(retryWatching).not.toHaveBeenCalled();
+    });
+
+    it("swallows an error to our voice_watch without a retry", async () => {
+      noteWatchSent("w1");
+      expect(handleVoiceWatchError(err("BAD_REQUEST"), "w1")).toBe(true);
+      await Promise.resolve();
+      expect(retryWatching).not.toHaveBeenCalled();
+    });
+
+    it("retries once for RATE_LIMITED", async () => {
+      noteWatchSent("w2");
+      expect(handleVoiceWatchError(err("RATE_LIMITED"), "w2")).toBe(true);
+      await vi.waitFor(() => expect(retryWatching).toHaveBeenCalledTimes(1));
+    });
+  });
+
+  describe("streamViewers", () => {
+    it("lists members watching the sharer, plus me when I watch locally", () => {
+      handleVoiceWatching(frame(5, [2]));
+      expect(streamViewers(2)).toEqual([5]);
+      expect(streamViewers(2, true)).toEqual([1, 5]);
+    });
+
+    it("never lists the sharer, and skips members watching someone else", () => {
+      handleVoiceWatching(frame(2, [2]));
+      handleVoiceWatching(frame(5, [7]));
+      expect(streamViewers(2)).toEqual([]);
+    });
+
+    it("is empty unless the sharer's voice user is sharing", () => {
+      handleVoiceWatching(frame(2, [5]));
+      expect(streamViewers(5)).toEqual([]);
+      expect(streamViewers(5, true)).toEqual([]);
+    });
+
+    it("is empty outside a channel", () => {
+      handleVoiceWatching(frame(5, [2]));
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: null }));
+      expect(streamViewers(2)).toEqual([]);
+    });
   });
 });

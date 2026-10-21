@@ -13,6 +13,8 @@ import {
   leaveVoiceChannel,
   joinVoiceChannel,
   restateSelfVoiceState,
+  noteWatchingResync,
+  clearPeerWatching,
 } from "../../stores/voice.store";
 import { focusPayload } from "../../lib/last-channel";
 import { PROTOCOL_EPOCH, ServerRestartReason } from "../../lib/protocolTypes";
@@ -63,6 +65,9 @@ export function handleAuthOk(
     SETTLED_VOICE.has(voiceStore.getState().voiceStatus)
   ) {
     restateSelfVoiceState(ws);
+    noteWatchingResync();
+    clearPeerWatching();
+    void livekitSession().then(({ resendWatching }) => resendWatching());
   }
 }
 

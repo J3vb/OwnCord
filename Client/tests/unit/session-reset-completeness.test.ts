@@ -66,6 +66,7 @@ import {
 import { buildBlockedUsersSection } from "../../src/features/safety/BlockedUsers";
 import { createAvatarElement } from "../../src/components/message-list/avatar";
 import { isVoiceMovePending, noteVoiceMoved } from "../../src/features/voice/moveHint";
+import { noteWatchSent, takeWatchRefusal } from "../../src/lib/watchRequest";
 import { getChannelMutesHost, setChannelMutesHost } from "../../src/lib/channel-mutes";
 import {
   bindGifFavoritesApi,
@@ -420,6 +421,14 @@ const PROBES: readonly Probe[] = [
       expect(isVoiceMovePending()).toBe(true);
     },
     isInitial: () => !isVoiceMovePending(),
+  },
+  {
+    name: "voice:watch-request",
+    mutate: () => {
+      noteWatchSent("env-1");
+    },
+    // takeWatchRefusal consumes a pending id, so a live one reads as not initial.
+    isInitial: () => !takeWatchRefusal("env-1"),
   },
   {
     name: "channel-mutes:host",

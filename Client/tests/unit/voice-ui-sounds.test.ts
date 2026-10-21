@@ -35,6 +35,8 @@ import {
   joinVoiceChannel,
   leaveVoiceChannel,
   setVoiceStatus,
+  setPeerWatching,
+  noteWatchingResync,
 } from "@stores/voice.store";
 import { authStore } from "@stores/auth.store";
 import { startVoiceUiSounds } from "../../src/features/voice/uiSounds";
@@ -494,6 +496,96 @@ describe("voice UI sounds", () => {
       connectTo(20);
       expect(playVoiceSound.mock.calls).toEqual([["join"]]);
       vi.useRealTimers();
+    });
+  });
+  describe("viewers of your own stream (6.6b)", () => {
+    const peer = (userId: number, screenshare = false) => ({
+      ...SELF,
+      userId,
+      username: `u${String(userId)}`,
+      screenshare,
+    });
+    const setRoster = (users: ReturnType<typeof peer>[]): void => {
+      voiceStore.setState((prev) => ({
+        ...prev,
+        currentChannelId: 10,
+        voiceStatus: "connected",
+        voiceUsers: new Map([[10, new Map(users.map((u) => [u.userId, u]))]]),
+      }));
+      voiceStore.flush();
+    };
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-10-21T10:00:00Z"));
+      authStore.setState((prev) => ({ ...prev, user: { id: 1, username: "me" } as never }));
+      setRoster([peer(1, true), peer(2), peer(3)]);
+      vi.advanceTimersByTime(5000);
+      playVoiceSound.mockClear();
+    });
+
+    it("plays viewerJoin and viewerLeave as people start and stop watching my share", () => {
+      setPeerWatching(2, [1]);
+      voiceStore.flush();
+      setPeerWatching(2, []);
+      voiceStore.flush();
+      expect(playVoiceSound.mock.calls).toEqual([["viewerJoin"], ["viewerLeave"]]);
+    });
+
+    it("ignores people watching someone else's share", () => {
+      setRoster([peer(1, true), peer(2, true), peer(3)]);
+      playVoiceSound.mockClear();
+      setPeerWatching(3, [2]);
+      voiceStore.flush();
+      setPeerWatching(3, []);
+      voiceStore.flush();
+      expect(playVoiceSound).not.toHaveBeenCalled();
+    });
+
+    it("plays nothing for a viewer who leaves voice entirely, only the leave", () => {
+      setPeerWatching(2, [1]);
+      voiceStore.flush();
+      playVoiceSound.mockClear();
+      removeVoiceUser({ channel_id: 10, user_id: 2 });
+      voiceStore.flush();
+      expect(playVoiceSound.mock.calls).toEqual([["leave"]]);
+    });
+
+    it("plays nothing when my share starts with viewers already on the roster", () => {
+      setRoster([peer(1), peer(2), peer(3)]);
+      setPeerWatching(2, [1]);
+      voiceStore.flush();
+      playVoiceSound.mockClear();
+      updateVoiceState({ ...voiceState(10, 1), screenshare: true });
+      voiceStore.flush();
+      expect(playVoiceSound.mock.calls).toEqual([["streamStart"]]);
+    });
+
+    it("plays nothing from the re-sync after a resume", () => {
+      noteWatchingResync();
+      setPeerWatching(2, [1]);
+      voiceStore.flush();
+      setPeerWatching(3, [1]);
+      voiceStore.flush();
+      expect(playVoiceSound).not.toHaveBeenCalled();
+      // Once the window has passed, a real change sounds again.
+      vi.advanceTimersByTime(2500);
+      setPeerWatching(3, []);
+      voiceStore.flush();
+      expect(playVoiceSound.mock.calls).toEqual([["viewerLeave"]]);
+    });
+
+    it("respects Do Not Disturb and the voice sounds switch", () => {
+      testPrefs.set("voiceSounds", false);
+      setPeerWatching(2, [1]);
+      voiceStore.flush();
+      expect(playVoiceSound).not.toHaveBeenCalled();
+    });
+
+    it("respects the stream sound switch", () => {
+      testPrefs.set("soundStream", false);
+      setPeerWatching(2, [1]);
+      voiceStore.flush();
+      expect(playVoiceSound).not.toHaveBeenCalled();
     });
   });
 });
