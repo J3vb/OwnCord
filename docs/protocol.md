@@ -2537,7 +2537,12 @@ on a given command (`you can't message this user`; `cannot join this call` for
 `voice_join`), so the frame says nothing about which cause applies. A refused
 send writes no message and no message request, and the recipient receives no
 frame. On `chat_send`, `call_ring` and `voice_join`, a failed read of the setting is answered `INTERNAL`, not `FORBIDDEN`.
-Group DMs are covered separately.
+Creating a group DM, or adding people to one, is refused with the same `FORBIDDEN`
+and message (`cannot add this user to a group DM`) whatever the cause: a block,
+a person with direct messages off who does not trust the caller, or a person the
+caller holds an unaccepted message request to. Only the caller's trust counts,
+the response never names the person, and a member who later turns direct
+messages off stays in the group.
 
 **Blocks are a 1:1 rule.** A block refuses DM creation and gates every
 interaction sink in a two-person DM, but is _not_ consulted inside a group: a

@@ -33,6 +33,12 @@ func (d *DB) CreateGroupDMChannel(ctx context.Context, name string, ownerID int6
 	}
 	defer func() { _ = tx.Rollback() }() //nolint:errcheck // no-op after a successful Commit
 
+	// The service's reachability check ran earlier; re-read it on the
+	// transaction so a setting changed since writes no channel and no rows.
+	if err := requireReachableTargets(ctx, tx, ownerID, slices.DeleteFunc(slices.Clone(participantIDs), func(id int64) bool { return id == ownerID })); err != nil {
+		return nil, err
+	}
+
 	res, err := tx.ExecContext(ctx, `INSERT INTO channels (name, type, is_group, dm_owner_id) VALUES (?, 'dm', 1, ?)`, name, ownerID)
 	if err != nil {
 		return nil, fmt.Errorf("CreateGroupDMChannel insert channel: %w", err)

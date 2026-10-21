@@ -235,6 +235,34 @@ CREATE TABLE IF NOT EXISTS dm_open_state (
     PRIMARY KEY (user_id, channel_id)
 );
 
+-- Group DM create reads the recipients' DM privacy, trust rows and the
+-- creator's message requests (migrations 046 and 070, WP 6.8d).
+CREATE TABLE IF NOT EXISTS user_privacy (
+    user_id           INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    allow_member_dms  INTEGER NOT NULL DEFAULT 1 CHECK (allow_member_dms IN (0, 1)),
+    message_requests  INTEGER NOT NULL DEFAULT 1 CHECK (message_requests IN (0, 1)),
+    updated_at        TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+CREATE TABLE IF NOT EXISTS trusted_senders (
+    recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    sender_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source       TEXT    NOT NULL CHECK (source IN ('accepted', 'sent_first', 'grandfathered')),
+    created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (recipient_id, sender_id)
+);
+CREATE TABLE IF NOT EXISTS message_requests (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    sender_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    recipient_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    channel_id       INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    first_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+    state            TEXT    NOT NULL DEFAULT 'pending'
+                     CHECK (state IN ('pending', 'accepted', 'ignored', 'deleted', 'blocked')),
+    created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+    decided_at       TEXT,
+    UNIQUE (sender_id, recipient_id)
+);
+
 -- B5-9: PurgeMessages/DeleteMessage write a removal row here in the same
 -- transaction as their effect (PurgeChannelMessagesWithAction/
 -- DeleteMessageWithRemoval).

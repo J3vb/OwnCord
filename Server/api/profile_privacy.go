@@ -7,6 +7,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"net/http"
 
 	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // privacyMaxBody bounds a privacy PUT body; the real body is under 100 bytes.
@@ -40,7 +42,28 @@ func handleGetPrivacy(privacy *service.PrivacyService) http.HandlerFunc {
 	}
 }
 
-func handlePutPrivacy(privacy *service.PrivacyService) http.HandlerFunc {
+// evictUntrustedFromVoice removes, from each 1:1 DM voice call userID is in,
+// the other participant when userID has just turned direct messages from
+// members off and does not trust them: the same eviction a block performs
+// (evictBlockedUserFromVoice), reached by the same hub capability. The setting
+// is already stored when this runs, so a failure here is logged and the voice
+// sweep removes the person on its next pass.
+func evictUntrustedFromVoice(ctx context.Context, privacy *service.PrivacyService, broadcaster ProfileBroadcaster, userID int64) {
+	ve, evictable := broadcaster.(dmVoiceEvictor)
+	if !evictable {
+		return
+	}
+	callers, err := privacy.UntrustedCallers(ctx, userID)
+	if err != nil {
+		slog.Warn("privacy: voice call lookup for eviction failed", "user_id", userID, "err", err)
+		return
+	}
+	for _, c := range callers {
+		ve.DisconnectFromVoiceInChannel(ctx, c.UserID, c.ChannelID, ws.VoiceLeaveReasonBlocked)
+	}
+}
+
+func handlePutPrivacy(privacy *service.PrivacyService, broadcaster ProfileBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
 		if !ok {
@@ -66,6 +89,9 @@ func handlePutPrivacy(privacy *service.PrivacyService) http.HandlerFunc {
 			slog.Error("set privacy", "error", err)
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not save privacy settings")
 			return
+		}
+		if !p.AllowMemberDMs {
+			evictUntrustedFromVoice(context.WithoutCancel(r.Context()), privacy, broadcaster, user.ID)
 		}
 		writeJSON(w, http.StatusOK, privacyJSON{AllowMemberDMs: p.AllowMemberDMs, MessageRequests: p.MessageRequests})
 	}

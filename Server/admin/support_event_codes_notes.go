@@ -8,4 +8,5 @@ func init() {
 	supportEventCodes["put user note"] = "put_user_note"
 	supportEventCodes["get privacy"] = "get_privacy"
 	supportEventCodes["set privacy"] = "set_privacy"
+	supportEventCodes["privacy: voice call lookup for eviction failed"] = "privacy_voice_call_lookup_for_eviction_failed"
 }

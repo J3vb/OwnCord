@@ -1891,7 +1891,11 @@ to look up.
 
 Blocks are enforced in both directions, per recipient — a user may neither pull
 someone they have blocked into a room with them nor use a group to reach
-someone who has blocked them. The check is creation-time only; see
+someone who has blocked them. A recipient is also refused when they have turned
+off direct messages from members (`allow_member_dms`) and hold no trust row for
+the caller, or when the caller holds a message request to them that they have not
+accepted (pending, ignored or deleted); only the caller's own trust counts. Staff
+are checked like anyone else. The check is creation-time only; see
 `docs/protocol.md` § DM Authorization for why sending into a group is not
 block-checked.
 
@@ -1922,7 +1926,7 @@ The creator is the group's owner (`owner_id`).
 | Status | Code          | Reason                                                                |
 | ------ | ------------- | --------------------------------------------------------------------- |
 | 400    | `BAD_REQUEST` | Fewer than 2 or more than 8 recipients, or a name over 100 characters |
-| 403    | `FORBIDDEN`   | A recipient is blocked by, or has blocked, the caller                 |
+| 403    | `FORBIDDEN`   | A recipient cannot be added to a group by the caller (any cause)      |
 | 403    | `TIMED_OUT`   | The caller is timed out                                               |
 | 404    | `NOT_FOUND`   | A recipient does not exist                                            |
 
@@ -2013,13 +2017,18 @@ A leave is never refused for a timeout and is not rate limited.
 Add people to a group DM. Any member may add, up to 10 members in all. A 1:1 DM
 refuses.
 
-Adding has no trust or message-request gate: groups are outside message requests,
-as at create. The recipient checks are the ones create runs (the same code):
-every user must exist and not be banned (either is "not found"), and none of the
-new people may be blocked by, or have blocked, any other new person or any
-current member. The pairs between people who are already in the group are not
-re-checked. Once added, the group is a shared room and sends are not
-block-checked, as today. Added people see the earlier history.
+The recipient checks are the ones create runs (the same code): every user must
+exist and not be banned (either is "not found"), and none of the new people may
+be blocked by, or have blocked, any other new person or any current member. Each
+new person must also be reachable by the caller: they have not turned off direct
+messages from members without trusting the caller, and the caller holds no
+message request to them that they have not accepted (pending, ignored or
+deleted). Only the caller's trust counts, not that of the members already in the
+group, and staff are checked like anyone else. If one of several new people is
+refused, nobody is added. The pairs between people who are already in the group
+are not re-checked, and a member who later turns direct messages off stays in the
+group, keeps sending and can leave. Once added, the group is a shared room and
+sends are not block-checked. Added people see the earlier history.
 
 **Auth:** Required (member)
 
@@ -2048,9 +2057,9 @@ So on each connection the open arrives before the row, and an added user never
 sees a row for a DM they do not know yet. The cap is counted inside the
 transaction: two adds that together pass 10 cannot both succeed.
 
-The blocked-pair check runs again inside the transaction, so a block or another
-add that lands between the first check and the commit cannot slip a blocked pair
-into the room (403 `FORBIDDEN`).
+The blocked-pair and reachability checks run again inside the transaction, so a
+block, a changed setting or another add that lands between the first check and
+the commit cannot slip a refused person into the room (403 `FORBIDDEN`).
 
 If the change commits but the server cannot then read the summary back, the route
 answers `204 No Content` instead (the change and its events have happened, and the
@@ -2061,14 +2070,14 @@ Limited to 20 group changes per user per minute.
 
 #### Errors
 
-| Status | Code            | Reason                                                                                |
-| ------ | --------------- | ------------------------------------------------------------------------------------- |
-| 400    | `BAD_REQUEST`   | A 1:1 DM, no ids, more than 9 ids, a non-positive id, or every id is already a member |
-| 403    | `FORBIDDEN`     | A blocked pair among the new people and the members                                   |
-| 403    | `TIMED_OUT`     | The caller is timed out                                                               |
-| 404    | `NOT_FOUND`     | The caller is not a member, or a new user does not exist or is banned                 |
-| 409    | `GROUP_DM_FULL` | The group would pass 10 members                                                       |
-| 429    | `RATE_LIMITED`  | More than 20 group changes in a minute                                                |
+| Status | Code            | Reason                                                                                             |
+| ------ | --------------- | -------------------------------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST`   | A 1:1 DM, no ids, more than 9 ids, a non-positive id, or every id is already a member              |
+| 403    | `FORBIDDEN`     | A new person cannot be added by the caller, or a blocked pair among the new people and the members |
+| 403    | `TIMED_OUT`     | The caller is timed out                                                                            |
+| 404    | `NOT_FOUND`     | The caller is not a member, or a new user does not exist or is banned                              |
+| 409    | `GROUP_DM_FULL` | The group would pass 10 members                                                                    |
+| 429    | `RATE_LIMITED`  | More than 20 group changes in a minute                                                             |
 
 ---
 
