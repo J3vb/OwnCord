@@ -634,3 +634,69 @@ test.describe("Category management", () => {
     await expect(page.locator("[data-testid='create-category-modal']")).toBeVisible();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Drag between categories (WP 6.5c)
+// ---------------------------------------------------------------------------
+
+test.describe("Drag between categories", () => {
+  /** Press on `from`, move over `to`'s centre in steps, and release there. */
+  async function dragOnto(page: Page, from: string, to: string): Promise<void> {
+    const a = await page.locator(from).boundingBox();
+    const b = await page.locator(to).boundingBox();
+    expect(a).not.toBeNull();
+    expect(b).not.toBeNull();
+    await page.mouse.move(a!.x + a!.width / 2, a!.y + a!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(a!.x + a!.width / 2, a!.y + a!.height / 2 + 12, { steps: 4 });
+    await page.mouse.move(b!.x + b!.width / 2, b!.y + b!.height / 2, { steps: 8 });
+    await page.mouse.up();
+  }
+
+  test("dropping a channel on another category's header PATCHes category_id and position", async ({
+    page,
+  }) => {
+    await openSession(page, { categories: CATEGORIES });
+    await dragOnto(page, "[data-testid='channel-1']", ".category[data-category-id='2']");
+
+    const call = await waitForCapturedCall(
+      page,
+      (c) => c.method === "PATCH" && (c.url ?? "").endsWith("/api/v1/moderation/channels/1"),
+    );
+    // Appended after the category's text rows and before its voice row.
+    expect(JSON.parse(call.body ?? "{}")).toEqual({ category_id: 2, position: 1 });
+    // The voice row was re-slotted behind it.
+    const voice = await waitForCapturedCall(
+      page,
+      (c) => c.method === "PATCH" && (c.url ?? "").endsWith("/api/v1/moderation/channels/10"),
+    );
+    expect(JSON.parse(voice.body ?? "{}")).toEqual({ position: 2 });
+    // Optimistic: the row now sits under the second category.
+    await expect(
+      page
+        .locator(".category[data-category-id='2']")
+        .locator("xpath=following-sibling::div[contains(@class,'category-channels-container')]")
+        .locator("[data-testid='channel-1']"),
+    ).toBeVisible();
+  });
+
+  test("dragging a category header onto another PUTs the full order", async ({ page }) => {
+    await openSession(page, { categories: CATEGORIES });
+    // Archive (3) onto the upper half of the Text Channels header: before it.
+    const target = await page.locator(".category[data-category-id='1']").boundingBox();
+    const from = await page.locator(".category[data-category-id='3']").boundingBox();
+    expect(target).not.toBeNull();
+    expect(from).not.toBeNull();
+    await page.mouse.move(from!.x + 60, from!.y + from!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(from!.x + 60, from!.y - 12, { steps: 4 });
+    await page.mouse.move(target!.x + 60, target!.y + 2, { steps: 8 });
+    await page.mouse.up();
+
+    const call = await waitForCapturedCall(page, (c) =>
+      (c.url ?? "").endsWith("/categories/order"),
+    );
+    expect(call.method).toBe("PUT");
+    expect(JSON.parse(call.body ?? "{}")).toEqual({ ids: [3, 1, 2] });
+  });
+});

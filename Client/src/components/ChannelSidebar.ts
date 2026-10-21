@@ -35,7 +35,7 @@ import { getUserLocalMute, getUserVolume } from "@lib/livekitSession";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import { attachCategoryContextMenu } from "./channel-sidebar/category-menu";
 import { attachChannelContextMenu, CHANNEL_MUTE_CHANGED } from "./channel-sidebar/context-menu";
-import { attachDragHandlers } from "./channel-sidebar/drag-reorder";
+import { attachCategoryDragHandlers, attachDragHandlers } from "./channel-sidebar/drag-reorder";
 import { attachVoiceUserDrag, markVoiceDropTarget } from "../features/voice/dragMove";
 import { openIdentityMismatchModal } from "../features/voice/peerVerification";
 import { createAvatarElement, pickAvatarColor } from "@components/message-list/avatar";
@@ -92,6 +92,24 @@ export interface ChannelReorderData {
   readonly newPosition: number;
   /** Position before the optimistic move, so a failed save can roll back. */
   readonly previousPosition: number;
+  /**
+   * Present on the one entry of a drop that also moves the channel to another
+   * category (WP 6.5c): its PATCH then carries `category_id`, and a failed save
+   * rolls back the category as well as the position.
+   */
+  readonly category?: {
+    readonly previous: ChannelCategoryFields;
+    readonly next: ChannelCategoryFields;
+  };
+}
+
+/** The channel fields that say which category it sits under, as the store holds them. */
+export interface ChannelCategoryFields {
+  /** 0 or undefined when the channel is in no category. */
+  readonly categoryId: number | undefined;
+  /** The category's name ("" or null for none). */
+  readonly category: string | null;
+  readonly categoryPosition: number | undefined;
 }
 
 /** Moderator actions on another user's voice session. Supplied by the page,
@@ -138,6 +156,12 @@ export interface ChannelSidebarOptions {
   readonly onDeleteChannel?: (channel: Channel) => void;
   /** Called when the user drags a channel to a new position. */
   readonly onReorderChannel?: (reorders: readonly ChannelReorderData[]) => void;
+  /**
+   * Called when a manager drops a category header on another category's header
+   * or group: `categoryId` goes before (or after) `targetId` (WP 6.5c). The page
+   * sends the new order; nothing is applied locally.
+   */
+  readonly onReorderCategory?: (categoryId: number, targetId: number, before: boolean) => void;
   /** Bulk-delete the newest `count` messages; gated on MANAGE_MESSAGES. */
   readonly onPurgeChannel?: (channel: Channel, count: number) => Promise<void>;
   /** Called when the user picks Invite People from a channel's menu. */
@@ -342,6 +366,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     onEditChannel,
     onDeleteChannel,
     onReorderChannel,
+    onReorderCategory,
     onWatchStream,
     onVoiceModerate,
     onPurgeChannel,
@@ -689,6 +714,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     isMuted: isChannelMuted,
     canCreate: onCreateChannel !== undefined,
     canReorder: onReorderChannel !== undefined,
+    canReorderCategories: onReorderCategory !== undefined,
   };
   const UNCATEGORIZED_KEY = "\u0000uncategorized";
   const groupKeyOf = (key: string | null): string => key ?? UNCATEGORIZED_KEY;
@@ -898,6 +924,18 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
           },
           { signal },
         );
+        // Registered before the collapse click so its capture-phase guard and
+        // the drag's own listeners belong to the same render owner.
+        if (model.draggable) {
+          attachCategoryDragHandlers(
+            header,
+            model.categoryId,
+            signal,
+            disposable.signal,
+            onReorderCategory,
+            model.draggable,
+          );
+        }
         header.addEventListener("click", () => toggleCategory(key), { signal });
         attachCategoryContextMenu(
           header,

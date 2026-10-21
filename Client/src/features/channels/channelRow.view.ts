@@ -65,6 +65,8 @@ export type CategoryGroupModel = {
   readonly collapsed: boolean;
   /** The header's "+" button. */
   readonly showCreate: boolean;
+  /** A real category a manager may drag to reorder (WP 6.5c): the `category-draggable` class. */
+  readonly draggable: boolean;
 };
 
 /**
@@ -167,9 +169,10 @@ export function drawTextChannelRow(model: TextChannelRowModel): HTMLDivElement {
 export function drawCategoryGroup(model: CategoryGroupModel): HTMLDivElement {
   const group = createElement("div", {});
   if (model.name !== null) {
-    const header = createElement("div", {
-      class: model.collapsed ? "category collapsed" : "category",
-    });
+    const headerClasses = ["category"];
+    if (model.collapsed) headerClasses.push("collapsed");
+    if (model.draggable) headerClasses.push("category-draggable");
+    const header = createElement("div", { class: headerClasses.join(" ") });
     header.dataset.category = model.name;
     if (model.key !== null) header.dataset.categoryKey = model.key;
     if (model.categoryId > 0) header.dataset.categoryId = String(model.categoryId);

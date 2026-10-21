@@ -119,6 +119,7 @@ export const shellText = defineCatalog("shell", {
   "channel.updateFailed": "Failed to update channel",
   "channel.deleteFailed": "Failed to delete channel",
   "channel.reorderFailed": "Failed to save channel order",
+  "channel.moveFailed": "Failed to move channel",
   "channel.type.text": "Text",
   "channel.type.voice": "Voice",
   "channel.type.announcement": "Announcement",

@@ -67,6 +67,7 @@ import { membersStore, getOnlineMembers } from "@stores/members.store";
 import {
   channelsStore,
   setActiveChannel,
+  updateChannel,
   updateChannelPosition,
   NO_CATEGORY,
   type CategoryRef,
@@ -624,11 +625,14 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         activeModal = modal;
         modal.mount(document.body);
       },
+      onReorderCategory: categoryDialogs.place,
       onReorderChannel: (reorders) => {
         // The store already applied the optimistic order (drag-reorder.ts,
         // on mouseup). Aggregate the per-channel PATCHes and surface a single
         // failure toast — same try/catch+toast contract as onSave/onDelete
-        // above. A rejected PATCH is rolled back to its previous position only
+        // above. A drop into another category sends the moved channel's
+        // `category_id` with its position (WP 6.5c). A rejected PATCH is rolled
+        // back to its previous position, and previous category, only
         // if no channel_update broadcast arrived for that channel since the
         // request started (the server broadcasts before it answers, so a
         // broadcast means the write landed) and it still shows the optimistic
@@ -636,28 +640,63 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         // replace the channel object but confirm nothing. A request that failed
         // only because its response was lost is covered by the reconnect
         // resync, so it needs no reconciliation here.
+        // The moved channel's category PATCH and its peers' position PATCHes run
+        // concurrently. That is safe only because the server does not enforce
+        // unique positions: no ordering between them can make one collide.
         const touched = new Set<number>();
         const unsubscribe = ws.on("channel_update", (payload) => {
           touched.add(payload.id);
         });
         void Promise.allSettled(
-          reorders.map((r) => api.adminUpdateChannel(r.channelId, { position: r.newPosition })),
+          reorders.map((r) =>
+            api.adminUpdateChannel(
+              r.channelId,
+              r.category === undefined
+                ? { position: r.newPosition }
+                : { category_id: r.category.next.categoryId ?? 0, position: r.newPosition },
+            ),
+          ),
         ).then((results) => {
           unsubscribe();
-          if (results.some((r) => r.status === "rejected")) {
-            results.forEach((result, i) => {
-              const entry = reorders[i];
-              if (
-                result.status === "rejected" &&
-                entry !== undefined &&
-                !touched.has(entry.channelId) &&
-                channelsStore.getState().channels.get(entry.channelId)?.position ===
-                  entry.newPosition
-              ) {
-                updateChannelPosition(entry.channelId, entry.previousPosition);
-              }
+          let failure: unknown;
+          let movedFailed = false;
+          let failed = false;
+          results.forEach((result, i) => {
+            const entry = reorders[i];
+            if (result.status !== "rejected" || entry === undefined) return;
+            if (!failed) failure = result.reason;
+            failed = true;
+            movedFailed = movedFailed || entry.category !== undefined;
+            const stored = channelsStore.getState().channels.get(entry.channelId);
+            if (
+              touched.has(entry.channelId) ||
+              stored === undefined ||
+              stored.position !== entry.newPosition ||
+              (entry.category !== undefined &&
+                (stored.categoryId ?? 0) !== (entry.category.next.categoryId ?? 0))
+            ) {
+              return;
+            }
+            if (entry.category === undefined) {
+              updateChannelPosition(entry.channelId, entry.previousPosition);
+              return;
+            }
+            const prev = entry.category.previous;
+            updateChannel({
+              id: entry.channelId,
+              position: entry.previousPosition,
+              category_id: prev.categoryId ?? 0,
+              category: prev.category ?? "",
+              category_position: prev.categoryPosition ?? 0,
             });
-            getToast()?.show(shellText("channel.reorderFailed"), "error");
+          });
+          if (failed) {
+            getToast()?.show(
+              movedFailed
+                ? errorText(failure, shellText("channel.moveFailed"))
+                : shellText("channel.reorderFailed"),
+              "error",
+            );
           }
         });
       },

@@ -15,6 +15,7 @@ import {
   createCategory,
   deleteCategory,
   moveCategory,
+  placeCategory,
   renameCategory,
   type CategoryApi,
   type CategoryToast,
@@ -36,6 +37,8 @@ export interface CategoryDialogs {
   readonly rename: (category: CategoryRef) => void;
   readonly remove: (category: CategoryRef) => void;
   readonly move: (category: CategoryRef, direction: -1 | 1) => void;
+  /** A dragged header dropped before or after another (WP 6.5c). */
+  readonly place: (categoryId: number, targetId: number, before: boolean) => void;
 }
 
 export function createCategoryDialogs(deps: {
@@ -114,6 +117,9 @@ export function createCategoryDialogs(deps: {
       ),
     move: (category, direction) => {
       void moveCategory(api, getToast, category.id, direction);
+    },
+    place: (categoryId, targetId, before) => {
+      void placeCategory(api, getToast, categoryId, targetId, before);
     },
   };
 }
