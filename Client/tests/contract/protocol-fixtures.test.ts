@@ -89,7 +89,12 @@ import {
 import { createForwardSession } from "../../src/features/messaging/forwardSend";
 import { handleServerRestart } from "../../src/features/connection/wsHandlers";
 import type { ReconnectClock } from "../../src/features/connection/dispatchContext";
-import { modAppealStore, modQueueStore } from "../../src/features/moderation/store";
+import {
+  memberTimeoutsStore,
+  modAppealStore,
+  modQueueStore,
+  setMemberTimeouts,
+} from "../../src/features/moderation/store";
 import { safetyStore } from "../../src/features/safety/store";
 import type { ServerMessage } from "../../src/lib/types";
 import { showToast } from "@lib/toast";
@@ -1000,6 +1005,195 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
     expect(stateNow()).toMatchObject({ state: "overturned", decision_note: "fixture decision" });
   });
 
+  /** A roster entry for the member-frame tests below: the fixture does not
+   *  keep ids stable, so each test seeds the member it patches. */
+  function seedMember(id: number, username: string, role: string): void {
+    setMembers([
+      {
+        id,
+        username,
+        avatar: null,
+        role,
+        status: "online",
+        display_name: null,
+        custom_status: null,
+        identity_public_key: "pinned-key",
+      },
+    ]);
+  }
+
+  it("role-change: member_update regroups the member, promotion then demotion", async () => {
+    const USER_ID = 8201;
+    seedMember(USER_ID, "bob", "Member");
+    const [promote, demote] = s2c("role-change", "a").filter(
+      (f) => f.frame.type === "member_update",
+    );
+    expect(promote?.frame.payload).toMatchObject({ role: "Moderator" });
+    await send(promote!.frame, { user_id: USER_ID }, { n: 0 });
+    expect(membersStore.getState().members.get(USER_ID)?.role).toBe("Moderator");
+    await send(demote!.frame, { user_id: USER_ID }, { n: 0 });
+    expect(membersStore.getState().members.get(USER_ID)?.role).toBe("Member");
+  });
+
+  it("role-change: member_timeouts replaces the target's list wholesale, full then own-only", async () => {
+    // bob becomes a moderator (the full list, empty here) and is then demoted
+    // (his own-only list, replacing it): both are the same frame shape.
+    const frames = s2c("role-change", "b").filter((f) => f.frame.type === "member_timeouts");
+    expect(frames).toHaveLength(2);
+    setMemberTimeouts([{ user_id: 77, expires_at: "2099-01-01T00:00:00Z" }]);
+    for (const f of frames) {
+      await send(f.frame, {}, { n: 0 });
+      expect(memberTimeoutsStore.getState()).toEqual(new Map());
+    }
+  });
+
+  it("role-edit: roles_update replaces the role list, colour edit then rename and permissions", async () => {
+    const frames = s2c("role-edit", "a").filter((f) => f.frame.type === "roles_update");
+    expect(frames).toHaveLength(2);
+    await send(frames[0]!.frame, {}, { n: 0 });
+    const afterColour = channelsStore.getState().roles.find((r) => r.is_default);
+    expect(afterColour).toMatchObject({ name: "Member", color: "#3366CC" });
+    await send(frames[1]!.frame, {}, { n: 0 });
+    const afterEdit = channelsStore.getState().roles.find((r) => r.is_default);
+    expect(afterEdit?.name).toBe("Regular");
+    // SEND_MESSAGES (bit 0) is the bit the second edit removed.
+    expect(afterEdit!.permissions & 1).toBe(0);
+    expect(afterColour!.permissions & 1).toBe(1);
+    expect(channelsStore.getState().roles).toHaveLength(4);
+  });
+
+  it("role-edit: member_update re-keys the holder to the renamed role", async () => {
+    const USER_ID = 8211;
+    seedMember(USER_ID, "bob", "Member");
+    await dispatch("role-edit", "member_update", { user_id: USER_ID });
+    expect(membersStore.getState().members.get(USER_ID)?.role).toBe("Regular");
+  });
+
+  it("user-update: the populated form sets every profile field, the sparse form clears them", async () => {
+    const ALICE_ID = 8301;
+    const BOB_ID = 8302;
+    setMembers([
+      {
+        id: ALICE_ID,
+        username: "alice",
+        avatar: null,
+        role: "Admin",
+        status: "online",
+        display_name: null,
+        custom_status: null,
+        identity_public_key: null,
+      },
+      {
+        id: BOB_ID,
+        username: "bob",
+        avatar: "https://old.invalid/bob.png",
+        role: "Member",
+        status: "online",
+        display_name: null,
+        custom_status: null,
+        identity_public_key: "bob-pinned-key",
+        about: "old about",
+      } as never,
+    ]);
+    const [full, sparse] = s2c("user-update", "b").filter((f) => f.frame.type === "user_update");
+    await send(full!.frame, { user_id: ALICE_ID }, { n: 0 });
+    expect(membersStore.getState().members.get(ALICE_ID)).toMatchObject({
+      username: "alice",
+      avatar: "https://fixtures.invalid/alice-avatar.png",
+      displayName: "Alice Fixture",
+      identityPublicKey: "YWxpY2UtaWRlbnRpdHktcHVibGljLWtleS1maXh0dXJl",
+      about: "edited fixture profile text",
+      banner_color: "#112233",
+    });
+    await send(sparse!.frame, { user_id: BOB_ID }, { n: 0 });
+    const bob = membersStore.getState().members.get(BOB_ID);
+    expect(bob).toMatchObject({ username: "bob", avatar: null, displayName: "Bob Fixture" });
+    expect((bob as { about?: string | null }).about).toBeNull();
+    // The sparse frame omits identity_public_key: an absent key leaves the
+    // pinned one alone, where an explicit null would clear it.
+    expect(bob?.identityPublicKey).toBe("bob-pinned-key");
+  });
+
+  it("member-ban: member_ban drops the banned member from the roster", async () => {
+    const CAROL_ID = 8401;
+    const ALICE_ID = 8402;
+    setMembers([
+      {
+        id: CAROL_ID,
+        username: "carol",
+        avatar: null,
+        role: "Member",
+        status: "offline",
+        display_name: null,
+        custom_status: null,
+        identity_public_key: null,
+      },
+      {
+        id: ALICE_ID,
+        username: "alice",
+        avatar: null,
+        role: "Admin",
+        status: "online",
+        display_name: null,
+        custom_status: null,
+        identity_public_key: null,
+      },
+    ]);
+    const [carolBan, bobBan] = s2c("member-ban", "a").filter((f) => f.frame.type === "member_ban");
+    await send(carolBan!.frame, { user_id: CAROL_ID }, { n: 0 });
+    expect([...membersStore.getState().members.keys()]).toEqual([ALICE_ID]);
+    // A ban of a user the client does not hold is a no-op, not a throw.
+    await send(bobBan!.frame, { user_id: 8499 }, { n: 0 });
+    expect([...membersStore.getState().members.keys()]).toEqual([ALICE_ID]);
+  });
+
+  it("member-ban: the banned socket's error frame carries the BANNED code", async () => {
+    const errFrame = s2cFrame("member-ban", "error");
+    expect(errFrame.payload).toMatchObject({ code: "BANNED", message: "you are banned" });
+    await send(errFrame, {}, { n: 0 });
+    expectConsole("error", "Server error");
+  });
+
+  it("member-timeout: mod_action with expires_at starts the timeout, the lift clears it", async () => {
+    vi.mocked(showToast).mockClear();
+    const EXPIRES_AT = "2099-01-01T00:00:00Z";
+    const [issued, lifted] = s2c("member-timeout", "b").filter(
+      (f) => f.frame.type === "mod_action",
+    );
+    expect(issued?.frame.payload).toMatchObject({ kind: "timeout", reason: "fixture timeout" });
+    await send(issued!.frame, { id: 5500, expires_at: EXPIRES_AT }, { n: 0 });
+    expect(safetyStore.getState().timeout).toEqual({ expiresAt: EXPIRES_AT });
+    expect(vi.mocked(showToast)).toHaveBeenCalledWith(expect.any(String), "warning");
+    expect(lifted?.frame.payload).toMatchObject({ kind: "timeout", expires_at: "<ts:null>" });
+    await send(lifted!.frame, { id: 5501 }, { n: 0 });
+    expect(safetyStore.getState().timeout).toBeNull();
+  });
+
+  it("member-timeout: member_timeouts is the moderator's full list, then empty after the lift", async () => {
+    const TARGET_ID = 8501;
+    const EXPIRES_AT = "2099-01-01T00:00:00Z";
+    const [issued, lifted] = s2c("member-timeout", "a").filter(
+      (f) => f.frame.type === "member_timeouts",
+    );
+    await send(issued!.frame, { user_id: TARGET_ID, expires_at: EXPIRES_AT }, { n: 0 });
+    expect(memberTimeoutsStore.getState()).toEqual(new Map([[TARGET_ID, EXPIRES_AT]]));
+    await send(lifted!.frame, {}, { n: 0 });
+    expect(memberTimeoutsStore.getState()).toEqual(new Map());
+  });
+
+  it("member-timeout: the re-sent channel_create flips can_send off and back on", async () => {
+    const creates = s2c("member-timeout", "b").filter(
+      (f) =>
+        f.frame.type === "channel_create" &&
+        (f.frame.payload as { name: string }).name === "general",
+    );
+    expect(creates).toHaveLength(2);
+    await send(creates[0]!.frame, { id: 1 }, { n: 0 });
+    expect(channelsStore.getState().channels.get(1)?.canSend).toBe(false);
+    await send(creates[1]!.frame, { id: 1 }, { n: 0 });
+    expect(channelsStore.getState().channels.get(1)?.canSend).toBe(true);
+  });
+
   it("every fixture connection replays end to end without a handler throw", async () => {
     for (const [journey, tr] of FIXTURES) {
       for (const conn of Object.keys(tr.connections)) {
@@ -1021,6 +1215,8 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
         // chat-command-unknown's refusal is logged by the same handler.
         if (journey === "chat-command-unknown" && conn === "a")
           expectConsole("error", "Server error");
+        // member-ban's BANNED error on the banned socket, same handler.
+        if (journey === "member-ban" && conn === "b") expectConsole("error", "Server error");
       }
     }
   });
