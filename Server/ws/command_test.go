@@ -29,6 +29,7 @@ func allClientToServerTypes() []string {
 		MsgTypeVoiceScreenshare,
 		MsgTypeVoiceE2EEAnnounce,
 		MsgTypeVoiceE2EEOffer,
+		MsgTypeVoiceWatch,
 	}
 }
 
@@ -66,6 +67,7 @@ func TestCommandTypeAndUserID(t *testing.T) {
 		{"VoiceScreenshareCmd", VoiceScreenshareCmd{userID: 16, Enabled: true}, MsgTypeVoiceScreenshare, 16},
 		{"VoiceE2EEAnnounceCmd", VoiceE2EEAnnounceCmd{userID: 17, PublicKey: "abc"}, MsgTypeVoiceE2EEAnnounce, 17},
 		{"VoiceE2EEOfferCmd", VoiceE2EEOfferCmd{userID: 18, TargetUserID: 99}, MsgTypeVoiceE2EEOffer, 18},
+		{"VoiceWatchCmd", VoiceWatchCmd{userID: 19, UserIDs: []int64{2}}, MsgTypeVoiceWatch, 19},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -351,6 +353,7 @@ func TestCommandConstructorRejectsInvalidJSON(t *testing.T) {
 		MsgTypeVoiceScreenshare,
 		MsgTypeVoiceE2EEAnnounce,
 		MsgTypeVoiceE2EEOffer,
+		MsgTypeVoiceWatch,
 	}
 	badJSON := json.RawMessage(`{not valid json`)
 	for _, msgType := range typesWithPayload {

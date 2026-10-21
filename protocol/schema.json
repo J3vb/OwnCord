@@ -37,6 +37,7 @@
       "ts": "VOICE_E2EE_ANNOUNCE"
     },
     { "wire": "voice_e2ee_offer", "go": "MsgTypeVoiceE2EEOffer", "ts": "VOICE_E2EE_OFFER" },
+    { "wire": "voice_watch", "go": "MsgTypeVoiceWatch", "ts": "VOICE_WATCH" },
     { "wire": "call_ring", "go": "MsgTypeCallRing", "ts": "CALL_RING" },
     { "wire": "call_decline", "go": "MsgTypeCallDecline", "ts": "CALL_DECLINE" },
     {
@@ -146,6 +147,7 @@
     { "wire": "dm_request", "go": "MsgTypeDMRequest", "ts": "DM_REQUEST" },
     { "wire": "call_incoming", "go": "MsgTypeCallIncoming", "ts": "CALL_INCOMING" },
     { "wire": "call_declined", "go": "MsgTypeCallDeclined", "ts": "CALL_DECLINED" },
+    { "wire": "voice_watching", "go": "MsgTypeVoiceWatching", "ts": "VOICE_WATCHING" },
     {
       "wire": "voice_e2ee_announce",
       "go": "MsgTypeVoiceE2EEAnnounceBC",
