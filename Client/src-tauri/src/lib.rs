@@ -55,6 +55,9 @@ mod unread_badge;
 mod update_commands;
 #[cfg(desktop)]
 mod window_prefs;
+// Command set exists on every target (unavailable off Windows); only the
+// Win32 capture inside is `cfg(windows)`.
+mod windows_app_audio;
 #[cfg(windows)]
 mod windows_media;
 #[cfg(windows)]
@@ -207,6 +210,7 @@ pub fn run() {
         .manage(external_content::ExternalContentState::new())
         .manage(native_voice_state())
         .manage(app_sounds_state())
+        .manage(windows_app_audio::AppAudioState::new())
         .invoke_handler(tauri::generate_handler![
             diagnostics::frontend_ready,
             #[cfg(desktop)]
@@ -259,6 +263,9 @@ pub fn run() {
             external_content::external_preview,
             external_content::external_image,
             idle::system_idle_ms,
+            windows_app_audio::app_audio_available,
+            windows_app_audio::start_app_audio,
+            windows_app_audio::stop_app_audio,
             tray::open_log_folder,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_build_info,

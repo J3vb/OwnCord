@@ -151,6 +151,16 @@ notify-rust = "4"
 windows = { version = "0.58", features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_System_SystemInformation",
+    # Per-app share audio (windows_app_audio.rs): WASAPI process loopback
+    # activation, its COM apartment and completion event, and the blob
+    # PROPVARIANT that carries the target process id.
+    "Win32_Media_Audio",
+    "Win32_Security",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+    "Win32_Foundation",
     "Data_Xml_Dom",
     "UI_Notifications",
 ] }
@@ -162,6 +172,11 @@ windows-sys = { version = "0.60", features = [
     "Win32_Foundation",
     "Win32_Security_Cryptography",
     "Win32_UI_WindowsAndMessaging",
+    # windows_app_audio.rs: the build number (RtlGetVersion) and the parent
+    # map that keeps OwnCord's own process tree out of a capture.
+    "Wdk_System_SystemServices",
+    "Win32_System_SystemInformation",
+    "Win32_System_Diagnostics_ToolHelp",
 ] }
 # WebView2 profile permission state (windows_media.rs). Both match the
 # versions tauri/wry already build, so no new crate enters the tree.

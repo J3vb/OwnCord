@@ -68,6 +68,7 @@ and only when it changes something a contributor or fork holder must do
 - Members who stay idle in a server voice channel are now moved to the AFK channel once it is set, after the AFK timeout on top of the client's own idle delay. A member who could not join the AFK channel, a DM or group call, and a member who comes back first are left alone. A moderator mute or deafen is kept through the move, and the member returns by joining a channel themselves. The client does not show why yet and the admin panel has no card for it.
 - The admin panel's Settings page now has a Voice: AFK card to choose the AFK channel (or none) and the extra idle time (1, 5, 15, 30 or 60 minutes), with a warning when members cannot connect to the chosen channel or it has a user limit, and the Channels page marks the AFK channel with a badge. Choosing the channel needs Manage Channels as well as Manage Server.
 - The client now shows when it was moved to the AFK channel (a short note once the move is done), marks the AFK channel in the channel list, and keeps the microphone off there with the mic button locked. Speaking or typing counts as activity again, also while in a call.
+- Windows: groundwork to share one app's sound with a shared window (the share picker switch follows).
 
 **Desktop UI**
 
