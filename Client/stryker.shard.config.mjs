@@ -137,6 +137,7 @@ export const shards = {
     "src/lib/channel-mutes.ts",
     "src/lib/channel-mute-expiry.ts",
     "src/lib/gifProvider.ts",
+    "src/lib/gifPager.ts",
     "src/features/updates/UpdateCheckRow.ts",
     "src/features/channels/channelRow.view.ts",
     "src/features/channels/channelRowModel.ts",

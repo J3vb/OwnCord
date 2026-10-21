@@ -1569,10 +1569,11 @@ them against its `klipy.com` CDN allowlist before rendering.
 
 #### Query Parameters
 
-| Param   | Type   | Default    | Range       | Description               |
-| ------- | ------ | ---------- | ----------- | ------------------------- |
-| `q`     | string | (required) | 1-100 chars | Search term               |
-| `limit` | int    | 20         | 1-50        | Maximum results to return |
+| Param   | Type   | Default    | Range       | Description                                                                   |
+| ------- | ------ | ---------- | ----------- | ----------------------------------------------------------------------------- |
+| `q`     | string | (required) | 1-100 chars | Search term                                                                   |
+| `limit` | int    | 20         | 1-50        | Maximum results to return                                                     |
+| `pos`   | string | (none)     | 1-256 chars | Paging cursor from the previous response's `next` (`A-Za-z0-9._:=+/%~-` only) |
 
 #### Response 200 OK
 
@@ -1587,7 +1588,8 @@ them against its `klipy.com` CDN allowlist before rendering.
         "gif": { "url": "https://media.klipy.com/abc123.gif" }
       }
     }
-  ]
+  ],
+  "next": "CAoQ"
 }
 ```
 
@@ -1595,24 +1597,31 @@ Only `id`, `title`, and the two `media_formats` URLs are forwarded. Every other
 field the upstream returns is dropped, so an upstream that echoed the API key
 could not leak it to clients. Results missing either format are omitted.
 
+`next` is the opaque cursor for the following page: send it back as `pos` to
+get it. It is `""` when there is nothing more, and also when the upstream's
+cursor fails the same character rule as `pos` (it is dropped, never relayed).
+A provider that ignores `pos` returns the same page again, so a client pages
+only while a page brings GIFs it has not seen.
+
 #### Errors
 
-| Status | Code            | When                                                           |
-| ------ | --------------- | -------------------------------------------------------------- |
-| 400    | `INVALID_INPUT` | Missing/blank `q`, `q` over 100 chars, or `limit` outside 1-50 |
-| 401    | `UNAUTHORIZED`  | No valid session (checked before the disabled check)           |
-| 429    | `RATE_LIMITED`  | Over 30 requests/minute                                        |
-| 502    | `BAD_GATEWAY`   | Upstream error, timeout, or unparseable response               |
-| 503    | `GIF_DISABLED`  | `gif.api_key` is not configured                                |
+| Status | Code            | When                                                                              |
+| ------ | --------------- | --------------------------------------------------------------------------------- |
+| 400    | `INVALID_INPUT` | Missing/blank `q`, `q` over 100 chars, `limit` outside 1-50, or a malformed `pos` |
+| 401    | `UNAUTHORIZED`  | No valid session (checked before the disabled check)                              |
+| 429    | `RATE_LIMITED`  | Over 30 requests/minute                                                           |
+| 502    | `BAD_GATEWAY`   | Upstream error, timeout, or unparseable response                                  |
+| 503    | `GIF_DISABLED`  | `gif.api_key` is not configured                                                   |
 
 ### GET /api/v1/gif/trending
 
 Same auth, rate limit, response shape, and error codes as
 `/api/v1/gif/search`, minus the `q` parameter.
 
-| Param   | Type | Default | Range | Description               |
-| ------- | ---- | ------- | ----- | ------------------------- |
-| `limit` | int  | 20      | 1-50  | Maximum results to return |
+| Param   | Type   | Default | Range       | Description               |
+| ------- | ------ | ------- | ----------- | ------------------------- |
+| `limit` | int    | 20      | 1-50        | Maximum results to return |
+| `pos`   | string | (none)  | 1-256 chars | Paging cursor, as above   |
 
 ### GET /api/v1/gif/favorites
 
