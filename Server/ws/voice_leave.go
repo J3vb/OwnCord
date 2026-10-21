@@ -166,14 +166,10 @@ func (h *Hub) removeLiveKitParticipantAsync(ctx context.Context, channelID, user
 
 // voiceLeaveRetryTimeout bounds each background retry of the voice-state
 // delete, so a wedged DB cannot hold the retry goroutine forever. Atomic so a
-// test can change it while another test's grace timer still reads it.
-var voiceLeaveRetryTimeout = newDurationVar(5 * time.Second)
+// test can shorten it while a grace timer left by an earlier test still reads it.
+var voiceLeaveRetryTimeout atomic.Int64
 
-func newDurationVar(d time.Duration) *atomic.Int64 {
-	var v atomic.Int64
-	v.Store(int64(d))
-	return &v
-}
+func init() { voiceLeaveRetryTimeout.Store(int64(5 * time.Second)) }
 
 // leaveVoiceChannelWithRetry attempts to remove the voice state from the DB
 // using a channel-conditional delete. Only the row matching (userID, channelID)
