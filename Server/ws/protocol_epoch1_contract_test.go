@@ -1810,7 +1810,7 @@ func journeyChatForwardPin(t *testing.T, r *epochRig) {
 // migrated database, so they are deterministic.
 func journeyChatBulkDelete(t *testing.T, r *epochRig) {
 	aliceID, _, aliceTok, bobTok := r.seedBaseline(t)
-	var ids []int64
+	ids := make([]int64, 0, 3)
 	for _, text := range []string{"one", "two", "three"} {
 		id, err := r.db.CreateMessage(context.Background(), textChannelID, aliceID, text, nil)
 		if err != nil {
