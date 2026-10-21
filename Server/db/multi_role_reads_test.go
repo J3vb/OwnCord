@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -282,6 +283,24 @@ func TestRolePosition_UsesTopRole(t *testing.T) {
 	}
 }
 
+// A member with no user_roles row at all is still judged by users.role_id, so
+// the last-admin guard cannot be skipped by a drifted database.
+func TestLastAdminGuard_ZeroRoleRowsFallsBackToMirror(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	uid, err := database.CreateUser(ctx, "rowless-admin", "hash", int(permissions.AdminRoleID))
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	execAll(t, database, `DELETE FROM user_roles WHERE user_id = `+strconv.FormatInt(uid, 10))
+	if err := eraseAccount(ctx, database, uid); !errors.Is(err, db.ErrLastAdmin) {
+		t.Fatalf("DeleteAccount(last admin with no user_roles row) = %v, want ErrLastAdmin", err)
+	}
+	if err := eraseAccount(ctx, database, 987654); err == nil || errors.Is(err, db.ErrLastAdmin) {
+		t.Fatalf("DeleteAccount(missing user) = %v, want an error", err)
+	}
+}
+
 // ListMentionTargetsByRoles joins user_roles: a member is listed once and
 // counted for any role they hold, with every held role reported.
 func TestListMentionTargetsByRoles_TwoRoleHolderListedOnce(t *testing.T) {
@@ -291,8 +310,9 @@ func TestListMentionTargetsByRoles_TwoRoleHolderListedOnce(t *testing.T) {
 	if err := database.AddUserRole(ctx, uid, 3); err != nil {
 		t.Fatalf("AddUserRole: %v", err)
 	}
-	// Only the Moderator role is asked for: the Member-top... Moderator is the
-	// top here, so ask for the LOWER role to prove the join is not the mirror.
+	// The Moderator role (3) outranks Member, so it is the member's top role and
+	// the users.role_id mirror. Asking for the LOWER role (Member) proves the
+	// lookup reads user_roles and not the mirror.
 	got, err := database.ListMentionTargetsByRoles(ctx, []int64{permissions.MemberRoleID})
 	if err != nil {
 		t.Fatalf("ListMentionTargetsByRoles: %v", err)

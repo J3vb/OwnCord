@@ -262,6 +262,7 @@ func (d *DB) GetMemberGrants(ctx context.Context, userID int64) (permissions.Mem
 	var grants permissions.MemberGrants
 	for _, r := range roles {
 		grants.Perms |= r.Permissions
+		grants.RoleIDs = append(grants.RoleIDs, r.ID)
 	}
 	rows, err := d.q.ListHeldRoleChannelOverrides(ctx, userID)
 	if err != nil {

@@ -3,6 +3,7 @@ package ws_test
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -214,16 +215,18 @@ func TestApplySetChannelID_ArchivedChannel_Unwinds(t *testing.T) {
 }
 
 // erroringOverridesStore wraps a service.Store and makes every
-// GetChannelOverridesFor call fail, standing in for a transient DB hiccup
+// GetMemberGrants call fail, standing in for a transient DB hiccup
 // (SQLITE_BUSY, an I/O error) on the permission-lookup query that
 // PermissionService.getOrPopulate issues after the role fetch succeeds. All
 // other methods pass straight through to the embedded real store.
 type erroringOverridesStore struct {
 	service.Store
+	calls atomic.Int32 // how many times the injected failure fired
 }
 
-func (s *erroringOverridesStore) GetChannelOverridesFor(ctx context.Context, roleID, userID int64) (map[int64]db.ChannelOverride, error) {
-	return nil, errors.New("simulated transient lookup failure")
+func (s *erroringOverridesStore) GetMemberGrants(ctx context.Context, userID int64) (permissions.MemberGrants, error) {
+	s.calls.Add(1)
+	return permissions.MemberGrants{}, errors.New("simulated transient lookup failure")
 }
 
 // TestApplySetChannelID_TransientPermissionLookupError_KeepsFocus pins
@@ -233,8 +236,8 @@ func (s *erroringOverridesStore) GetChannelOverridesFor(ctx context.Context, rol
 // for the permission-lookup leg reached through hasChannelAccess ->
 // PermissionService.HasChannelPerm. That closes the whole DB, so the FIRST
 // GetChannel call fails and the function returns before the permission leg
-// ever runs — vacuously "passing" while a hiccup on GetChannelOverridesFor
-// (or GetRoleForUser) alone, with GetChannel healthy, still gets collapsed to
+// ever runs — vacuously "passing" while a hiccup on GetMemberGrants
+// (or GetMemberRoles) alone, with GetChannel healthy, still gets collapsed to
 // a denial and silently kills the channel's live message stream.
 func TestApplySetChannelID_TransientPermissionLookupError_KeepsFocus(t *testing.T) {
 	database := openHandlerDB(t)
@@ -255,6 +258,11 @@ func TestApplySetChannelID_TransientPermissionLookupError_KeepsFocus(t *testing.
 
 	hub.ApplySetChannelIDForTest(c, ch)
 
+	// Without this the test would pass vacuously whenever the permission
+	// lookup never reaches the injected failure.
+	if store.calls.Load() == 0 {
+		t.Fatal("the permission lookup never reached GetMemberGrants, so the injected failure was not exercised")
+	}
 	if !hub.SubscribedToChannelTopicForTest(c, ch) {
 		t.Error("a transient permission-lookup failure must not unwind a just-admitted focus")
 	}

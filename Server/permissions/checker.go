@@ -3,6 +3,7 @@ package permissions
 import (
 	"context"
 	"errors"
+	"slices"
 )
 
 // ─── Errors ─────────────────────────────────────────────────────────────────
@@ -70,7 +71,11 @@ func NewChecker(db DB) *Checker {
 // roles and at least one has an override. A missing map entry means "no
 // override" and is always the correct answer. Build it with db.GetMemberGrants.
 type MemberGrants struct {
-	Perms     int64
+	Perms int64
+	// RoleIDs are the held roles the grants were read for, top role first. A
+	// caller that also read the roles separately compares the two to notice a
+	// role change that landed between the reads.
+	RoleIDs   []int64
 	Overrides map[int64]ChannelOverride
 	Layers    map[int64][]RoleGrant
 }
@@ -78,7 +83,9 @@ type MemberGrants struct {
 // Subject returns the value-taking subject for channelID with the role bits
 // and layers resolved. The channel's flags and DM state are the caller's.
 func (g MemberGrants) Subject(channelID int64) Subject {
-	return Subject{RolePerms: g.Perms, Override: g.Overrides[channelID], Layers: g.Layers[channelID]}
+	// Layers is cloned so a caller holding the Subject cannot write through
+	// into a cached MemberGrants.
+	return Subject{RolePerms: g.Perms, Override: g.Overrides[channelID], Layers: slices.Clone(g.Layers[channelID])}
 }
 
 // HasChannelPerm reports whether the member (identified by the roles they

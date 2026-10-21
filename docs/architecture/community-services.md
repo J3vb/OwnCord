@@ -86,7 +86,10 @@ attachment rows. Forwards of an erased user's message stay without any author
 `channel_categories` and `channels.category_id` (WP 6.5a). A category is a name and
 a position an administrator writes, holds no user content and no personal data, and
 is shared by every member who can see a channel in it, so it adds no data class. A
-channel outlives its category (`ON DELETE SET NULL`). Other historical
+channel outlives its category (`ON DELETE SET NULL`). **Amended 2026-10-21 (role reconcile):** `073_user_roles_reconcile.sql` rewrites
+`user_roles` rows so they match the role `users.role_id` already names (WP 6.3b).
+It moves no personal data and adds no data class here; the rows keep going with
+their user or role by cascade. Other historical
 status statements retain their `cbebd37c` baseline.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each
 service are documented"). **Input to:** HP-5, and to the retention and

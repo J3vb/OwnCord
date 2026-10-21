@@ -21,7 +21,6 @@ import (
 // immutable once built: singleflight hands the same pointer to every waiter
 // of a load, so nothing may write to it (or its maps and slices) afterwards.
 type cachedPerms struct {
-	roleIDs   []int64        // every held role, top role first
 	rolePerms int64          // OR of the held role masks
 	roles     db.MemberRoles // copy of the held roles, so GetRoleForUser needs no store read
 	// grants carries the per-channel overrides and, for the channels where
@@ -382,20 +381,27 @@ func (s *PermissionService) loadPerms(parent context.Context, userID int64, star
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), permLoadTimeout)
 	defer cancel()
 
-	roles, err := s.st.GetMemberRoles(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	if roles == nil {
-		return nil, nil
-	}
-	// Admins bypass every channel check, so skip the fetch entirely (mirrors
-	// ChannelService.ListVisibleChannels and ws.buildReady). The fetch pulls
-	// every held role's override and the per-user layer in batch queries, so
-	// the cached snapshot can answer the full resolution order without an
-	// extra query per channel.
-	grants := permissions.MemberGrants{Perms: roles.Perms}
-	if !permissions.HasAdmin(roles.Perms) {
+	// The roles and the grants are separate store reads. Admins bypass every
+	// channel check, so they skip the grants fetch entirely (mirrors
+	// ChannelService.ListVisibleChannels and ws.buildReady). Otherwise the
+	// grants carry the role ids and mask they were composed from, and a role
+	// change landing between the two reads is detected by comparing ids and
+	// re-reading, so the cached mask and layers always come from one read.
+	var roles *db.MemberRoles
+	var grants permissions.MemberGrants
+	for attempt := 0; ; attempt++ {
+		var err error
+		roles, err = s.st.GetMemberRoles(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+		if roles == nil {
+			return nil, nil
+		}
+		grants = permissions.MemberGrants{Perms: roles.Perms, RoleIDs: roles.IDs}
+		if permissions.HasAdmin(roles.Perms) {
+			break
+		}
 		g, oErr := s.st.GetMemberGrants(ctx, userID)
 		if oErr != nil {
 			// Fail closed (for HasChannelPerm/GetRoleForUser): an empty map
@@ -405,15 +411,16 @@ func (s *PermissionService) loadPerms(parent context.Context, userID int64, star
 			slog.Error("PermissionService.getOrPopulate override fetch failed, denying", "err", oErr, "user_id", userID, "role_ids", roles.IDs)
 			return nil, oErr
 		}
-		// The grants were read after the roles. A role change that landed in
-		// between bumps the generation (InvalidateUser) and the snapshot is
-		// then not cached; take the roles' OR as the authority for the mask.
-		grants = g
-		grants.Perms = roles.Perms
+		if slices.Equal(g.RoleIDs, roles.IDs) {
+			grants = g
+			break
+		}
+		if attempt >= 2 {
+			return nil, fmt.Errorf("loadPerms: held roles kept changing for user %d", userID)
+		}
 	}
 
 	cp := &cachedPerms{
-		roleIDs:     slices.Clone(roles.IDs),
 		rolePerms:   roles.Perms,
 		roles:       *cloneMemberRoles(roles),
 		grants:      grants,

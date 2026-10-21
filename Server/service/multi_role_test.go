@@ -33,11 +33,18 @@ func newTwoRoleFixture(t *testing.T) (*MessageService, *ChannelService, *Permiss
 	return svc, chSvc, svc.perms, database
 }
 
-// A member holding Member (READ denied here) plus Helper is a reader, counted
+// A member holding Member (READ denied here), Helper and a higher Lead role
+// that cannot read is a reader through Helper alone, counted
 // once; a Member-only user is not.
 func TestMentionReaders_TwoRoleHolderCounted(t *testing.T) {
 	svc, _, _, database := newTwoRoleFixture(t)
 	ctx := context.Background()
+	// dave's TOP role is one that cannot read the channel, so only a join on
+	// user_roles (not the users.role_id mirror) finds him through Helper.
+	seedRole(t, database, &db.Role{ID: 9, Name: "lead", Position: 30, Permissions: permissions.SendMessages})
+	if err := database.AddUserRole(ctx, 5, 9); err != nil {
+		t.Fatalf("AddUserRole: %v", err)
+	}
 
 	readers, err := svc.mentionReaders(ctx, 10, false, nil)
 	if err != nil {
@@ -82,6 +89,33 @@ func TestMentionReaders_AdminInLowerRoleBypassesUserDeny(t *testing.T) {
 	}
 	if !slices.ContainsFunc(readers, func(r db.MentionTarget) bool { return r.UserID == 5 }) {
 		t.Fatalf("an Administrator role below the top must bypass the per-user deny, readers = %+v", readers)
+	}
+}
+
+// A per-user deny on a bit another held role grants wins over that role: the
+// member layer applies after the OR of the role layers, through the cached
+// PermissionService path.
+func TestPermissionService_UserDenyBeatsOtherRoleGrant(t *testing.T) {
+	_, _, perms, database := newTwoRoleFixture(t)
+	ctx := context.Background()
+	seedRole(t, database, &db.Role{ID: 11, Name: "pinner", Position: 15,
+		Permissions: permissions.ReadMessages | permissions.ManageMessages})
+	if err := database.AddUserRole(ctx, 5, 11); err != nil {
+		t.Fatalf("AddUserRole: %v", err)
+	}
+	perms.InvalidateUser(5)
+	if !perms.HasChannelPerm(ctx, 5, 10, permissions.ManageMessages) {
+		t.Fatal("precondition: the second role grants ManageMessages")
+	}
+	if err := database.UpsertChannelUserOverride(ctx, 10, 5, 0, permissions.ManageMessages); err != nil {
+		t.Fatalf("UpsertChannelUserOverride: %v", err)
+	}
+	perms.InvalidateUser(5)
+	if perms.HasChannelPerm(ctx, 5, 10, permissions.ManageMessages) {
+		t.Error("a per-user deny must beat the bit another held role grants")
+	}
+	if !perms.HasChannelPerm(ctx, 5, 10, permissions.ReadMessages) {
+		t.Error("the deny is for ManageMessages only; reading must still work")
 	}
 }
 

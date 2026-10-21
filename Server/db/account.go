@@ -195,15 +195,24 @@ func deleteAccountCloseDMChannels(ctx context.Context, tx *sql.Tx, userID int64,
 	return nil
 }
 
-// holdsAnyRole reports whether the user holds at least one of roleIDs.
+// holdsAnyRole reports whether the user holds at least one of roleIDs. The
+// mirror role counts too, so a member with no user_roles row at all is judged
+// by users.role_id instead of slipping past the guard. A missing user is an
+// error.
 func holdsAnyRole(ctx context.Context, tx *sql.Tx, userID int64, roleIDs []int64) (bool, error) {
+	var mirror int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT role_id FROM users WHERE id = ?`, userID,
+	).Scan(&mirror); err != nil {
+		return false, fmt.Errorf("DeleteAccount fetch role: %w", err)
+	}
+	held := slices.Contains(roleIDs, mirror)
 	heldRows, err := tx.QueryContext(ctx,
 		`SELECT role_id FROM user_roles WHERE user_id = ?`, userID)
 	if err != nil {
 		return false, fmt.Errorf("DeleteAccount fetch roles: %w", err)
 	}
 	defer heldRows.Close() //nolint:errcheck
-	held := false
 	for heldRows.Next() {
 		var rid int64
 		if scanErr := heldRows.Scan(&rid); scanErr != nil {
