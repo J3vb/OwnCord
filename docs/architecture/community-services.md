@@ -88,6 +88,12 @@ a position an administrator writes, holds no user content and no personal data, 
 is shared by every member who can see a channel in it, so it adds no data class. A
 channel outlives its category (`ON DELETE SET NULL`). Other historical
 status statements retain their `cbebd37c` baseline.
+**Amended 2026-10-21 (polls):** `073_polls.sql` adds `polls`, `poll_answers` and
+`poll_votes` (WP 6.9b). A poll is an ordinary message of its author whose text is a
+readable fallback of the question and answers, so it follows the message rows. The
+side rows go with the message by cascade. The one new data class is the vote (lifecycle
+row 10a in `data-lifecycle.md`): a voter's rows are public to the community as
+reactions are, and go with the account. Counts are never stored.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each
 service are documented"). **Input to:** HP-5, and to the retention and
 erasure obligations every B5 step carries.

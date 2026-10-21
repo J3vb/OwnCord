@@ -45,6 +45,11 @@ type chatMessagePayload struct {
 	// Forward is set only on a forwarded message (WP 6.9a): the same shape as
 	// the history payload's db.ForwardInfo, static, so it replays as is.
 	Forward *service.ForwardInfo `json:"forward,omitempty"`
+	// Poll is set only on a poll message (WP 6.9b): the same shape as the
+	// history payload's db.PollInfo. The counts are those at creation, zero, so
+	// a replayed frame must not roll a newer count back (clients keep the higher
+	// results.version).
+	Poll *service.PollInfo `json:"poll,omitempty"`
 }
 
 // groupEventBlock is the group_event object of a group DM row. Add and remove
@@ -90,6 +95,8 @@ type chatMessageArgs struct {
 	GroupEvent *groupEventBlock
 	// Forward is set only for a forwarded message.
 	Forward *service.ForwardInfo
+	// Poll is set only for a poll message.
+	Poll *service.PollInfo
 }
 
 // buildChatMessage constructs a chat_message broadcast envelope.
@@ -130,6 +137,7 @@ func buildChatMessage(a chatMessageArgs) []byte {
 			Call:              a.Call,
 			GroupEvent:        a.GroupEvent,
 			Forward:           a.Forward,
+			Poll:              a.Poll,
 		},
 	})
 }
