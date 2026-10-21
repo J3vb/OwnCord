@@ -119,35 +119,49 @@ SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
        COALESCE(c.category_id, 0) AS category_id,
        COALESCE(cc.position, 0) AS category_position,
        COALESCE(c.topic, '') AS topic,
-       c.position, c.slow_mode, c.archived, c.created_at,
+       c.position,
+       CAST(CASE WHEN p.id IS NULL THEN c.slow_mode ELSE p.slow_mode END AS INTEGER) AS slow_mode,
+       CAST(CASE WHEN p.id IS NULL THEN c.archived ELSE p.archived END AS INTEGER) AS archived,
+       c.created_at,
        COALESCE(c.voice_max_users, 0) AS voice_max_users,
        c.voice_quality,
        c.mixing_threshold,
        COALESCE(c.voice_max_video, 0) AS voice_max_video,
-       c.nsfw,
-       c.afk
+       CAST(CASE WHEN p.id IS NULL THEN c.nsfw ELSE p.nsfw END AS INTEGER) AS nsfw,
+       c.afk,
+       COALESCE(c.parent_channel_id, 0) AS parent_channel_id,
+       c.thread_archived,
+       c.thread_locked,
+       c.forum_require_tag,
+       c.forum_default_auto_archive_minutes
 FROM channels c
+LEFT JOIN channels p ON p.id = c.parent_channel_id
 LEFT JOIN channel_categories cc ON cc.id = c.category_id WHERE c.afk = 1
 `
 
 type GetAFKChannelRow struct {
-	ID               int64   `json:"id"`
-	Name             string  `json:"name"`
-	Type             string  `json:"type"`
-	Category         string  `json:"category"`
-	CategoryID       int64   `json:"categoryId"`
-	CategoryPosition int64   `json:"categoryPosition"`
-	Topic            string  `json:"topic"`
-	Position         int64   `json:"position"`
-	SlowMode         int64   `json:"slowMode"`
-	Archived         int64   `json:"archived"`
-	CreatedAt        string  `json:"createdAt"`
-	VoiceMaxUsers    int64   `json:"voiceMaxUsers"`
-	VoiceQuality     *string `json:"voiceQuality"`
-	MixingThreshold  *int64  `json:"mixingThreshold"`
-	VoiceMaxVideo    int64   `json:"voiceMaxVideo"`
-	Nsfw             int64   `json:"nsfw"`
-	Afk              int64   `json:"afk"`
+	ID                             int64   `json:"id"`
+	Name                           string  `json:"name"`
+	Type                           string  `json:"type"`
+	Category                       string  `json:"category"`
+	CategoryID                     int64   `json:"categoryId"`
+	CategoryPosition               int64   `json:"categoryPosition"`
+	Topic                          string  `json:"topic"`
+	Position                       int64   `json:"position"`
+	SlowMode                       int64   `json:"slowMode"`
+	Archived                       int64   `json:"archived"`
+	CreatedAt                      string  `json:"createdAt"`
+	VoiceMaxUsers                  int64   `json:"voiceMaxUsers"`
+	VoiceQuality                   *string `json:"voiceQuality"`
+	MixingThreshold                *int64  `json:"mixingThreshold"`
+	VoiceMaxVideo                  int64   `json:"voiceMaxVideo"`
+	Nsfw                           int64   `json:"nsfw"`
+	Afk                            int64   `json:"afk"`
+	ParentChannelID                int64   `json:"parentChannelId"`
+	ThreadArchived                 int64   `json:"threadArchived"`
+	ThreadLocked                   int64   `json:"threadLocked"`
+	ForumRequireTag                int64   `json:"forumRequireTag"`
+	ForumDefaultAutoArchiveMinutes int64   `json:"forumDefaultAutoArchiveMinutes"`
 }
 
 func (q *Queries) GetAFKChannel(ctx context.Context) (GetAFKChannelRow, error) {
@@ -171,6 +185,11 @@ func (q *Queries) GetAFKChannel(ctx context.Context) (GetAFKChannelRow, error) {
 		&i.VoiceMaxVideo,
 		&i.Nsfw,
 		&i.Afk,
+		&i.ParentChannelID,
+		&i.ThreadArchived,
+		&i.ThreadLocked,
+		&i.ForumRequireTag,
+		&i.ForumDefaultAutoArchiveMinutes,
 	)
 	return i, err
 }
@@ -180,35 +199,49 @@ SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
        COALESCE(c.category_id, 0) AS category_id,
        COALESCE(cc.position, 0) AS category_position,
        COALESCE(c.topic, '') AS topic,
-       c.position, c.slow_mode, c.archived, c.created_at,
+       c.position,
+       CAST(CASE WHEN p.id IS NULL THEN c.slow_mode ELSE p.slow_mode END AS INTEGER) AS slow_mode,
+       CAST(CASE WHEN p.id IS NULL THEN c.archived ELSE p.archived END AS INTEGER) AS archived,
+       c.created_at,
        COALESCE(c.voice_max_users, 0) AS voice_max_users,
        c.voice_quality,
        c.mixing_threshold,
        COALESCE(c.voice_max_video, 0) AS voice_max_video,
-       c.nsfw,
-       c.afk
+       CAST(CASE WHEN p.id IS NULL THEN c.nsfw ELSE p.nsfw END AS INTEGER) AS nsfw,
+       c.afk,
+       COALESCE(c.parent_channel_id, 0) AS parent_channel_id,
+       c.thread_archived,
+       c.thread_locked,
+       c.forum_require_tag,
+       c.forum_default_auto_archive_minutes
 FROM channels c
+LEFT JOIN channels p ON p.id = c.parent_channel_id
 LEFT JOIN channel_categories cc ON cc.id = c.category_id WHERE c.id = ?
 `
 
 type GetChannelRow struct {
-	ID               int64   `json:"id"`
-	Name             string  `json:"name"`
-	Type             string  `json:"type"`
-	Category         string  `json:"category"`
-	CategoryID       int64   `json:"categoryId"`
-	CategoryPosition int64   `json:"categoryPosition"`
-	Topic            string  `json:"topic"`
-	Position         int64   `json:"position"`
-	SlowMode         int64   `json:"slowMode"`
-	Archived         int64   `json:"archived"`
-	CreatedAt        string  `json:"createdAt"`
-	VoiceMaxUsers    int64   `json:"voiceMaxUsers"`
-	VoiceQuality     *string `json:"voiceQuality"`
-	MixingThreshold  *int64  `json:"mixingThreshold"`
-	VoiceMaxVideo    int64   `json:"voiceMaxVideo"`
-	Nsfw             int64   `json:"nsfw"`
-	Afk              int64   `json:"afk"`
+	ID                             int64   `json:"id"`
+	Name                           string  `json:"name"`
+	Type                           string  `json:"type"`
+	Category                       string  `json:"category"`
+	CategoryID                     int64   `json:"categoryId"`
+	CategoryPosition               int64   `json:"categoryPosition"`
+	Topic                          string  `json:"topic"`
+	Position                       int64   `json:"position"`
+	SlowMode                       int64   `json:"slowMode"`
+	Archived                       int64   `json:"archived"`
+	CreatedAt                      string  `json:"createdAt"`
+	VoiceMaxUsers                  int64   `json:"voiceMaxUsers"`
+	VoiceQuality                   *string `json:"voiceQuality"`
+	MixingThreshold                *int64  `json:"mixingThreshold"`
+	VoiceMaxVideo                  int64   `json:"voiceMaxVideo"`
+	Nsfw                           int64   `json:"nsfw"`
+	Afk                            int64   `json:"afk"`
+	ParentChannelID                int64   `json:"parentChannelId"`
+	ThreadArchived                 int64   `json:"threadArchived"`
+	ThreadLocked                   int64   `json:"threadLocked"`
+	ForumRequireTag                int64   `json:"forumRequireTag"`
+	ForumDefaultAutoArchiveMinutes int64   `json:"forumDefaultAutoArchiveMinutes"`
 }
 
 func (q *Queries) GetChannel(ctx context.Context, id int64) (GetChannelRow, error) {
@@ -232,12 +265,18 @@ func (q *Queries) GetChannel(ctx context.Context, id int64) (GetChannelRow, erro
 		&i.VoiceMaxVideo,
 		&i.Nsfw,
 		&i.Afk,
+		&i.ParentChannelID,
+		&i.ThreadArchived,
+		&i.ThreadLocked,
+		&i.ForumRequireTag,
+		&i.ForumDefaultAutoArchiveMinutes,
 	)
 	return i, err
 }
 
 const getChannelOverrides = `-- name: GetChannelOverrides :many
-SELECT role_id, allow, deny FROM channel_overrides WHERE channel_id = ?
+SELECT role_id, allow, deny FROM channel_overrides WHERE channel_id = (
+    SELECT COALESCE(ac.parent_channel_id, ac.id) FROM channels ac WHERE ac.id = ?1)
 `
 
 type GetChannelOverridesRow struct {
@@ -270,7 +309,10 @@ func (q *Queries) GetChannelOverrides(ctx context.Context, channelID int64) ([]G
 }
 
 const getChannelPermission = `-- name: GetChannelPermission :one
-SELECT allow, deny FROM channel_overrides WHERE channel_id = ? AND role_id = ?
+SELECT allow, deny FROM channel_overrides
+WHERE channel_id = (
+    SELECT COALESCE(ac.parent_channel_id, ac.id) FROM channels ac WHERE ac.id = ?1)
+  AND role_id = ?2
 `
 
 type GetChannelPermissionParams struct {
@@ -283,6 +325,8 @@ type GetChannelPermissionRow struct {
 	Deny  int64 `json:"deny"`
 }
 
+// The single-channel override reads resolve a thread id to its parent first
+// (migration 074): a thread has no overrides of its own, it has its parent's.
 func (q *Queries) GetChannelPermission(ctx context.Context, arg GetChannelPermissionParams) (GetChannelPermissionRow, error) {
 	row := q.db.QueryRowContext(ctx, getChannelPermission, arg.ChannelID, arg.RoleID)
 	var i GetChannelPermissionRow
@@ -291,7 +335,8 @@ func (q *Queries) GetChannelPermission(ctx context.Context, arg GetChannelPermis
 }
 
 const getChannelUserOverrides = `-- name: GetChannelUserOverrides :many
-SELECT user_id, allow, deny FROM channel_user_overrides WHERE channel_id = ?
+SELECT user_id, allow, deny FROM channel_user_overrides WHERE channel_id = (
+    SELECT COALESCE(ac.parent_channel_id, ac.id) FROM channels ac WHERE ac.id = ?1)
 `
 
 type GetChannelUserOverridesRow struct {
@@ -324,7 +369,10 @@ func (q *Queries) GetChannelUserOverrides(ctx context.Context, channelID int64) 
 }
 
 const getChannelUserPermission = `-- name: GetChannelUserPermission :one
-SELECT allow, deny FROM channel_user_overrides WHERE channel_id = ? AND user_id = ?
+SELECT allow, deny FROM channel_user_overrides
+WHERE channel_id = (
+    SELECT COALESCE(ac.parent_channel_id, ac.id) FROM channels ac WHERE ac.id = ?1)
+  AND user_id = ?2
 `
 
 type GetChannelUserPermissionParams struct {
@@ -415,35 +463,51 @@ SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
        COALESCE(c.category_id, 0) AS category_id,
        COALESCE(cc.position, 0) AS category_position,
        COALESCE(c.topic, '') AS topic,
-       c.position, c.slow_mode, c.archived, c.created_at,
+       c.position,
+       CAST(CASE WHEN p.id IS NULL THEN c.slow_mode ELSE p.slow_mode END AS INTEGER) AS slow_mode,
+       CAST(CASE WHEN p.id IS NULL THEN c.archived ELSE p.archived END AS INTEGER) AS archived,
+       c.created_at,
        COALESCE(c.voice_max_users, 0) AS voice_max_users,
        c.voice_quality,
        c.mixing_threshold,
        COALESCE(c.voice_max_video, 0) AS voice_max_video,
-       c.nsfw,
-       c.afk
+       CAST(CASE WHEN p.id IS NULL THEN c.nsfw ELSE p.nsfw END AS INTEGER) AS nsfw,
+       c.afk,
+       COALESCE(c.parent_channel_id, 0) AS parent_channel_id,
+       c.thread_archived,
+       c.thread_locked,
+       c.forum_require_tag,
+       c.forum_default_auto_archive_minutes
 FROM channels c
-LEFT JOIN channel_categories cc ON cc.id = c.category_id ORDER BY c.position ASC, c.id ASC
+LEFT JOIN channels p ON p.id = c.parent_channel_id
+LEFT JOIN channel_categories cc ON cc.id = c.category_id
+WHERE c.parent_channel_id IS NULL
+ORDER BY c.position ASC, c.id ASC
 `
 
 type ListChannelsRow struct {
-	ID               int64   `json:"id"`
-	Name             string  `json:"name"`
-	Type             string  `json:"type"`
-	Category         string  `json:"category"`
-	CategoryID       int64   `json:"categoryId"`
-	CategoryPosition int64   `json:"categoryPosition"`
-	Topic            string  `json:"topic"`
-	Position         int64   `json:"position"`
-	SlowMode         int64   `json:"slowMode"`
-	Archived         int64   `json:"archived"`
-	CreatedAt        string  `json:"createdAt"`
-	VoiceMaxUsers    int64   `json:"voiceMaxUsers"`
-	VoiceQuality     *string `json:"voiceQuality"`
-	MixingThreshold  *int64  `json:"mixingThreshold"`
-	VoiceMaxVideo    int64   `json:"voiceMaxVideo"`
-	Nsfw             int64   `json:"nsfw"`
-	Afk              int64   `json:"afk"`
+	ID                             int64   `json:"id"`
+	Name                           string  `json:"name"`
+	Type                           string  `json:"type"`
+	Category                       string  `json:"category"`
+	CategoryID                     int64   `json:"categoryId"`
+	CategoryPosition               int64   `json:"categoryPosition"`
+	Topic                          string  `json:"topic"`
+	Position                       int64   `json:"position"`
+	SlowMode                       int64   `json:"slowMode"`
+	Archived                       int64   `json:"archived"`
+	CreatedAt                      string  `json:"createdAt"`
+	VoiceMaxUsers                  int64   `json:"voiceMaxUsers"`
+	VoiceQuality                   *string `json:"voiceQuality"`
+	MixingThreshold                *int64  `json:"mixingThreshold"`
+	VoiceMaxVideo                  int64   `json:"voiceMaxVideo"`
+	Nsfw                           int64   `json:"nsfw"`
+	Afk                            int64   `json:"afk"`
+	ParentChannelID                int64   `json:"parentChannelId"`
+	ThreadArchived                 int64   `json:"threadArchived"`
+	ThreadLocked                   int64   `json:"threadLocked"`
+	ForumRequireTag                int64   `json:"forumRequireTag"`
+	ForumDefaultAutoArchiveMinutes int64   `json:"forumDefaultAutoArchiveMinutes"`
 }
 
 func (q *Queries) ListChannels(ctx context.Context) ([]ListChannelsRow, error) {
@@ -473,6 +537,11 @@ func (q *Queries) ListChannels(ctx context.Context) ([]ListChannelsRow, error) {
 			&i.VoiceMaxVideo,
 			&i.Nsfw,
 			&i.Afk,
+			&i.ParentChannelID,
+			&i.ThreadArchived,
+			&i.ThreadLocked,
+			&i.ForumRequireTag,
+			&i.ForumDefaultAutoArchiveMinutes,
 		); err != nil {
 			return nil, err
 		}

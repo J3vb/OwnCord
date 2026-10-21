@@ -2,7 +2,7 @@
 // against livekit-client in Chromium, over a local livekit-server, with
 // E2EE on. No OwnCord server and no app bundle: the page is a bare
 // livekit-client peer, the way a Windows client encrypts. Run by ci.yml's
-// rust-tests job after the crate is built; locally see Client/CLAUDE.md.
+// rust-tests job after the crate is built; locally see docs/architecture/linux-native-voice.md.
 import { defineConfig, devices } from "@playwright/test";
 import { quarantineGrepInvert } from "./scripts/check-quarantine.mjs";
 

@@ -57,6 +57,8 @@ func TestCommandTypeAndUserID(t *testing.T) {
 		{"ChannelFocusCmd", ChannelFocusCmd{userID: 7, ChannelID: 12}, MsgTypeChannelFocus, 7},
 		{"MarkReadCmd", MarkReadCmd{userID: 7, ChannelID: 12}, MsgTypeMarkRead, 7},
 		{"ReactionAddCmd", ReactionAddCmd{userID: 8, MessageID: 40, Emoji: "👍"}, MsgTypeReactionAdd, 8},
+		{"PollVoteCmd", PollVoteCmd{userID: 10, MessageID: 5}, MsgTypePollVote, 10},
+		{"PollEndCmd", PollEndCmd{userID: 11, MessageID: 5}, MsgTypePollEnd, 11},
 		{"ReactionRemoveCmd", ReactionRemoveCmd{userID: 9, MessageID: 41, Emoji: "👎"}, MsgTypeReactionRemove, 9},
 		{"VoiceJoinCmd", VoiceJoinCmd{userID: 10, ChannelID: 13}, MsgTypeVoiceJoin, 10},
 		{"VoiceLeaveCmd", VoiceLeaveCmd{userID: 11}, MsgTypeVoiceLeave, 11},

@@ -185,17 +185,6 @@ func describeChannelWindow(c *db.ChannelRetention) string {
 	return fmt.Sprintf("%d days", c.Days)
 }
 
-func (s *RetentionService) retentionChannel(ctx context.Context, channelID int64) error {
-	ch, err := s.st.GetChannel(ctx, channelID)
-	if err != nil || ch == nil {
-		return fmt.Errorf("%w: channel not found", ErrNotFound)
-	}
-	if ch.Type == "dm" {
-		return fmt.Errorf("%w: %w", ErrBadRequest, ErrRetentionDMChannel)
-	}
-	return nil
-}
-
 // RetentionPreview is one channel's line of the effect preview.
 type RetentionPreview struct {
 	db.RetentionWindow

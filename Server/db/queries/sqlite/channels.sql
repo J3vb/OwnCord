@@ -3,29 +3,49 @@ SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
        COALESCE(c.category_id, 0) AS category_id,
        COALESCE(cc.position, 0) AS category_position,
        COALESCE(c.topic, '') AS topic,
-       c.position, c.slow_mode, c.archived, c.created_at,
+       c.position,
+       CAST(CASE WHEN p.id IS NULL THEN c.slow_mode ELSE p.slow_mode END AS INTEGER) AS slow_mode,
+       CAST(CASE WHEN p.id IS NULL THEN c.archived ELSE p.archived END AS INTEGER) AS archived,
+       c.created_at,
        COALESCE(c.voice_max_users, 0) AS voice_max_users,
        c.voice_quality,
        c.mixing_threshold,
        COALESCE(c.voice_max_video, 0) AS voice_max_video,
-       c.nsfw,
-       c.afk
+       CAST(CASE WHEN p.id IS NULL THEN c.nsfw ELSE p.nsfw END AS INTEGER) AS nsfw,
+       c.afk,
+       COALESCE(c.parent_channel_id, 0) AS parent_channel_id,
+       c.thread_archived,
+       c.thread_locked,
+       c.forum_require_tag,
+       c.forum_default_auto_archive_minutes
 FROM channels c
-LEFT JOIN channel_categories cc ON cc.id = c.category_id ORDER BY c.position ASC, c.id ASC;
+LEFT JOIN channels p ON p.id = c.parent_channel_id
+LEFT JOIN channel_categories cc ON cc.id = c.category_id
+WHERE c.parent_channel_id IS NULL
+ORDER BY c.position ASC, c.id ASC;
 
 -- name: GetChannel :one
 SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
        COALESCE(c.category_id, 0) AS category_id,
        COALESCE(cc.position, 0) AS category_position,
        COALESCE(c.topic, '') AS topic,
-       c.position, c.slow_mode, c.archived, c.created_at,
+       c.position,
+       CAST(CASE WHEN p.id IS NULL THEN c.slow_mode ELSE p.slow_mode END AS INTEGER) AS slow_mode,
+       CAST(CASE WHEN p.id IS NULL THEN c.archived ELSE p.archived END AS INTEGER) AS archived,
+       c.created_at,
        COALESCE(c.voice_max_users, 0) AS voice_max_users,
        c.voice_quality,
        c.mixing_threshold,
        COALESCE(c.voice_max_video, 0) AS voice_max_video,
-       c.nsfw,
-       c.afk
+       CAST(CASE WHEN p.id IS NULL THEN c.nsfw ELSE p.nsfw END AS INTEGER) AS nsfw,
+       c.afk,
+       COALESCE(c.parent_channel_id, 0) AS parent_channel_id,
+       c.thread_archived,
+       c.thread_locked,
+       c.forum_require_tag,
+       c.forum_default_auto_archive_minutes
 FROM channels c
+LEFT JOIN channels p ON p.id = c.parent_channel_id
 LEFT JOIN channel_categories cc ON cc.id = c.category_id WHERE c.id = ?;
 
 -- name: GetAFKChannel :one
@@ -33,14 +53,23 @@ SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
        COALESCE(c.category_id, 0) AS category_id,
        COALESCE(cc.position, 0) AS category_position,
        COALESCE(c.topic, '') AS topic,
-       c.position, c.slow_mode, c.archived, c.created_at,
+       c.position,
+       CAST(CASE WHEN p.id IS NULL THEN c.slow_mode ELSE p.slow_mode END AS INTEGER) AS slow_mode,
+       CAST(CASE WHEN p.id IS NULL THEN c.archived ELSE p.archived END AS INTEGER) AS archived,
+       c.created_at,
        COALESCE(c.voice_max_users, 0) AS voice_max_users,
        c.voice_quality,
        c.mixing_threshold,
        COALESCE(c.voice_max_video, 0) AS voice_max_video,
-       c.nsfw,
-       c.afk
+       CAST(CASE WHEN p.id IS NULL THEN c.nsfw ELSE p.nsfw END AS INTEGER) AS nsfw,
+       c.afk,
+       COALESCE(c.parent_channel_id, 0) AS parent_channel_id,
+       c.thread_archived,
+       c.thread_locked,
+       c.forum_require_tag,
+       c.forum_default_auto_archive_minutes
 FROM channels c
+LEFT JOIN channels p ON p.id = c.parent_channel_id
 LEFT JOIN channel_categories cc ON cc.id = c.category_id WHERE c.afk = 1;
 
 -- name: ClearAFKChannel :exec
@@ -78,10 +107,16 @@ ON CONFLICT(channel_id, role_id) DO UPDATE SET
     deny  = excluded.deny;
 
 -- name: GetChannelPermission :one
-SELECT allow, deny FROM channel_overrides WHERE channel_id = ? AND role_id = ?;
+-- The single-channel override reads resolve a thread id to its parent first
+-- (migration 074): a thread has no overrides of its own, it has its parent's.
+SELECT allow, deny FROM channel_overrides
+WHERE channel_id = (
+    SELECT COALESCE(ac.parent_channel_id, ac.id) FROM channels ac WHERE ac.id = sqlc.arg(channel_id))
+  AND role_id = sqlc.arg(role_id);
 
 -- name: GetChannelOverrides :many
-SELECT role_id, allow, deny FROM channel_overrides WHERE channel_id = ?;
+SELECT role_id, allow, deny FROM channel_overrides WHERE channel_id = (
+    SELECT COALESCE(ac.parent_channel_id, ac.id) FROM channels ac WHERE ac.id = sqlc.arg(channel_id));
 
 -- name: GetRoleChannelPermissions :many
 SELECT channel_id, allow, deny FROM channel_overrides WHERE role_id = ?;
@@ -97,10 +132,14 @@ ON CONFLICT(channel_id, user_id) DO UPDATE SET
     deny  = excluded.deny;
 
 -- name: GetChannelUserPermission :one
-SELECT allow, deny FROM channel_user_overrides WHERE channel_id = ? AND user_id = ?;
+SELECT allow, deny FROM channel_user_overrides
+WHERE channel_id = (
+    SELECT COALESCE(ac.parent_channel_id, ac.id) FROM channels ac WHERE ac.id = sqlc.arg(channel_id))
+  AND user_id = sqlc.arg(user_id);
 
 -- name: GetChannelUserOverrides :many
-SELECT user_id, allow, deny FROM channel_user_overrides WHERE channel_id = ?;
+SELECT user_id, allow, deny FROM channel_user_overrides WHERE channel_id = (
+    SELECT COALESCE(ac.parent_channel_id, ac.id) FROM channels ac WHERE ac.id = sqlc.arg(channel_id));
 
 -- name: GetUserChannelPermissions :many
 SELECT channel_id, allow, deny FROM channel_user_overrides WHERE user_id = ?;

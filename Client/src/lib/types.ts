@@ -440,6 +440,11 @@ export interface ReadyPayload {
      */
     readonly profile_banners?: boolean;
     /**
+     * The server understands `poll_create`, `poll_vote` and `poll_end` and sends
+     * `poll_update` (WP 6.9b). Absent means an older server: no Poll button.
+     */
+    readonly polls?: boolean;
+    /**
      * The server stores the caller's two direct message privacy settings (WP
      * 6.8b), read and written over `/users/me/privacy`. Absent means an older
      * server.
@@ -592,6 +597,80 @@ export interface ForwardInfo {
   readonly source_timestamp: string;
 }
 
+/** One answer of a poll (WP 6.9b). `emoji` is a Unicode emoji or a `:shortcode:`, or null. */
+export interface PollAnswer {
+  readonly answer_id: number;
+  readonly text: string;
+  readonly emoji?: string | null;
+}
+
+export interface PollCount {
+  readonly answer_id: number;
+  readonly count: number;
+}
+
+/**
+ * A poll's tally. `version` rises by one on every vote change and on the end,
+ * and orders every copy of it; `me` is the viewer's own answer ids.
+ */
+export interface PollResults {
+  readonly version: number;
+  readonly total_voters: number;
+  readonly counts: readonly PollCount[];
+  readonly me: readonly number[];
+}
+
+/** The `poll` block of a poll message, live and in history (WP 6.9b). */
+export interface PollInfo {
+  readonly question: string;
+  readonly answers: readonly PollAnswer[];
+  readonly allow_multiselect: boolean;
+  readonly expires_at: string;
+  readonly ended: boolean;
+  readonly ended_at: string | null;
+  readonly results: PollResults;
+}
+
+/**
+ * A poll as the client holds it: the wire block plus the version `results.me`
+ * is current as of. `me` moves only from a frame whose version is above this,
+ * which is the second watermark that keeps a viewer's own selection right when
+ * their devices' frames arrive out of order.
+ */
+export interface PollView extends PollInfo {
+  readonly selfVersion: number;
+}
+
+/** A poll's tally after a vote or its end; `user_id` and `answer_ids` ride only on a vote. */
+export interface PollUpdatePayload {
+  readonly channel_id: number;
+  readonly message_id: number;
+  readonly version: number;
+  readonly total_voters: number;
+  readonly counts: readonly PollCount[];
+  readonly ended: boolean;
+  readonly ended_at: string | null;
+  readonly user_id?: number;
+  readonly answer_ids?: readonly number[];
+}
+
+export interface PollCreateOkPayload {
+  readonly message_id: number;
+  readonly channel_id: number;
+  readonly client_message_id: string;
+  readonly deduplicated: boolean;
+}
+
+export interface PollVoteOkPayload {
+  readonly message_id: number;
+  readonly version: number;
+  readonly answer_ids: readonly number[];
+}
+
+export interface PollEndOkPayload {
+  readonly message_id: number;
+}
+
 export interface ChatMessagePayload {
   readonly client_message_id?: string;
   readonly id: number;
@@ -631,6 +710,8 @@ export interface ChatMessagePayload {
   readonly group_event?: GroupEventInfo;
   /** Present on a forwarded message only (WP 6.9a). */
   readonly forward?: ForwardInfo;
+  /** Present on a poll message only (WP 6.9b). */
+  readonly poll?: PollInfo;
 }
 
 export interface ChatSendOkPayload {
@@ -1118,6 +1199,32 @@ export interface ChatForwardPayload {
   readonly message_id: number;
 }
 
+/** One answer of a new poll; `emoji` is optional (WP 6.9b). */
+export interface PollCreateAnswer {
+  readonly text: string;
+  readonly emoji?: string;
+}
+
+/** Post a poll as a message; `client_message_id` is required (WP 6.9b). */
+export interface PollCreatePayload {
+  readonly client_message_id: string;
+  readonly channel_id: number;
+  readonly question: string;
+  readonly answers: readonly PollCreateAnswer[];
+  readonly duration_hours: number;
+  readonly allow_multiselect: boolean;
+}
+
+/** Set the sender's whole selection on a poll; `[]` removes the vote (WP 6.9b). */
+export interface PollVotePayload {
+  readonly message_id: number;
+  readonly answer_ids: readonly number[];
+}
+
+export interface PollEndPayload {
+  readonly message_id: number;
+}
+
 export interface ChatEditPayload {
   readonly message_id: number;
   readonly content: string;
@@ -1259,6 +1366,10 @@ export type ServerMessage =
   | (WsEnvelope<ChatBulkDeletedPayload> & { readonly type: "chat_bulk_deleted" })
   | (WsEnvelope<ChatPinnedPayload> & { readonly type: "chat_pinned" })
   | (WsEnvelope<ReactionUpdatePayload> & { readonly type: "reaction_update" })
+  | (WsEnvelope<PollUpdatePayload> & { readonly type: "poll_update" })
+  | (WsEnvelope<PollCreateOkPayload> & { readonly type: "poll_create_ok" })
+  | (WsEnvelope<PollVoteOkPayload> & { readonly type: "poll_vote_ok" })
+  | (WsEnvelope<PollEndOkPayload> & { readonly type: "poll_end_ok" })
   | (WsEnvelope<TypingPayload> & { readonly type: "typing" })
   | (WsEnvelope<PresencePayload> & { readonly type: "presence" })
   | (WsEnvelope<PresenceBatchPayload> & { readonly type: "presence_batch" })
@@ -1306,6 +1417,9 @@ export type ClientMessage =
   | (WsEnvelope<AuthPayload> & { readonly type: "auth" })
   | (WsEnvelope<ChatSendPayload> & { readonly type: "chat_send" })
   | (WsEnvelope<ChatForwardPayload> & { readonly type: "chat_forward" })
+  | (WsEnvelope<PollCreatePayload> & { readonly type: "poll_create" })
+  | (WsEnvelope<PollVotePayload> & { readonly type: "poll_vote" })
+  | (WsEnvelope<PollEndPayload> & { readonly type: "poll_end" })
   | (WsEnvelope<ChatEditPayload> & { readonly type: "chat_edit" })
   | (WsEnvelope<ChatDeletePayload> & { readonly type: "chat_delete" })
   | (WsEnvelope<ReactionAddPayload> & { readonly type: "reaction_add" })
@@ -1470,6 +1584,8 @@ export interface MessageResponse {
   readonly group_event?: GroupEventInfo;
   /** Present on a forwarded message only (WP 6.9a). */
   readonly forward?: ForwardInfo;
+  /** Present on a poll message only (WP 6.9b). */
+  readonly poll?: PollInfo;
 }
 
 /**

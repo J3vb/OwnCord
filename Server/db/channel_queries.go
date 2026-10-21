@@ -10,9 +10,10 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// channelFields carries the 17 columns shared by GetChannelRow and
-// ListChannelsRow; both generated row types are structurally identical, so a
-// single mapper narrows either to the domain Channel model.
+// channelFields carries the 20 columns shared by GetChannelRow,
+// ListChannelsRow and GetAFKChannelRow; the generated row types are
+// structurally identical, so a single mapper narrows any of them to the
+// domain Channel model.
 type channelFields struct {
 	ID               int64
 	Name             string
@@ -32,8 +33,15 @@ type channelFields struct {
 	// Nsfw keeps sqlc's spelling, not the domain model's NSFW: the two
 	// generated row types are narrowed by a direct struct conversion, which
 	// requires identical field names.
-	Nsfw int64
-	Afk  int64
+	Nsfw            int64
+	Afk             int64
+	ParentChannelID int64
+	ThreadArchived  int64
+	ThreadLocked    int64
+	// ForumRequireTag and ForumDefaultAutoArchiveMinutes are the forum
+	// settings columns (migration 075), meaningful on a type 'forum' row.
+	ForumRequireTag                int64
+	ForumDefaultAutoArchiveMinutes int64
 }
 
 func channelFromFields(f channelFields) Channel {
@@ -55,6 +63,12 @@ func channelFromFields(f channelFields) Channel {
 		VoiceMaxVideo:    int(f.VoiceMaxVideo),
 		NSFW:             f.Nsfw != 0,
 		AFK:              f.Afk != 0,
+		Thread: ChannelThread{
+			ParentID: f.ParentChannelID,
+			Archived: f.ThreadArchived != 0,
+			Locked:   f.ThreadLocked != 0,
+		},
+		Forum: forumFromFields(f),
 	}
 }
 
@@ -67,6 +81,9 @@ func (d *DB) ListChannels(ctx context.Context) ([]Channel, error) {
 	channels := make([]Channel, 0, len(rows))
 	for i := range rows {
 		channels = append(channels, channelFromFields(channelFields(rows[i])))
+	}
+	if err := d.attachForumTags(ctx, channels); err != nil {
+		return nil, err
 	}
 	return channels, nil
 }
@@ -81,6 +98,13 @@ func (d *DB) GetChannel(ctx context.Context, id int64) (*Channel, error) {
 		return nil, fmt.Errorf("GetChannel: %w", err)
 	}
 	ch := channelFromFields(channelFields(r))
+	if ch.Forum != nil {
+		one := []Channel{ch}
+		if err := d.attachForumTags(ctx, one); err != nil {
+			return nil, err
+		}
+		ch = one[0]
+	}
 	return &ch, nil
 }
 

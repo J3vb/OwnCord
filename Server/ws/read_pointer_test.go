@@ -488,6 +488,9 @@ func TestReady_CapabilityDMPrivacyAndNoSettingsInPayload(t *testing.T) {
 	if got, ok := env.Payload.Capabilities["dm_privacy"].(bool); !ok || !got {
 		t.Errorf("capabilities.dm_privacy = %v, want true", env.Payload.Capabilities["dm_privacy"])
 	}
+	if got, ok := env.Payload.Capabilities["polls"].(bool); !ok || !got {
+		t.Errorf("capabilities.polls = %v, want true", env.Payload.Capabilities["polls"])
+	}
 	for _, key := range []string{"allow_member_dms", "message_requests"} {
 		if strings.Contains(string(raw), key) {
 			t.Errorf("ready payload carries %q: another member's setting must not reach a viewer", key)

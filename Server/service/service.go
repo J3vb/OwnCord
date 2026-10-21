@@ -102,6 +102,11 @@ type Services struct {
 	// root installs its notifier and runs it; ChannelService wakes it when a
 	// status with an expiry is set.
 	StatusExpiry *CustomStatusExpirer
+	// PollExpiry ends polls at their expiry and tells the notifier. The
+	// composition root installs its notifier and runs it. It is nil when the
+	// Store does not also serve polls (a test double). MessageService wakes it
+	// when a poll is created.
+	PollExpiry *PollExpirer
 	// CallLog writes the call log rows of DM calls from voice presence (WP
 	// 3B-9). The hub installs its sink; the composition root starts it.
 	CallLog *CallLogService
@@ -135,6 +140,11 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 	channels := NewChannelService(st, permSvc)
 	statusExpiry := NewCustomStatusExpirer(st)
 	channels.SetExpiryWake(statusExpiry.Wake)
+	var pollExpiry *PollExpirer
+	if ps, ok := st.(pollExpiryStore); ok {
+		pollExpiry = NewPollExpirer(ps, messages)
+		messages.SetPollWake(pollExpiry.Wake)
+	}
 	dms := NewDMService(st, permSvc)
 	voice := NewVoiceService(st)
 	callLog := NewCallLogService(st, dms)
@@ -156,6 +166,7 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 		Messages:        messages,
 		Channels:        channels,
 		StatusExpiry:    statusExpiry,
+		PollExpiry:      pollExpiry,
 		Permissions:     permSvc,
 		Users:           NewUserService(st),
 		DMs:             dms,

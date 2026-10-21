@@ -39,7 +39,7 @@ const (
 // channel's CATEGORY deliberately constrains nothing: grouping is a display
 // concern, so the server validates the type alone (see the admin handler's
 // original rationale, kept verbatim through the B3-8 move).
-var validChannelTypes = []string{"text", "voice", "announcement"}
+var validChannelTypes = []string{"text", "voice", "announcement", "forum"}
 
 // ChannelMeta is the cleaned, validated name/topic/category triple every
 // channel write goes through.
@@ -92,7 +92,8 @@ func cleanChannelField(v string, maxRunes int, field string) (string, error) {
 // to their participants, not to MANAGE_CHANNELS holders — and answering a DM
 // id with anything but "not found" confirms which ids are private
 // conversations (A-2026-08-02). Every sibling lookup goes through here so no
-// path can grow its own policy again (S-04).
+// path can grow its own policy again (S-04). A thread answers ErrBadRequest
+// (errThreadNotAdminChannel).
 func (s *ChannelService) ResolveGuildChannel(ctx context.Context, id int64) (*db.Channel, error) {
 	if id <= 0 {
 		return nil, fmt.Errorf("invalid channel id%.0w", ErrBadRequest)
@@ -104,8 +105,18 @@ func (s *ChannelService) ResolveGuildChannel(ctx context.Context, id int64) (*db
 	if ch == nil || ch.Type == "dm" {
 		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
+	if ch.IsThread() {
+		return nil, fmt.Errorf("%w", errThreadNotAdminChannel)
+	}
 	return ch, nil
 }
+
+// errThreadNotAdminChannel refuses a thread id on the admin channel surface
+// (6.9c). A thread takes its permissions, NSFW, archive and retention from
+// its parent, so an override, edit or delete keyed by a thread id would
+// either be ignored or bypass the thread rules; the parent is the channel to
+// manage.
+var errThreadNotAdminChannel = fmt.Errorf("a thread is managed through its parent channel%.0w", ErrBadRequest)
 
 // ─── Admin channel CRUD ──────────────────────────────────────────────────────
 
@@ -156,7 +167,7 @@ func (s *ChannelService) AdminCreateChannel(ctx context.Context, actorID int64, 
 		req.Type = "text"
 	}
 	if !slices.Contains(validChannelTypes, req.Type) {
-		return nil, nil, fmt.Errorf("type must be one of text, voice, announcement%.0w", ErrBadRequest)
+		return nil, nil, fmt.Errorf("type must be one of text, voice, announcement, forum%.0w", ErrBadRequest)
 	}
 	// category_id wins over the legacy string, so the string is not even
 	// looked at when an id is sent.

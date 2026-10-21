@@ -87,6 +87,7 @@ import {
   resetMessageRequests,
 } from "../../src/features/message-requests/store";
 import { createForwardSession } from "../../src/features/messaging/forwardSend";
+import { createPoll, endPoll, votePoll } from "../../src/features/messaging/pollSend";
 import { handleServerRestart } from "../../src/features/connection/wsHandlers";
 import type { ReconnectClock } from "../../src/features/connection/dispatchContext";
 import {
@@ -817,6 +818,208 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
     expect(pinned()).toBe(true);
     await send(frames[1]!, { message_id: MESSAGE_ID }, { n: 0 });
     expect(pinned()).toBe(false);
+  });
+
+  // ── chat-poll (WP 6.9b) ──────────────────────────────────────────────────
+  // The fixture masks every id as a placeholder, so the answers of the poll and
+  // the counts of its updates would get unrelated numbers. These helpers pin
+  // them to 1 and 2, as the server numbers answers, and the viewer's id.
+
+  const POLL_MESSAGE = 5201;
+  const POLL_VIEWER = 77;
+
+  /** A fixture frame's payload with answer ids made literal (1..n in order). */
+  function pollPayload(frame: WireFrame["frame"]): Record<string, unknown> {
+    const payload = JSON.parse(JSON.stringify(frame.payload)) as {
+      poll?: { answers: { answer_id: unknown }[]; results: { counts: { answer_id: unknown }[] } };
+      counts?: { answer_id: unknown }[];
+    };
+    payload.poll?.answers.forEach((a, i) => (a.answer_id = i + 1));
+    payload.poll?.results.counts.forEach((c, i) => (c.answer_id = i + 1));
+    payload.counts?.forEach((c, i) => (c.answer_id = i + 1));
+    return payload;
+  }
+
+  async function sendPoll(frame: WireFrame["frame"]): Promise<void> {
+    // The viewer is the fixture's voter, so their own frames move `me`.
+    if (authStore.getState().user?.id !== POLL_VIEWER) {
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: POLL_VIEWER, username: "bob", avatar: null, role: "member" },
+      }));
+    }
+    ws.simulateMessage(
+      frame.type as ServerMessage["type"],
+      substitute(
+        pollPayload(frame),
+        { message_id: POLL_MESSAGE, id: POLL_MESSAGE, user_id: POLL_VIEWER },
+        { n: 0 },
+      ) as never,
+    );
+    await vi.dynamicImportSettled();
+  }
+
+  const pollRow = () => getChannelMessages(1).find((m) => m.id === POLL_MESSAGE);
+
+  /** Connection a's poll frames: the creation, then the four updates. */
+  const pollFrames = (): { create: WireFrame["frame"]; updates: WireFrame["frame"][] } => ({
+    create: s2c("chat-poll", "a").find((f) => f.frame.type === "chat_message")!.frame,
+    updates: s2c("chat-poll", "a")
+      .filter((f) => f.frame.type === "poll_update")
+      .map((f) => f.frame),
+  });
+
+  it("chat-poll: the creation frame is a poll message with the fallback text and zeroed results", async () => {
+    await sendPoll(pollFrames().create);
+    const row = pollRow();
+    expect(row).toBeDefined();
+    expect(row?.content).toBe("\u{1F4CA} Lunch?\n- \u{1F355} Pizza\n- Sushi");
+    expect(row?.mentions).toEqual([]);
+    expect(row?.poll).toMatchObject({
+      question: "Lunch?",
+      allow_multiselect: false,
+      ended: false,
+      ended_at: null,
+      answers: [
+        { answer_id: 1, text: "Pizza", emoji: "\u{1F355}" },
+        { answer_id: 2, text: "Sushi", emoji: null },
+      ],
+      results: { version: 0, total_voters: 0, me: [] },
+      selfVersion: 0,
+    });
+  });
+
+  it("chat-poll: the updates in recorded order end on the final counts, the end and the viewer's last vote", async () => {
+    const { create, updates } = pollFrames();
+    expect(updates).toHaveLength(4);
+    await sendPoll(create);
+    for (const u of updates) await sendPoll(u);
+    const poll = pollRow()!.poll!;
+    expect(poll.results.version).toBe(4);
+    expect(poll.results.counts).toEqual([
+      { answer_id: 1, count: 0 },
+      { answer_id: 2, count: 1 },
+    ]);
+    expect(poll.results.total_voters).toBe(1);
+    expect(poll.ended).toBe(true);
+    expect(poll.ended_at).not.toBeNull();
+    // v1 voted [1], v2 removed, v3 voted [2]; the end names no one.
+    expect(poll.results.me).toEqual([2]);
+    expect(poll.selfVersion).toBe(3);
+  });
+
+  it("chat-poll: any arrival order gives the same final poll", async () => {
+    const { create, updates } = pollFrames();
+    for (const order of [
+      [3, 2, 1, 0],
+      [1, 3, 0, 2],
+      [2, 0, 3, 1],
+    ]) {
+      resetMessagesStore();
+      await sendPoll(create);
+      for (const i of order) await sendPoll(updates[i]!);
+      const poll = pollRow()!.poll!;
+      expect(poll.results.version, `order ${order.join(",")}`).toBe(4);
+      expect(poll.ended, `order ${order.join(",")}`).toBe(true);
+      expect(poll.results.me, `order ${order.join(",")}`).toEqual([2]);
+    }
+  });
+
+  it("chat-poll: a replayed creation frame never rolls the counts back", async () => {
+    const { create, updates } = pollFrames();
+    await sendPoll(create);
+    for (const u of updates) await sendPoll(u);
+    await sendPoll(create);
+    const poll = pollRow()!.poll!;
+    expect(poll.results.version).toBe(4);
+    expect(poll.ended).toBe(true);
+    expect(poll.results.me).toEqual([2]);
+  });
+
+  it("chat-poll: the voter's poll_vote_ok shows their selection before the counts arrive", async () => {
+    await sendPoll(pollFrames().create);
+    await sendPoll(s2c("chat-poll", "b").find((f) => f.frame.type === "poll_vote_ok")!.frame);
+    const poll = pollRow()!.poll!;
+    expect(poll.results.me).toEqual([1]);
+    expect(poll.selfVersion).toBe(1);
+    expect(poll.results.version).toBe(0);
+  });
+
+  it("chat-poll: an update for a message that is not loaded is dropped", async () => {
+    await sendPoll(pollFrames().updates[0]!);
+    expect(pollRow()).toBeUndefined();
+    expect(getChannelMessages(1)).toHaveLength(0);
+  });
+
+  it("chat-poll: the poll requests send exactly the fixture's fields and settle on its replies", async () => {
+    const wsMock = createMockWsClient();
+    wsMock.connect();
+    const sentOf = () =>
+      wsMock.getSentMessages() as unknown as {
+        type: string;
+        id: string;
+        payload: Record<string, unknown>;
+      }[];
+    const recorded = (conn: string, type: string): WireFrame["frame"] =>
+      fixture("chat-poll").connections[conn]!.find((f) => f.dir === "c2s" && f.frame.type === type)!
+        .frame;
+    const keys = (o: unknown): string[] => Object.keys(o as Record<string, unknown>).sort();
+
+    const created = createPoll(wsMock, {
+      channelId: 1,
+      question: "Lunch?",
+      answers: [{ text: "Pizza", emoji: "\u{1F355}" }, { text: "Sushi" }],
+      durationHours: 24,
+      allowMultiselect: false,
+      clientMessageId: "cmid-contract",
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const create = recorded("a", "poll_create").payload as Record<string, unknown>;
+    expect(keys(sentOf()[0]!.payload)).toEqual(keys(create));
+    expect(sentOf()[0]!.payload).toMatchObject({
+      question: create["question"],
+      answers: create["answers"],
+      duration_hours: create["duration_hours"],
+      allow_multiselect: create["allow_multiselect"],
+    });
+    wsMock.simulateMessage(
+      "poll_create_ok",
+      substitute(
+        s2cFrame("chat-poll", "poll_create_ok").payload,
+        { client_message_id: "cmid-contract" },
+        { n: 0 },
+      ) as never,
+      sentOf()[0]!.id,
+    );
+    await expect(created).resolves.toMatchObject({ ok: true });
+
+    const voted = votePoll(wsMock, POLL_MESSAGE, [1]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(keys(sentOf()[1]!.payload)).toEqual(keys(recorded("b", "poll_vote").payload));
+    wsMock.simulateMessage(
+      "poll_vote_ok",
+      substitute(
+        s2cFrame("chat-poll", "poll_vote_ok").payload,
+        { message_id: POLL_MESSAGE },
+        { n: 0 },
+      ) as never,
+      sentOf()[1]!.id,
+    );
+    await expect(voted).resolves.toMatchObject({ ok: true, value: { version: 1 } });
+
+    const ended = endPoll(wsMock, POLL_MESSAGE);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(keys(sentOf()[2]!.payload)).toEqual(keys(recorded("a", "poll_end").payload));
+    wsMock.simulateMessage(
+      "poll_end_ok",
+      substitute(
+        s2cFrame("chat-poll", "poll_end_ok").payload,
+        { message_id: POLL_MESSAGE },
+        { n: 0 },
+      ) as never,
+      sentOf()[2]!.id,
+    );
+    await expect(ended).resolves.toMatchObject({ ok: true });
   });
 
   it("chat-bulk-delete: one frame removes every id it lists", async () => {

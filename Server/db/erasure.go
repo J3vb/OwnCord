@@ -148,6 +148,14 @@ var erasureStatements = []struct {
 	{"message_call_participants", `DELETE FROM message_call_participants WHERE user_id = ?`},
 	{"message_delivery_receipts", `DELETE FROM message_delivery_receipts WHERE user_id = ?`},
 	{"reactions", `DELETE FROM reactions WHERE user_id = ?`},
+	// Poll votes (migration 073, WP 6.9b). Votes on polls the subject authored
+	// went with those messages above. Counts are always recomputed, so the
+	// polls the subject voted in read exactly on the next update or read.
+	// The version bump comes first, in the same transaction, so a client that
+	// refetches after the votes went reads counts that are newer than any copy
+	// it holds, and a merge that keeps the higher version takes them.
+	{"poll versions", `UPDATE polls SET version = version + 1 WHERE message_id IN (SELECT DISTINCT message_id FROM poll_votes WHERE user_id = ?)`},
+	{"poll_votes", `DELETE FROM poll_votes WHERE user_id = ?`},
 	{"read_states", `DELETE FROM read_states WHERE user_id = ?`},
 	// Mention ledger (migration 063): receipts naming the subject as the
 	// recipient. Receipts for the subject's own messages go with those messages

@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 215 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 217 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -65,6 +65,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | PATCH   | `/admin/api/channels/{id}`                                           |
 | GET     | `/admin/api/channels/{id}/access/explain`                            |
 | POST    | `/admin/api/channels/{id}/access/preview`                            |
+| PUT     | `/admin/api/channels/{id}/forum`                                     |
 | GET     | `/admin/api/channels/{id}/permissions`                               |
 | DELETE  | `/admin/api/channels/{id}/permissions/{roleId}`                      |
 | PUT     | `/admin/api/channels/{id}/permissions/{roleId}`                      |
@@ -189,6 +190,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | PATCH   | `/api/v1/moderation/channels/categories/{id}`                        |
 | DELETE  | `/api/v1/moderation/channels/{id}`                                   |
 | PATCH   | `/api/v1/moderation/channels/{id}`                                   |
+| PUT     | `/api/v1/moderation/channels/{id}/forum`                             |
 | GET     | `/api/v1/moderation/members/`                                        |
 | PATCH   | `/api/v1/moderation/members/{id}`                                    |
 | DELETE  | `/api/v1/moderation/members/{id}/sessions`                           |
@@ -1257,6 +1259,15 @@ block, omitted for every other message: `{"source_channel_id", "source_message_i
 purged. The block has no author and no channel name, and a deleted forward carries
 none. The forward's `content` and `attachments` are its own snapshot and copies,
 and it cannot be edited.
+
+A poll message (`poll_create`, see `docs/protocol.md`) carries a `poll` block,
+omitted for every other message and for a deleted one: `{"question", "answers":
+[{"answer_id", "text", "emoji"}], "allow_multiselect", "expires_at", "ended",
+"ended_at", "results": {"version", "total_voters", "counts": [{"answer_id",
+"count"}], "me"}}`. `me` is the requesting user's own answer ids. `ended` is true
+when the poll was ended or `expires_at` has passed, even before anything marked it
+ended. The poll's `content` is a readable fallback of the question and answers. A poll
+cannot be edited or forwarded.
 
 A group DM can also hold group event rows: `kind` is `group_add`, `group_remove`,
 `group_leave`, `group_rename` or `group_icon`, with a `group_event` block
@@ -2395,10 +2406,11 @@ Idempotent. Sends the caller's other live sockets an `nsfw_ack` frame
 
 #### Errors
 
-| Status | Code        | Reason                                                     |
-| ------ | ----------- | ---------------------------------------------------------- |
-| 404    | `NOT_FOUND` | The channel does not exist or is not visible to the caller |
-| 409    | `NOT_NSFW`  | The channel is not labelled — nothing to acknowledge       |
+| Status | Code          | Reason                                                     |
+| ------ | ------------- | ---------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | The channel is a thread: its consent is its parent's       |
+| 404    | `NOT_FOUND`   | The channel does not exist or is not visible to the caller |
+| 409    | `NOT_NSFW`    | The channel is not labelled — nothing to acknowledge       |
 
 ---
 
@@ -2415,9 +2427,10 @@ with `"acknowledged": false`.
 
 #### Errors
 
-| Status | Code        | Reason                                                     |
-| ------ | ----------- | ---------------------------------------------------------- |
-| 404    | `NOT_FOUND` | The channel does not exist or is not visible to the caller |
+| Status | Code          | Reason                                                     |
+| ------ | ------------- | ---------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | The channel is a thread: its consent is its parent's       |
+| 404    | `NOT_FOUND`   | The channel does not exist or is not visible to the caller |
 
 ---
 
@@ -5504,6 +5517,10 @@ and then re-syncs connected clients with targeted `channel_create` /
 `channel_delete` messages, so sidebars converge without a reconnect.
 
 DM channels have no override surface: `400 INVALID_INPUT`.
+
+A thread has no overrides, NSFW label, archive flag or retention policy of its
+own: each is its parent channel's. Every `/admin/api/channels/{id}` route,
+retention included, answers a thread id with `400`.
 
 ### GET /admin/api/channels/{id}/permissions
 

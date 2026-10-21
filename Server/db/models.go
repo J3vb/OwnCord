@@ -176,6 +176,9 @@ type Channel struct {
 	// AFK marks the server's one AFK voice channel (migration 068): members
 	// parked there can only listen. At most one row carries it.
 	AFK bool `json:"afk"`
+	// Thread is set on a thread row only (migration 074); never on the wire.
+	Thread ChannelThread `json:"-"`
+	Forum  *ChannelForum `json:"forum,omitempty"` // forum rows only (migration 075)
 }
 
 // Message represents a row in the messages table.
@@ -312,6 +315,8 @@ type MessageAPIResponse struct {
 	GroupEvent *GroupEventInfo `json:"group_event,omitempty"`
 	// Forward is set only on a forwarded message (WP 6.9a). See ForwardInfo.
 	Forward *ForwardInfo `json:"forward,omitempty"`
+	// Poll is set only on a poll message (WP 6.9b). See PollInfo.
+	Poll *PollInfo `json:"poll,omitempty"`
 }
 
 // GroupEventInfo is the group_event block of a group DM row. Which fields are

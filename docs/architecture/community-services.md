@@ -88,6 +88,35 @@ a position an administrator writes, holds no user content and no personal data, 
 is shared by every member who can see a channel in it, so it adds no data class. A
 channel outlives its category (`ON DELETE SET NULL`). Other historical
 status statements retain their `cbebd37c` baseline.
+**Amended 2026-10-21 (polls):** `073_polls.sql` adds `polls`, `poll_answers` and
+`poll_votes` (WP 6.9b). A poll is an ordinary message of its author whose text is a
+readable fallback of the question and answers, so it follows the message rows. The
+side rows go with the message by cascade. The one new data class is the vote (lifecycle
+row 10a in `data-lifecycle.md`): a voter's rows are public to the community as
+reactions are, and go with the account. Counts are never stored. Voting, ending and
+expiry (WP 6.9b-b) add no data class: a vote is a row of the same table, and ending
+only sets `polls.ended_at` and bumps `polls.version`. The poll expirer keeps no
+state of its own beyond a wake signal and reads the next deadline from the table.
+**Amended 2026-10-21 (threads):** `074_threads.sql` adds the thread columns to
+`channels` (WP 6.9c). A thread is a channel row under a text channel, so its
+messages, attachments, reactions and read state are the existing classes and
+follow their rows. It has no permission, NSFW, archive or retention state of its
+own: every one is its parent's, and the admin override, NSFW acknowledgement and
+retention routes refuse a thread id. `thread_owner_id` goes `NULL` with its user
+and `thread_starter_message_id` with its message; the thread goes with its
+parent by cascade. It adds no data class.
+**Amended 2026-10-21 (forums):** `075_forums.sql` adds the `forum` channel type,
+`forum_tags` and `thread_tags` (WP 6.9d). A forum is a channel row that holds no
+messages, and its posts are threads under it, so every message, attachment,
+reaction and read-state row in a post is the existing class and follows its row.
+A post takes its overrides, NSFW label, archive state and retention from the forum,
+exactly as a thread does from its text channel, so the NSFW acknowledgement and
+retention routes still refuse a post id and answer for the forum. The one new
+data class is the tag: a name and an optional emoji owned by the forum, editable
+only with MANAGE_CHANNELS, carrying no personal data, and deleted with the forum.
+A post's tag links go with the post or the tag. A client that did not declare the
+`forums` feature is sent no forum row, so an NSFW-labelled forum's name and topic
+reach only sockets that can read it and render it. It adds no other data class.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each
 service are documented"). **Input to:** HP-5, and to the retention and
 erasure obligations every B5 step carries.

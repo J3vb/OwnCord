@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -74,6 +75,10 @@ type PermissionService struct {
 	// the last to have read the store: a reload that started before a
 	// timeout write committed can never overwrite the one that started after.
 	timeoutsReload syncutil.Mutex
+
+	// parents maps a channel id to its override authority (overrideKey):
+	// int64 to int64, written once per channel and never changed.
+	parents sync.Map
 }
 
 // NewPermissionService creates a PermissionService backed by the given DB.
@@ -104,7 +109,11 @@ func (s *PermissionService) HasChannelPerm(ctx context.Context, userID, channelI
 	if err != nil || cp == nil {
 		return false
 	}
-	return s.checker.HasChannelPermBatch(cp.rolePerms, cp.overrides, channelID, perm)
+	key, err := s.overrideKey(ctx, channelID)
+	if err != nil {
+		return false
+	}
+	return s.checker.HasChannelPermBatch(cp.rolePerms, cp.overrides, key, perm)
 }
 
 // HasChannelPermChecked is HasChannelPerm's error-preserving counterpart: it
@@ -125,11 +134,16 @@ func (s *PermissionService) HasChannelPermChecked(ctx context.Context, userID, c
 		// failure — HasChannelPerm has always treated it as a plain false.
 		return false, nil
 	}
-	return s.checker.HasChannelPermBatch(cp.rolePerms, cp.overrides, channelID, perm), nil
+	key, err := s.overrideKey(ctx, channelID)
+	if err != nil {
+		return false, err
+	}
+	return s.checker.HasChannelPermBatch(cp.rolePerms, cp.overrides, key, perm), nil
 }
 
 // Subject resolves the user's role bits and both override layers for
-// channelID from the per-user cache, as a permissions.Subject for the
+// channelID (a thread's being its parent's, overrideKey) from the per-user
+// cache, as a permissions.Subject for the
 // value-taking predicates (CanSendMessage and friends). Channel flags and DM
 // state are the caller's to fill in. A missing role row yields the zero
 // Subject (no bits — every predicate refuses it) with a nil error; a store
@@ -143,7 +157,11 @@ func (s *PermissionService) Subject(ctx context.Context, userID, channelID int64
 	if cp == nil {
 		return permissions.Subject{}, nil
 	}
-	sub := permissions.Subject{RolePerms: cp.rolePerms, Override: cp.overrides[channelID]}
+	key, err := s.overrideKey(ctx, channelID)
+	if err != nil {
+		return permissions.Subject{}, err
+	}
+	sub := permissions.Subject{RolePerms: cp.rolePerms, Override: cp.overrides[key]}
 	// TimedOut comes from the timeout mirror, never the 30s role cache
 	// (B5-9): a stale answer would let a just-lifted timeout keep refusing,
 	// or a just-issued one keep landing. The mirror is reloaded synchronously

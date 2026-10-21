@@ -389,6 +389,9 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 	},
 
 	MsgTypeChatForward: parseChatForward,
+	MsgTypePollCreate:  parsePollCreate,
+	MsgTypePollVote:    parsePollVote,
+	MsgTypePollEnd:     parsePollEnd,
 
 	MsgTypeChatEdit: func(userID int64, reqID string, raw json.RawMessage) (Command, error) {
 		var p struct {

@@ -34,7 +34,8 @@ type predicateCase struct {
 
 func runPredicate(t *testing.T, name string, fn func(Subject) error, cases []predicateCase) {
 	t.Helper()
-	for _, c := range cases {
+	for i := range cases {
+		c := &cases[i]
 		got := fn(c.s)
 		if c.want == nil && got != nil {
 			t.Errorf("%s/%s: want allowed, got %v", name, c.name, got)
