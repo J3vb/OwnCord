@@ -1,0 +1,77 @@
+{
+  "journey": "dm-open-close",
+  "connections": {
+    "a": [
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "channel_id": 3
+          },
+          "type": "dm_channel_close"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ],
+    "b": [
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "channel_id": 3,
+            "icon": "",
+            "is_group": false,
+            "last_message": "",
+            "last_message_at": "<ts:string>",
+            "last_message_id": "<id:null>",
+            "mention_count": 0,
+            "name": "",
+            "recipient": {
+              "avatar": "https://fixtures.invalid/alice-avatar.png",
+              "display_name": "Alice Fixture",
+              "id": "<id:number>",
+              "status": "online",
+              "username": "alice"
+            },
+            "recipients": [
+              {
+                "avatar": "https://fixtures.invalid/alice-avatar.png",
+                "display_name": "Alice Fixture",
+                "id": "<id:number>",
+                "status": "online",
+                "username": "alice"
+              }
+            ],
+            "unread_count": 0
+          },
+          "type": "dm_channel_open"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ]
+  }
+}

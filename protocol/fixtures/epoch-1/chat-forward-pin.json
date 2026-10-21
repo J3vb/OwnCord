@@ -1,0 +1,182 @@
+{
+  "journey": "chat-forward-pin",
+  "connections": {
+    "a": [
+      {
+        "dir": "c2s",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "channel_id": 3,
+            "client_message_id": "<id:string>",
+            "message_id": "<id:number>"
+          },
+          "type": "chat_forward"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "channel_id": 3,
+            "client_message_id": "<id:string>",
+            "deduplicated": false,
+            "message_id": "<id:number>"
+          },
+          "type": "chat_forward_ok"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "cseq": 5,
+          "payload": {
+            "attachments": [],
+            "channel_id": 3,
+            "client_message_id": "<id:string>",
+            "content": "message to forward",
+            "forward": {
+              "source_channel_id": "<id:number>",
+              "source_message_id": "<id:number>",
+              "source_timestamp": "<ts:string>"
+            },
+            "id": "<id:number>",
+            "mentions": [],
+            "mentions_everyone": false,
+            "mentions_here": false,
+            "pinned": false,
+            "reactions": [],
+            "referenced_message": null,
+            "reply_to": null,
+            "timestamp": "<ts:string>",
+            "user": {
+              "avatar": "https://fixtures.invalid/alice-avatar.png",
+              "display_name": "Alice Fixture",
+              "id": "<id:number>",
+              "role": "member",
+              "username": "alice"
+            }
+          },
+          "seq": "<seq:number>",
+          "type": "chat_message"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "cseq": 6,
+          "payload": {
+            "channel_id": 1,
+            "message_id": "<id:number>",
+            "pinned": true
+          },
+          "seq": "<seq:number>",
+          "type": "chat_pinned"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "cseq": 7,
+          "payload": {
+            "channel_id": 1,
+            "message_id": "<id:number>",
+            "pinned": false
+          },
+          "seq": "<seq:number>",
+          "type": "chat_pinned"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ],
+    "b": [
+      {
+        "dir": "s2c",
+        "frame": {
+          "cseq": 3,
+          "payload": {
+            "attachments": [],
+            "channel_id": 3,
+            "client_message_id": "<id:string>",
+            "content": "message to forward",
+            "forward": {
+              "source_channel_id": "<id:number>",
+              "source_message_id": "<id:number>",
+              "source_timestamp": "<ts:string>"
+            },
+            "id": "<id:number>",
+            "mentions": [],
+            "mentions_everyone": false,
+            "mentions_here": false,
+            "pinned": false,
+            "reactions": [],
+            "referenced_message": null,
+            "reply_to": null,
+            "timestamp": "<ts:string>",
+            "user": {
+              "avatar": "https://fixtures.invalid/alice-avatar.png",
+              "display_name": "Alice Fixture",
+              "id": "<id:number>",
+              "role": "member",
+              "username": "alice"
+            }
+          },
+          "seq": "<seq:number>",
+          "type": "chat_message"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "cseq": 4,
+          "payload": {
+            "channel_id": 1,
+            "message_id": "<id:number>",
+            "pinned": true
+          },
+          "seq": "<seq:number>",
+          "type": "chat_pinned"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "cseq": 5,
+          "payload": {
+            "channel_id": 1,
+            "message_id": "<id:number>",
+            "pinned": false
+          },
+          "seq": "<seq:number>",
+          "type": "chat_pinned"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ]
+  }
+}
