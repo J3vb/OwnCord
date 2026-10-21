@@ -525,3 +525,97 @@ func TestRestoreCLI_CarriesTheLiveSeqFloorAcrossTheRestore(t *testing.T) {
 		t.Fatalf("sidecar = %d ok=%v, want 7000000000", got, ok)
 	}
 }
+
+// fileExists reports whether path exists.
+func fileExists(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
+}
+
+// TestRestoreCLI_RefusesWhileRestoreStaged: a restore the admin panel staged
+// would be applied at the next boot over whatever the CLI restores, so the CLI
+// refuses and leaves both the live database and the pending restore alone.
+func TestRestoreCLI_RefusesWhileRestoreStaged(t *testing.T) {
+	cfgPath, dbPath, _ := restoreCLIFixture(t)
+	staged := makeBackup(t, t.TempDir(), "staged.db", "panel-user")
+	if err := db.StageRestore(context.Background(), dbPath, staged, db.StagedRestoreMarker{Backup: "staged.db"}); err != nil {
+		t.Fatalf("StageRestore: %v", err)
+	}
+	backup := makeBackup(t, t.TempDir(), "backup.db", "restored-user")
+	// OpenShared refuses while a restore is pending, so compare the bytes.
+	before, err := os.ReadFile(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if code := runRestoreCLI(cfgPath, []string{"--force", backup}); code != 1 {
+		t.Fatalf("restore with a staged restore exited %d, want 1", code)
+	}
+	if after, err := os.ReadFile(dbPath); err != nil || !bytes.Equal(after, before) {
+		t.Fatalf("the live database changed despite the refusal (%v)", err)
+	}
+	if aside, _ := filepath.Glob(dbPath + ".pre_restore_*"); len(aside) > 0 {
+		t.Errorf("the refused run moved files aside: %v", aside)
+	}
+	for _, suffix := range []string{".restore-pending.json", ".restore-staged"} {
+		if !fileExists(dbPath + suffix) {
+			t.Errorf("%s was removed by the refused run", suffix)
+		}
+	}
+	if fileExists(dbPath + ".restore-result.json") {
+		t.Error("the refused run applied the staged restore")
+	}
+}
+
+// TestRestoreCLI_RefusesWhileRollbackPresent: files moved aside by an
+// unfinished swap mean a restore is half done; the CLI must not touch them.
+func TestRestoreCLI_RefusesWhileRollbackPresent(t *testing.T) {
+	cfgPath, dbPath, _ := restoreCLIFixture(t)
+	// A swap interrupted after the live database moved aside: no live file.
+	rollback := dbPath + ".restore-rollback"
+	if err := os.Rename(dbPath, rollback); err != nil {
+		t.Fatal(err)
+	}
+	for _, suffix := range []string{"-wal", "-shm"} {
+		_ = os.Remove(dbPath + suffix)
+	}
+	before, err := os.ReadFile(rollback)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backup := makeBackup(t, t.TempDir(), "backup.db", "restored-user")
+
+	if code := runRestoreCLI(cfgPath, []string{"--force", backup}); code != 1 {
+		t.Fatalf("restore with a rollback file exited %d, want 1", code)
+	}
+	if after, err := os.ReadFile(rollback); err != nil || !bytes.Equal(after, before) {
+		t.Fatalf("the rollback file was touched (%v)", err)
+	}
+	if fileExists(dbPath + ".restore-result.json") {
+		t.Error("the refused run applied a restore over the half-done one")
+	}
+}
+
+// TestRestoreCLI_AppliedLeavesOnlyTheResult: a finished run leaves no staged
+// copy, marker or rollback file, and the result file records status applied
+// for the next boot to report.
+func TestRestoreCLI_AppliedLeavesOnlyTheResult(t *testing.T) {
+	cfgPath, dbPath, _ := restoreCLIFixture(t)
+	backup := makeBackup(t, t.TempDir(), "backup.db", "restored-user")
+
+	if code := runRestoreCLI(cfgPath, []string{"--force", backup}); code != 0 {
+		t.Fatalf("restore --force exited %d, want 0", code)
+	}
+	for _, suffix := range []string{".restore-staged", ".restore-staged.tmp", ".restore-pending.json", ".restore-rollback", ".restore-rollback-wal", ".restore-rollback-shm"} {
+		if fileExists(dbPath + suffix) {
+			t.Errorf("%s was left behind", suffix)
+		}
+	}
+	res, found, err := db.ReadRestoreResult(dbPath)
+	if err != nil || !found {
+		t.Fatalf("ReadRestoreResult = found %v, err %v; want a result", found, err)
+	}
+	if res.Status != db.RestoreStatusApplied || res.Backup != "backup.db" {
+		t.Fatalf("result = %+v, want status applied for backup.db", res)
+	}
+}

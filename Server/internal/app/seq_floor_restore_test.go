@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -42,7 +43,18 @@ func openAndBoot(t *testing.T, path string) (*db.DB, uint64) {
 	return database, floor
 }
 
-// restoreOver mirrors what both restore paths (admin panel and CLI) do to the
+// removeWALSidecars drops dbPath's -wal and -shm, as a restore must before a
+// backup is copied over the database.
+func removeWALSidecars(t *testing.T, dbPath string) {
+	t.Helper()
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if err := os.Remove(dbPath + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("removing %s: %v", dbPath+suffix, err)
+		}
+	}
+}
+
+// restoreOver mirrors what the old copy-over restore did to the
 // files: close the live database, carry the live seq floor into the sidecar,
 // advance the message cutoff, drop the WAL files and copy the backup over the
 // database.
@@ -57,9 +69,7 @@ func restoreOver(t *testing.T, database *db.DB, path, backup string) {
 	if err := db.AdvanceMessageDeliveryFloorForRestore(path); err != nil {
 		t.Fatalf("AdvanceMessageDeliveryFloorForRestore: %v", err)
 	}
-	if err := db.RemoveWALSidecars(path); err != nil {
-		t.Fatalf("RemoveWALSidecars: %v", err)
-	}
+	removeWALSidecars(t, path)
 	if err := db.CopyDatabaseFile(backup, path); err != nil {
 		t.Fatalf("CopyDatabaseFile: %v", err)
 	}
@@ -100,9 +110,7 @@ func TestSeedHubSeqFloor_RestoredBackupDoesNotReuseTheOldBlock(t *testing.T) {
 	if err := booted.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	if err := db.RemoveWALSidecars(path); err != nil {
-		t.Fatal(err)
-	}
+	removeWALSidecars(t, path)
 	if err := db.CopyDatabaseFile(filepath.Join(filepath.Dir(path), "backup.db"), path); err != nil {
 		t.Fatal(err)
 	}
