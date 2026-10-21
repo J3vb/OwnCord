@@ -1365,6 +1365,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
     const scrollTop = root.scrollTop;
     const clientHeight = root.clientHeight;
+    lastViewportHeight = clientHeight;
 
     if (virtualItems.length === 0) {
       releaseTrackedMedia();
@@ -2039,6 +2040,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
   let scrollRafId = 0;
   let resizeRafId = 0;
+  /** The scroll viewport's height at the last resize pass: the window's overscan
+   *  is a distance, so it must be recomputed when the viewport grows or shrinks. */
+  let lastViewportHeight = 0;
   let resizeObserver: ResizeObserver | null = null;
   // resizeDirty tracking removed — resize observer batches via RAF directly
   function handleScroll(): void {
@@ -2391,6 +2395,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         const widthChanged = width > 0 && width !== (estimateWidth ?? DEFAULT_LIST_WIDTH);
         if (widthChanged) estimateWidth = width;
 
+        // A viewport that grew (pane enlarged, window maximized) needs more
+        // rows than the window holds, with no scroll event to say so.
+        const viewportHeight = root.clientHeight;
+        if (viewportHeight !== lastViewportHeight) renderWindow();
+
         const jumpIdx =
           jumpTarget !== null && Date.now() < jumpTarget.until
             ? virtualItems.findIndex(
@@ -2431,6 +2440,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       });
     });
     resizeObserver.observe(contentContainer);
+    resizeObserver.observe(root);
 
     parentContainer.appendChild(region);
 

@@ -1,19 +1,23 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // jsdom does not provide ResizeObserver — stub it so MessageList can mount.
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {
-      /* noop */
-    }
-    unobserve(): void {
-      /* noop */
-    }
-    disconnect(): void {
-      /* noop */
-    }
-  } as unknown as typeof ResizeObserver;
-}
+// jsdom does not provide ResizeObserver: a stub that lets a test fire the callbacks.
+const observers = new Set<() => void>();
+globalThis.ResizeObserver = class {
+  private readonly cb: () => void;
+  constructor(cb: () => void) {
+    this.cb = cb;
+  }
+  observe(): void {
+    observers.add(this.cb);
+  }
+  unobserve(): void {
+    /* noop */
+  }
+  disconnect(): void {
+    observers.delete(this.cb);
+  }
+} as unknown as typeof ResizeObserver;
 
 const { fetchImageAsObjectUrlMock } = vi.hoisted(() => ({
   fetchImageAsObjectUrlMock: vi.fn(() => Promise.resolve("data:image/png;base64,AAAA")),
@@ -192,6 +196,21 @@ describe("MessageList overscan by distance", () => {
     expect(rows).toBeLessThanOrEqual(3 + 2 * 6 + 2);
     expect(rows).toBeGreaterThanOrEqual(3 + 2 * 4);
     expect(rows).toBeLessThan(2 * 20);
+  });
+
+  it("a viewport that grows re-windows to cover it, with no scroll event", async () => {
+    await mount("text", 300);
+    await scrollTo(ROW_H * 150);
+    const small = content.children.length;
+    Object.defineProperty(root, "clientHeight", { configurable: true, value: 1500 });
+    for (const cb of observers) cb();
+    await nextFrame2();
+    await nextFrame2();
+    // ~25 visible rows plus up to 20 each side, against ~13 before.
+    expect(content.children.length).toBeGreaterThan(small + 15);
+    const lastRow = content.lastElementChild as HTMLElement;
+    const lastId = Number(lastRow.dataset.testid?.replace("message-", ""));
+    expect(lastId).toBeGreaterThanOrEqual(150 + Math.ceil(1500 / ROW_H));
   });
 
   it("a viewport with no height keeps the 20-row buffer so the first render is not thin", async () => {
