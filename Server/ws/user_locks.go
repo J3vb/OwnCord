@@ -80,12 +80,11 @@ func (v *userLocks[R]) tryLock(userID int64) (func(), bool) {
 		v.locks = make(map[int64]*userLockEntry[R])
 	}
 	e := &userLockEntry[R]{refs: 1}
-	// The entry is private until it is inserted, so the try always succeeds.
-	// It is a try, not a Lock, because v.mu (a leaf) is held: the rank
-	// check flags a blocking acquire under it, never a try.
-	if !e.mu.TryLock() {
-		return nil, false
-	}
+	// The entry is private until it is inserted, so the try always succeeds
+	// and its result carries nothing. It is a try, not a Lock, because v.mu
+	// (a leaf) is held: the rank check flags a blocking acquire under it,
+	// never a try.
+	e.mu.TryLock()
 	v.locks[userID] = e
 	return func() { v.unlock(userID, e) }, true
 }
