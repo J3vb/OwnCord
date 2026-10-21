@@ -10,10 +10,12 @@ import {
   resetVoiceStore,
   joinVoiceChannel,
   setVoiceStatus,
+  isWatchingResync,
 } from "../../stores/voice.store";
 import { expectConsole } from "../../../tests/helpers/console";
 
-vi.mock("../../lib/livekitSession", () => ({ leaveVoice: vi.fn() }));
+const resendWatching = vi.hoisted(() => vi.fn());
+vi.mock("../../lib/livekitSession", () => ({ leaveVoice: vi.fn(), resendWatching }));
 
 const user = { id: 9, username: "me", avatar: null, role: "member" };
 
@@ -69,6 +71,22 @@ describe("handleAuthOk", () => {
       handleAuthOk(ws, createReconnectClock(), resumed);
 
       expect(ws.send).toHaveBeenCalledWith({ type: "voice_mute", payload: { muted: true } });
+    });
+
+    it("re-sends our watch set and quiets the viewer sounds for the re-sync", async () => {
+      handleAuthOk(socketStub(), createReconnectClock(), resumed);
+
+      expect(isWatchingResync()).toBe(true);
+      await vi.waitFor(() => expect(resendWatching).toHaveBeenCalledTimes(1));
+    });
+
+    it("does not re-send the watch set on a fresh flow or with no session", async () => {
+      resendWatching.mockClear();
+      handleAuthOk(socketStub(), createReconnectClock(), { user, server_name: "s", motd: "" });
+      setVoiceStatus("idle");
+      handleAuthOk(socketStub(), createReconnectClock(), resumed);
+      await Promise.resolve();
+      expect(resendWatching).not.toHaveBeenCalled();
     });
 
     it("sends nothing on a fresh flow, where ready restates", () => {

@@ -44,7 +44,12 @@ import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
 import { startStatusTimerWatcher, type StatusTimerWatcher } from "@lib/statusTimer";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
-import { voiceStore, isSelfMuted, restoreSavedSelfVoiceState } from "@stores/voice.store";
+import {
+  voiceStore,
+  isSelfMuted,
+  restoreSavedSelfVoiceState,
+  streamViewers,
+} from "@stores/voice.store";
 import type { VoiceState } from "@stores/voice.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import {
@@ -1929,6 +1934,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     let prevVideoSignature = "";
     let prevSpeaking = "";
     let prevAudioState = "";
+    let prevViewers = "";
     let prevCallState = "";
     /** Your call state for the grid's call controls, from the voice store and
      *  the chat socket (camera and share freeze while it is down). */
@@ -2002,6 +2008,24 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           if (audioKey !== prevAudioState) {
             prevAudioState = audioKey;
             videoGrid?.setUserAudioState(audioState);
+          }
+          // Eye + count on each screen-share tile: the other members watching it.
+          let viewersKey = "";
+          const viewerNames = new Map<number, readonly string[]>();
+          const roster = channelId !== null ? state.voiceUsers.get(channelId) : undefined;
+          for (const u of roster?.values() ?? []) {
+            if (!u.screenshare) continue;
+            const names = streamViewers(u.userId, false, state).flatMap((id) => {
+              const name = roster?.get(id)?.username;
+              return name === undefined ? [] : [name];
+            });
+            if (names.length === 0) continue;
+            viewerNames.set(u.userId, names);
+            viewersKey += `${String(u.userId)}:${names.join("\u0000")};`;
+          }
+          if (viewersKey !== prevViewers) {
+            prevViewers = viewersKey;
+            videoGrid?.setStreamViewers(viewerNames);
           }
           syncCallState(state);
 

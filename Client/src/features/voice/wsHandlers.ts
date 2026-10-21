@@ -14,6 +14,8 @@ import {
   setModeratorDeafened,
   restateSelfVoiceState,
   setPeerVideoDecode,
+  setPeerWatching,
+  noteWatchingResync,
 } from "../../stores/voice.store";
 import { ensureIdentityKeyPublished } from "../../lib/identity";
 import { showToast } from "../../lib/toast";
@@ -171,6 +173,9 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
       const modMuted = prevSelfServerMuted || selfVoiceState.server_muted === true;
       const modDeafened = prevSelfServerDeafened || selfVoiceState.server_deafened === true;
       restateSelfVoiceState(ws, modMuted || modDeafened, modDeafened);
+      // The server does not re-relay a resumed member's own watch set to
+      // peers: send ours again, and keep the viewer sounds out of the re-sync.
+      noteWatchingResync();
 
       // OC-0201: same gap, for E2EE. A full resync never replays the
       // voice_leave for anyone who departed our voice channel during the
@@ -199,11 +204,17 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
       // The same gap for the camera and share flags: an announce sent while
       // the socket was down never reached the server (WP 1C-8).
       for (const uid of left) setPeerVideoDecode(uid, undefined);
-      void livekitSession().then(({ handleParticipantLeft, reconcileVideoFlags }) => {
-        for (const uid of left) void handleParticipantLeft(uid);
-        if (prevVoiceChannelId === selfVoiceState.channel_id)
-          reconcileVideoFlags(selfVoiceState.camera === true, selfVoiceState.screenshare === true);
-      });
+      void livekitSession().then(
+        ({ handleParticipantLeft, reconcileVideoFlags, resendWatching }) => {
+          for (const uid of left) void handleParticipantLeft(uid);
+          resendWatching();
+          if (prevVoiceChannelId === selfVoiceState.channel_id)
+            reconcileVideoFlags(
+              selfVoiceState.camera === true,
+              selfVoiceState.screenshare === true,
+            );
+        },
+      );
     }
   };
 }
@@ -430,6 +441,19 @@ export function handleVoiceE2eeAnnounce(payload: Payload<"voice_e2ee_announce">)
   void livekitSession().then(({ handleE2EEAnnounce }) =>
     handleE2EEAnnounce(payload.user_id, payload.public_key, payload.signature),
   );
+}
+
+/** Whose screen shares a member of our channel watches (6.6). The wire is
+ *  untrusted: non-integer entries are dropped, and the store ignores a user
+ *  who is not in our current channel's roster (one that already left). */
+export function handleVoiceWatching(payload: Payload<"voice_watching">): void {
+  const raw: unknown = payload.user_ids;
+  const ids = Array.isArray(raw)
+    ? [...new Set((raw as unknown[]).filter((v): v is number => Number.isInteger(v)))].toSorted(
+        (a, b) => a - b,
+      )
+    : [];
+  setPeerWatching(payload.user_id, ids);
 }
 
 export function handleVoiceE2eeOffer(payload: Payload<"voice_e2ee_offer">): void {

@@ -147,6 +147,12 @@ export interface VoiceState {
    *  peerVerifications (that runs at key setup, after a list may have arrived).
    *  Reset at session end. Optional for the same fixture reason. */
   readonly peerVideoDecode?: ReadonlyMap<number, readonly string[]>;
+  /** Whose screen share each member of the current channel watches, from
+   *  their `voice_watching` frames (sorted user ids). Written only from the
+   *  dispatcher's handler; removeVoiceUser drops a member, leaveVoiceChannel
+   *  and resetVoiceStore clear it. Your own watching is read from the local
+   *  RemoteTracks set, not from here. Optional for the fixture reason above. */
+  readonly peerWatching?: ReadonlyMap<number, readonly number[]>;
   /** Fingerprint of the local user's own ephemeral session key (OC-0003), so
    *  it can be read out to a peer who sees us as unverified. Null outside a
    *  voice session. Optional for the same fixture reason as peerVerifications. */
@@ -177,6 +183,7 @@ const INITIAL_STATE: VoiceState = {
   encryptionDegraded: false,
   peerVerifications: new Map(),
   peerVideoDecode: new Map(),
+  peerWatching: new Map(),
   localGateSpeaking: null,
 };
 
@@ -243,6 +250,7 @@ export function resetVoiceStore(): void {
     encryptionDegraded: false,
     peerVerifications: new Map(),
     peerVideoDecode: new Map(),
+    peerWatching: new Map(),
   }));
 }
 
@@ -400,7 +408,11 @@ export function removeVoiceUser(payload: VoiceLeavePayload): void {
       nextChannels.set(payload.channel_id, nextUsers);
     }
 
-    return { ...prev, voiceUsers: nextChannels };
+    const watching = prev.peerWatching;
+    if (watching?.has(payload.user_id) !== true) return { ...prev, voiceUsers: nextChannels };
+    const nextWatching = new Map(watching);
+    nextWatching.delete(payload.user_id);
+    return { ...prev, voiceUsers: nextChannels, peerWatching: nextWatching };
   });
 }
 
@@ -458,6 +470,7 @@ export function leaveVoiceChannel(): void {
       encryptionDegraded: false,
       shareDenied: false,
       peerVideoDecode: new Map<number, readonly string[]>(),
+      peerWatching: new Map<number, readonly number[]>(),
     };
     const channelId = prev.currentChannelId;
     const voiceUsers = withoutRings(prev.voiceUsers, channelId);
@@ -771,6 +784,72 @@ export function setPeerVideoDecode(userId: number, list: readonly string[] | und
     next.set(userId, [...list]);
     return { ...prev, peerVideoDecode: next };
   });
+}
+
+/** When the socket last resumed, for `isWatchingResync`. Module state: a
+ *  listener only needs the instant, and no render reads it. */
+let watchingResyncAt = Number.NEGATIVE_INFINITY;
+
+/** The server re-sends every member's `voice_watching` after a resume; note
+ *  the instant so the streamer's viewer sounds skip that re-sync. */
+export function noteWatchingResync(): void {
+  watchingResyncAt = Date.now();
+}
+
+/** True for a short while after `noteWatchingResync`. */
+export function isWatchingResync(windowMs = 2000): boolean {
+  return Date.now() - watchingResyncAt < windowMs;
+}
+
+/** Record whose screen shares a member of our current channel watches. A
+ *  frame for a user who is not in that channel's roster (one that already
+ *  left, or another channel's) is ignored; an empty list clears the entry.
+ *  Single writer: the dispatcher's voice_watching handler. */
+export function setPeerWatching(userId: number, watching: readonly number[]): void {
+  voiceStore.setState((prev) => {
+    const channelId = prev.currentChannelId;
+    if (channelId === null || prev.voiceUsers.get(channelId)?.has(userId) !== true) return prev;
+    const current = prev.peerWatching;
+    const had = current?.get(userId);
+    if (watching.length === 0) {
+      if (had === undefined) return prev;
+      const next = new Map(current);
+      next.delete(userId);
+      return { ...prev, peerWatching: next };
+    }
+    if (
+      had !== undefined &&
+      had.length === watching.length &&
+      had.every((v, i) => v === watching[i])
+    )
+      return prev;
+    const next = new Map(current);
+    next.set(userId, [...watching]);
+    return { ...prev, peerWatching: next };
+  });
+}
+
+/** Who watches a member's screen share, as user ids: the channel members
+ *  whose set has the sharer, plus you when you watch it locally (the local
+ *  set lives in RemoteTracks, so the caller passes it), never the sharer.
+ *  Empty unless the sharer's voice user has screenshare on. */
+export function streamViewers(
+  sharerId: number,
+  watchingLocally = false,
+  state: VoiceState = voiceStore.getState(),
+): number[] {
+  const channelId = state.currentChannelId;
+  if (channelId === null) return [];
+  const members = state.voiceUsers.get(channelId);
+  if (members?.get(sharerId)?.screenshare !== true) return [];
+  const self = authStore.getState().user?.id ?? 0;
+  const out: number[] = [];
+  for (const id of members.keys()) {
+    if (id === sharerId) continue;
+    if (id === self ? watchingLocally : state.peerWatching?.get(id)?.includes(sharerId) === true)
+      out.push(id);
+  }
+  return out.toSorted((a, b) => a - b);
 }
 
 /** Drop all peer verifications (on voice leave). */

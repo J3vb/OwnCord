@@ -277,6 +277,7 @@ import { keepDmForCall, resetKeptCallDms } from "../../src/features/direct-messa
 import type { ReadyMember } from "../../src/lib/types";
 import { ensureLiveKitProxy, getLiveKitProxyPort } from "../../src/platform/desktop/nativeProxies";
 import { takeJoinRefusal } from "../../src/features/voice/joinRequest";
+import { takeWatchRefusal } from "../../src/lib/watchRequest";
 import {
   leaveVoice as boundLeaveVoice,
   setMuted as boundSetMuted,
@@ -817,6 +818,63 @@ describe("LiveKitSession", () => {
     it("calls setLocalScreenshare(false)", () => {
       session.leaveVoice(false);
       expect(setLocalScreenshare).toHaveBeenCalledWith(false);
+    });
+  });
+
+  describe("voice_watch (6.6b)", () => {
+    const watchFrames = (ws: { send: ReturnType<typeof vi.fn> }) =>
+      ws.send.mock.calls.filter(([m]) => m.type === "voice_watch").map(([m]) => m.payload.user_ids);
+
+    it("sends the watched screen-share set when it changes, in a channel", () => {
+      const ws = { send: vi.fn(), getState: () => "connected" } as any;
+      session.setWsClient(ws);
+      (session as any)._remoteTracks.watch(9, "screenshare", true);
+      (session as any)._remoteTracks.watch(4, "screenshare", true);
+      (session as any)._remoteTracks.watch(9, "screenshare", false);
+      expect(watchFrames(ws)).toEqual([[9], [4, 9], [4]]);
+    });
+
+    it("sends nothing for a camera, or when the socket is down or no channel is joined", () => {
+      const ws = { send: vi.fn(), getState: () => "connected" } as any;
+      session.setWsClient(ws);
+      (session as any)._remoteTracks.watch(9, "camera", true);
+      expect(watchFrames(ws)).toEqual([]);
+      const down = { send: vi.fn(), getState: () => "reconnecting" } as any;
+      session.setWsClient(down);
+      (session as any)._remoteTracks.watch(9, "screenshare", true);
+      expect(watchFrames(down)).toEqual([]);
+      session.setWsClient(ws);
+      mockVoiceState.currentChannelId = null as any;
+      (session as any)._remoteTracks.watch(8, "screenshare", true);
+      expect(watchFrames(ws)).toEqual([]);
+    });
+
+    it("sends nothing when leaving clears the set (the server clears on leave)", () => {
+      const ws = { send: vi.fn(), getState: () => "connected" } as any;
+      session.setWsClient(ws);
+      (session as any)._remoteTracks.watch(9, "screenshare", true);
+      ws.send.mockClear();
+      session.leaveVoice(true);
+      expect(watchFrames(ws)).toEqual([]);
+      expect(ws.send).toHaveBeenCalledWith({ type: "voice_leave", payload: {} });
+    });
+
+    it("re-sends the current set on a resume, and nothing when it is empty", () => {
+      const ws = { send: vi.fn(), getState: () => "connected" } as any;
+      session.setWsClient(ws);
+      session.resendWatching();
+      expect(watchFrames(ws)).toEqual([]);
+      (session as any)._remoteTracks.watch(9, "screenshare", true);
+      ws.send.mockClear();
+      session.resendWatching();
+      expect(watchFrames(ws)).toEqual([[9]]);
+    });
+
+    it("an error reply to a voice_watch is recognised and dropped", () => {
+      const ws = { send: vi.fn(() => "env-1"), getState: () => "connected" } as any;
+      session.setWsClient(ws);
+      (session as any)._remoteTracks.watch(9, "screenshare", true);
+      expect(takeWatchRefusal("env-1")).toBe(true);
     });
   });
 

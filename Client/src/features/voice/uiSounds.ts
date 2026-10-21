@@ -24,7 +24,13 @@
  * deafen gate per D2, so it does not route through here.
  */
 
-import { voiceStore, getVoiceRosterRevision, type VoiceStatus } from "@stores/voice.store";
+import {
+  voiceStore,
+  getVoiceRosterRevision,
+  isWatchingResync,
+  streamViewers,
+  type VoiceStatus,
+} from "@stores/voice.store";
 import { authStore } from "@stores/auth.store";
 import { loadPref } from "@lib/preferences";
 import { loadUserStatus } from "@lib/userStatus";
@@ -43,6 +49,8 @@ interface SoundState {
   /** Who in `channelId` is sharing their screen, by the server's roster:
    *  your own share counts once the server has it, not on the click. */
   readonly sharing: ReadonlySet<number>;
+  /** Who watches your own screen share (empty unless you are sharing). */
+  readonly viewers: ReadonlySet<number>;
   readonly localMuted: boolean;
   readonly localDeafened: boolean;
 }
@@ -64,6 +72,7 @@ function snapshot(channelId: number | null): SoundState {
     rosterRevision: getVoiceRosterRevision(),
     peers,
     sharing,
+    viewers: new Set(channelId === null || self === 0 ? [] : streamViewers(self, false, s)),
     localMuted: s.localMuted,
     localDeafened: s.localDeafened,
   };
@@ -73,6 +82,13 @@ function snapshot(channelId: number | null): SoundState {
  *  moderator move as voice_leave and then voice_moved, two frames apart; the
  *  leave must not chime when the move is right behind it. */
 const LEAVE_GRACE_MS = 250;
+
+/** How long after your own join the viewer sets settle. */
+const VIEWER_SYNC_QUIET_MS = 2000;
+
+function selfId(): number {
+  return authStore.getState().user?.id ?? 0;
+}
 
 function canPlay(): boolean {
   if (loadUserStatus() === "dnd") return false;
@@ -90,6 +106,8 @@ const SOUND_SWITCH: Readonly<Record<VoiceSound, SoundSwitch>> = {
   undeafen: "muteDeafen",
   streamStart: "stream",
   streamEnd: "stream",
+  viewerJoin: "stream",
+  viewerLeave: "stream",
 };
 
 /** Play `kind` unless its own switch is off. Callers have already passed the
@@ -113,6 +131,8 @@ export function startVoiceUiSounds(): () => void {
       ? prev.channelId
       : null;
 
+  /** Until when viewer changes are a join's re-sync, not people coming and going. */
+  let quietUntil = 0;
   let leaveTimer: ReturnType<typeof setTimeout> | null = null;
   const cancelLeave = (): void => {
     if (leaveTimer !== null) clearTimeout(leaveTimer);
@@ -163,6 +183,8 @@ export function startVoiceUiSounds(): () => void {
     }
 
     const self = selfEdge(next);
+    // The server re-sends the room's watch sets on a join: not viewer edges.
+    if (self === "join" || self === "moved") quietUntil = Date.now() + VIEWER_SYNC_QUIET_MS;
 
     // A deafen edge is its own sound and owns the notification: the mute that
     // a deafen implies (the keybind mutes too) must not also blip.
@@ -189,6 +211,25 @@ export function startVoiceUiSounds(): () => void {
       else if (self !== null) play(self);
       finish();
       return;
+    }
+
+    // Someone starts or stops watching your own screen share. Only a change
+    // while you share before and after counts: a share starting (viewers
+    // already on the roster) or the re-sync after a join or a resume is not
+    // an edge. A viewer who left voice is a leave, not a viewer leaving.
+    if (
+      prev.sharing.has(selfId()) &&
+      next.sharing.has(selfId()) &&
+      !isWatchingResync() &&
+      quietUntil <= Date.now()
+    ) {
+      const gained = [...next.viewers].some((id) => !prev.viewers.has(id));
+      const lost = [...prev.viewers].some((id) => !next.viewers.has(id) && next.peers.has(id));
+      if (gained || lost) {
+        play(gained ? "viewerJoin" : "viewerLeave");
+        finish();
+        return;
+      }
     }
 
     // Another member joining or leaving the channel we are in. Only the
