@@ -1,12 +1,11 @@
 package admin
 
 import (
-	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 
 	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // ─── Role Handlers ───────────────────────────────────────────────────────────
@@ -16,13 +15,20 @@ import (
 // never grant a bit you lack, Owner/default undeletable), so these handlers
 // stay adapters: decode, call, invalidate, fan out.
 //
-// Fan-out after a mutation follows the two existing patterns exactly:
-//   - the permission cache is invalidated BEFORE the hub calls, as the
-//     channel-override handlers do, so the hub's per-client visibility lookups
+// Fan-out after a mutation is ONE hub.EnqueueRoleRefresh call (WP 4.4b):
+//   - the permission cache is invalidated BEFORE the enqueue, as the
+//     channel-override handlers do, so the worker's per-user visibility lookups
 //     repopulate from post-change data;
-//   - visibility is re-synced with targeted channel_create/channel_delete
-//     (RefreshChannelVisibility), not a reconnect — a role's mask is the base
-//     for every channel, so the refresh covers all of them.
+//   - the hub's worker then re-syncs only the users whose role changed with
+//     targeted channel_create/channel_delete, a paced member_update and one
+//     roles_update, off this goroutine. Nothing after the commit reads
+//     r.Context(), so a request deadline or an aborted client cannot cut the
+//     fan-out.
+
+// roleRevokeInline is how many moved members a role delete releases directly,
+// as the request answers; the worker releases every affected member's held
+// topics before sending their sidebar.
+const roleRevokeInline = 32
 
 // roleServiceUnavailable writes the fail-closed response used when the server
 // was constructed without a RoleService. Refusing beats falling back to an
@@ -95,7 +101,7 @@ func handleCreateRole(hub HubBroadcaster, roles *service.RoleService) http.Handl
 		}
 		// A brand-new role has no members, so nothing's cached mask changed and
 		// no channel changed visibility — only the role list itself moved.
-		broadcastRoles(r, roles, hub)
+		enqueueRoles(hub, ws.RoleRefresh{Roles: true})
 		writeJSON(w, http.StatusCreated, role)
 	}
 }
@@ -148,21 +154,22 @@ func handlePatchRole(hub HubBroadcaster, permInvalidator PermissionInvalidator, 
 		// role color, member-list group and permission-gated affordances until
 		// they reconnect — exactly like a role delete's fallback move already
 		// does. RoleUpdateResult reports the rename from the pre-update row the
-		// service already read, so this handler re-reads nothing.
-		if res.Renamed && affectedOK && hub != nil {
-			for _, uid := range affected {
-				hub.BroadcastMemberUpdate(uid, role.Name)
-			}
+		// service already read, so this handler re-reads nothing. A permission
+		// edit may move READ_MESSAGES in either direction, so every channel's
+		// audience for this role is re-derived; when the member list was
+		// unreadable every connected user counts as affected.
+		fan := ws.RoleRefresh{Roles: true}
+		if res.Renamed && affectedOK {
+			fan.MemberUpdate = affected
 		}
-
 		if res.PermsChanged {
-			// READ_MESSAGES may have moved in either direction, so every
-			// channel's audience for this role has to be re-derived.
-			if hub != nil {
-				hub.RefreshAllChannelVisibility()
+			if affectedOK {
+				fan.Visibility = affected
+			} else {
+				fan.AllConnected = true
 			}
 		}
-		broadcastRoles(r, roles, hub)
+		enqueueRoles(hub, fan)
 		writeJSON(w, http.StatusOK, role)
 	}
 }
@@ -178,7 +185,7 @@ func handleDeleteRole(hub HubBroadcaster, permInvalidator PermissionInvalidator,
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid role id")
 			return
 		}
-		_, fallback, moved, err := roles.DeleteRole(r.Context(), actorFromContext(r), id)
+		_, _, moved, err := roles.DeleteRole(r.Context(), actorFromContext(r), id)
 		if err != nil {
 			writeRoleErr(w, err)
 			return
@@ -188,16 +195,19 @@ func handleDeleteRole(hub HubBroadcaster, permInvalidator PermissionInvalidator,
 		// covers the handler-side invalidator too (they are the same object in
 		// production, distinct in tests).
 		invalidateUsers(permInvalidator, moved)
+		// Same shape as PATCH /users/{id} role_change: member_update tells
+		// every client the user regrouped, and the worker revokes the
+		// subscriptions the new role may not read. The name is read at send
+		// time, so a later edit of the fallback role is announced as committed.
 		if hub != nil {
-			// Same shape as PATCH /users/{id} role_change: member_update tells
-			// every client the user regrouped, and revokes the subscriptions
-			// the new role may not read.
-			for _, uid := range moved {
-				hub.BroadcastMemberUpdate(uid, fallback.Name)
+			// The first members' held channels are released here; the worker
+			// releases every affected member's held topics before it sends
+			// their sidebar.
+			for _, uid := range moved[:min(len(moved), roleRevokeInline)] {
+				hub.RevokeUnreadableChannels(uid)
 			}
-			hub.RefreshAllChannelVisibility()
 		}
-		broadcastRoles(r, roles, hub)
+		enqueueRoles(hub, ws.RoleRefresh{Visibility: moved, MemberUpdate: moved, Roles: true})
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -224,9 +234,7 @@ func handleReorderRoles(hub HubBroadcaster, permInvalidator PermissionInvalidato
 		if permInvalidator != nil {
 			permInvalidator.InvalidateAll()
 		}
-		if hub != nil {
-			hub.BroadcastRolesUpdate(updated)
-		}
+		enqueueRoles(hub, ws.RoleRefresh{Roles: true})
 		writeJSON(w, http.StatusOK, updated)
 	}
 }
@@ -242,25 +250,13 @@ func invalidateUsers(permInvalidator PermissionInvalidator, userIDs []int64) {
 	}
 }
 
-// broadcastRoles re-reads the role list and pushes it to every client. Re-read
-// rather than patched locally so the broadcast always reflects committed state,
-// including any concurrent change.
-//
-// Called after the mutation has already committed, so the caller's request
-// context may be canceled by the time this runs (client aborted, deadline
-// fired) -- context.WithoutCancel detaches the re-read from that, matching
-// broadcastEmojiSet in api/emoji_handler.go and broadcastDMOpen in
-// api/dm_handler.go.
-func broadcastRoles(r *http.Request, roles *service.RoleService, hub HubBroadcaster) {
-	if hub == nil || roles == nil {
+// enqueueRoles hands the committed mutation's fan-out to the hub's worker. The
+// role list is re-read by the worker rather than patched here, so the broadcast
+// always reflects committed state, including any concurrent change, and lists
+// go out in commit order.
+func enqueueRoles(hub HubBroadcaster, r ws.RoleRefresh) {
+	if hub == nil {
 		return
 	}
-	list, err := roles.AllRoles(context.WithoutCancel(r.Context()))
-	if err != nil {
-		// The mutation already committed; clients converge on their next
-		// reconnect rather than seeing a failed request.
-		slog.Warn("admin: roles_update broadcast skipped, role list unreadable", "err", err)
-		return
-	}
-	hub.BroadcastRolesUpdate(list)
+	hub.EnqueueRoleRefresh(r)
 }

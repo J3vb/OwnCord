@@ -210,14 +210,30 @@ func (h *Hub) applyQueueContentDrops() {
 // under seqMu. An unsettled queue drop (SRV-03) ratchets the watermark first,
 // so a resume racing the dispatch of the frames ahead of it still takes the
 // full-ready path. So does a targeted fan-out still in flight
-// (beginTargetedFanout), and a loss marked for this user (markLoss) since
-// reconnectPrecheck looked.
+// (beginTargetedFanout), a loss marked for this user (markLoss) since
+// reconnectPrecheck looked, and a role refresh pending or running for this user
+// (role_refresh.go) -- scoped to the affected users, so every other reconnect
+// still resumes by replay.
 func (h *Hub) mustFullResyncAtRegister(lastSeq uint64, userID int64) bool {
 	if h.queueDrops.dropped.Load() != h.queueDrops.applied {
 		h.bumpVisibilityWatermark()
 	}
-	return h.targetedFanouts > 0 || h.mustFullResync(lastSeq) || h.presenceResyncPending(userID)
+	// The order matters: a refresh round bumps the watermark and only then
+	// stops covering the user. Reading covers first means a reconnect sees
+	// either the user still covered or the new watermark. covers runs under
+	// seqMu and roleRefresh.mu is a leaf, so the lock order is unchanged.
+	covered := h.roleRefresh.covers(userID)
+	if mustFullResyncMidReadRaceHook != nil {
+		mustFullResyncMidReadRaceHook()
+	}
+	return covered || h.targetedFanouts > 0 || h.mustFullResync(lastSeq) ||
+		h.presenceResyncPending(userID)
 }
+
+// mustFullResyncMidReadRaceHook, when non-nil, runs between the coverage read
+// and the watermark read in mustFullResyncAtRegister. Test-only (nil in
+// production); pins the order deterministically.
+var mustFullResyncMidReadRaceHook func()
 
 // BroadcastQueueDepth is the number of frames currently waiting on the hub's
 // dispatch channel — 0 is healthy, approaching the channel's capacity means

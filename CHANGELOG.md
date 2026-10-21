@@ -219,6 +219,10 @@ and only when it changes something a contributor or fork holder must do
 
 ### Changed
 
+**Accounts & admin**
+
+- Changing a member's role, or editing or deleting a role, no longer holds up the admin request while every connected member is updated. The change is saved and answered at once, and each affected member's channel list, role name and timeout view then catch up in the background, in small paced batches so a role with hundreds of members cannot flood everyone's connection. Members whose role did not change stop receiving redundant channel updates, and the role list now always arrives in the order the changes were made.
+
 **Voice and video**
 
 - Going Idle after ten quiet minutes now also happens while you are in a voice channel or a DM call, instead of staying Online. Activity still brings you back.

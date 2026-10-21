@@ -22,14 +22,10 @@ func TestAdminAPI_PatchRole_RenameBroadcastsMemberUpdate(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
 
-	found := false
-	for _, mu := range hub.memberUpdates {
-		if mu.roleName == "Mods" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("expected a member_update carrying the renamed role, got %+v", hub.memberUpdates)
+	// The enqueue names the holder; the worker reads the committed name when
+	// it sends, so a coalesced or overtaken rename announces the final one.
+	if len(hub.memberUpdateIDs()) != 1 {
+		t.Fatalf("expected a member_update for the one holder of the renamed role, got %+v", hub.roleRefreshes)
 	}
 }
 
@@ -49,7 +45,7 @@ func TestAdminAPI_PatchRole_NoRenameNoMemberUpdate(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
 
-	if len(hub.memberUpdates) != 0 {
-		t.Fatalf("expected no member_update for a color-only patch, got %+v", hub.memberUpdates)
+	if len(hub.memberUpdateIDs()) != 0 {
+		t.Fatalf("expected no member_update for a color-only patch, got %+v", hub.roleRefreshes)
 	}
 }
