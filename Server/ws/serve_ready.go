@@ -11,7 +11,6 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
-	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // buildAuthOK constructs the auth_ok server→client message.
@@ -163,7 +162,7 @@ func presentDMStatuses(dmChannels []db.DMChannelInfo, viewerID int64, liveStatus
 func channelRefs(channels []db.Channel) []permissions.ChannelRef {
 	refs := make([]permissions.ChannelRef, len(channels))
 	for i := range channels {
-		refs[i] = permissions.ChannelRef{ID: channels[i].ID, Type: channels[i].Type, Archived: channels[i].Archived}
+		refs[i] = channelRef(&channels[i])
 	}
 	return refs
 }
@@ -209,7 +208,8 @@ func channelCanModerateVoice(role *db.Role, o db.ChannelOverride, chanType strin
 
 // channelRef maps one db channel to the predicates' db-agnostic ChannelRef.
 func channelRef(ch *db.Channel) permissions.ChannelRef {
-	return permissions.ChannelRef{ID: ch.ID, Type: ch.Type, Archived: ch.Archived, NSFW: ch.NSFW}
+	return permissions.ChannelRef{ID: ch.ID, Type: ch.Type, Archived: ch.Archived, NSFW: ch.NSFW,
+		AuthorityID: ch.Thread.ParentID, ThreadLocked: ch.Thread.Locked}
 }
 
 // permOverride maps one db override (both layers) to the checker's type.
@@ -415,18 +415,10 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 	}
 	return &readyFields{
 		head: readyHead{
-			Capabilities: map[string]any{
-				"message_deduplication":        true,
-				"message_retry_window_seconds": int64(service.MessageRetryWindow.Seconds()),
-				"message_retry_floor_ms":       retryFloorMS,
-				"read_pointer":                 true,
-				"user_notes":                   true,
-				"profile_banners":              true,
-				"dm_privacy":                   true,
-			},
-			Categories: categories,
-			Channels:   channelPayloads,
-			DMChannels: dmChannels,
+			Capabilities: readyCapabilities(retryFloorMS),
+			Categories:   categories,
+			Channels:     channelPayloads,
+			DMChannels:   dmChannels,
 
 			MemberTimeouts: timeouts.entries,
 		},

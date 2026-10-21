@@ -92,7 +92,8 @@ func cleanChannelField(v string, maxRunes int, field string) (string, error) {
 // to their participants, not to MANAGE_CHANNELS holders — and answering a DM
 // id with anything but "not found" confirms which ids are private
 // conversations (A-2026-08-02). Every sibling lookup goes through here so no
-// path can grow its own policy again (S-04).
+// path can grow its own policy again (S-04). A thread answers ErrBadRequest
+// (errThreadNotAdminChannel).
 func (s *ChannelService) ResolveGuildChannel(ctx context.Context, id int64) (*db.Channel, error) {
 	if id <= 0 {
 		return nil, fmt.Errorf("invalid channel id%.0w", ErrBadRequest)
@@ -104,8 +105,18 @@ func (s *ChannelService) ResolveGuildChannel(ctx context.Context, id int64) (*db
 	if ch == nil || ch.Type == "dm" {
 		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
+	if ch.IsThread() {
+		return nil, fmt.Errorf("%w", errThreadNotAdminChannel)
+	}
 	return ch, nil
 }
+
+// errThreadNotAdminChannel refuses a thread id on the admin channel surface
+// (6.9c). A thread takes its permissions, NSFW, archive and retention from
+// its parent, so an override, edit or delete keyed by a thread id would
+// either be ignored or bypass the thread rules; the parent is the channel to
+// manage.
+var errThreadNotAdminChannel = fmt.Errorf("a thread is managed through its parent channel%.0w", ErrBadRequest)
 
 // ─── Admin channel CRUD ──────────────────────────────────────────────────────
 
@@ -461,35 +472,4 @@ func (s *ChannelService) AdminDeleteChannel(ctx context.Context, actorID int64, 
 	db.WriteAudit(delCtx, s.st, actorID, "channel_delete", "channel", existing.ID,
 		fmt.Sprintf("deleted #%s", existing.Name))
 	return nil, nil
-}
-
-// prepareUpdateSync arms the update's sync guard when the request asked for a
-// permission sync. It is a no-op otherwise.
-func (s *ChannelService) prepareUpdateSync(ctx context.Context, req AdminChannelUpdate, channelID, categoryID int64, update *db.ChannelUpdate, refused *error) error {
-	if !req.SyncPermissions {
-		return nil
-	}
-	if categoryID == 0 {
-		return fmt.Errorf("sync_permissions needs an existing category%.0w", ErrBadRequest)
-	}
-	guard, err := s.prepareSync(ctx, req.ActorRole, channelID, categoryID, refused)
-	if err != nil {
-		return err
-	}
-	update.SyncGuard = guard
-	return nil
-}
-
-// afterUpdateSync audits a committed sync and drops the cached permissions of
-// everyone its replaced rows name. The returned effect says whether any row
-// changed, so the caller refreshes the channel's audience once it has re-read
-// the row.
-func (s *ChannelService) afterUpdateSync(ctx context.Context, actorID int64, ch *db.Channel, req AdminChannelUpdate, plan db.ChannelSyncPlan) PermEffect {
-	if !req.SyncPermissions {
-		return PermEffect{}
-	}
-	s.auditSync(ctx, actorID, ch, plan)
-	effect := s.effectOfPlan(ctx, plan)
-	s.invalidatePermEffect(effect)
-	return effect
 }

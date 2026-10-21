@@ -1265,6 +1265,15 @@ purged. The block has no author and no channel name, and a deleted forward carri
 none. The forward's `content` and `attachments` are its own snapshot and copies,
 and it cannot be edited.
 
+A poll message (`poll_create`, see `docs/protocol.md`) carries a `poll` block,
+omitted for every other message and for a deleted one: `{"question", "answers":
+[{"answer_id", "text", "emoji"}], "allow_multiselect", "expires_at", "ended",
+"ended_at", "results": {"version", "total_voters", "counts": [{"answer_id",
+"count"}], "me"}}`. `me` is the requesting user's own answer ids. `ended` is true
+when the poll was ended or `expires_at` has passed, even before anything marked it
+ended. The poll's `content` is a readable fallback of the question and answers. A poll
+cannot be edited or forwarded.
+
 A group DM can also hold group event rows: `kind` is `group_add`, `group_remove`,
 `group_leave`, `group_rename` or `group_icon`, with a `group_event` block
 (`{"target_user_id"}` for add and remove, `{}` for leave, `{"name"}` for rename,
@@ -2402,10 +2411,11 @@ Idempotent. Sends the caller's other live sockets an `nsfw_ack` frame
 
 #### Errors
 
-| Status | Code        | Reason                                                     |
-| ------ | ----------- | ---------------------------------------------------------- |
-| 404    | `NOT_FOUND` | The channel does not exist or is not visible to the caller |
-| 409    | `NOT_NSFW`  | The channel is not labelled — nothing to acknowledge       |
+| Status | Code          | Reason                                                     |
+| ------ | ------------- | ---------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | The channel is a thread: its consent is its parent's       |
+| 404    | `NOT_FOUND`   | The channel does not exist or is not visible to the caller |
+| 409    | `NOT_NSFW`    | The channel is not labelled — nothing to acknowledge       |
 
 ---
 
@@ -2422,9 +2432,10 @@ with `"acknowledged": false`.
 
 #### Errors
 
-| Status | Code        | Reason                                                     |
-| ------ | ----------- | ---------------------------------------------------------- |
-| 404    | `NOT_FOUND` | The channel does not exist or is not visible to the caller |
+| Status | Code          | Reason                                                     |
+| ------ | ------------- | ---------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | The channel is a thread: its consent is its parent's       |
+| 404    | `NOT_FOUND`   | The channel does not exist or is not visible to the caller |
 
 ---
 
@@ -5554,6 +5565,10 @@ and then re-syncs connected clients with targeted `channel_create` /
 `channel_delete` messages, so sidebars converge without a reconnect.
 
 DM channels have no override surface: `400 INVALID_INPUT`.
+
+A thread has no overrides, NSFW label, archive flag or retention policy of its
+own: each is its parent channel's. Every `/admin/api/channels/{id}` route,
+retention included, answers a thread id with `400`.
 
 ### GET /admin/api/channels/{id}/permissions
 

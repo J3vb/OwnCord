@@ -148,6 +148,10 @@ var erasureStatements = []struct {
 	{"message_call_participants", `DELETE FROM message_call_participants WHERE user_id = ?`},
 	{"message_delivery_receipts", `DELETE FROM message_delivery_receipts WHERE user_id = ?`},
 	{"reactions", `DELETE FROM reactions WHERE user_id = ?`},
+	// Poll votes (migration 073, WP 6.9b). Votes on polls the subject authored
+	// went with those messages above. Counts are always recomputed, so the
+	// polls the subject voted in read exactly on the next update or read.
+	{"poll_votes", `DELETE FROM poll_votes WHERE user_id = ?`},
 	{"read_states", `DELETE FROM read_states WHERE user_id = ?`},
 	// Mention ledger (migration 063): receipts naming the subject as the
 	// recipient. Receipts for the subject's own messages go with those messages
@@ -185,7 +189,7 @@ var erasureStatements = []struct {
 	{"user_privacy", `DELETE FROM user_privacy WHERE user_id = ?1`},
 	{"user_blocks", `DELETE FROM user_blocks WHERE blocker_id = ?1 OR blocked_id = ?1`},
 	{"channel_user_overrides", `DELETE FROM channel_user_overrides WHERE user_id = ?`},
-	// Category permission templates (migration 073, class 18c): the per-member
+	// Category permission templates (migration 075, class 18c): the per-member
 	// rows of a category's template. The users delete below would cascade them,
 	// but this is the explicit statement the inventory's zero is proved against.
 	{"category_user_overrides", `DELETE FROM category_user_overrides WHERE user_id = ?`},

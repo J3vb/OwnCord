@@ -88,7 +88,21 @@ a position an administrator writes, holds no user content and no personal data, 
 is shared by every member who can see a channel in it, so it adds no data class. A
 channel outlives its category (`ON DELETE SET NULL`). Other historical
 status statements retain their `cbebd37c` baseline.
-**Amended 2026-10-21 (category permissions):** `073_category_permissions.sql` adds
+**Amended 2026-10-21 (polls):** `073_polls.sql` adds `polls`, `poll_answers` and
+`poll_votes` (WP 6.9b). A poll is an ordinary message of its author whose text is a
+readable fallback of the question and answers, so it follows the message rows. The
+side rows go with the message by cascade. The one new data class is the vote (lifecycle
+row 10a in `data-lifecycle.md`): a voter's rows are public to the community as
+reactions are, and go with the account. Counts are never stored.
+**Amended 2026-10-21 (threads):** `074_threads.sql` adds the thread columns to
+`channels` (WP 6.9c). A thread is a channel row under a text channel, so its
+messages, attachments, reactions and read state are the existing classes and
+follow their rows. It has no permission, NSFW, archive or retention state of its
+own: every one is its parent's, and the admin override, NSFW acknowledgement and
+retention routes refuse a thread id. `thread_owner_id` goes `NULL` with its user
+and `thread_starter_message_id` with its message; the thread goes with its
+parent by cascade. It adds no data class.
+**Amended 2026-10-21 (category permissions):** `075_category_permissions.sql` adds
 `category_overrides`, `category_user_overrides` and `channels.permissions_synced`
 (WP 6.5d), a template of permission overrides that a category's synced channels
 follow. The per-member rows are keyed by user exactly like `channel_user_overrides`,

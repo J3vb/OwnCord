@@ -55,7 +55,10 @@ func messageDeliveryParams(p SendMessageParams, floorMS int64) (*db.MessageDeliv
 		// Same for the forwarded message's id (WP 6.9a): zero for every send
 		// that predates forwarding.
 		ForwardOf int64 `json:",omitempty"`
-	}{p.ChannelID, p.Content, p.ReplyTo, attachments, p.ReplyPing, p.ForwardOf})
+		// And the canonical poll input (WP 6.9b): empty for every send that
+		// is not a poll_create, so older receipts hash the same.
+		Poll string `json:",omitempty"`
+	}{p.ChannelID, p.Content, p.ReplyTo, attachments, p.ReplyPing, p.ForwardOf, p.Poll})
 	if err != nil {
 		return nil, fmt.Errorf("%w: fingerprint message: %w", ErrInternal, err)
 	}

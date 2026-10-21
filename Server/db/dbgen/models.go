@@ -74,26 +74,33 @@ type CategoryUserOverride struct {
 }
 
 type Channel struct {
-	ID                int64   `json:"id"`
-	Name              string  `json:"name"`
-	Type              string  `json:"type"`
-	Category          *string `json:"category"`
-	Topic             *string `json:"topic"`
-	Position          int64   `json:"position"`
-	SlowMode          int64   `json:"slowMode"`
-	Archived          int64   `json:"archived"`
-	CreatedAt         string  `json:"createdAt"`
-	VoiceMaxUsers     int64   `json:"voiceMaxUsers"`
-	VoiceQuality      *string `json:"voiceQuality"`
-	MixingThreshold   *int64  `json:"mixingThreshold"`
-	VoiceMaxVideo     int64   `json:"voiceMaxVideo"`
-	Nsfw              int64   `json:"nsfw"`
-	IsGroup           int64   `json:"isGroup"`
-	DmOwnerID         *int64  `json:"dmOwnerId"`
-	DmIcon            *string `json:"dmIcon"`
-	Afk               int64   `json:"afk"`
-	CategoryID        *int64  `json:"categoryId"`
-	PermissionsSynced int64   `json:"permissionsSynced"`
+	ID                       int64   `json:"id"`
+	Name                     string  `json:"name"`
+	Type                     string  `json:"type"`
+	Category                 *string `json:"category"`
+	Topic                    *string `json:"topic"`
+	Position                 int64   `json:"position"`
+	SlowMode                 int64   `json:"slowMode"`
+	Archived                 int64   `json:"archived"`
+	CreatedAt                string  `json:"createdAt"`
+	VoiceMaxUsers            int64   `json:"voiceMaxUsers"`
+	VoiceQuality             *string `json:"voiceQuality"`
+	MixingThreshold          *int64  `json:"mixingThreshold"`
+	VoiceMaxVideo            int64   `json:"voiceMaxVideo"`
+	Nsfw                     int64   `json:"nsfw"`
+	IsGroup                  int64   `json:"isGroup"`
+	DmOwnerID                *int64  `json:"dmOwnerId"`
+	DmIcon                   *string `json:"dmIcon"`
+	Afk                      int64   `json:"afk"`
+	CategoryID               *int64  `json:"categoryId"`
+	ParentChannelID          *int64  `json:"parentChannelId"`
+	ThreadStarterMessageID   *int64  `json:"threadStarterMessageId"`
+	ThreadOwnerID            *int64  `json:"threadOwnerId"`
+	ThreadArchived           int64   `json:"threadArchived"`
+	ThreadLocked             int64   `json:"threadLocked"`
+	ThreadAutoArchiveMinutes int64   `json:"threadAutoArchiveMinutes"`
+	ThreadLastActivityAt     *string `json:"threadLastActivityAt"`
+	PermissionsSynced        int64   `json:"permissionsSynced"`
 }
 
 type ChannelCategory struct {
@@ -341,6 +348,28 @@ type PluginKv struct {
 	PluginID int64  `json:"pluginId"`
 	Key      string `json:"key"`
 	Value    []byte `json:"value"`
+}
+
+type Poll struct {
+	MessageID        int64   `json:"messageId"`
+	Question         string  `json:"question"`
+	AllowMultiselect int64   `json:"allowMultiselect"`
+	ExpiresAt        string  `json:"expiresAt"`
+	EndedAt          *string `json:"endedAt"`
+	Version          int64   `json:"version"`
+}
+
+type PollAnswer struct {
+	MessageID int64   `json:"messageId"`
+	AnswerID  int64   `json:"answerId"`
+	Text      string  `json:"text"`
+	Emoji     *string `json:"emoji"`
+}
+
+type PollVote struct {
+	MessageID int64 `json:"messageId"`
+	AnswerID  int64 `json:"answerId"`
+	UserID    int64 `json:"userId"`
 }
 
 type PushSubscription struct {

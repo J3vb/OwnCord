@@ -46,6 +46,7 @@ var SubjectInventory = []InventoryClass{
 	{"8c message retry receipts", `SELECT COUNT(*) FROM message_delivery_receipts WHERE user_id = ?`, inventoryByUID},
 	{"9 mentions naming the subject", `SELECT COUNT(*) FROM message_mentions WHERE mentioned_user_id = ?`, inventoryByUID},
 	{"10 reactions", `SELECT COUNT(*) FROM reactions WHERE user_id = ?`, inventoryByUID},
+	{"10a poll votes", `SELECT COUNT(*) FROM poll_votes WHERE user_id = ?`, inventoryByUID},
 	{"11 read states", `SELECT COUNT(*) FROM read_states WHERE user_id = ?`, inventoryByUID},
 	{"11a mention receipts", `SELECT COUNT(*) FROM mention_receipts WHERE user_id = ?`, inventoryByUID},
 	{"11b call participation", `SELECT COUNT(*) FROM message_call_participants WHERE user_id = ?`, inventoryByUID},

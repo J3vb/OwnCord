@@ -232,3 +232,34 @@ func (s *ChannelService) AdminListChannelsSynced(ctx context.Context) ([]AdminCh
 	}
 	return out, nil
 }
+
+// prepareUpdateSync arms the update's sync guard when the request asked for a
+// permission sync. It is a no-op otherwise.
+func (s *ChannelService) prepareUpdateSync(ctx context.Context, req AdminChannelUpdate, channelID, categoryID int64, update *db.ChannelUpdate, refused *error) error {
+	if !req.SyncPermissions {
+		return nil
+	}
+	if categoryID == 0 {
+		return fmt.Errorf("sync_permissions needs an existing category%.0w", ErrBadRequest)
+	}
+	guard, err := s.prepareSync(ctx, req.ActorRole, channelID, categoryID, refused)
+	if err != nil {
+		return err
+	}
+	update.SyncGuard = guard
+	return nil
+}
+
+// afterUpdateSync audits a committed sync and drops the cached permissions of
+// everyone its replaced rows name. The returned effect says whether any row
+// changed, so the caller refreshes the channel's audience once it has re-read
+// the row.
+func (s *ChannelService) afterUpdateSync(ctx context.Context, actorID int64, ch *db.Channel, req AdminChannelUpdate, plan db.ChannelSyncPlan) PermEffect {
+	if !req.SyncPermissions {
+		return PermEffect{}
+	}
+	s.auditSync(ctx, actorID, ch, plan)
+	effect := s.effectOfPlan(ctx, plan)
+	s.invalidatePermEffect(effect)
+	return effect
+}

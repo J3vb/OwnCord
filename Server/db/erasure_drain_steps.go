@@ -25,6 +25,10 @@ var erasureDrainSteps = []drainStep{
 	limitStep("mention_receipts",
 		`DELETE FROM mention_receipts WHERE (user_id, channel_id, message_id) IN
 		   (SELECT user_id, channel_id, message_id FROM mention_receipts WHERE user_id = ?1 LIMIT ?2)`),
+	// poll_votes is WITHOUT ROWID, so the chunk is named by its primary key.
+	limitStep("poll_votes",
+		`DELETE FROM poll_votes WHERE (message_id, user_id, answer_id) IN
+		   (SELECT message_id, user_id, answer_id FROM poll_votes WHERE user_id = ?1 LIMIT ?2)`),
 	{label: "attachments uploaded", run: drainUploadedAttachments},
 	{label: "messages", run: drainMessages},
 	windowStep("reactions", "reactions", "id", `user_id = ?1`),

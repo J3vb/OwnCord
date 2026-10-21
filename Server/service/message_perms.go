@@ -165,7 +165,8 @@ func channelSubject(ctx context.Context, st Store, perms *PermissionService, use
 	if err != nil {
 		return permissions.Subject{}, fmt.Errorf("%w: failed to resolve permissions: %w", ErrInternal, err)
 	}
-	sub.Channel = permissions.ChannelRef{ID: ch.ID, Type: ch.Type, Archived: ch.Archived}
+	sub.Channel = permissions.ChannelRef{ID: ch.ID, Type: ch.Type, Archived: ch.Archived,
+		AuthorityID: ch.Thread.ParentID, ThreadLocked: ch.Thread.Locked}
 	if ch.Type != "dm" {
 		return sub, nil
 	}
@@ -243,7 +244,7 @@ func readSubject(ctx context.Context, st Store, perms *PermissionService, userID
 	if err != nil {
 		sub = permissions.Subject{}
 	}
-	sub.Channel = permissions.ChannelRef{ID: ch.ID, Type: ch.Type, NSFW: ch.NSFW}
+	sub.Channel = permissions.ChannelRef{ID: ch.ID, Type: ch.Type, NSFW: ch.NSFW, AuthorityID: ch.Thread.ParentID}
 	switch {
 	case ch.Type == "dm":
 		ok, dmErr := st.IsDMParticipant(ctx, userID, ch.ID)
