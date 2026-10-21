@@ -27,8 +27,8 @@ type cancelOnCommitStore struct {
 	cancel context.CancelFunc
 }
 
-func (c *cancelOnCommitStore) UpdateUserProfile(ctx context.Context, userID int64, username string, avatar, displayName, about *string) error {
-	err := c.Store.UpdateUserProfile(ctx, userID, username, avatar, displayName, about)
+func (c *cancelOnCommitStore) UpdateUserProfile(ctx context.Context, userID int64, username string, avatar, displayName, about, bannerID, bannerColor *string) error {
+	err := c.Store.UpdateUserProfile(ctx, userID, username, avatar, displayName, about, nil, nil)
 	if err == nil {
 		c.cancel()
 	}

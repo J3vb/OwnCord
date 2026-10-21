@@ -88,6 +88,9 @@ type DispatchReader interface {
 	GetChannelOverridesFor(ctx context.Context, roleID, userID int64) (map[int64]db.ChannelOverride, error)
 	GetSessionWithBanStatus(ctx context.Context, tokenHash string) (*db.SessionWithBanStatus, error)
 	IsDMParticipant(ctx context.Context, userID, channelID int64) (bool, error)
+	// GetAFKChannel backs the AFK sweep (voice_afk.go): the one channel
+	// flagged AFK, nil when there is none.
+	GetAFKChannel(ctx context.Context) (*db.Channel, error)
 	// The three reads service.RequireDMNotBlocked makes through this seam.
 	IsGroupDM(ctx context.Context, channelID int64) (bool, error)
 	GetDMRecipient(ctx context.Context, channelID, userID int64) (*db.User, error)

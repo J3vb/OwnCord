@@ -39,6 +39,7 @@ func isInvalidSearchQueryError(err error) bool {
 type PurgeBroadcaster interface {
 	BroadcastChatBulkDeleted(channelID int64, messageIDs []int64)
 	BroadcastMessagePinned(channelID, messageID int64, pinned bool)
+	PinEventRow(ctx context.Context, res *service.PinEventResult)
 }
 
 // MountChannelRoutes registers all channel-related routes onto r.
@@ -398,9 +399,8 @@ func handleGetPins(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// handleSetPinned pins or unpins a message in a channel. The change is
-// broadcast to every reader so other clients (and the pinner's own other
-// devices) do not show stale pins (F5).
+// handleSetPinned pins or unpins a message. The change is broadcast to every
+// reader so no client shows stale pins (F5); a pin may also fan out a pin row.
 func handleSetPinned(svc *service.Services, broadcaster PurgeBroadcaster, pinned bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		channelID, ok := parseIDParam(w, r, "id")
@@ -417,12 +417,16 @@ func handleSetPinned(svc *service.Services, broadcaster PurgeBroadcaster, pinned
 			return
 		}
 
-		if err := svc.Messages.SetMessagePinned(r.Context(), user.ID, channelID, messageID, pinned); err != nil {
+		pinRow, err := svc.Messages.SetMessagePinned(r.Context(), user.ID, channelID, messageID, pinned)
+		if err != nil {
 			writeServiceError(r.Context(), w, err)
 			return
 		}
 		if broadcaster != nil {
 			broadcaster.BroadcastMessagePinned(channelID, messageID, pinned)
+			if pinRow != nil { // detached: the pin committed, a dropped pinner must not cost the room the row
+				broadcaster.PinEventRow(context.WithoutCancel(r.Context()), pinRow)
+			}
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}

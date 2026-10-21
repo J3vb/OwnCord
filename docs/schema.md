@@ -420,6 +420,12 @@ additionally admits one that some user's `avatar` currently equals, so an
 avatar is readable by every authenticated user for exactly as long as it is in
 use.
 
+`idx_users_banner_id` covers the same probe for `users.banner_id` (migration
+069), the profile banner image. It names an attachment the way
+`channels.dm_icon` does, and `GET /api/v1/files/{id}` admits the file to every
+authenticated user for exactly as long as a `banner_id` names it. `banner_color`
+is the optional colour, stored lower-case as `#rgb` or `#rrggbb`.
+
 ---
 
 ### sessions
@@ -625,6 +631,13 @@ the owner removing one writes `group_remove`, a leave writes `group_leave`
 (author = the leaver, none for the last leaver) and a changed name writes
 `group_rename`, and an icon set or removed writes `group_icon`, each in the same
 transaction as the change.
+
+Kind 7 is the pin row `pin_add` (WP 6.12, no migration). Its `reply_to` holds the
+pinned message id (`ON DELETE SET NULL`, so a purged target leaves the row with a
+null link), its author is the pinner and `content` is the English fallback. It is
+written by `SetMessagePinned` in the pin's own transaction, once per message per
+10 minutes and never for a re-pin. Unlike kinds 1 to 6 it is soft-deletable and
+purgeable like a message (`kind IN (0, 7)`).
 
 `channels.dm_owner_id` (migration 065) names a group DM's owner. A group with at
 least one member always has an owner who is a member: create sets it to the

@@ -46,6 +46,9 @@ const (
 	// voiceLeaveReasonGraceExpired is RT-8's reconnect grace window elapsing
 	// before a replacement socket arrived (voice_grace.go).
 	voiceLeaveReasonGraceExpired = "grace_expired"
+	// voiceLeaveReasonAFK is the AFK sweep moving a member who has been idle
+	// past the timeout to the AFK channel (EvictForAFKMove, voice_afk.go).
+	voiceLeaveReasonAFK = "afk"
 )
 
 // handleVoiceLeave processes an explicit voice_leave message or a disconnect.

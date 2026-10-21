@@ -62,6 +62,10 @@ type memberJoinUser struct {
 	About *string `json:"about"`
 	// CreatedAt is the account creation instant, "2006-01-02T15:04:05Z".
 	CreatedAt string `json:"created_at"`
+	// Banner (the /api/v1/files/<id> path) and BannerColor are omitted when
+	// unset, like members[] in ready: absent means no banner.
+	Banner      *string `json:"banner,omitempty"`
+	BannerColor *string `json:"banner_color,omitempty"`
 }
 
 type memberJoinPayload struct {
@@ -94,6 +98,10 @@ type userUpdatePayload struct {
 	// IdentityPublicKey mirrors memberUserPayload — carried so peers can
 	// detect an identity-key change (TOFU mismatch) as it happens.
 	IdentityPublicKey *string `json:"identity_public_key,omitempty"`
+	// Banner and BannerColor are always present (null = cleared) for the same
+	// reason as DisplayName and About: user_update replaces the client's copy.
+	Banner      *string `json:"banner"`
+	BannerColor *string `json:"banner_color"`
 }
 
 type memberBanPayload struct {
@@ -207,7 +215,13 @@ type voiceStatePayload struct {
 // through the normal voice_join path.
 type voiceMovedPayload struct {
 	ToChannelID int64 `json:"to_channel_id"`
+	// Reason says why the server moved the client; "afk" for the idle sweep
+	// (WP 6.10b). Omitted for a moderator move, so those bytes are unchanged.
+	Reason string `json:"reason,omitempty"`
 }
+
+// voiceMovedReasonAFK is voice_moved's reason for a move by the AFK sweep.
+const voiceMovedReasonAFK = "afk"
 
 // voiceDisconnectedPayload tells one client a moderator removed it from voice.
 type voiceDisconnectedPayload struct {
@@ -504,6 +518,8 @@ type UserUpdate struct {
 	DisplayName       *string
 	About             *string
 	IdentityPublicKey *string
+	Banner            *string // /api/v1/files/<id> path; nil = none
+	BannerColor       *string
 }
 
 // buildUserUpdate constructs a user_update broadcast for profile changes.
@@ -669,10 +685,12 @@ func buildVoiceState(state db.VoiceState) []byte {
 }
 
 // buildVoiceMoved constructs a voice_moved message for the moved client.
-func buildVoiceMoved(toChannelID int64) []byte {
+//
+// reason is "" for a moderator move and "afk" for the AFK sweep's.
+func buildVoiceMoved(toChannelID int64, reason string) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeVoiceMoved,
-		Payload: voiceMovedPayload{ToChannelID: toChannelID},
+		Payload: voiceMovedPayload{ToChannelID: toChannelID, Reason: reason},
 	})
 }
 

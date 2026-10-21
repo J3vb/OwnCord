@@ -159,6 +159,30 @@ type livePresence struct {
 	// CustomStatusExpired compares: only a connection still showing the status
 	// that expired is cleared.
 	customStatusExpiresAt string
+	// idleSince is when status last became "idle" on this connection, the zero
+	// time while it is anything else (WP 6.10b). It is kept while the status
+	// stays idle, across a custom-status change and its expiry, so the AFK sweep
+	// measures one unbroken idle stretch. A reconnect re-stamps it at connect.
+	idleSince time.Time
+}
+
+// afkNow is the clock the idle stamp and the AFK sweep read. A var so tests
+// can move time without sleeping.
+var afkNow = time.Now
+
+// nextLivePresence is the presence that follows prev when the connection takes
+// status: it keeps prev.idleSince while the status stays idle and stamps now on
+// entry to idle, and leaves it zero for every other status.
+func nextLivePresence(prev *livePresence, status string, customStatus *string, expiresAt string, now time.Time) *livePresence {
+	next := &livePresence{status: status, customStatus: customStatus, customStatusExpiresAt: expiresAt}
+	if !isIdleStatus(status) {
+		return next
+	}
+	next.idleSince = now
+	if prev != nil && isIdleStatus(prev.status) && !prev.idleSince.IsZero() {
+		next.idleSince = prev.idleSince
+	}
+	return next
 }
 
 // livePresence returns the connection's live presence, a zero value (status
@@ -171,8 +195,17 @@ func (c *Client) livePresence() livePresence {
 }
 
 // setLivePresence records the presence this connection just stamped or chose.
+// The idle stamp is derived from the previous value, so the swap is a
+// compare-and-swap loop: two writers (a presence_update and the connect stamp)
+// cannot both read the same prev and drop each other's idleSince.
 func (c *Client) setLivePresence(status string, customStatus *string, expiresAt string) {
-	c.presence.Store(&livePresence{status: status, customStatus: customStatus, customStatusExpiresAt: expiresAt})
+	now := afkNow()
+	for {
+		prev := c.presence.Load()
+		if c.presence.CompareAndSwap(prev, nextLivePresence(prev, status, customStatus, expiresAt, now)) {
+			return
+		}
+	}
 }
 
 // sendMsg queues a normal-priority message (chat messages, reactions, channel events).

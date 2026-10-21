@@ -55,13 +55,31 @@ func (h *Hub) EvictForModeratorMove(ctx context.Context, userID, channelID int64
 	if c == nil {
 		return h.leaveParkedVoice(ctx, txn, txn.takeParked(channelID), voiceLeaveReasonModerator)
 	}
+	return h.evictAndStash(ctx, txn, c, channelID,
+		modFlagStash{muted: serverMuted, deafened: serverDeafened, mutedBy: serverMutedBy},
+		voiceLeaveReasonModerator)
+}
+
+// modFlagStash is the moderator mute/deafen an eviction carries to the
+// member's own re-join.
+type modFlagStash struct {
+	muted, deafened bool
+	mutedBy         *int64
+}
+
+// evictAndStash is the body shared by the moderator move and the AFK move:
+// when c is still in channelID it clears the slot, stashes flags on c if any
+// is set and runs the voice-leave routine with reason. The caller holds txn
+// (c's membership lock), so the stash exists exactly when the eviction
+// happened. It reports false, with nothing stashed, when c has left channelID.
+func (h *Hub) evictAndStash(ctx context.Context, txn *voiceTxn, c *Client, channelID int64, flags modFlagStash, reason string) bool {
 	snap, ok := txn.clearIfChannel(c, channelID)
 	if !ok {
 		return false
 	}
-	if serverMuted || serverDeafened {
-		txn.stashModFlags(c, serverMuted, serverDeafened, serverMutedBy)
+	if flags.muted || flags.deafened {
+		txn.stashModFlags(c, flags.muted, flags.deafened, flags.mutedBy)
 	}
-	h.finishVoiceLeave(ctx, txn, c, channelID, snap.joinToken, voiceLeaveReasonModerator)
+	h.finishVoiceLeave(ctx, txn, c, channelID, snap.joinToken, reason)
 	return true
 }
