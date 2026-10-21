@@ -1,0 +1,205 @@
+{
+  "journey": "member-timeout",
+  "connections": {
+    "a": [
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "timeouts": [
+              {
+                "expires_at": "<ts:string>",
+                "user_id": "<id:number>"
+              }
+            ]
+          },
+          "type": "member_timeouts"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "timeouts": []
+          },
+          "type": "member_timeouts"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ],
+    "b": [
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "expires_at": "<ts:string>",
+            "id": "<id:number>",
+            "kind": "timeout",
+            "reason": "fixture timeout"
+          },
+          "type": "mod_action"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "timeouts": [
+              {
+                "expires_at": "<ts:string>",
+                "user_id": "<id:number>"
+              }
+            ]
+          },
+          "type": "member_timeouts"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "afk": false,
+            "can_delete_others": false,
+            "can_moderate_voice": false,
+            "can_pin": false,
+            "can_react": false,
+            "can_send": false,
+            "category": "",
+            "id": "<id:number>",
+            "name": "general",
+            "nsfw": false,
+            "position": 0,
+            "private": false,
+            "slow_mode": 0,
+            "topic": "",
+            "type": "text",
+            "voice_max_users": 0,
+            "voice_max_video": 25
+          },
+          "type": "channel_create"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "afk": false,
+            "can_delete_others": false,
+            "can_moderate_voice": false,
+            "can_pin": false,
+            "can_react": false,
+            "can_send": false,
+            "category": "",
+            "id": "<id:number>",
+            "name": "Voice",
+            "nsfw": false,
+            "position": 1,
+            "private": false,
+            "slow_mode": 0,
+            "topic": "",
+            "type": "voice",
+            "voice_max_users": 0,
+            "voice_max_video": 25
+          },
+          "type": "channel_create"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "expires_at": "<ts:null>",
+            "id": "<id:number>",
+            "kind": "timeout",
+            "reason": ""
+          },
+          "type": "mod_action"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "timeouts": []
+          },
+          "type": "member_timeouts"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "afk": false,
+            "can_delete_others": false,
+            "can_moderate_voice": false,
+            "can_pin": false,
+            "can_react": true,
+            "can_send": true,
+            "category": "",
+            "id": "<id:number>",
+            "name": "general",
+            "nsfw": false,
+            "position": 0,
+            "private": false,
+            "slow_mode": 0,
+            "topic": "",
+            "type": "text",
+            "voice_max_users": 0,
+            "voice_max_video": 25
+          },
+          "type": "channel_create"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "afk": false,
+            "can_delete_others": false,
+            "can_moderate_voice": false,
+            "can_pin": false,
+            "can_react": true,
+            "can_send": true,
+            "category": "",
+            "id": "<id:number>",
+            "name": "Voice",
+            "nsfw": false,
+            "position": 1,
+            "private": false,
+            "slow_mode": 0,
+            "topic": "",
+            "type": "voice",
+            "voice_max_users": 0,
+            "voice_max_video": 25
+          },
+          "type": "channel_create"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ]
+  }
+}
