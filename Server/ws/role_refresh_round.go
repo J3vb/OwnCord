@@ -46,7 +46,7 @@ type roleFrame struct {
 // roleChannels is a round's channel snapshot.
 type roleChannels struct {
 	servers []roleChannel
-	dms     []int64
+	dms     map[int64]struct{} // DM ids: a role change never revokes these
 	known   map[int64]struct{} // every channel id in the snapshot
 }
 
@@ -210,11 +210,11 @@ func (h *Hub) listRoleChannels(ctx context.Context) (*roleChannels, bool) {
 		slog.Warn("hub: RefreshAllChannelVisibility could not list channels", "err", err)
 		return nil, false
 	}
-	rc := &roleChannels{known: make(map[int64]struct{}, len(channels))}
+	rc := &roleChannels{known: make(map[int64]struct{}, len(channels)), dms: make(map[int64]struct{})}
 	for i := range channels {
 		rc.known[channels[i].ID] = struct{}{}
 		if channels[i].Type == "dm" {
-			rc.dms = append(rc.dms, channels[i].ID)
+			rc.dms[channels[i].ID] = struct{}{}
 			continue
 		}
 		rc.servers = append(rc.servers, roleChannel{
@@ -264,13 +264,19 @@ func (h *Hub) prepareUserVisibility(ctx context.Context, uid int64, rc *roleChan
 // the permission cache. It returns the frame to send for each channel (a
 // channel_create with this user's affordances, or a channel_delete) and the
 // set of channels the user may keep a topic on: the visible ones plus every
-// DM, which a role change never revokes.
+// DM the user holds, which a role change never revokes.
 func (h *Hub) roleRefreshVerdicts(ctx context.Context, uid int64, rc *roleChannels) (frames []roleFrame, allowed map[int64]bool, ok bool) {
 	ctx, cancel := context.WithTimeout(ctx, roleRefreshUserBudget)
 	defer cancel()
-	allowed = make(map[int64]bool, len(rc.servers)+len(rc.dms))
-	for _, id := range rc.dms {
-		allowed[id] = true
+	allowed = make(map[int64]bool, len(rc.servers))
+	// Only the DMs this user holds a topic on matter, so the cost follows
+	// the user's subscriptions rather than every DM on the server.
+	for _, topic := range h.pubsub.TopicsForClient(uid) {
+		if id := channelTopicID(topic); id != 0 {
+			if _, dm := rc.dms[id]; dm {
+				allowed[id] = true
+			}
+		}
 	}
 	frames = make([]roleFrame, 0, len(rc.servers))
 	for _, e := range rc.servers {
