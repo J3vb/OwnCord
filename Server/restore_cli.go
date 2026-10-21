@@ -140,29 +140,9 @@ func replaceLiveDatabase(source, dbPath, backupDir string) int {
 		return 1
 	}
 
-	// Preserve the message-delivery cutoff across the replacement, exactly as
-	// the admin restore path does: a restored database may have lost the
-	// receipts for messages this server already accepted. The apply takes the
-	// floors again (they are idempotent max-floors), but the unreadable-live
-	// case moves the live files aside first, so only this call can read them.
-	if err := db.AdvanceMessageDeliveryFloorForRestore(dbPath); err != nil {
-		fmt.Fprintf(os.Stderr, "error: could not preserve message retry protection — database untouched: %v\n", err)
+	if !preserveFloors(dbPath) {
 		dropSafetyCopy(safety)
 		return 1
-	}
-
-	// Carry the live event sequence floor across the replacement as well, so
-	// the next boot reserves above what the old database handed out. A floor
-	// that cannot be stored refuses the restore; a missing or unreadable live
-	// database only warns.
-	err := db.CarryWSSeqFloorForRestore(context.Background(), dbPath)
-	if errors.Is(err, db.ErrWSSeqFloorNotStored) {
-		fmt.Fprintf(os.Stderr, "error: could not preserve the event sequence floor — database untouched: %v\n", err)
-		dropSafetyCopy(safety)
-		return 1
-	}
-	if err != nil && !onlyMissingFile(err) {
-		fmt.Fprintf(os.Stderr, "warning: could not carry the live event sequence floor across the restore (%v)\n", err)
 	}
 
 	// With a safety copy the apply moves the live database and its sidecars
@@ -230,6 +210,35 @@ func replaceLiveDatabase(source, dbPath, backupDir string) int {
 	}
 	fmt.Println("start the server to load the restored data")
 	return 0
+}
+
+// preserveFloors carries the message retry cutoff and the event sequence floor
+// past the replacement. It reports false, having said why, when the restore
+// must be refused; nothing has been moved yet at that point.
+func preserveFloors(dbPath string) bool {
+	// Preserve the message-delivery cutoff across the replacement, exactly as
+	// the admin restore path does: a restored database may have lost the
+	// receipts for messages this server already accepted. The apply takes the
+	// floors again (they are idempotent max-floors), but the unreadable-live
+	// case moves the live files aside first, so only this call can read them.
+	if err := db.AdvanceMessageDeliveryFloorForRestore(dbPath); err != nil {
+		fmt.Fprintf(os.Stderr, "error: could not preserve message retry protection — database untouched: %v\n", err)
+		return false
+	}
+
+	// Carry the live event sequence floor across the replacement as well, so
+	// the next boot reserves above what the old database handed out. A floor
+	// that cannot be stored refuses the restore; a missing or unreadable live
+	// database only warns.
+	err := db.CarryWSSeqFloorForRestore(context.Background(), dbPath)
+	if errors.Is(err, db.ErrWSSeqFloorNotStored) {
+		fmt.Fprintf(os.Stderr, "error: could not preserve the event sequence floor — database untouched: %v\n", err)
+		return false
+	}
+	if err != nil && !onlyMissingFile(err) {
+		fmt.Fprintf(os.Stderr, "warning: could not carry the live event sequence floor across the restore (%v)\n", err)
+	}
+	return true
 }
 
 // moveAside renames dbPath and its -wal and -shm to aside plus the same
