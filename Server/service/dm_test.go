@@ -52,6 +52,70 @@ func TestDMService_CreateDM_AllowsLapsedTemporaryBan(t *testing.T) {
 	}
 }
 
+// setRegistrationStatus moves a seeded user to the given registration status.
+func setRegistrationStatus(t *testing.T, database *db.DB, userID int64, status string) {
+	t.Helper()
+	if _, err := database.ExecContext(context.Background(),
+		`UPDATE users SET registration_status = ? WHERE id = ?`, status, userID); err != nil {
+		t.Fatalf("set registration_status: %v", err)
+	}
+}
+
+// Only active accounts can be reached: a pending or denied applicant gets the
+// same 404 body as an id that does not exist, and no rows are written.
+func TestCreateDM_NonActiveRecipientNotFound(t *testing.T) {
+	for _, status := range []string{db.RegistrationPending, db.RegistrationDenied} {
+		t.Run(status, func(t *testing.T) {
+			database := newTestDB(t)
+			seedUser(t, database, &db.User{ID: 1, Username: "alice"})
+			seedUser(t, database, &db.User{ID: 2, Username: "bob"})
+			setRegistrationStatus(t, database, 2, status)
+
+			svc := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
+			ctx := context.Background()
+			_, err := svc.CreateDM(ctx, 1, 2)
+			if !errors.Is(err, ErrNotFound) {
+				t.Fatalf("CreateDM to a %s recipient = %v, want ErrNotFound", status, err)
+			}
+			_, missingErr := svc.CreateDM(ctx, 1, 999)
+			if !errors.Is(missingErr, ErrNotFound) || err.Error() != missingErr.Error() {
+				t.Fatalf("body = %q, want the unknown-id body %q", err, missingErr)
+			}
+			for _, table := range []string{"channels", "dm_participants", "dm_open_state"} {
+				if n := countRows(t, database, `SELECT COUNT(*) FROM `+table); n != 0 {
+					t.Errorf("%s rows = %d, want 0", table, n)
+				}
+			}
+		})
+	}
+}
+
+// An application approved between two calls: the first call is a 404 and
+// leaves nothing behind, the second creates exactly one channel.
+func TestCreateDM_ApprovedBetweenCalls(t *testing.T) {
+	database := newTestDB(t)
+	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
+	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
+	setRegistrationStatus(t, database, 2, db.RegistrationPending)
+
+	svc := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
+	ctx := context.Background()
+	if _, err := svc.CreateDM(ctx, 1, 2); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("first CreateDM = %v, want ErrNotFound", err)
+	}
+	if n := countRows(t, database, `SELECT COUNT(*) FROM channels`); n != 0 {
+		t.Fatalf("channels after refused create = %d, want 0", n)
+	}
+	setRegistrationStatus(t, database, 2, db.RegistrationActive)
+	result, err := svc.CreateDM(ctx, 1, 2)
+	if err != nil || result.Channel == nil {
+		t.Fatalf("second CreateDM = %v, %v, want a channel", result, err)
+	}
+	if n := countRows(t, database, `SELECT COUNT(*) FROM channels`); n != 1 {
+		t.Errorf("channels = %d, want 1", n)
+	}
+}
+
 func TestDMService_CreateGroupDM_RefusesBannedRecipient(t *testing.T) {
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
