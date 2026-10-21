@@ -792,3 +792,9 @@ func (h *Hub) ReplaceHandlerForTest(typ string, fn func(ctx context.Context) Res
 func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMessage, reqID string) {
 	h.handleVoiceJoinFrame(ctx, ctx, c, payload, reqID)
 }
+
+// NewTestDMEvent builds the sequenced DM event the real handlers emit, for
+// external tests that cannot implement the sealed Event interface themselves.
+func NewTestDMEvent(evType string, channelID int64, participantIDs []int64, payload []byte) Event {
+	return dmEvt{evType: evType, channelID: channelID, participantIDs: participantIDs, payload: payload}
+}

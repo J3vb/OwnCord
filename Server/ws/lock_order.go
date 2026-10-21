@@ -76,8 +76,7 @@
 //	                                                          PubSub.mu, Client.mu (SendToUser, hub_broadcast.go:
 //	                                                          294-299,354; registerNow, hub_registry.go:89),
 //	                                                          EventRingBuffer.mu, presenceRepairState.mu,
-//	                                                          queueDropState.mu, plugin.EventSink.mu
-//	                                                          (hub_broadcast.go:440-444), and the leaves below
+//	                                                          queueDropState.mu, and the leaves below
 //	6     Hub.keyHolderMu RW         hub.go:228               Hub.mu (R), voiceSlot.voiceMu
 //	                                                          (voice_e2ee.go:44-60)
 //	6     Hub.settingsMu RW          hub.go:219               a DB read under the write lock
@@ -112,8 +111,6 @@
 //
 // # Known exceptions to the rule
 //
-//   - plugin.EventSink.Dispatch runs under Hub.seqMu (hub_broadcast.go:440-444).
-//     It is inert: no production caller of Subscribe exists (plugin/host_events.go).
 //   - Hub.settingsMu is held for writing across a DB read (hub_settings.go:27-35).
 //     It is the one state lock that does I/O. The read is bounded by a context.
 //   - slog on a non-error path under a lock: Hub.seqMu and Hub.mu in registerNow
