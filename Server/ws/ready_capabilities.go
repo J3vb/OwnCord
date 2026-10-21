@@ -14,5 +14,6 @@ func readyCapabilities(retryFloorMS int64) map[string]any {
 		"user_notes":                   true,
 		"profile_banners":              true,
 		"dm_privacy":                   true,
+		"polls":                        true,
 	}
 }

@@ -39,6 +39,10 @@ var (
 	// holds db.MaxDistinctReactions different ones. It is always wrapped together
 	// with ErrBadRequest, which it refines into the REACTION_LIMIT wire code.
 	ErrReactionLimit = errors.New("reaction limit reached")
+	// ErrPollEnded means a vote or an end reached a poll that was already ended
+	// or whose time ran out. It is always wrapped together with ErrBadRequest,
+	// which it refines into the POLL_ENDED wire code.
+	ErrPollEnded = errors.New("poll ended")
 	// ErrTimedOut is a 403 TIMED_OUT: the actor has an active moderator
 	// timeout row (B5-9) and cannot send or edit messages, add reactions,
 	// join voice, start a new DM, create or rename a group DM, ring a DM

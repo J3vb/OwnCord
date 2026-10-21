@@ -27,6 +27,16 @@ type pollFrame struct {
 		Forward         any      `json:"forward"`
 		Code            string   `json:"code"`
 		Poll            *pollObj `json:"poll"`
+		Version         int64    `json:"version"`
+		TotalVoters     int64    `json:"total_voters"`
+		Counts          []struct {
+			AnswerID int64 `json:"answer_id"`
+			Count    int64 `json:"count"`
+		} `json:"counts"`
+		Ended     bool    `json:"ended"`
+		EndedAt   *string `json:"ended_at"`
+		UserID    int64   `json:"user_id"`
+		AnswerIDs []int64 `json:"answer_ids"`
 	} `json:"payload"`
 }
 

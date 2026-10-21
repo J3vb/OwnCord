@@ -17,6 +17,7 @@ import (
 )
 
 type forwardHarness struct {
+	svc                *service.Services
 	hub                *ws.Hub
 	database           *db.DB
 	alice, bob         *db.User
@@ -51,7 +52,7 @@ func newForwardHarness(t *testing.T) *forwardHarness {
 	go hub.Run()
 	t.Cleanup(hub.Stop)
 
-	h := &forwardHarness{hub: hub, database: database}
+	h := &forwardHarness{svc: svc, hub: hub, database: database}
 	h.alice = seedOwnerUser(t, database, "fwd-alice")
 	h.bob = seedMemberUser(t, database, "fwd-bob")
 	h.srcChan = seedTestChannel(t, database, "fwd-source")

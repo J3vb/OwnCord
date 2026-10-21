@@ -16,6 +16,8 @@ const (
 	MsgTypeChatSend          = "chat_send"
 	MsgTypeChatForward       = "chat_forward" // forward one message to one target channel or DM (WP 6.9a)
 	MsgTypePollCreate        = "poll_create"  // post a poll as a message (WP 6.9b)
+	MsgTypePollVote          = "poll_vote"    // set the sender's whole selection on a poll, [] removes the vote (WP 6.9b)
+	MsgTypePollEnd           = "poll_end"     // end a poll now: its author, or anyone who may delete the message (WP 6.9b)
 	MsgTypeChatEdit          = "chat_edit"
 	MsgTypeChatDelete        = "chat_delete"
 	MsgTypeReactionAdd       = "reaction_add"
@@ -54,11 +56,14 @@ const (
 	MsgTypeChatSendOK          = "chat_send_ok"
 	MsgTypeChatForwardOK       = "chat_forward_ok"
 	MsgTypePollCreateOK        = "poll_create_ok"
+	MsgTypePollVoteOK          = "poll_vote_ok"
+	MsgTypePollEndOK           = "poll_end_ok"
 	MsgTypeChatEdited          = "chat_edited"
 	MsgTypeChatDeleted         = "chat_deleted"
 	MsgTypeChatPinned          = "chat_pinned" // a message was pinned or unpinned in a channel the recipient can read
 	MsgTypeChatBulkDeleted     = "chat_bulk_deleted"
 	MsgTypeReactionUpdate      = "reaction_update"
+	MsgTypePollUpdate          = "poll_update" // a poll's full counts and version after a vote or its end (WP 6.9b)
 	MsgTypeTyping              = "typing"
 	MsgTypePresence            = "presence"
 	MsgTypePresenceBatch       = "presence_batch" // many users' presence in one frame: the connect/disconnect coalescing window, or a full snapshot for a client whose queue dropped presence

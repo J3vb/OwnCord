@@ -283,7 +283,7 @@ func (f *frameRefs) userIn(set map[int64]uint64) (int64, bool) { return userIn(f
 
 // messageIn reports whether the frame is a message-family frame about a key
 // of set: payload.id (chat_message), payload.message_id (chat_edited,
-// chat_deleted, reaction_update), one of payload.ids (chat_bulk_deleted), or
+// chat_deleted, reaction_update, poll_update), one of payload.ids (chat_bulk_deleted), or
 // the replied-to message.
 func messageIn[V any](f *frameRefs, set map[int64]V) bool {
 	if _, ok := messageFamily[f.Type]; !ok {
