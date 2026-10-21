@@ -2317,6 +2317,38 @@ announcing client did not send them (or sent an invalid `video_decode`):
 }
 ```
 
+### voice_watch (Client -> Server)
+
+The whole set of users whose **screen share** this participant watches now
+(cameras are not counted). It is idempotent, so a lost or reordered frame
+heals on the next send; clients re-send after a join and after a resume. An
+empty list is valid and means "watching nothing".
+
+```json
+{ "type": "voice_watch", "payload": { "user_ids": [2, 5] } }
+```
+
+The sender must be in a voice channel (otherwise `VOICE_ERROR`). More than 16
+ids answers `BAD_PAYLOAD`. The server drops ids that are not positive and the
+sender's own id, removes duplicates and sorts ascending; it does not check
+that the ids are in the channel or sharing (clients filter on display).
+Rate limited at 10 per 5 seconds per user (`RATE_LIMITED`). The set lives in
+memory on the member's voice slot, survives a resume, and is cleared on leave
+and on a new join.
+
+### voice_watching (Server -> Client, broadcast to voice channel)
+
+Relayed to the other members of the same voice channel only (never the
+sender, nobody outside the channel) when a member's set is stored. It is an
+unsequenced pub/sub frame like `voice_e2ee_announce`: no `seq`, never
+replayed. The server therefore re-sends it on join and on resume, one frame
+per other member whose set is non-empty. There is no frame on leave; peers
+drop that user's entry on `voice_leave`. `user_ids` is always an array.
+
+```json
+{ "type": "voice_watching", "payload": { "user_id": 1, "user_ids": [2, 5] } }
+```
+
 ### voice_e2ee_offer (Client -> Server)
 
 The key holder wraps the room key for a specific participant:
@@ -2874,6 +2906,7 @@ tables below add per-type behavioral notes.
 | `voice_token_refresh` | 1/60sec                              | Must be in voice                                                |
 | `voice_e2ee_announce` | 5/sec                                | ECDH pubkey announce                                            |
 | `voice_e2ee_offer`    | 64/sec outer, 5/sec per target       | Wrapped room key to target (budgeted per key rotation)          |
+| `voice_watch`         | 10/5sec                              | Must be in voice; screen shares watched, max 16 ids             |
 | `call_ring`           | 1/3sec                               | DM participants only; fans out as `call_incoming`               |
 | `call_decline`        | 1/3sec                               | DM participants only; fans out as `call_declined`               |
 | `chat_command`        | 5/sec                                | Plugin slash command; max 64 args; broadcast gated by `CanPost` |
@@ -2919,6 +2952,7 @@ tables below add per-type behavioral notes.
 | `call_declined`       | No       | Direct to each other DM participant                                                                    |
 | `voice_e2ee_announce` | No       | Voice channel (excl. sender)                                                                           |
 | `voice_e2ee_offer`    | No       | Direct to target participant                                                                           |
+| `voice_watching`      | No       | Voice channel (excl. sender)                                                                           |
 | `server_restart`      | Yes      | All clients                                                                                            |
 | `mod_queue`           | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders only                                              |
 | `mod_action`          | No       | Direct to the live target only                                                                         |

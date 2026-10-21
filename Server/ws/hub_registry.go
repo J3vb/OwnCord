@@ -198,6 +198,9 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool, txn *voi
 	// currently in a voice channel, which is the common case (fresh login).
 	if voiceChID := c.voice.channel(); voiceChID != 0 {
 		h.sendVoicePeerKeys(c, voiceChID)
+		// Same for who-watches-what (voice_watching, also unsequenced). No
+		// self re-relay: the resumed client re-sends its own set.
+		h.sendVoicePeerWatching(c, voiceChID)
 		// Re-relay THIS client's own stored key back onto VoiceTopic (OC-0316).
 		// voice_e2ee_offer (the room-key-bearing message) is a targeted,
 		// unsequenced send that is silently dropped if this socket was down

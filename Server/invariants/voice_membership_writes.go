@@ -18,6 +18,7 @@ var voiceSlotFields = map[string]bool{
 	"voiceJoinToken":           true,
 	"voiceJoinCompleted":       true,
 	"e2ee":                     true,
+	"watching":                 true,
 	"pendingModServerMuted":    true,
 	"pendingModServerDeafened": true,
 	"pendingModServerMutedBy":  true,
