@@ -1,0 +1,109 @@
+{
+  "journey": "moderation-queue",
+  "connections": {
+    "a": [
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "report_id": "<id:string>",
+            "state": "open"
+          },
+          "type": "mod_queue"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "appeal_id": "<id:string>",
+            "state": "open"
+          },
+          "type": "mod_queue"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "appeal_id": "<id:string>",
+            "state": "assigned"
+          },
+          "type": "mod_queue"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "appeal_id": "<id:string>",
+            "state": "overturned"
+          },
+          "type": "mod_queue"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ],
+    "b": [
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "expires_at": "<ts:null>",
+            "id": "<id:number>",
+            "kind": "warning",
+            "reason": "fixture warning"
+          },
+          "type": "mod_action"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "decision_note": null,
+            "id": "<id:string>",
+            "state": "assigned"
+          },
+          "type": "appeal_status"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "decision_note": "fixture decision",
+            "id": "<id:string>",
+            "state": "overturned"
+          },
+          "type": "appeal_status"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ]
+  }
+}
