@@ -3,7 +3,6 @@ package ws
 import (
 	"context"
 	"log/slog"
-	"sync/atomic"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -461,16 +460,7 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 	}()
 
 	if pluginMsg != nil {
-		if sink := h.pluginSink.Load(); sink != nil {
-			eventType := extractEventType(pluginMsg)
-			if eventType == "" {
-				eventType = "broadcast"
-			}
-			if hook := pluginDispatchHook.Load(); hook != nil {
-				(*hook)(h, pluginMsg)
-			}
-			sink.Dispatch(context.Background(), eventType, pluginMsg)
-		}
+		h.dispatchToPlugins(pluginMsg)
 	}
 
 	// Instrumentation runs after seqMu is released: a metrics provider must
@@ -490,6 +480,3 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 			"channel_id", bm.channelID, "delivered", delivered, "seq", seq)
 	}
 }
-
-// pluginDispatchHook is a test seam called right before the plugin sink.
-var pluginDispatchHook atomic.Pointer[func(h *Hub, msg []byte)]
