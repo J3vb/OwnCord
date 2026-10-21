@@ -244,7 +244,9 @@ describe("Server/admin/static — AFK card (WP 6.10d)", () => {
     const calls: FetchCall[] = [];
     const chans = CHANNELS.map((c) => (c.id === 2 ? { ...c, afk: true } : c));
     const perms = role(0, CONNECT_VOICE);
-    perms.roles[1].role_name = "<img src=x onerror=alert(1)>";
+    const member = perms.roles[1];
+    if (!member) throw new Error("expected a Member role");
+    member.role_name = "<img src=x onerror=alert(1)>";
     const b = await boot(calls, responder({ channels: chans, perms }));
     dom = b.dom;
     await mountSettings(b.bridge, b.doc);
