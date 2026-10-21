@@ -248,6 +248,11 @@ export const messagingText = defineCatalog("messaging", {
   "header.topicTitle": "Topic of {channel}",
   "header.search": "Search...",
 
+  "poll.button": "Poll",
+  "poll.buttonTitle": "Create a poll",
+
+  "poll.loadFailed": "Couldn't open the poll dialog",
+
   "jump.channelUnavailable": "That channel isn't available",
   "jump.gone": "That message no longer exists",
   "jump.failed": "Couldn't jump to that message",

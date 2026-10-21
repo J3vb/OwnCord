@@ -232,6 +232,10 @@
   background: var(--bg-hover);
   color: var(--text-normal);
 }
+.poll-btn {
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+}
 .msg-textarea {
   flex: 1;
   background: transparent;

@@ -44,6 +44,7 @@ const gifPickerScreen = createLazyScreen("gif-picker", () => import("@components
 
 export { wrapWithMarker };
 import { authStore } from "@stores/auth.store";
+import { pollsEnabled } from "@lib/serverCapabilities";
 import { messagingText } from "../i18n/messaging";
 import type { GifApi, GifFavoritesApi } from "@lib/gifProvider";
 
@@ -77,6 +78,11 @@ export interface MessageInputOptions {
    *  once. Best effort: a rejection is ignored. */
   readonly onDiscardUpload?: (id: string) => Promise<void>;
   readonly onTyping: () => void;
+  /**
+   * Opens the poll dialog (WP 6.9b). Omit to leave the Poll button out; it is
+   * also left out on a server that does not advertise polls.
+   */
+  readonly onCreatePoll?: () => void;
   /** The draft's text or reply changed; read it back with peekDraft(). */
   readonly onDraftChange?: () => void;
   /** Initial disabled reason (e.g. read-only / no-permission / offline). */
@@ -1559,6 +1565,23 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (gifUnavailable) {
       markGifUnavailable(gifBtn, messagingText("gif.disabled"));
     }
+    // The Poll button (WP 6.9b): only where the host can open the dialog and the server has polls.
+    const createPoll = options.onCreatePoll;
+    const pollBtn =
+      createPoll !== undefined && pollsEnabled()
+        ? createElement(
+            "button",
+            {
+              class: "input-btn poll-btn",
+              type: "button",
+              title: messagingText("poll.buttonTitle"),
+              "aria-label": messagingText("poll.buttonTitle"),
+              "data-testid": "poll-btn",
+            },
+            messagingText("poll.button"),
+          )
+        : null;
+    pollBtn?.addEventListener("click", () => createPoll?.(), { signal });
     const sendBtn = createElement("button", {
       class: "input-btn send-btn",
       "aria-label": messagingText("send.label"),
@@ -1568,6 +1591,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // Register interactive controls so the disabled state can toggle them.
     controlButtons.length = 0;
     controlButtons.push(sendBtn, emojiBtn, gifBtn);
+    if (pollBtn !== null) controlButtons.push(pollBtn);
     if (options.onUploadFile !== undefined) {
       controlButtons.push(attachBtn);
       disposable.onStoreChange(
@@ -1914,7 +1938,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       "data-testid": "char-counter",
     });
     charCounter.hidden = true;
-    appendChildren(inputBox, attachBtn, textarea, emojiBtn, gifBtn, charCounter, sendBtn);
+    appendChildren(inputBox, attachBtn, textarea, emojiBtn, gifBtn);
+    if (pollBtn !== null) inputBox.appendChild(pollBtn);
+    appendChildren(inputBox, charCounter, sendBtn);
     slowModeNoteEl = createElement("div", {
       class: "composer-slow-note",
       "data-testid": "slow-mode-note",

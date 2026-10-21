@@ -17,6 +17,8 @@ import type {
   ChatDeletedPayload,
   ChatBulkDeletedPayload,
   ReactionUpdatePayload,
+  PollUpdatePayload,
+  PollVoteOkPayload,
   MessageUser,
   Attachment,
   MessageResponse,
@@ -57,6 +59,7 @@ import {
   reduceRollbackReaction,
   reduceUpdateReaction,
 } from "../features/messaging/reactionState";
+import { reducePollUpdate, reducePollVoteOk } from "@lib/pollState";
 
 export type { Message, PendingReaction, MessagesState } from "../features/messaging/messageModel";
 /**
@@ -465,6 +468,16 @@ export function rollbackReaction(correlationId: string): boolean {
 /** Update reactions on a message from a reaction_update WS event. */
 export function updateReaction(payload: ReactionUpdatePayload, currentUserId: number): void {
   messagesStore.setState((prev) => reduceUpdateReaction(prev, payload, currentUserId));
+}
+
+/** Apply a poll_update (WP 6.9b): counts in version order, the viewer's own selection by its own watermark. */
+export function updatePoll(payload: PollUpdatePayload, currentUserId: number): void {
+  messagesStore.setState((prev) => reducePollUpdate(prev, payload, currentUserId));
+}
+
+/** Apply the sender's poll_vote_ok: their stored selection, ahead of the poll_update that carries the counts. */
+export function applyPollVoteOk(payload: PollVoteOkPayload): void {
+  messagesStore.setState((prev) => reducePollVoteOk(prev, payload));
 }
 
 /** Reset the entire store to its initial (empty) state — e.g. on logout. */
