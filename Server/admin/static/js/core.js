@@ -83,9 +83,7 @@ async function apiRes(method,path,body,headers){
   if(!res.ok){
     /* status and code ride on the Error so a caller can tell a conflict from a
        failure without parsing the message. */
-    const err=new Error(data.message||res.statusText);
-    err.status=res.status;err.code=data.error;
-    throw err;
+    throw Object.assign(new Error(data.message||res.statusText),{status:res.status,code:data.error});
   }
   if(method==='GET')noteBadgeSource(path,data);
   return{data,res};
