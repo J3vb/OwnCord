@@ -527,6 +527,11 @@ function onDocumentMouseUp(e: MouseEvent): void {
   if (!retargeted) {
     return;
   }
+  // As for a category drop, the permission is read again on release: a demotion
+  // mid-drag drops the move before it touches the store or the API.
+  if (!canManageChannels()) {
+    return;
+  }
 
   const target = findDropTarget(drag, e);
   if (target === null || (target.kind === "row" && target.channelId === drag.channelId)) {

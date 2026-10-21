@@ -640,6 +640,9 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         // replace the channel object but confirm nothing. A request that failed
         // only because its response was lost is covered by the reconnect
         // resync, so it needs no reconciliation here.
+        // The moved channel's category PATCH and its peers' position PATCHes run
+        // concurrently. That is safe only because the server does not enforce
+        // unique positions: no ordering between them can make one collide.
         const touched = new Set<number>();
         const unsubscribe = ws.on("channel_update", (payload) => {
           touched.add(payload.id);

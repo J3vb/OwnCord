@@ -491,6 +491,25 @@ describe("text above voice across categories", () => {
   });
 });
 
+describe("a channel drag when the viewer loses MANAGE_CHANNELS mid-drag", () => {
+  it("is dropped on release: no callback and no store write", () => {
+    signIn("owner");
+    seed([...A, ...B], CATEGORIES);
+    const h = handlers();
+    const sb = build(SPECS, h, h.lifetime);
+
+    sb.rows.get(1)!.dispatchEvent(mouse("mousedown", 25));
+    sb.rows.get(1)!.dispatchEvent(mouse("mousemove", 45));
+    signIn("member");
+    document.dispatchEvent(mouse("mouseup", 104));
+
+    expect(h.onReorder).not.toHaveBeenCalled();
+    expect(stored(1)).toMatchObject({ categoryId: 10, position: 0 });
+    expect(sb.rows.get(1)?.classList.contains("dragging")).toBe(false);
+    expect(document.body.classList.contains("channel-reordering")).toBe(false);
+  });
+});
+
 describe("a legacy name-only category", () => {
   it("is not a drop target for a move (it has no id to file under)", () => {
     signIn("owner");
