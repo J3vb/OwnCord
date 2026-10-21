@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
@@ -340,10 +339,10 @@ func (d *DB) PurgeChannelMessagesWithAction(ctx context.Context, channelID, befo
 // already-open tx so callers can extend the same transaction (the ledger
 // row PurgeChannelMessagesWithAction adds).
 func purgeChannelMessagesTx(ctx context.Context, tx *sql.Tx, channelID, before int64, limit int) ([]int64, error) {
-	sel := `SELECT id FROM messages WHERE channel_id = ? AND deleted = 0 AND kind = 0 ORDER BY id DESC LIMIT ?`
+	sel := `SELECT id FROM messages WHERE channel_id = ? AND deleted = 0 AND kind IN (0, 7) ORDER BY id DESC LIMIT ?`
 	args := []any{channelID, limit}
 	if before > 0 {
-		sel = `SELECT id FROM messages WHERE channel_id = ? AND id < ? AND deleted = 0 AND kind = 0 ORDER BY id DESC LIMIT ?`
+		sel = `SELECT id FROM messages WHERE channel_id = ? AND id < ? AND deleted = 0 AND kind IN (0, 7) ORDER BY id DESC LIMIT ?`
 		args = []any{channelID, before, limit}
 	}
 
@@ -734,7 +733,7 @@ func (d *DB) UpdateReadState(ctx context.Context, userID, channelID, lastReadMes
 }
 
 // GetChannelUnreadCounts returns per-channel unread counts and last message IDs
-// for a given user. Text and announcement channels are included, with 0,0 for
+// for a given user. Text, announcement and voice channels are included, with 0,0 for
 // channels that have no messages. DM channels are included too, but only the
 // ones this user participates in; the ready payload's dm_channels[] takes its
 // mention_count from GetUserDMChannels instead, the same source as GET /dms.
@@ -756,7 +755,7 @@ func (d *DB) GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int6
 		        COALESCE((SELECT rs.last_message_id FROM read_states rs
 		                   WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS last_read
 		 FROM channels c
-		 WHERE c.type IN ('text', 'announcement')
+		 WHERE c.type IN ('text', 'announcement', 'voice')
 		    OR (c.type = 'dm' AND EXISTS (SELECT 1 FROM dm_participants dp
 		                                   WHERE dp.channel_id = c.id AND dp.user_id = ?))`,
 		userID, userID, userID, userID,
@@ -900,32 +899,6 @@ func (d *DB) scanAndEnrichMessages(ctx context.Context, rows *sql.Rows, requesti
 	}
 
 	return d.attachReferencedMessages(ctx, msgs)
-}
-
-// SetMessagePinned updates the pinned column on a message.
-// Returns ErrNotFound if the message does not exist.
-func (d *DB) SetMessagePinned(ctx context.Context, id int64, pinned bool) error {
-	var pinnedAt *string
-	if pinned {
-		// Stamp pin time so GetPinnedMessages can order by recency. Fixed-width
-		// nanosecond precision keeps lexicographic TEXT ordering correct even
-		// for two pins in the same second.
-		t := time.Now().UTC().Format("2006-01-02 15:04:05.000000000")
-		pinnedAt = &t
-	}
-	res, err := d.q.SetMessagePinned(ctx, dbgen.SetMessagePinnedParams{
-		Pinned:   b2i64(pinned),
-		PinnedAt: pinnedAt,
-		ID:       id,
-	})
-	if err != nil {
-		return fmt.Errorf("SetMessagePinned: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("SetMessagePinned: message %d: %w", id, ErrNotFound)
-	}
-	return nil
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────

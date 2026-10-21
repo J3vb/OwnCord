@@ -23,9 +23,22 @@ import (
 type UploadService struct {
 	st    Store
 	perms *PermissionService
+	// banners answers whether a file is some user's live profile banner. It is
+	// a slice interface and not part of Store (the Store method ratchet); nil
+	// means no banner is ever readable through the grant, which fails closed.
+	banners BannerFileStore
 	// quota is the per-user byte counter's in-process half (B5-2); see
 	// storage_quota.go.
 	quota storageQuota
+}
+
+var _ BannerFileStore = (*db.DB)(nil)
+
+// BannerFileStore is the one question the file route asks about profile
+// banners: is this attachment named by some user's banner_id right now.
+// *db.DB satisfies it.
+type BannerFileStore interface {
+	IsBannerFile(ctx context.Context, fileID string) (bool, error)
 }
 
 // NewUploadService creates an UploadService.
@@ -231,7 +244,7 @@ func (s *UploadService) checkNSFWConsent(ctx context.Context, aa *db.AttachmentA
 }
 
 // authorizeUnlinked is Authorize's branch for an attachment no message claims:
-// the uploader may read it, everyone may while it is somebody's avatar, and the
+// the uploader may read it, everyone may while it is somebody's avatar or profile banner, and the
 // members of a group DM may while it is that group's live icon.
 func (s *UploadService) authorizeUnlinked(ctx context.Context, aa *db.AttachmentAccess, actor *db.User) error {
 	// A failed lookup is not a grant and not a refusal: it falls through to
@@ -242,6 +255,9 @@ func (s *UploadService) authorizeUnlinked(ctx context.Context, aa *db.Attachment
 		slog.Error("failed to check avatar file", "id", aa.ID, "error", avatarErr)
 	}
 	if isAvatar {
+		return nil
+	}
+	if s.isLiveBanner(ctx, aa.ID) {
 		return nil
 	}
 	if s.isGroupIconFor(ctx, aa.ID, actor) {
@@ -255,6 +271,22 @@ func (s *UploadService) authorizeUnlinked(ctx context.Context, aa *db.Attachment
 		return errFileForbidden()
 	}
 	return nil
+}
+
+// isLiveBanner reports whether the attachment is some user's current profile
+// banner. Like the avatar rule, the grant lasts exactly while banner_id names
+// the file; a replaced or cleared banner is refused. A failed lookup is not a
+// grant: it falls through to the uploader check.
+func (s *UploadService) isLiveBanner(ctx context.Context, fileID string) bool {
+	if s.banners == nil {
+		return false
+	}
+	ok, err := s.banners.IsBannerFile(ctx, fileID)
+	if err != nil {
+		slog.Error("failed to check banner file", "id", fileID, "error", err)
+		return false
+	}
+	return ok
 }
 
 // isGroupIconFor reports whether the attachment is the live icon of a group the

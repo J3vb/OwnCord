@@ -13,7 +13,9 @@ import { connectionLockReason, messageActionGates } from "./message-actions";
 import { QUICK_REACTIONS, emojiNode, quickReactionEmojiForPass } from "./quick-reactions";
 import { messagesStore, type Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
+import { messageStatusText } from "../../i18n/messageStatus";
 import { messagingText } from "../../i18n/messaging";
+import { isSpoilerFilename } from "../../features/messaging/spoilerAttachment";
 import { connectText } from "../../i18n/connect";
 import { uiStore } from "@stores/ui.store";
 import { voiceStore } from "@stores/voice.store";
@@ -426,6 +428,8 @@ function sendErrorReason(code: string | null): string {
       return messagingText("send.rateLimited");
     case "FORBIDDEN":
       return messagingText("send.forbidden");
+    case "REQUEST_TIMEOUT":
+      return messageStatusText("send.requestTimeout");
     case "OFFLINE":
       return messagingText("send.disconnected");
     case "OFFLINE_NO_RECOVERY":
@@ -456,7 +460,9 @@ function appendAttachments(el: HTMLElement, msg: Message): void {
   // A pending row already lays its images out as the grid, so confirming it
   // does not resize the row; only the lightbox sequence waits for the id.
   const tiles = msg.attachments.filter(isGalleryImage);
-  const images = msg.id === 0 ? [] : tiles;
+  // A spoiler image stays out of the sequence, or the arrows would open it
+  // while it is covered; once revealed it opens on its own.
+  const images = msg.id === 0 ? [] : tiles.filter((att) => !isSpoilerFilename(att.filename));
   const items = images.map((att) => ({
     url: resolveServerUrl(att.url),
     filename: att.filename,

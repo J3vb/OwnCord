@@ -18,7 +18,7 @@ import { createElement, appendChildren, setText } from "../../lib/dom";
 import { createIcon, type IconName } from "../../lib/icons";
 import { shellText } from "../../i18n/shell";
 import type { createAvatarElement } from "../../components/message-list/avatar";
-import { nsfwIndicator, privateIndicator } from "./channelRow.view";
+import { mentionBadge, nsfwIndicator, privateIndicator } from "./channelRow.view";
 
 /** The avatar drawer, injected: a feature reaches the UI layer only lazily. */
 export type CreateAvatar = typeof createAvatarElement;
@@ -86,6 +86,8 @@ export type VoiceChannelChromeModel = {
   readonly timeoutReason: string | null;
   /** "3/5" and its tooltip for a channel with a user limit, else null. */
   readonly capacity: { readonly label: string; readonly title: string } | null;
+  /** The mention badge's count; 0 draws none. Unread is never drawn here. */
+  readonly mentionCount: number;
 };
 
 /** The fields `patchVoiceUserRow` changes in place. */
@@ -97,6 +99,7 @@ export const VOICE_CHROME_PATCH_FIELDS = [
   "frozenReason",
   "timeoutReason",
   "capacity",
+  "mentionCount",
 ] as const;
 
 function iconSpan(cls: string, icon: IconName): HTMLSpanElement {
@@ -243,6 +246,7 @@ export function drawVoiceChannelChrome(model: VoiceChannelChromeModel): HTMLDivE
   if (model.nsfw) item.appendChild(nsfwIndicator(model.channelId));
   if (model.private) item.appendChild(privateIndicator(model.channelId));
   if (model.capacity !== null) item.appendChild(drawCapacity(model.channelId, model.capacity));
+  if (model.mentionCount > 0) item.appendChild(mentionBadge(model.channelId, model.mentionCount));
 
   wrapper.appendChild(item);
   if (model.timeoutReason !== null) {
@@ -277,10 +281,23 @@ export function patchVoiceChannelChrome(wrapper: Element, next: VoiceChannelChro
   if (next.capacity === null) {
     badge?.remove();
   } else if (badge === null) {
-    item.appendChild(drawCapacity(next.channelId, next.capacity));
+    // Before the mention badge, which a fresh draw puts last.
+    const cap = drawCapacity(next.channelId, next.capacity);
+    const mention = item.querySelector(":scope > .mention-badge");
+    if (mention === null) item.appendChild(cap);
+    else mention.before(cap);
   } else {
     if (badge.textContent !== next.capacity.label) setText(badge, next.capacity.label);
     badge.setAttribute("title", next.capacity.title);
+  }
+
+  const mentionEl = item.querySelector<HTMLElement>(":scope > .mention-badge");
+  if (next.mentionCount === 0) {
+    mentionEl?.remove();
+  } else if (mentionEl === null) {
+    item.appendChild(mentionBadge(next.channelId, next.mentionCount));
+  } else if (mentionEl.textContent !== String(next.mentionCount)) {
+    mentionEl.replaceWith(mentionBadge(next.channelId, next.mentionCount));
   }
 
   // Directly after the row: the participant list, when present, follows it.

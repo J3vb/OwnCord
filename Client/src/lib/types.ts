@@ -83,6 +83,10 @@ export type WsErrorCode =
   // A fresh connect refused while the server's ready builds are saturated;
   // carries retry_after_ms and is handled inside ws.ts (P5-S04).
   | "SERVER_BUSY"
+  // A command whose database work ran past the server's per-frame deadline. It
+  // was not applied, so Retry is safe. Unlike SERVER_BUSY it is an ordinary
+  // frame error and never ends the connection (WP 4.1b).
+  | "REQUEST_TIMEOUT"
   // A wake reconnect (auth frame `wake: true`) refused because another device
   // currently holds the account's one live socket. The client stays signed in
   // and does not reconnect until the user chooses "Use here" (U4).
@@ -226,6 +230,12 @@ export interface ReadyChannel {
    * labelled".
    */
   readonly nsfw?: boolean;
+  /**
+   * Whether this is the server's AFK voice channel (migration 068): members
+   * idle past the server's timeout are moved here, and it is listen-only.
+   * Absent from older servers, which is read as "not the AFK channel".
+   */
+  readonly afk?: boolean;
   /**
    * Whether the channel is private: @everyone cannot see it (a permission
    * override hides it), worked out per channel, not per viewer. Sent on every
@@ -708,9 +718,11 @@ export interface VoiceStatePayload {
   readonly server_deafened?: boolean;
 }
 
-/** Server -> Client: a moderator moved this client to another voice channel. */
+/** Server -> Client: the server moved this client to another voice channel,
+ *  by a moderator (no `reason`) or the AFK sweep (`reason: "afk"`). */
 export interface VoiceMovedPayload {
   readonly to_channel_id: number;
+  readonly reason?: "afk";
 }
 
 /** Server -> Client: a moderator removed this client from voice. */

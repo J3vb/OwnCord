@@ -416,7 +416,7 @@ func (r *epochRig) fillAliceProfile(t *testing.T, userID int64) {
 	// NOT normalised — the rule replaces keys containing "token", and
 	// identity_public_key is not one — so the fixture pins the value verbatim.
 	identityKey := "YWxpY2UtaWRlbnRpdHktcHVibGljLWtleS1maXh0dXJl"
-	if err := r.db.UpdateUserProfile(ctx, userID, "alice", &avatar, &displayName, &about); err != nil {
+	if err := r.db.UpdateUserProfile(ctx, userID, "alice", &avatar, &displayName, &about, nil, nil); err != nil {
 		t.Fatalf("UpdateUserProfile(alice): %v", err)
 	}
 	if err := r.db.UpdateUserCustomStatus(ctx, userID, &customStatus); err != nil {

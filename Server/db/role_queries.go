@@ -25,6 +25,104 @@ func roleFromGen(r dbgen.Role) *Role {
 	}
 }
 
+// MemberRoles is every role a member holds: Top is the highest-position role
+// (ties by lowest id, the one users.role_id mirrors), Perms the OR of all held
+// permission masks, IDs the held role ids with the top role first.
+type MemberRoles struct {
+	Top   Role
+	Perms int64
+	IDs   []int64
+}
+
+// ErrLastRole is returned when removing a role would leave a member with none.
+var ErrLastRole = errors.New("member must keep at least one role")
+
+// syncTopRoleTx mirrors the member's top held role into users.role_id inside
+// the caller's transaction. It is the only writer of users.role_id that
+// follows a user_roles change.
+func syncTopRoleTx(ctx context.Context, q *dbgen.Queries, userID int64) error {
+	if err := q.SyncTopRole(ctx, userID); err != nil {
+		return fmt.Errorf("syncTopRole: %w", err)
+	}
+	return nil
+}
+
+// GetMemberRoles returns every role userID holds, or (nil, nil) when the user
+// holds none (unknown user included).
+func (d *DB) GetMemberRoles(ctx context.Context, userID int64) (*MemberRoles, error) {
+	rows, err := d.q.ListUserRoles(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("GetMemberRoles: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	m := &MemberRoles{Top: *roleFromGen(rows[0]), IDs: make([]int64, 0, len(rows))}
+	for _, r := range rows {
+		m.Perms |= r.Permissions
+		m.IDs = append(m.IDs, r.ID)
+	}
+	return m, nil
+}
+
+// AddUserRole grants roleID to userID (a no-op when already held) and
+// re-mirrors the top role, in one writer transaction.
+func (d *DB) AddUserRole(ctx context.Context, userID, roleID int64) error {
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("AddUserRole begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	q := d.q.WithTx(tx)
+	if err := q.AddUserRole(ctx, dbgen.AddUserRoleParams{UserID: userID, RoleID: roleID}); err != nil {
+		return fmt.Errorf("AddUserRole insert: %w", err)
+	}
+	if err := syncTopRoleTx(ctx, q, userID); err != nil {
+		return fmt.Errorf("AddUserRole: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("AddUserRole commit: %w", err)
+	}
+	return nil
+}
+
+// RemoveUserRole revokes roleID from userID and re-mirrors the top role, in one
+// writer transaction. It returns ErrLastRole, changing nothing, when the
+// member holds roleID as their only role.
+func (d *DB) RemoveUserRole(ctx context.Context, userID, roleID int64) error {
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("RemoveUserRole begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	q := d.q.WithTx(tx)
+	n, err := q.CountUserRoles(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("RemoveUserRole count: %w", err)
+	}
+	if n <= 1 {
+		held, err := q.ListRoleIDsByUser(ctx, userID)
+		if err != nil {
+			return fmt.Errorf("RemoveUserRole list: %w", err)
+		}
+		if slices.Contains(held, roleID) {
+			return fmt.Errorf("RemoveUserRole: %w", ErrLastRole)
+		}
+	}
+	if err := q.RemoveUserRole(ctx, dbgen.RemoveUserRoleParams{UserID: userID, RoleID: roleID}); err != nil {
+		return fmt.Errorf("RemoveUserRole delete: %w", err)
+	}
+	if err := syncTopRoleTx(ctx, q, userID); err != nil {
+		return fmt.Errorf("RemoveUserRole: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("RemoveUserRole commit: %w", err)
+	}
+	return nil
+}
+
 // GetRoleByID returns the role with the given ID, or nil if not found.
 func (d *DB) GetRoleByID(ctx context.Context, id int64) (*Role, error) {
 	r, err := d.q.GetRoleByID(ctx, id)

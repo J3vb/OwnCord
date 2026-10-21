@@ -53,8 +53,24 @@ read-only), so they add nothing here; their lifecycle rows are classes 11c and
 `066_group_dm_icon.sql` adds `channels.dm_icon`, the attachment id of a group DM's
 icon (WP 3B-10c). It is an uploaded image like an avatar, kept alive and served to
 the group's members only while the column names it, so it adds no data class here;
-its file follows the attachment rows of class 12. Other
-historical
+its file follows the attachment rows of class 12. **Amended 2026-10-20 (member
+roles):** `067_user_roles.sql` adds `user_roles`, `roles.hoist`, `roles.mentionable`
+and `message_role_mentions` (WP 6.3a). `user_roles` is the member's role
+assignment, which `users.role_id` already carried and which only an administrator
+can change. The role flags are role settings and `message_role_mentions` is the
+server-written record of which roles a message pinged. They add no data class
+here, and a row goes with its user, role or message by cascade.
+**Amended 2026-10-20 (AFK channel):**
+`068_channel_afk.sql` adds `channels.afk`, the flag on the server's one AFK voice
+channel (WP 6.10a). It is a setting an administrator writes, holds no user content
+and is removed with its channel, so it adds no data class here.
+**Amended 2026-10-20 (profile notes and banners):** `069_profile_notes_banners.sql`
+adds `user_notes`, `users.banner_id` and `users.banner_color` (WP 6.11). A note is
+private to the user who wrote it: no other user, administrator or moderator route
+reads it, and it is removed with either user (lifecycle row 16a in
+`data-lifecycle.md`). The banner columns are public profile fields like the
+avatar, unused until the banner endpoints land. They add no community service.
+Other historical
 status statements retain their `cbebd37c` baseline.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each
 service are documented"). **Input to:** HP-5, and to the retention and

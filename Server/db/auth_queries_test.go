@@ -17,7 +17,9 @@ CREATE TABLE IF NOT EXISTS roles (
     color       TEXT,
     permissions INTEGER NOT NULL DEFAULT 0,
     position    INTEGER NOT NULL DEFAULT 0,
-    is_default  INTEGER NOT NULL DEFAULT 0
+    is_default  INTEGER NOT NULL DEFAULT 0,
+    hoist       INTEGER NOT NULL DEFAULT 0,
+    mentionable INTEGER NOT NULL DEFAULT 0
 );
 
 INSERT OR IGNORE INTO roles (id, name, color, permissions, position, is_default) VALUES
@@ -44,7 +46,9 @@ CREATE TABLE IF NOT EXISTS users (
     display_name TEXT,
     about TEXT,
     custom_status TEXT,
-    custom_status_expires_at TEXT
+    custom_status_expires_at TEXT,
+    banner_id TEXT,
+    banner_color TEXT
 );
 
 CREATE TABLE IF NOT EXISTS erasure_jobs (

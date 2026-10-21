@@ -1,6 +1,7 @@
 -- name: UpdateUserProfile :execresult
 UPDATE users
-SET username = ?, avatar = ?, display_name = ?, about = ?
+SET username = ?, avatar = ?, display_name = ?, about = ?,
+    banner_id = ?, banner_color = ?
 WHERE id = ?;
 
 -- name: UpdateUserPassword :exec
@@ -41,3 +42,9 @@ WHERE id = ? AND custom_status_expires_at = ?;
 -- everyone exactly while some user's avatar points at it. Covered by the
 -- partial index on users(avatar) added in migration 027.
 SELECT COUNT(*) FROM users WHERE avatar = ?;
+
+-- name: IsBannerFile :one
+-- Authorization probe for the file route: an unlinked attachment is readable by
+-- everyone exactly while some user's banner_id names it. Served by the partial
+-- index idx_users_banner_id (migration 069).
+SELECT EXISTS (SELECT 1 FROM users WHERE banner_id = ?) AS is_banner;

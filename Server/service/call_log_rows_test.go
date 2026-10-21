@@ -87,7 +87,7 @@ func TestReaction_CallRowRefused(t *testing.T) {
 
 func TestPin_CallRowRefused(t *testing.T) {
 	f, dmID, msgID := callRowFixture(t)
-	if err := f.messages.SetMessagePinned(context.Background(), fixtureMember, dmID, msgID, true); !errors.Is(err, ErrBadRequest) {
+	if _, err := f.messages.SetMessagePinned(context.Background(), fixtureMember, dmID, msgID, true); !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("pin = %v, want ErrBadRequest", err)
 	}
 	assertCallRowUnchanged(t, f, msgID)

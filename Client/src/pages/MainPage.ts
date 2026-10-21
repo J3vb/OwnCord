@@ -81,6 +81,8 @@ import { setScreenSourcePicker } from "../features/voice/native/screenPickerSlot
 import { createQuickSwitcherManager } from "./main-page/OverlayManagers";
 import { attachGlobalKeybinds } from "./main-page/GlobalKeybinds";
 import { createVoiceWidgetCallbacks } from "./main-page/VoiceCallbacks";
+import { setChatHeaderCallChat } from "./main-page/ChatHeader";
+import { createCallChat, type CallChat } from "./main-page/callChat";
 import { createMessageController } from "./main-page/MessageController";
 import type { MessageController } from "./main-page/MessageController";
 import { createReactionController } from "./main-page/ReactionController";
@@ -314,6 +316,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   let msgCtrl: MessageController | null = null;
   let reactionCtrl: ReactionController | null = null;
   let videoModeCtrl: VideoModeController | null = null;
+  let callChat: CallChat | null = null;
   let channelCtrl: ChannelController | null = null;
   /** Inactivity watcher that flips the status to idle after ten quiet
    *  minutes. Started once the socket is up, torn down with the page. */
@@ -916,18 +919,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // (see @lib/autoIdle) — a manually chosen Idle, Do Not Disturb or
     // Invisible is never touched — so it is safe to leave running for the
     // whole session. The OS idle source makes input in other apps count too.
-    // No idle while in a voice call; leaving one restarts the delay.
     autoIdle = startAutoIdle({
       onStatusChange: (status) => applyPresence(status),
       systemIdleMs: () => desktop.systemIdle.idleMs(),
-      inCall: voiceStore.getState().currentChannelId !== null,
     });
-    unsubscribers.push(
-      voiceStore.subscribeSelector(
-        (s) => s.currentChannelId !== null,
-        (inCall) => autoIdle?.setInCall(inCall),
-      ),
-    );
 
     unsubscribers.push(
       ws.on("server_restart", (payload) => {
@@ -971,7 +966,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         videoModeCtrl.setFocus(userId);
         videoGrid?.watch(userId);
       },
-      onOpenCall: () => videoModeCtrl?.openCall(),
+      onOpenCall: () => callChat?.openVoiceCall(),
       destinations: NAVIGATION_DESTINATIONS,
       onOpenView: (id, opener) => contentNav?.open(id, opener),
       // The member list's profile popup Call action opens the DM then starts
@@ -1032,7 +1027,16 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       getCurrentUserId,
       // The DM call panel hosts the video of its own call (chat stays up).
       panelHost: () => callPanelHost,
+      chatColumn: chatAreaResult.chatArea,
+      onGridChange: () => callChat?.refresh(),
     });
+    // Opening the call view selects the voice channel; its chat sits beside the grid.
+    const callChatBtn = chatAreaResult.chatHeaderRefs.callChatBtn;
+    callChat = createCallChat({
+      videoModeCtrl,
+      onStateChange: (state) => setChatHeaderCallChat(chatAreaResult.chatHeaderRefs, state),
+    });
+    callChatBtn.addEventListener("click", () => callChat?.toggleChat());
 
     // The composer of the channel on screen, else the header's menu button
     // (shown only at narrow width, where the closed sidebar is inert), else
@@ -1309,8 +1313,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     const qsManager = createQuickSwitcherManager(
       () => root,
       () => uiStore.getState().settingsOpen,
-      // A voice row in the switcher joins voice (matching the sidebar row)
-      // instead of mounting chat for an unjoined voice channel (F8).
+      // A voice row in the switcher joins voice (matching the sidebar row): a
+      // pick joins, as a click on the row does. The call view's own chat
+      // reaches the voice channel through navigateToChannel (callChat).
       (channelId: number) => createSidebarVoiceCallbacks(ws).onVoiceJoin(channelId),
       () => sidebar.rememberChannel(),
       () => sidebar.forgetChannel(),
@@ -2004,15 +2009,17 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     container.appendChild(root);
 
-    // Voice is the only channel type that should keep the grid up; text, dm
-    // and announcement all mount a chat surface and must dismiss it, not just
-    // "text" (a dm/announcement switch used to leave the grid covering an
-    // unrelated channel's chat). The DM that owns the current call is the
-    // exception: its call panel shows the video above the chat (its own
-    // update re-seats the grid through onVideoHostChange).
+    // Only the channel that owns the current call keeps the grid up: the joined
+    // voice channel (its chat sits beside the grid, WP 6.1b) or the DM whose
+    // call panel shows the video above the chat (its own update re-seats the
+    // grid through onVideoHostChange). Every other channel mounts a chat
+    // surface and must dismiss it, another voice channel's chat opened from
+    // its menu included (WP 6.1d).
     const showChatFor = (active: { id: number; type: string }): void => {
-      const ownsCall = active.type === "dm" && voiceStore.getState().currentChannelId === active.id;
-      if (active.type !== "voice" && !ownsCall) videoModeCtrl?.showChat({ keepWatching: true });
+      const ownsCall =
+        (active.type === "dm" || active.type === "voice") &&
+        voiceStore.getState().currentChannelId === active.id;
+      if (!ownsCall) videoModeCtrl?.showChat({ keepWatching: true });
     };
     // A click on the channel already open under the stream view changes no
     // store, so the subscriber below never sees it.
@@ -2141,6 +2148,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         reactionCtrl?.destroy();
         reactionCtrl = null;
         msgCtrl = null;
+      });
+      step("callChat", () => {
+        callChat?.destroy();
+        callChat = null;
       });
       step("videoModeCtrl", () => {
         videoModeCtrl?.destroy();

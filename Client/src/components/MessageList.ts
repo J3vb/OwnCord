@@ -68,7 +68,20 @@ import {
   resolveAuthor,
   roleColorVar,
 } from "@lib/formatting";
-import { isAudioMime, isVideoAttachment } from "./message-list/attachments";
+import {
+  isAudioMime,
+  isGalleryImage,
+  isVideoAttachment,
+  resolveServerUrl,
+  thumbnailUrl,
+} from "./message-list/attachments";
+import {
+  ATTACHMENT_BOX_MAX_H,
+  fitImageBox,
+  getImageBox,
+  knownImageHeight,
+} from "./message-list/image-sizes";
+import { extractUrls, isDirectImageUrl } from "./message-list/media";
 import { FenwickTree } from "./message-list/fenwick";
 import { messagingText } from "../i18n/messaging";
 import {
@@ -214,37 +227,105 @@ interface VirtualItemBlockedRun {
   readonly expanded: boolean;
 }
 
-type VirtualItem =
+export type VirtualItem =
   VirtualItemMessage | VirtualItemDivider | VirtualItemNewDivider | VirtualItemBlockedRun;
 
 // -- Smart height estimation --------------------------------------------------
 
-function estimateItemHeight(item: VirtualItem): number {
+/** A message line: `.msg-text` is 1.45 x 15 px; the header line shares the
+ *  first row's 44 px minimum with it. */
+const TEXT_LINE_HEIGHT = 22;
+/** Average glyph width of the message font, in px (a proportional sans). */
+const AVERAGE_CHAR_WIDTH = 7.5;
+/** Width of `.messages-container` assumed before a real one is measured, and
+ *  what the row padding (`--message-content-left/right`) takes from it. */
+const DEFAULT_LIST_WIDTH = 900;
+const ROW_HORIZONTAL_PADDING = 120;
+/** Margin above an inline image or attachment box. */
+const MEDIA_MARGIN = 4;
+
+/** Rows of text a message fills at `listWidth`: each source line wraps at the
+ *  characters that fit; an empty line still takes one. */
+function estimateTextLines(content: string, listWidth: number): number {
+  const perLine = Math.max(
+    8,
+    Math.floor(Math.max(listWidth - ROW_HORIZONTAL_PADDING, 0) / AVERAGE_CHAR_WIDTH),
+  );
+  let lines = 0;
+  for (const line of content.split("\n")) lines += Math.max(1, Math.ceil(line.length / perLine));
+  return lines;
+}
+
+/** Height of an image box the list already knows: the server's dimensions,
+ *  else the size remembered for its URL; undefined when neither exists. */
+function knownAttachmentHeight(att: Message["attachments"][number]): number | undefined {
+  if (att.width != null && att.height != null) {
+    const box = fitImageBox(att.width, att.height, ATTACHMENT_BOX_MAX_H);
+    if (box !== null) return box.h;
+  }
+  return knownImageHeight(thumbnailUrl(resolveServerUrl(att.url), att.mime));
+}
+
+/** Height of the mosaic `.msg-image-grid` makes for `count` tiles (messages.css):
+ *  140 px rows, 200 px for exactly two, 4 px gaps and the 4 px margin above.
+ *  The first row holds one tile (7, 10), two (the default) or fills the width. */
+function galleryGridHeight(count: number): number {
+  let rows: number;
+  if (count === 2) rows = 1;
+  else if (count === 3 || count === 4) rows = 2;
+  else if (count === 6 || count === 9) rows = Math.ceil(count / 3);
+  else if (count === 7 || count === 10) rows = 1 + Math.ceil((count - 1) / 3);
+  else rows = 1 + Math.ceil((count - 2) / 3);
+  const rowHeight = count === 2 ? 200 : 140;
+  return rows * rowHeight + (rows - 1) * 4 + MEDIA_MARGIN;
+}
+
+export function estimateItemHeight(
+  item: VirtualItem,
+  listWidth: number = DEFAULT_LIST_WIDTH,
+): number {
   if (item.kind !== "message") return 32;
 
   // Non-grouped: min-height 2.75rem (44px @16px root) + margin-top 17px = 61px
   // Grouped: min-height 1.375rem (22px @16px root) + margin-top 0px = 22px
+  // Both hold one line of text; each further wrapped line adds one line height.
   let height = item.isGrouped ? 22 : 61;
+  const { content } = item.message;
+  height += (estimateTextLines(content, listWidth) - 1) * TEXT_LINE_HEIGHT;
 
   // Media attachments. Video shares the image box, so it reserves the same
   // space; the audio player is a chip-height row.
+  // Two or more images share one mosaic, whatever their own sizes are.
+  const tiles = item.message.attachments.filter(isGalleryImage);
+  const gridded = tiles.length >= 2;
+  if (gridded) height += galleryGridHeight(tiles.length);
   for (const att of item.message.attachments) {
+    if (gridded && tiles.includes(att)) continue;
     if (isVideoAttachment(att)) {
       height += 220;
     } else if (isAudioMime(att.mime)) {
       height += 96;
     } else if (att.mime.startsWith("image/")) {
-      height += 220;
+      const known = knownAttachmentHeight(att);
+      height += known === undefined ? 220 : known + MEDIA_MARGIN;
     }
   }
 
-  // Inline image URLs in content
-  if (IMAGE_URL_RE.test(item.message.content)) {
-    height += 220;
+  // Inline image URLs in content: the box measured for each URL, else 220.
+  if (IMAGE_URL_RE.test(content)) {
+    // The URLs renderUrlEmbeds draws (none inside code, masked links,
+    // spoilers or angle brackets), one embed per distinct URL.
+    const rowWidth = Math.max(listWidth - ROW_HORIZONTAL_PADDING, 1);
+    for (const url of new Set(extractUrls(content).filter(isDirectImageUrl))) {
+      const box = getImageBox(url);
+      // The box shrinks with the row (max-width 100%), keeping its ratio.
+      height +=
+        box === undefined ? 220 : Math.round(box.h * Math.min(1, rowWidth / box.w)) + MEDIA_MARGIN;
+    }
   }
 
   // YouTube embeds
-  if (YOUTUBE_URL_RE.test(item.message.content)) {
+  if (YOUTUBE_URL_RE.test(content)) {
     height += 320;
   }
 
@@ -502,6 +583,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    *  `allMessages` (the rows drawn) leaves tombstones out. */
   let replyParents: readonly Message[] = [];
   const heightCache = new Map<string, number>(); // itemKey -> measured px
+  /** Width the unmeasured rows' text estimates wrap at; the real one once the
+   *  ResizeObserver has seen the list. */
+  let estimateWidth: number | undefined;
   let tree: FenwickTree | null = null;
   let topSpacer: HTMLDivElement | null = null;
   let bottomSpacer: HTMLDivElement | null = null;
@@ -724,7 +808,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function getItemHeight(index: number): number {
     const cached = heightCache.get(itemKey(index));
     if (cached !== undefined) return cached;
-    return estimateItemHeight(virtualItems[index]!);
+    return estimateItemHeight(virtualItems[index]!, estimateWidth);
   }
 
   function totalHeight(): number {
@@ -1061,9 +1145,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // Render visible window
   // ---------------------------------------------------------------------------
 
-  function measureRendered(): void {
+  /** Record the heights of the rendered rows, or only those whose item index
+   *  lies in [from, to) (a slide measures just the rows that entered; every
+   *  other row was measured when it entered or by the ResizeObserver pass). */
+  function measureRendered(from: number = renderedStart, to: number = renderedEnd): void {
     if (contentContainer === null || renderedStart < 0) return;
     const children = contentContainer.children;
+    const first = Math.max(0, from - renderedStart);
+    const last = Math.min(children.length, to - renderedStart);
 
     // Pass 1 — pure reads: collect all heights without touching any styles.
     // Batching all getComputedStyle / offsetHeight reads before any writes
@@ -1075,7 +1164,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       readonly h: number;
     }
     const measurements: Measurement[] = [];
-    for (let i = 0; i < children.length; i++) {
+    for (let i = first; i < last; i++) {
       const globalIdx = renderedStart + i;
       if (globalIdx < 0 || (tree !== null && globalIdx >= tree.size)) continue;
       const el = children[i] as HTMLElement;
@@ -1209,8 +1298,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    *  rows that left, render only the rows that entered, keep the rest. */
   function shiftWindow(start: number, end: number): void {
     if (contentContainer === null) return;
-    // Record the rows' heights before any of them leave.
-    measureRendered();
+    // Rows that stay were measured when they entered or by the ResizeObserver
+    // pass, so only the rows that leave (here, before they are released: one
+    // may have grown since the last pass) and the rows that enter (below) are
+    // measured.
+    const prevStart = renderedStart;
+    const prevEnd = renderedEnd;
+    measureRendered(prevStart, start);
+    measureRendered(end, prevEnd);
     const rows = [...contentContainer.children] as HTMLElement[];
     // Rows entering above the view keep the first row that stays in place on
     // screen; rows leaving above it are measured, so their spacer share is exact.
@@ -1235,7 +1330,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     contentContainer.appendChild(tail);
     renderedStart = start;
     renderedEnd = end;
-    measureRendered();
+    measureRendered(start, prevStart);
+    measureRendered(prevEnd, end);
     updateSpacers();
     if (hold && kept.isConnected) holdRow(kept, keptEdge);
     refocusEditor();
@@ -1410,6 +1506,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     seedTree();
   }
 
+  /** Estimate again every row that has no measured height, leaving measured
+   *  rows (and so the rendered window) as they are. */
+  function reseedUnmeasured(): void {
+    if (tree === null) return;
+    for (let i = 0; i < virtualItems.length; i++) {
+      if (!heightCache.has(itemKey(i)))
+        tree.set(i, estimateItemHeight(virtualItems[i]!, estimateWidth));
+    }
+  }
+
   /** Build the Fenwick tree from measured heights, estimating the rest. */
   function seedTree(): void {
     tree = new FenwickTree(virtualItems.length);
@@ -1425,6 +1531,35 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   const MAX_INCREMENTAL_WINDOW = 200;
 
   /**
+   * Whether a history prepend leaves every rendered row in place: each item of
+   * the new window [start, end) was a rendered row, and each rendered row is
+   * in it, bar day dividers at its head (the day now starts higher up).
+   */
+  function keepsRenderedRows(
+    prevItems: readonly VirtualItem[],
+    prevKeys: readonly string[],
+    prevIndex: ReadonlyMap<string, number>,
+    nextKeys: readonly string[],
+    nextIndex: ReadonlyMap<string, number>,
+    start: number,
+    end: number,
+  ): boolean {
+    for (let j = start; j < end; j++) {
+      const i = prevIndex.get(nextKeys[j]!);
+      if (i === undefined || i < renderedStart || i >= renderedEnd) return false;
+    }
+    let atHead = true;
+    for (let i = renderedStart; i < renderedEnd; i++) {
+      if (nextIndex.has(prevKeys[i]!)) {
+        atHead = false;
+      } else if (!atHead || prevItems[i]!.kind !== "divider") {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
    * Fast path for a store update that changes a few rows (P4-01): diff the new
    * items against the rendered ones by key and touch only what changed — a
    * reaction, edit, delete or send confirmation re-renders its own row, plus a
@@ -1435,9 +1570,18 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    * playing video, a revealed spoiler or focus survive. A row outside the
    * rendered window only moves its height entry.
    *
+   * A history prepend keeps the DOM too, when every rendered row survives
+   * (a day divider that moved up with the page excepted) and the new items all
+   * land above the rendered window, the tail trim of the message cap included:
+   * the window's indices shift by the inserted count, the spacers take the
+   * page's estimated height and the reading position is re-applied in the same
+   * task, so no rendered row is rebuilt or has its media reloaded. A prepend
+   * that moves the NEW line, reaches into the window or drops a rendered row
+   * is left to renderAll.
+   *
    * Returns false, for renderAll to rebuild, when there is nothing rendered to
    * keep, rows were reordered, or a message was inserted above every row that
-   * stays (a history prepend, whose reading position renderAll keeps).
+   * stays and the prepend conditions above do not hold.
    *
    * The Fenwick tree is re-seeded from the height cache, as for any rebuild,
    * and the topmost visible message row that stays keeps its offset in the
@@ -1464,13 +1608,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     if (prevIndex.size < prevKeys.length || nextIndex.size < nextKeys.length) return false;
 
     // The rows that stay keep their order, and no message lands above every
-    // message that stays (a history prepend, left to renderAll).
+    // message that stays (a history prepend sets `prepended`).
     let last = -1;
     let anchored = false;
+    let prepended = false;
     for (const [j, item] of nextItems.entries()) {
       const i = prevIndex.get(nextKeys[j]!);
       if (i === undefined) {
-        if (!anchored && item.kind === "message") return false;
+        if (!anchored && item.kind === "message") prepended = true;
         continue;
       }
       if (i < last) return false;
@@ -1490,7 +1635,15 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       end = j + 1;
     }
     if (start === -1) return false;
-    if (renderedStart === 0) start = 0;
+    if (
+      prepended &&
+      !keepsRenderedRows(prevItems, prevKeys, prevIndex, nextKeys, nextIndex, start, end)
+    ) {
+      return false;
+    }
+    // A prepend's window stays on the rows already drawn; the page above it is
+    // drawn by the slide below, as for any scroll.
+    if (renderedStart === 0 && !prepended) start = 0;
     if (renderedEnd === prevItems.length) end = nextItems.length;
     if (end - start > MAX_INCREMENTAL_WINDOW) return false;
 
@@ -1510,6 +1663,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     }
     const anchorKey = prevKeys[anchor];
     const anchorOffset = root.scrollTop - offsetBefore(anchor);
+    const anchorRow = prepended ? renderedRowAt(anchor) : undefined;
+    const anchorEdge = anchorRow === undefined ? null : edgeOf(anchorRow);
 
     // A reply re-renders its quote when its parent left, arrived, or changed
     // what the quote draws (renderReplyRef reads the parent from replyParents);
@@ -1584,9 +1739,23 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
     if (atBottom) {
       scrollToBottom();
+      if (prepended) renderWindow();
       updateScrollToBottomBtn();
-    } else if (anchorKey !== undefined) {
-      root.scrollTop = Math.max(0, offsetBefore(nextIndex.get(anchorKey)!) + anchorOffset);
+    } else if (anchorKey === undefined) {
+      if (prepended) renderWindow();
+    } else {
+      const anchorAt = nextIndex.get(anchorKey)!;
+      root.scrollTop = Math.max(0, offsetBefore(anchorAt) + anchorOffset);
+      if (prepended) {
+        // The page above is spacer only: draw the rows now in view, then
+        // re-place the anchor against the heights they measured.
+        renderWindow();
+        for (let pass = 0; pass < 3; pass++) {
+          if (!placeIndex(anchorAt, anchorOffset)) break;
+        }
+        const el = renderedRowAt(anchorAt);
+        if (el !== undefined && anchorEdge !== null) holdRow(el, anchorEdge);
+      }
     }
     dropGoneEdit(editHadFocus);
     return true;
@@ -2195,6 +2364,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       resizeRafId = requestAnimationFrame(() => {
         resizeRafId = 0;
         if (root === null || contentContainer === null) return;
+        // The text estimates wrap at the list's width: when it changes, the
+        // rows nothing has measured yet are estimated again (below).
+        const width = root.clientWidth;
+        const widthChanged = width > 0 && width !== (estimateWidth ?? DEFAULT_LIST_WIDTH);
+        if (widthChanged) estimateWidth = width;
 
         const jumpIdx =
           jumpTarget !== null && Date.now() < jumpTarget.until
@@ -2203,6 +2377,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
               )
             : -1;
         if (jumpIdx !== -1) {
+          if (widthChanged) reseedUnmeasured();
           measureRendered();
           updateSpacers();
           centreOnIndex(jumpIdx);
@@ -2214,6 +2389,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         // Capture anchor: topmost visible item and its offset from viewport top
         const anchorIdx = offsetToIndex(root.scrollTop);
         const anchorOffset = root.scrollTop - offsetBefore(anchorIdx);
+
+        // The anchor above was read against the old estimates; the restore
+        // below reads the new ones, so the reading position holds.
+        if (widthChanged) reseedUnmeasured();
 
         // Re-measure rendered elements
         measureRendered();

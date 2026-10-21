@@ -42,7 +42,7 @@ func TestHandleMessageSessionRecheck_TransientDBErrorDoesNotKick(t *testing.T) {
 		t.Fatalf("database.Close: %v", err)
 	}
 
-	closed := h.handleMessageSessionRecheck(c)
+	closed := h.handleMessageSessionRecheck(context.Background(), c)
 
 	if closed {
 		t.Fatalf("handleMessageSessionRecheck reported the connection closed on a transient DB lookup error; " +

@@ -204,6 +204,8 @@ keeps it until one authenticates.
       "about": "A short bio.",
       "custom_status": "shipping phase 6",
       "custom_status_expires_at": "2026-10-15T18:00:00Z",
+      "banner": "/api/v1/files/7a1e...",
+      "banner_color": "#5865f2",
       "status": "invisible"
     },
     "server_name": "My Server",
@@ -218,8 +220,8 @@ keeps it until one authenticates.
 }
 ```
 
-`display_name`, `about` and `custom_status` are the signed-in user's own
-profile fields, `null` when unset. `display_name` is what clients render
+`display_name`, `about`, `custom_status`, `banner` and `banner_color` are the
+signed-in user's own profile fields, `null` when unset. `display_name` is what clients render
 instead of `username`; `@mentions` still resolve against `username`, which is
 the unique handle.
 
@@ -482,18 +484,27 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
 
 ### Payload Fields
 
-**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true }`. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
+**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true, "user_notes": true, "profile_banners": true }`. `profile_banners` means the server supports profile banners (`POST` and `DELETE /api/v1/users/me/banner`, `banner_color` on `PATCH /api/v1/users/me`); a client that does not see it shows no banner controls. `user_notes` means the server stores private profile notes (`GET` and `PUT /api/v1/users/me/notes/{userId}`); a client that does not see it keeps notes in local storage. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
 These fields advertise retry-safe `chat_send` support. Older servers omit them;
 clients must not infer support from the protocol epoch or silently retry a
 durable pending message against a server that no longer advertises support.
 
-**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin`, `can_react`, `slow_mode`, `nsfw`, `private`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text + announcement), `last_message_id` (text + announcement), `mention_count` (text + announcement), `last_read_message_id` (text + announcement)
+**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin`, `can_react`, `slow_mode`, `nsfw`, `afk`, `private`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text, announcement and voice), `last_message_id` (text, announcement and voice), `mention_count` (text, announcement and voice), `last_read_message_id` (text, announcement and voice)
 
 `last_read_message_id` is the caller's own read pointer (`read_states.last_message_id`):
 the newest message id they have read, or `0` when they have no read state for the
 channel. It is not `last_message_id`, which is the newest live message in the
 channel. A client can place its NEW line after the pointer. It is plain data with
 no capability flag; an older server omits it.
+
+`afk` is `true` on the server's one AFK voice channel and `false` everywhere
+else (migration `067`, WP 6.10a); it rides the same payload on `ready`,
+`channel_create` and `channel_update`, and an older server omits it, which a
+client reads as `false`. The AFK channel is listen-only: the voice token for it
+(on `voice_join` and on `voice_token_refresh`) grants no microphone, camera or
+screen-share publishing whatever the role allows. An admin sets or clears it
+with `PUT /admin/api/afk-channel`, and the previous and the new channel each
+get a `channel_update`.
 
 `nsfw`, `nsfw_acknowledged`, `voice_max_users` and `voice_max_video` are always
 present, with their column defaults on an unconfigured channel — `false`,
@@ -586,7 +597,7 @@ carries. It used to be absent here, so a DM mention badge silently reset to 0 on
 every reconnect; the ready payload now ships the stored value. A DM's
 `unread_count` is capped at 100 under the same rule as `channels[]` above.
 
-**members[]:** All registered users with `id`, `username`, `avatar`, `role` (lowercase name), `status`, `display_name` (`null` when unset — render it instead of `username`), `about` (the About Me bio, `null` when unset; sent for every member, invisible ones included), `created_at` (the account creation instant, RFC 3339 UTC like `2026-10-15T13:04:05Z`; for an approval-mode account this is the application time), `custom_status` (`null` when unset), `identity_public_key` (base64 long-term E2EE identity key, omitted when the user has not published one — see voice E2EE TOFU)
+**members[]:** All registered users with `id`, `username`, `avatar`, `role` (lowercase name), `status`, `display_name` (`null` when unset — render it instead of `username`), `about` (the About Me bio, `null` when unset; sent for every member, invisible ones included), `created_at` (the account creation instant, RFC 3339 UTC like `2026-10-15T13:04:05Z`; for an approval-mode account this is the application time), `custom_status` (`null` when unset), `identity_public_key` (base64 long-term E2EE identity key, omitted when the user has not published one — see voice E2EE TOFU), `banner` (the profile banner image path `/api/v1/files/{id}`) and `banner_color` (`#rgb` or `#rrggbb`, lower-case); both are omitted when unset, so absent means no banner
 
 **member_timeouts[]:** The active timeouts this viewer may see, as `{user_id, expires_at}` (RFC 3339 UTC); always an array, `[]` when there are none. A viewer who holds `MODERATE_MEMBERS` or `ADMINISTRATOR` gets every unexpired timeout, sorted by `user_id`; everyone else gets only their own entry, because a timeout is a sanction and other members are not told of it. It is the last field before `members` in the payload. An absent key means an older server: show no timeout icons. See [member_timeouts](#member_timeouts-server---client).
 
@@ -812,6 +823,21 @@ the row, so a newly added user hears of the DM first. An owner transfer
 (`PUT /dms/{id}/owner`) sends the refreshed `dm_channel_open` only and writes no
 row. A group row raises the unread count for everyone except its author, carries
 no mention and sends no push.
+
+A pin writes a pin row (WP 6.12): `kind` is `pin_add`, the author is the pinner
+and `reply_to` is the id of the pinned message, with `referenced_message` null on
+the live frame (history fills it in, redacted to `{id, deleted: true}` once the
+target is soft-deleted, and `reply_to` becomes null when the target is purged).
+`content` is the English fallback `Alice pinned a message to this channel.`. The
+row is written in the same transaction as the pin, only when the message was not
+already pinned and no live pin row for it was written in the last 10 minutes, so
+pin, unpin and pin again writes one row. Unpinning writes none. It is a sequenced
+`chat_message` to the channel's readers or the DM's delivery audience, as any DM
+frame (a one-to-one DM whose request is still pending reaches only the pinner), replayed on
+reconnect; it raises the unread count for everyone but the pinner (the pinner's read state advances to the row and their mention count resets, as for call and group rows), carries no
+mention and sends no push. Unlike a call or group row, its author or a moderator
+(MANAGE_MESSAGES in a channel, the author only in a DM) may delete it, as an
+ordinary message. It cannot be edited, replied to, reacted to or pinned.
 
 The server writes one call row per DM call, from voice presence. The row is
 created when the first person joins the DM's voice channel (its author is the
@@ -1361,7 +1387,7 @@ that changed for them, so a connection gets about one frame per second however
 many channels are busy.
 
 - **Audience.** Connected users who may view the channel (the same
-  `CanViewChannel` verdict as `ready`), for `text` and `announcement` channels
+  `CanViewChannel` verdict as `ready`), for `text`, `announcement` and `voice` channels
   only (the channels `ready` gives an `unread_count`). Not sent to the channel's
   topic subscribers (they get `chat_message`), to the author of the window's
   latest message, or for DMs (their participants get the sequenced
@@ -1409,6 +1435,7 @@ Channel messages are triggered by REST API calls from admins and reach only the 
     "position": 3,
     "slow_mode": 0,
     "nsfw": false,
+    "afk": false,
     "private": false,
     "voice_max_users": 0,
     "voice_max_video": 0,
@@ -1557,6 +1584,8 @@ reconnect before the unban).
       "display_name": "New User",
       "about": "Hello there",
       "created_at": "2026-10-15T13:04:05Z",
+      "banner": "/api/v1/files/7a1e...",
+      "banner_color": "#5865f2",
       "identity_public_key": "base64-identity-pubkey"
     },
     "status": "online"
@@ -1567,7 +1596,9 @@ reconnect before the unban).
 `display_name` is the nickname to render instead of `username`; omitted when
 unset. `about` is the About Me bio (`null` when unset) and `created_at` the
 account creation instant (RFC 3339 UTC); both match the same fields of
-`ready.members[]`, and neither appears on `chat_message.user`.
+`ready.members[]`, and neither appears on `chat_message.user`. `banner` and
+`banner_color` are the profile banner, omitted when unset like in
+`ready.members[]`.
 `identity_public_key` is the user's long-term E2EE identity public key
 (see voice E2EE TOFU); omitted when the user has not published one. The
 top-level `status` is the viewer-safe presence the user comes online as (an
@@ -1703,8 +1734,9 @@ carries the current lists.
 ### user_update (Server -> Client, broadcast)
 
 Broadcast when a user changes their own profile via `PATCH /api/v1/users/me`,
-`POST /api/v1/users/me/avatar` or `DELETE /api/v1/users/me/avatar` (username, avatar, display name, about
-and/or identity key).
+`POST /api/v1/users/me/avatar`, `DELETE /api/v1/users/me/avatar`,
+`POST /api/v1/users/me/banner` or `DELETE /api/v1/users/me/banner` (username,
+avatar, display name, about, banner and/or identity key).
 
 ```json
 {
@@ -1716,14 +1748,16 @@ and/or identity key).
     "avatar": "/api/v1/files/5f2c...",
     "display_name": "New Name",
     "about": "A short bio.",
+    "banner": "/api/v1/files/7a1e...",
+    "banner_color": "#5865f2",
     "identity_public_key": "base64-identity-pubkey"
   }
 }
 ```
 
 The payload is a full snapshot, not a delta: it **replaces** the client's copy
-of that user's profile. `avatar`, `display_name` and `about` are always present
-and may be `null` (unset/cleared) — a profile edit that removes a field has to
+of that user's profile. `avatar`, `display_name`, `about`, `banner` and
+`banner_color` are always present and may be `null` (unset/cleared) — a profile edit that removes a field has to
 be distinguishable from one that leaves it alone.
 `identity_public_key` carries the user's current long-term E2EE identity key
 and is omitted when none is published; peers that pinned a different key must
@@ -2147,6 +2181,25 @@ voice instead of moved").
 
 Sent only to the moved user. The client tears down its LiveKit session and joins
 `to_channel_id`.
+
+`reason` is optional and absent on a moderator move. `"afk"` means the server's
+AFK sweep moved a member who had been idle (presence `idle`) in a server voice
+channel for the AFK timeout (`afk_timeout_seconds`) to the AFK channel:
+
+```json
+{ "type": "voice_moved", "payload": { "to_channel_id": 12, "reason": "afk" } }
+```
+
+The sweep runs every 60 seconds and moves at most 25 members per run, oldest
+idle first. It moves only a member who could join the AFK channel themselves
+(`CONNECT_VOICE`, not archived, room under `voice_max_users`) and only out of a
+server voice channel, never out of a DM or group call; otherwise the member
+stays where they are. A member whose socket has dropped is not moved. The
+move is the same eviction plus client re-join as a moderator move: a server
+mute or deafen survives it, and for 60 seconds an automatic `voice_join` to the
+channel left is refused (a `user_initiated` join is not), so nothing returns the
+member automatically. No audit row is written. A client that does not know
+`reason` ignores it and re-joins as for a moderator move.
 
 ### voice_mod_kick (Client -> Server)
 
@@ -2671,9 +2724,47 @@ warm resume served by replay never waits for a permit.
 | `SERVER_DEAFENED`          | Self-undeafen refused: a moderator imposed the deafen                                                                                                                                                                                                                            |
 | `SESSION_REPLACED`         | Sent before the close to a connection displaced because the same account connected from another device; the client does not reconnect on its own                                                                                                                                 |
 | `SERVER_BUSY`              | A fresh connect waited too long for a ready-build permit; carries `retry_after_ms`, and the socket closes 1013 (see Fresh-connect admission)                                                                                                                                     |
+| `REQUEST_TIMEOUT`          | A command's database work ran past the per-frame deadline and was not applied; the `error` carries the command's `id` (see Command deadlines). Unlike `SERVER_BUSY` it does not end the connection                                                                               |
 | `ANOTHER_DEVICE_ACTIVE`    | Sent to a wake reconnect (auth `wake: true`) refused because a different session of the same account holds the live connection or a call it parked in the voice grace window; that session is not displaced, and the client does not reconnect until the user chooses "Use here" |
 
 After 10 consecutive invalid JSON messages, the connection is forcibly closed.
+
+### Command deadlines
+
+Each inbound frame's database work (the periodic session recheck, the
+app-level `ping` session touch and the command handler) runs under a 10 s
+deadline, under the 25 s server ping interval. A command that is still failing
+when the deadline passes is answered with `REQUEST_TIMEOUT`, carrying the
+command's `id`, and its effects are not applied: a transaction whose context
+ends before commit is rolled back. Work after a commit (mention badges, push,
+audit rows) is detached from the frame's context, so a deadline that expires
+after the commit still yields the normal success reply and broadcast. A retry
+is safe: `chat_send` dedupes on `client_message_id`, an edit is idempotent, a
+delete answers `ALREADY_DELETED`, a reaction answers `CONFLICT` and `mark_read`
+is idempotent. `voice_mod_mute`, `voice_mod_deafen`, `voice_mod_move`,
+`voice_mod_kick` and `chat_command` are exempt: they pair a database write with
+a LiveKit call or a plugin budget of their own. The retry answers differ by
+command: a retried `reaction_add` answers `CONFLICT` and a retried
+`reaction_remove` answers `BAD_REQUEST`. A timed-out send in a slow-mode channel,
+or a timed-out `voice_token_refresh`, has already spent its rate budget, so the
+retry may answer `SLOW_MODE` or `RATE_LIMITED` until the window passes.
+`typing_start` answers nothing on a timeout, because it swallows every error
+that is not a refusal. `channel_focus`, `mark_read` and `mark_unread` answer
+`REQUEST_TIMEOUT` when a database call runs past the deadline. `mark_read` and
+`mark_unread` also answer it when the wait is for the lock that orders
+`mention_count` and `read_state` frames behind a stalled mention write. A
+`voice_join` bounds its checks and the membership insert by the deadline and
+answers `REQUEST_TIMEOUT` without joining; once the membership row is committed
+the rest of the join runs to completion. A channel switch that times out after
+it left the previous channel has already dropped that membership, and the
+client has received the `voice_leave` for it. A `voice_token_refresh` that times out answers
+`REQUEST_TIMEOUT` and leaves the user in voice; only a real refusal evicts, and
+a client `voice_leave` always releases the user's slot. One exception to the
+bound: `chat_delete` flushes the message's pending mention counts on a detached
+context before it deletes, so that step is not limited by the deadline. The
+deadline bounds each command, not each connection: commands queued behind a
+stalled writer each wait their own deadline in turn. A client that predates the
+code treats it as an unknown error string.
 
 ---
 

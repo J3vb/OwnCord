@@ -449,8 +449,9 @@ func TestBuildReady_ChannelsCarryLastReadMessageID(t *testing.T) {
 	if got, ok := byID[ids["lr-fresh"]]["last_read_message_id"].(float64); !ok || got != 0 {
 		t.Errorf("channel with no read row: last_read_message_id = %v, want 0", byID[ids["lr-fresh"]]["last_read_message_id"])
 	}
-	if _, present := byID[ids["lr-voice"]]["last_read_message_id"]; present {
-		t.Error("voice channel must not carry last_read_message_id")
+	// WP 6.1a: a voice channel has a chat, so it carries the unread fields.
+	if got, ok := byID[ids["lr-voice"]]["last_read_message_id"].(float64); !ok || got != 0 {
+		t.Errorf("voice channel with no read row: last_read_message_id = %v, want 0", byID[ids["lr-voice"]]["last_read_message_id"])
 	}
 }
 

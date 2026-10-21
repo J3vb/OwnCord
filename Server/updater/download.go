@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
+	"time"
 )
 
 // ValidateDownloadURL ensures the URL points to an expected GitHub release
@@ -286,7 +288,9 @@ func serverSignatureAssetName(goos, goarch string) string {
 }
 
 // downloadFile downloads the content at url and writes it to destPath.
-func (u *Updater) downloadFile(ctx context.Context, url, destPath string) error {
+func (u *Updater) downloadFile(parent context.Context, url, destPath string) error {
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -295,7 +299,7 @@ func (u *Updater) downloadFile(ctx context.Context, url, destPath string) error 
 		req.Header.Set("Authorization", "token "+u.githubToken)
 	}
 
-	resp, err := u.httpClient.Do(req)
+	resp, err := u.downloadHTTPClient().Do(req)
 	if err != nil {
 		return err
 	}
@@ -304,6 +308,12 @@ func (u *Updater) downloadFile(ctx context.Context, url, destPath string) error 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("HTTP %d downloading %s", resp.StatusCode, url)
 	}
+	// From here the body is read under the stall watchdog: it cancels ctx if
+	// no bytes arrive for the stall timeout. The caller's own deadline still
+	// bounds the whole download.
+	stall := newStallReader(cancel, resp.Body, u.stallTimeout())
+	defer stall.stop()
+	body := io.Reader(stall)
 
 	// O_EXCL: staging paths are predictable (exe + ".new"), so refuse to
 	// write through a pre-created file or symlink (TOCTOU). Callers remove
@@ -322,19 +332,22 @@ func (u *Updater) downloadFile(ctx context.Context, url, destPath string) error 
 	// Cap download at 500 MiB to prevent unbounded disk usage from a
 	// malicious or corrupted release asset.
 	const maxBinarySize = 500 * 1024 * 1024
-	limitedReader := io.LimitReader(resp.Body, maxBinarySize)
+	limitedReader := io.LimitReader(body, maxBinarySize)
 
 	n, err := io.Copy(f, limitedReader)
 	if err != nil {
 		_ = f.Close()
 		closed = true
 		_ = os.Remove(destPath)
+		if stall.stalled() {
+			return fmt.Errorf("writing downloaded file: %w", errDownloadStalled)
+		}
 		return fmt.Errorf("writing downloaded file: %w", err)
 	}
 	// Probe for one more byte to detect if the file exceeds the limit.
 	if n == maxBinarySize {
 		var probe [1]byte
-		if extra, _ := resp.Body.Read(probe[:]); extra > 0 {
+		if extra, _ := body.Read(probe[:]); extra > 0 {
 			_ = f.Close()
 			closed = true
 			_ = os.Remove(destPath)
@@ -352,3 +365,60 @@ func (u *Updater) downloadFile(ctx context.Context, url, destPath string) error 
 	closed = true
 	return nil
 }
+
+// errDownloadStalled reports a download abandoned because no bytes arrived
+// within the stall timeout.
+var errDownloadStalled = errors.New("download stalled: no data received")
+
+// downloadHTTPClient returns the client for the large release asset. It is the
+// metadata client minus the whole-exchange Timeout, which net/http applies to
+// reading the body and would cut any download slower than that limit. It keeps
+// the metadata client's Transport (connect and response-header timeouts) and
+// CheckRedirect (the release-host check on every hop). The body is bounded by
+// the caller's context deadline and the stall watchdog instead.
+func (u *Updater) downloadHTTPClient() *http.Client {
+	c := *u.httpClient
+	c.Timeout = 0
+	return &c
+}
+
+func (u *Updater) stallTimeout() time.Duration {
+	if u.downloadStallTimeout > 0 {
+		return u.downloadStallTimeout
+	}
+	return defaultDownloadStallTimeout
+}
+
+// stallReader cancels the download context when no bytes arrive for d. The
+// timer is re-armed after every read that returns data.
+type stallReader struct {
+	r       io.Reader
+	timer   *time.Timer
+	d       time.Duration
+	fired   atomic.Bool
+	stopped atomic.Bool
+}
+
+func newStallReader(cancel context.CancelFunc, r io.Reader, d time.Duration) *stallReader {
+	s := &stallReader{r: r, d: d}
+	s.timer = time.AfterFunc(d, func() {
+		s.fired.Store(true)
+		cancel()
+	})
+	return s
+}
+
+func (s *stallReader) Read(p []byte) (int, error) {
+	n, err := s.r.Read(p)
+	if n > 0 && !s.stopped.Load() {
+		s.timer.Reset(s.d)
+	}
+	return n, err
+}
+
+func (s *stallReader) stop() {
+	s.stopped.Store(true)
+	s.timer.Stop()
+}
+
+func (s *stallReader) stalled() bool { return s.fired.Load() }

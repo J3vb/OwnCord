@@ -5,7 +5,8 @@ SELECT id, name, type, COALESCE(category, '') AS category, COALESCE(topic, '') A
        voice_quality,
        mixing_threshold,
        COALESCE(voice_max_video, 0) AS voice_max_video,
-       nsfw
+       nsfw,
+       afk
 FROM channels ORDER BY position ASC, id ASC;
 
 -- name: GetChannel :one
@@ -15,8 +16,26 @@ SELECT id, name, type, COALESCE(category, '') AS category, COALESCE(topic, '') A
        voice_quality,
        mixing_threshold,
        COALESCE(voice_max_video, 0) AS voice_max_video,
-       nsfw
+       nsfw,
+       afk
 FROM channels WHERE id = ?;
+
+-- name: GetAFKChannel :one
+SELECT id, name, type, COALESCE(category, '') AS category, COALESCE(topic, '') AS topic,
+       position, slow_mode, archived, created_at,
+       COALESCE(voice_max_users, 0) AS voice_max_users,
+       voice_quality,
+       mixing_threshold,
+       COALESCE(voice_max_video, 0) AS voice_max_video,
+       nsfw,
+       afk
+FROM channels WHERE afk = 1;
+
+-- name: ClearAFKChannel :exec
+UPDATE channels SET afk = 0 WHERE afk = 1;
+
+-- name: SetChannelAFK :execrows
+UPDATE channels SET afk = 1 WHERE id = ? AND type = 'voice' AND archived = 0;
 
 -- name: CreateChannel :execresult
 INSERT INTO channels (name, type, category, topic, position) VALUES (?, ?, ?, ?, ?);

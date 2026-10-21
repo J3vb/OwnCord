@@ -208,20 +208,23 @@ describe("channel context menu - Developer Mode Copy Channel ID", () => {
     expect(item()).toBeNull();
   });
 
-  it("opens a menu on a voice channel for a non-manager only in Developer Mode", () => {
+  it("a voice channel's menu holds only Open chat for a non-manager, plus Copy Channel ID in Developer Mode", () => {
     authStore.setState((s) => ({
       ...s,
       user: { id: 1, username: "t", avatar: null, role: "member" },
     }));
     const voice = { ...channel(7, 0), type: "voice" as const };
     open(voice);
-    expect(document.querySelector(".channel-ctx-menu")).toBeNull();
+    expect(document.querySelector(".channel-ctx-menu")).not.toBeNull();
+    expect(item()).toBeNull();
+    expect(document.querySelectorAll(".channel-ctx-menu .context-menu-item")).toHaveLength(1);
+    document.querySelectorAll(".channel-ctx-menu").forEach((el) => el.remove());
     setDeveloperMode(true);
     open(voice);
     expect(item()).not.toBeNull();
   });
 
-  it("leaves Shift+F10 and the Menu key alone on a row with no menu", () => {
+  it("opens the menu from Shift+F10 and the Menu key on a voice row (Open chat)", () => {
     authStore.setState((s) => ({
       ...s,
       user: { id: 1, username: "t", avatar: null, role: "member" },
@@ -235,22 +238,15 @@ describe("channel context menu - Developer Mode Copy Channel ID", () => {
       ac.signal,
       ac.signal,
     );
-    const keys = [
-      new KeyboardEvent("keydown", { key: "F10", shiftKey: true, bubbles: true, cancelable: true }),
-      new KeyboardEvent("keydown", { key: "ContextMenu", bubbles: true, cancelable: true }),
-    ];
-    for (const key of keys) el.dispatchEvent(key);
-    expect(keys.map((k) => k.defaultPrevented)).toEqual([false, false]);
-    expect(document.querySelector(".channel-ctx-menu")).toBeNull();
-
-    setDeveloperMode(true);
-    const again = new KeyboardEvent("keydown", {
-      key: "ContextMenu",
+    const key = new KeyboardEvent("keydown", {
+      key: "F10",
+      shiftKey: true,
       bubbles: true,
       cancelable: true,
     });
-    el.dispatchEvent(again);
-    expect(again.defaultPrevented).toBe(true);
-    expect(item()).not.toBeNull();
+    el.dispatchEvent(key);
+    expect(key.defaultPrevented).toBe(true);
+    expect(document.querySelector('[data-testid="ctx-open-chat"]')).not.toBeNull();
+    expect(item()).toBeNull();
   });
 });

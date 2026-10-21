@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"github.com/J3vb/OwnCord/Server/updater"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -182,4 +183,12 @@ func SetInstallWritable(f func() error) (restore func()) {
 	prev := installWritable
 	installWritable = f
 	return func() { installWritable = prev }
+}
+
+// SetDownloadAndVerify replaces the download stage of POST /updates/apply and
+// returns a restore func.
+func SetDownloadAndVerify(f func(u *updater.Updater, ctx context.Context, latest, dl, sum, sig, man, manSig, dest string) (string, error)) (restore func()) {
+	prev := downloadAndVerify
+	downloadAndVerify = f
+	return func() { downloadAndVerify = prev }
 }

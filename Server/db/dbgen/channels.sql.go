@@ -46,6 +46,15 @@ func (q *Queries) AdminUpdateChannel(ctx context.Context, arg AdminUpdateChannel
 	return err
 }
 
+const clearAFKChannel = `-- name: ClearAFKChannel :exec
+UPDATE channels SET afk = 0 WHERE afk = 1
+`
+
+func (q *Queries) ClearAFKChannel(ctx context.Context) error {
+	_, err := q.db.ExecContext(ctx, clearAFKChannel)
+	return err
+}
+
 const createChannel = `-- name: CreateChannel :execresult
 INSERT INTO channels (name, type, category, topic, position) VALUES (?, ?, ?, ?, ?)
 `
@@ -105,6 +114,59 @@ func (q *Queries) DeleteChannelUserPermission(ctx context.Context, arg DeleteCha
 	return err
 }
 
+const getAFKChannel = `-- name: GetAFKChannel :one
+SELECT id, name, type, COALESCE(category, '') AS category, COALESCE(topic, '') AS topic,
+       position, slow_mode, archived, created_at,
+       COALESCE(voice_max_users, 0) AS voice_max_users,
+       voice_quality,
+       mixing_threshold,
+       COALESCE(voice_max_video, 0) AS voice_max_video,
+       nsfw,
+       afk
+FROM channels WHERE afk = 1
+`
+
+type GetAFKChannelRow struct {
+	ID              int64   `json:"id"`
+	Name            string  `json:"name"`
+	Type            string  `json:"type"`
+	Category        string  `json:"category"`
+	Topic           string  `json:"topic"`
+	Position        int64   `json:"position"`
+	SlowMode        int64   `json:"slowMode"`
+	Archived        int64   `json:"archived"`
+	CreatedAt       string  `json:"createdAt"`
+	VoiceMaxUsers   int64   `json:"voiceMaxUsers"`
+	VoiceQuality    *string `json:"voiceQuality"`
+	MixingThreshold *int64  `json:"mixingThreshold"`
+	VoiceMaxVideo   int64   `json:"voiceMaxVideo"`
+	Nsfw            int64   `json:"nsfw"`
+	Afk             int64   `json:"afk"`
+}
+
+func (q *Queries) GetAFKChannel(ctx context.Context) (GetAFKChannelRow, error) {
+	row := q.db.QueryRowContext(ctx, getAFKChannel)
+	var i GetAFKChannelRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Type,
+		&i.Category,
+		&i.Topic,
+		&i.Position,
+		&i.SlowMode,
+		&i.Archived,
+		&i.CreatedAt,
+		&i.VoiceMaxUsers,
+		&i.VoiceQuality,
+		&i.MixingThreshold,
+		&i.VoiceMaxVideo,
+		&i.Nsfw,
+		&i.Afk,
+	)
+	return i, err
+}
+
 const getChannel = `-- name: GetChannel :one
 SELECT id, name, type, COALESCE(category, '') AS category, COALESCE(topic, '') AS topic,
        position, slow_mode, archived, created_at,
@@ -112,7 +174,8 @@ SELECT id, name, type, COALESCE(category, '') AS category, COALESCE(topic, '') A
        voice_quality,
        mixing_threshold,
        COALESCE(voice_max_video, 0) AS voice_max_video,
-       nsfw
+       nsfw,
+       afk
 FROM channels WHERE id = ?
 `
 
@@ -131,6 +194,7 @@ type GetChannelRow struct {
 	MixingThreshold *int64  `json:"mixingThreshold"`
 	VoiceMaxVideo   int64   `json:"voiceMaxVideo"`
 	Nsfw            int64   `json:"nsfw"`
+	Afk             int64   `json:"afk"`
 }
 
 func (q *Queries) GetChannel(ctx context.Context, id int64) (GetChannelRow, error) {
@@ -151,6 +215,7 @@ func (q *Queries) GetChannel(ctx context.Context, id int64) (GetChannelRow, erro
 		&i.MixingThreshold,
 		&i.VoiceMaxVideo,
 		&i.Nsfw,
+		&i.Afk,
 	)
 	return i, err
 }
@@ -336,7 +401,8 @@ SELECT id, name, type, COALESCE(category, '') AS category, COALESCE(topic, '') A
        voice_quality,
        mixing_threshold,
        COALESCE(voice_max_video, 0) AS voice_max_video,
-       nsfw
+       nsfw,
+       afk
 FROM channels ORDER BY position ASC, id ASC
 `
 
@@ -355,6 +421,7 @@ type ListChannelsRow struct {
 	MixingThreshold *int64  `json:"mixingThreshold"`
 	VoiceMaxVideo   int64   `json:"voiceMaxVideo"`
 	Nsfw            int64   `json:"nsfw"`
+	Afk             int64   `json:"afk"`
 }
 
 func (q *Queries) ListChannels(ctx context.Context) ([]ListChannelsRow, error) {
@@ -381,6 +448,7 @@ func (q *Queries) ListChannels(ctx context.Context) ([]ListChannelsRow, error) {
 			&i.MixingThreshold,
 			&i.VoiceMaxVideo,
 			&i.Nsfw,
+			&i.Afk,
 		); err != nil {
 			return nil, err
 		}
@@ -393,6 +461,18 @@ func (q *Queries) ListChannels(ctx context.Context) ([]ListChannelsRow, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const setChannelAFK = `-- name: SetChannelAFK :execrows
+UPDATE channels SET afk = 1 WHERE id = ? AND type = 'voice' AND archived = 0
+`
+
+func (q *Queries) SetChannelAFK(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setChannelAFK, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const setChannelSlowMode = `-- name: SetChannelSlowMode :exec

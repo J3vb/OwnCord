@@ -67,7 +67,7 @@ func (d *DB) PurgeUserChannelMessagesSince(ctx context.Context, channelID, userI
 
 	rows, err := tx.QueryContext(ctx,
 		`SELECT id FROM messages
-		 WHERE channel_id = ? AND user_id = ? AND id >= ? AND timestamp >= ? AND deleted = 0 AND kind = 0
+		 WHERE channel_id = ? AND user_id = ? AND id >= ? AND timestamp >= ? AND deleted = 0 AND kind IN (0, 7)
 		 ORDER BY id DESC LIMIT ?`,
 		channelID, userID, floor, since, limit,
 	)
@@ -93,7 +93,7 @@ func (d *DB) PurgeUserChannelMessagesSince(ctx context.Context, channelID, userI
 
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(selected)), ",")
 	moved, err := tx.QueryContext(ctx,
-		fmt.Sprintf(`UPDATE messages SET deleted = 1 WHERE id IN (%s) AND deleted = 0 AND kind = 0 RETURNING id`, //nolint:gosec // G201: placeholder interpolation, not user input
+		fmt.Sprintf(`UPDATE messages SET deleted = 1 WHERE id IN (%s) AND deleted = 0 AND kind IN (0, 7) RETURNING id`, //nolint:gosec // G201: placeholder interpolation, not user input
 			placeholders),
 		selected...,
 	)

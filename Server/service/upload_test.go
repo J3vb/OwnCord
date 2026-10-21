@@ -402,3 +402,60 @@ func TestUploadAuthorize_AdministratorStillNeedsConsentForALabelledChannel(t *te
 		t.Errorf("administrator with an acknowledgement was refused: %v", err)
 	}
 }
+
+// bannerlessStore is a Store that does not implement BannerFileStore: embedding
+// the interface (not *db.DB) hides IsBannerFile from the method set.
+type bannerlessStore struct{ Store }
+
+// failingBannerStore implements BannerFileStore, but the lookup always fails.
+type failingBannerStore struct{ Store }
+
+func (failingBannerStore) IsBannerFile(context.Context, string) (bool, error) {
+	return false, errors.New("lookup failed")
+}
+
+// The banner grant fails closed: with no BannerFileStore, or one whose lookup
+// errors, an unlinked attachment that IS a live banner is still refused to a
+// non-uploader and still readable by its uploader.
+func TestUploadAuthorize_BannerLookupFailsClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		banners func(Store) BannerFileStore
+	}{
+		// service.New leaves banners nil for a Store without the method.
+		{"store without BannerFileStore", func(Store) BannerFileStore { return nil }},
+		{"lookup errors", func(s Store) BannerFileStore { return failingBannerStore{s} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			database := newTestDB(t)
+			perms := NewPermissionService(database, permissions.NewChecker(database))
+			var bare Store = bannerlessStore{database}
+			if _, ok := bare.(BannerFileStore); ok {
+				t.Fatal("bannerlessStore must not satisfy BannerFileStore")
+			}
+			uploads := NewUploadService(bare, perms)
+			uploads.banners = tc.banners(database)
+			seedUser(t, database, &db.User{ID: 1})
+			seedUser(t, database, &db.User{ID: 2})
+			uploader := int64(1)
+			seedAttachment(t, database, "ban", &uploader, nil)
+			if _, err := database.ExecContext(context.Background(),
+				`UPDATE users SET banner_id = 'ban' WHERE id = 1`); err != nil {
+				t.Fatalf("set banner_id: %v", err)
+			}
+			if ok, err := database.IsBannerFile(context.Background(), "ban"); err != nil || !ok {
+				t.Fatalf("fixture: IsBannerFile = %v, %v; want a live banner", ok, err)
+			}
+			aa, err := uploads.Resolve(context.Background(), "ban")
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
+			}
+			if err := uploads.Authorize(context.Background(), aa, &db.User{ID: 2}, nil); !errors.Is(err, ErrForbidden) {
+				t.Errorf("non-uploader error = %v, want ErrForbidden", err)
+			}
+			if err := uploads.Authorize(context.Background(), aa, &db.User{ID: 1}, nil); err != nil {
+				t.Errorf("uploader was refused its own file: %v", err)
+			}
+		})
+	}
+}

@@ -202,6 +202,7 @@ export const shards = {
     "src/lib/dom.ts",
     "src/features/messaging/fileDropGuard.ts",
     "src/features/messaging/shortcodes.ts",
+    "src/features/messaging/spoilerAttachment.ts",
     "src/features/messaging/slashCommands.ts",
     "src/lib/logger.ts",
     "src/lib/logPersistence.ts",
@@ -234,7 +235,7 @@ export const shards = {
   // mutant there is static, so each one re-runs the whole suite; on runs
   // 38902717516 and 38926807609 they used most of lib-rest-1's 90 minutes.
   // This shard skips static mutants (see ignoreStaticShards below).
-  "lib-rest-9": ["src/lib/icons.ts"],
+  "lib-rest-9": ["src/lib/icons.ts", "src/lib/imageHeader.ts"],
   "stores-1": [
     "src/stores/auth.store.ts",
     "src/stores/emoji.store.ts",

@@ -152,7 +152,7 @@ func handleChannelFocusV2(ctx context.Context, cmd Command, info ClientInfo, dep
 		if errors.Is(err, service.ErrForbidden) {
 			return Result{Error: ClientError{Code: ErrCodeForbidden, Message: "access denied"}}
 		}
-		return Result{} // silently drop other errors
+		return dropUnlessDeadline(ctx, err) // silently drop other errors
 	}
 
 	if focusCmd.NoRead {
@@ -197,7 +197,7 @@ func handleMarkReadV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 			if errors.Is(err, service.ErrForbidden) {
 				return Result{Error: ClientError{Code: ErrCodeForbidden, Message: "access denied"}}
 			}
-			return Result{} // silently drop other errors
+			return dropUnlessDeadline(ctx, err) // silently drop other errors
 		}
 		return Result{Events: []Event{channelReadEvt(info.UserID, markCmd.ChannelID, readThroughNoted)}}
 	}
@@ -211,9 +211,20 @@ func handleMarkReadV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 		if errors.Is(err, service.ErrForbidden) {
 			return Result{Error: ClientError{Code: ErrCodeForbidden, Message: "access denied"}}
 		}
-		return Result{} // silently drop other errors
+		return dropUnlessDeadline(ctx, err) // silently drop other errors
 	}
 	return Result{Events: []Event{channelReadEvt(info.UserID, markCmd.ChannelID, rs.LastReadMessageID)}}
+}
+
+// dropUnlessDeadline is the result of a read-state command that ignores its
+// failure: an empty Result, except when the frame deadline ctx cut the work
+// short, which is carried as the error so the client is told REQUEST_TIMEOUT
+// rather than left to believe the read pointer moved.
+func dropUnlessDeadline(ctx context.Context, err error) Result {
+	if commandDeadlineExceeded(ctx, err) {
+		return Result{Error: err}
+	}
+	return Result{}
 }
 
 // handleMarkUnreadV2 is the V2 handler for mark_unread messages: it moves the

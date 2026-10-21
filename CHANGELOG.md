@@ -49,8 +49,26 @@ and only when it changes something a contributor or fork holder must do
 
 ### Added
 
+**Accounts & admin**
+
+- A server can now name one voice channel as its AFK channel (`PUT /admin/api/afk-channel`, Manage Server) and set how long a member must be idle first (the `afk_timeout_seconds` setting: 1, 5, 15, 30 or 60 minutes, 5 by default). Nobody is moved yet and the admin panel has no card for it; this release only adds the setting, the channel flag everyone's client receives, and the rule that the AFK channel is listen-only, with no microphone, camera or screen sharing.
+- The server can now keep a private note about any member and sync it between your devices. A note is yours alone: nobody else, including admins and moderators, can read it through OwnCord, and it is capped at 256 characters. The notes are stored in the server database, not end-to-end encrypted, so the server operator can read them there, as with direct messages. Deleting an account removes the notes that account kept and the notes others kept about it. Clients start using this in a later release; until then the notes you keep in the DM side panel stay on your device.
+- The server can now store a profile banner for each member: a colour (`#rgb` or `#rrggbb`), an uploaded image (PNG, JPEG or WebP, up to 1 MiB and 1920 by 960 pixels, counted against the uploader's storage quota), or both (`POST` and `DELETE /api/v1/users/me/banner`, `banner_color` on `PATCH /api/v1/users/me`). Like an avatar, a banner image can be read by every signed-in member while it is someone's banner and by nobody else once it is replaced or removed. The banner rides on the member list, `member_join`, `user_update` and your own profile. Clients start showing banners in a later release.
+
+**Messages & files**
+
+- Pinning a message now leaves a line in the chat for everyone who can read it ("X pinned a message to this channel"), in channels, DMs and group DMs. It makes no sound and is never a mention; pinning the same message again within 10 minutes adds no second line. The pinner (or Manage Messages in a channel) can delete the line. Clients without the matching update show it as plain text.
+
+**Voice**
+
+- Members who stay idle in a server voice channel are now moved to the AFK channel once it is set, after the AFK timeout on top of the client's own idle delay. A member who could not join the AFK channel, a DM or group call, and a member who comes back first are left alone. A moderator mute or deafen is kept through the move, and the member returns by joining a channel themselves. The client does not show why yet and the admin panel has no card for it.
+
 **Desktop UI**
 
+- Opening a voice call now opens the voice channel's text chat beside the video grid (stacked under it in a narrow window); leaving the call keeps the chat, and moving to another voice channel follows to its chat. A **Hide chat** / **Show chat** button in the header (shown during a call on that channel) keeps the grid full width, and a voice channel now shows a speaker in its header instead of `#`.
+- A voice channel in the sidebar now shows a red mention badge when someone mentions you in its chat, and right-clicking it offers **Open chat** to read that chat without joining the call; clicking the row still joins. "Mark all read" no longer appears for unread voice chat that no row shows.
+- Opening a voice call now opens the voice channel's text chat beside the video grid (stacked under it in a narrow window); leaving the call keeps the chat, and moving to another voice channel follows to its chat.
+- Images and videos can now be sent as spoilers. A **Mark as spoiler** button on each pending attachment renames the file to `SPOILER_<name>` and uploads it again (press it again to undo), and a file you already named `SPOILER_...` shows as marked. In the chat a spoiler image or video, alone or inside an image grid, is blurred under a **Spoiler** cover that opens with a click, Enter or Space; until then it cannot be opened in the viewer, saved or copied, and it stays out of the viewer's previous/next sequence. It is covered again whenever the message is redrawn.
 - The member list now sits on the right; Appearance > Member list position puts it back under the channels.
 - A group DM now has a member list on the right (a **Show Member List** button in the header toggles it) showing everyone with a crown on the owner. Anyone can add people with **Add People** while the group has fewer than 10, and the owner can **Remove From Group** or **Make Group Owner** from a member's right-click or ⋯ menu, each after a confirm. Added, removed, left, renamed and icon-changed events show as quiet lines in the chat that make no sound, and the leave confirm now says someone can add you back. These need a server with 3B-10 group DM support; on an older server the list shows but the add and owner actions stay hidden.
 - A group DM can now have its own picture. Right-click the group and choose **Change Group Icon** to pick a PNG, JPEG or WebP (it is cropped to a square for you) or **Remove Group Icon**; anyone in the group can do either, and everyone sees the picture in the DM list and the chat header instead of the two stacked faces. If the picture can't load, the faces show as before. This needs a server with 3B-10 group DM support.
@@ -133,6 +151,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Messaging**
 
+- A voice channel's chat now has unread and mention state like a text channel: the server counts its unread messages and mentions in `ready` and sends the `channel_activity` hint for it. This needs no new client; the voice row's badge comes with a later client change.
 - The search API understands `from:name`, `in:channel` (a channel name, in every channel with that name you can read), `before:`, `after:` and `during:` with `YYYY-MM-DD` dates, plus an optional `tz` time zone for the dates. A search can be filters only (`from:alex`) and then lists newest first, page by page. Unknown names give no results, and a channel you cannot read looks the same as one that does not exist.
 - The search API also understands `has:link`, `has:file`, `has:image`, `has:video` and `has:sound`, `mentions:name` (messages that mention that user in their text, not reply pings or @everyone) and `pinned:true` / `pinned:false`. Several `has:` or `mentions:` filters must all match.
 - Banning a member can now also delete their recent messages. `PATCH /api/v1/moderation/members/{id}` (and the admin panel's `PATCH /admin/api/users/{id}`) takes an optional `delete_message_seconds` (0 to 604800, only with `banned: true`) and deletes the member's messages from that long ago in the channels where you can read and manage messages. It needs the Manage Messages permission as well as Ban Members. Connected clients drop the messages right away, the response gains `purge` with the count and whether it finished, and a very large purge stops at 10,000 messages or 20 seconds with `complete: false`: send the same request again to continue. Requests without the field behave as before.
@@ -189,6 +208,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Voice and video**
 
+- Going Idle after ten quiet minutes now also happens while you are in a voice channel or a DM call, instead of staying Online. Activity still brings you back.
 - The Docker Compose stack now needs only three ports for chat and voice: `8443/TCP`, `7881/TCP` and `7882/UDP`. Voice media used to need the `50000-60000/UDP` range, and the LiveKit key and secret had to be typed in both `.env` and `livekit.yaml`; now they live only in `.env`. **For server owners using `docker compose`:**
   - Forward `7882/UDP` on your router instead of the `50000-60000` range, and close the old range.
   - Put the LiveKit key and secret only in `.env`, never using a `'` in either value (letters and digits, for example `openssl rand -hex 32`, are safest). `docker compose` now refuses to run any command, even `down` or `logs`, if `.env` is missing either value, and the message names the variable.
@@ -216,6 +236,7 @@ and only when it changes something a contributor or fork holder must do
 
 - New logins now stay signed in by default (Auto connect starts ticked). The password is saved only when Remember password is ticked; Auto connect alone keeps just the sign-in token.
 - The server's load test at 1,000 and 2,000 people online has now been run and published: 1,000 online holds steady chat and a burst of messages with room to spare on a 2 vCPU / 4 GB server, but a burst of 500 logins and a full reconnect of everyone are slower than their targets, and the 2,000 run was not valid, so 2,000 stays an estimate (see [Capacity](docs/capacity.md#scale-profile)).
+- When the server's database is stuck behind a long write, an ordinary request now gives up after 15 seconds and answers "service unavailable" with a short retry hint, instead of hanging until the connection drops. Uploads, downloads, the live connection, voice, backups and account deletion are not cut short.
 
 **Notifications**
 
@@ -235,6 +256,10 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
+**Messages & files**
+
+- A command that waits on a stalled database for more than 10 seconds now fails with "The server is busy — retry in a moment" (a Retry button on a message) instead of waiting indefinitely. Nothing was applied when this appears, so Retry never double-posts. Voice moderation and slash commands are not affected.
+
 **Desktop UI**
 
 - An app that fails to start now shows an error dialog instead of closing without a word: on Linux desktops (a run with no display still prints the error only), and on every platform when the main window or tray cannot be created.
@@ -250,6 +275,7 @@ and only when it changes something a contributor or fork holder must do
 - After a backup is restored from the admin panel or the restore command, connected apps now fetch everything fresh instead of resuming from older events. When you move a data folder by hand, copy the `.ws-seq-floor` file beside the database along with it.
 - After a backup is restored from the admin panel or the restore command, connected apps now fetch everything fresh instead of resuming from older events. When you move a data folder by hand, copy the `.ws-seq-floor` file beside the database along with it; the same goes when you restore another machine's backup to move a server.
 - "Update now" on a server whose install folder the service cannot write to failed with a vague download error after the download. The Updates page now says the server cannot replace its own program file and to install the release by hand, and nothing is downloaded or restarted.
+- **Update now** on the Updates page no longer fails on a slow connection: the download is not cut off after 30 seconds, and the page still gets the result when the update takes longer than the server's 30-second response limit. The server gives up if no data arrives for 60 seconds or the update check and download together take more than 10 minutes.
 - Deleting an account with a long history held up every other message, login and reaction on the server until it finished (about 3 seconds at 100,000 messages, far longer on a slow disk). The history is now removed in short steps that let others through, the account is signed out and locked at the start, and a restart or the server's housekeeping finishes the job if it is interrupted. Whoever deletes an account still sees success; for a few seconds the account can show with part of its history gone. The last-administrator check also counts deletions already under way.
 
 **Login & connection**

@@ -48,10 +48,10 @@ func TestMemberGeneration_MovesOnMemberWritesOnly(t *testing.T) {
 		{"ban", func() { must(database.BanUser(ctx, uid, "r", &expires)) }, true},
 		{"unban", func() { must(database.UnbanUser(ctx, uid)) }, true},
 		{"role change", func() { must(database.UpdateUserRole(ctx, uid, 3)) }, true},
-		{"profile", func() { must(database.UpdateUserProfile(ctx, uid, "alice", nil, str("Al"), nil)) }, true},
-		{"profile rewrite, nothing changed", func() { must(database.UpdateUserProfile(ctx, uid, "alice", nil, str("Al"), nil)) }, false},
-		{"about only", func() { must(database.UpdateUserProfile(ctx, uid, "alice", nil, str("Al"), str("hello"))) }, true},
-		{"about rewrite, nothing changed", func() { must(database.UpdateUserProfile(ctx, uid, "alice", nil, str("Al"), str("hello"))) }, false},
+		{"profile", func() { must(database.UpdateUserProfile(ctx, uid, "alice", nil, str("Al"), nil, nil, nil)) }, true},
+		{"profile rewrite, nothing changed", func() { must(database.UpdateUserProfile(ctx, uid, "alice", nil, str("Al"), nil, nil, nil)) }, false},
+		{"about only", func() { must(database.UpdateUserProfile(ctx, uid, "alice", nil, str("Al"), str("hello"), nil, nil)) }, true},
+		{"about rewrite, nothing changed", func() { must(database.UpdateUserProfile(ctx, uid, "alice", nil, str("Al"), str("hello"), nil, nil)) }, false},
 		{"custom status", func() { must(database.UpdateUserCustomStatus(ctx, uid, str("busy"))) }, true},
 		{"expiry rewrite, same text", func() {
 			must(database.UpdateUserPresence(ctx, uid, db.StatusOnline, str("busy"), str("2099-01-01T00:00:00Z")))
@@ -121,7 +121,7 @@ func TestListMembers_AboutAndCreatedAtRFC3339(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := database.UpdateUserProfile(ctx, uid, "alice", nil, nil, &about); err != nil {
+	if err := database.UpdateUserProfile(ctx, uid, "alice", nil, nil, &about, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	members, err := database.ListMembers(ctx)

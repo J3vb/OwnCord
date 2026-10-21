@@ -69,6 +69,7 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	exec(`INSERT OR IGNORE INTO read_states (user_id, channel_id, last_message_id) VALUES (?, ?, 0)`, uid, chID)
 	exec(`INSERT INTO attachments (id, message_id, filename, stored_as, mime_type, size, uploader_id) VALUES ('att-1', ?, 'a.png', 'stored-a.png', 'image/png', 1, ?)`, msg.ID, uid)
 	exec(`INSERT INTO attachments (id, filename, stored_as, mime_type, size, uploader_id) VALUES ('avatar-subject', 'me.png', 'stored-avatar.png', 'image/png', 1, ?)`, uid)
+	exec(`UPDATE users SET banner_id = 'avatar-subject' WHERE id = ?`, uid)
 	exec(`INSERT INTO attachments (id, message_id, filename, stored_as, mime_type, size, uploader_id) VALUES ('att-other', ?, 'o.png', 'stored-other.png', 'image/png', 1, ?)`, otherMsg.ID, other)
 	exec(`INSERT INTO user_storage (user_id, bytes_used) VALUES (?, 2)`, uid)
 	exec(`INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, vapid_key_id) VALUES (?, 'https://push.example/subject', 'p', 'a', 'key1')`, uid)
@@ -211,6 +212,14 @@ func eraseEveryInventoryClassIsZero(t *testing.T) {
 		`INSERT INTO message_group_events (message_id, target_user_id) VALUES (?, ?)`, evID, sub.id); err != nil {
 		t.Fatalf("seed group event target: %v", err)
 	}
+	// Private notes (migration 069): one the subject keeps about another user,
+	// one another user keeps about the subject, so class 16a is proved
+	// non-empty on both ids. A note between two other users must survive.
+	for _, n := range []struct{ owner, target int64 }{{sub.id, sub.other}, {sub.other, sub.id}, {sub.other, witness}} {
+		if ok, err := database.UpsertUserNote(ctx, n.owner, n.target, "private note"); err != nil || !ok {
+			t.Fatalf("seed note %d about %d: ok=%v err=%v", n.owner, n.target, ok, err)
+		}
+	}
 	before, err := database.TakeInventory(ctx, sub.id, sub.username)
 	if err != nil {
 		t.Fatalf("TakeInventory: %v", err)
@@ -291,7 +300,13 @@ func eraseEveryInventoryClassIsZero(t *testing.T) {
 	if n := count(`SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH 'needleword'`); n != 0 {
 		t.Errorf("FTS still finds the subject's text")
 	}
+	if n := count(`SELECT COUNT(*) FROM user_notes WHERE owner_id = ? AND target_id = ?`, sub.other, witness); n != 1 {
+		t.Errorf("a note between two other users = %d rows, want 1", n)
+	}
 	// The other user's reaction on the subject's message cascaded with it.
+	if n := count(`SELECT COUNT(*) FROM users WHERE banner_id IS NOT NULL`); n != 0 {
+		t.Errorf("users still naming a banner after erasure = %d, want 0", n)
+	}
 	if n := count(`SELECT COUNT(*) FROM reactions`); n != 0 {
 		t.Errorf("reactions left = %d, want 0", n)
 	}

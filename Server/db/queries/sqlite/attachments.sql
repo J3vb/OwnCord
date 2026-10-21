@@ -8,7 +8,7 @@ DELETE FROM attachments WHERE id = ? AND uploader_id = ? AND message_id IS NULL;
 -- name: DiscardUnlinkedAttachment :one
 -- The uploader withdraws a file it staged and never sent. A live avatar is an
 -- unlinked row too, so it is kept, as in the orphan sweep. So is a live group
--- DM icon.
+-- DM icon and a live profile banner (users.banner_id).
 DELETE FROM attachments
 WHERE id = ? AND uploader_id = ? AND message_id IS NULL
   AND NOT EXISTS (
@@ -16,6 +16,9 @@ WHERE id = ? AND uploader_id = ? AND message_id IS NULL
   )
   AND NOT EXISTS (
     SELECT 1 FROM channels c WHERE c.dm_icon = attachments.id
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM users u WHERE u.banner_id = attachments.id
   )
 RETURNING stored_as;
 
@@ -39,7 +42,8 @@ WHERE a.id = ?;
 -- users.avatar URL is what keeps them alive and authorizes serving them
 -- (migration 027). Excluding them here is what stops the sweep from destroying
 -- every avatar in the instance. idx_users_avatar makes the lookup cheap. A
--- group DM icon (channels.dm_icon, migration 066) is kept the same way.
+-- group DM icon (channels.dm_icon, migration 066) and a profile banner
+-- (users.banner_id, migration 069) are kept the same way.
 --
 -- OC-0279: a message delete is a soft delete (messages.deleted=1, the row
 -- survives), so an attachment linked to a deleted message keeps a non-NULL
@@ -64,6 +68,9 @@ WHERE uploaded_at < ?
   )
   AND NOT EXISTS (
     SELECT 1 FROM channels c WHERE c.dm_icon = attachments.id
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM users u WHERE u.banner_id = attachments.id
   )
 RETURNING stored_as;
 

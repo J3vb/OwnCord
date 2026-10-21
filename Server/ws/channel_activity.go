@@ -341,7 +341,7 @@ func (h *Hub) resolveChannelActivity(ctx context.Context, chID int64, pc *pendin
 		activityReadFailed("GetChannel, skipping channel", "channel_id", chID, "err", err)
 		return
 	}
-	if ch == nil || (ch.Type != "text" && ch.Type != "announcement") {
+	if ch == nil || !carriesChatState(ch.Type) {
 		return
 	}
 

@@ -27,7 +27,9 @@ CREATE TABLE IF NOT EXISTS roles (
     color       TEXT,
     permissions INTEGER NOT NULL DEFAULT 0,
     position    INTEGER NOT NULL DEFAULT 0,
-    is_default  INTEGER NOT NULL DEFAULT 0
+    is_default  INTEGER NOT NULL DEFAULT 0,
+    hoist       INTEGER NOT NULL DEFAULT 0,
+    mentionable INTEGER NOT NULL DEFAULT 0
 );
 INSERT OR IGNORE INTO roles (id, name, color, permissions, position, is_default) VALUES
     (1, 'Owner',     '#E74C3C', 2147483647, 100, 0),
@@ -53,7 +55,9 @@ CREATE TABLE IF NOT EXISTS users (
     display_name TEXT,
     about TEXT,
     custom_status TEXT,
-    custom_status_expires_at TEXT
+    custom_status_expires_at TEXT,
+    banner_id TEXT,
+    banner_color TEXT
 );
 CREATE TABLE IF NOT EXISTS erasure_jobs (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -102,6 +106,7 @@ CREATE TABLE IF NOT EXISTS channels (
     mixing_threshold INTEGER,
     voice_max_video  INTEGER NOT NULL DEFAULT 0,
     nsfw             INTEGER NOT NULL DEFAULT 0,
+    afk             INTEGER NOT NULL DEFAULT 0,
     is_group         INTEGER NOT NULL DEFAULT 0,
     dm_owner_id      INTEGER,
     dm_icon      TEXT
@@ -914,7 +919,9 @@ func TestGetPins_ReturnsPinnedMessages(t *testing.T) {
 	chID, _ := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
 
 	msgID, _ := database.CreateMessage(context.Background(), chID, user.ID, "pinned message", nil)
-	_ = database.SetMessagePinned(context.Background(), msgID, true)
+	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: msgID, Pinned: true, UserID: user.ID}); err != nil {
+		t.Fatalf("SetMessagePinned: %v", err)
+	}
 	// Also create an unpinned message — should not appear.
 	_, _ = database.CreateMessage(context.Background(), chID, user.ID, "not pinned", nil)
 
@@ -947,7 +954,7 @@ func TestGetPins_HasMoreOnlyPastCap(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CreateMessage: %v", err)
 		}
-		if err := database.SetMessagePinned(context.Background(), id, true); err != nil {
+		if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: id, Pinned: true, UserID: 1}); err != nil {
 			t.Fatalf("SetMessagePinned: %v", err)
 		}
 	}
@@ -1074,7 +1081,9 @@ func TestSetPinned_UnpinSuccessfully(t *testing.T) {
 	user, _ := database.GetUserByUsername(context.Background(), "unpinner1")
 	chID, _ := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
 	msgID, _ := database.CreateMessage(context.Background(), chID, user.ID, "unpin me", nil)
-	_ = database.SetMessagePinned(context.Background(), msgID, true)
+	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: msgID, Pinned: true, UserID: user.ID}); err != nil {
+		t.Fatalf("SetMessagePinned: %v", err)
+	}
 
 	rr := chDelete(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", chID, msgID), token)
 	if rr.Code != http.StatusNoContent {
@@ -1132,7 +1141,9 @@ func TestSetPinned_Idempotent(t *testing.T) {
 	user, _ := database.GetUserByUsername(context.Background(), "pinner4")
 	chID, _ := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
 	msgID, _ := database.CreateMessage(context.Background(), chID, user.ID, "already pinned", nil)
-	_ = database.SetMessagePinned(context.Background(), msgID, true)
+	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: msgID, Pinned: true, UserID: user.ID}); err != nil {
+		t.Fatalf("SetMessagePinned: %v", err)
+	}
 
 	// Pinning again should still succeed (idempotent).
 	rr := chPost(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", chID, msgID), token)
@@ -1147,6 +1158,8 @@ func TestSetPinned_Idempotent(t *testing.T) {
 // assert one event carries every purged id.
 type recordingPurgeBroadcaster struct {
 	calls []purgeBroadcast
+	// pinRows records every PinEventRow fan-out (WP 6.12).
+	pinRows []*service.PinEventResult
 }
 
 type purgeBroadcast struct {
@@ -1161,6 +1174,11 @@ func (b *recordingPurgeBroadcaster) BroadcastChatBulkDeleted(channelID int64, id
 // BroadcastMessagePinned satisfies PurgeBroadcaster; the pin fan-out itself is
 // asserted in ws/messages_test.go.
 func (b *recordingPurgeBroadcaster) BroadcastMessagePinned(_ int64, _ int64, _ bool) {}
+
+// PinEventRow records the pin row fan-out.
+func (b *recordingPurgeBroadcaster) PinEventRow(_ context.Context, res *service.PinEventResult) {
+	b.pinRows = append(b.pinRows, res)
+}
 
 // buildPurgeRouter wires the channel routes with a recording broadcaster onto a
 // DB that has the DM and audit tables the purge path touches.
@@ -1399,5 +1417,41 @@ func TestPurgeMessages_NilBroadcasterStillPurges(t *testing.T) {
 		if !msg.Deleted {
 			t.Errorf("message %d not purged", id)
 		}
+	}
+}
+
+// ─── pin row fan-out (WP 6.12) ──────────────────────────────────────────────
+
+func TestHandleSetPinned_EmitsRowOnce(t *testing.T) {
+	router, database, broadcaster := buildPurgeRouter(t)
+	token := chTestCreateToken(t, database, "pinrow", 1)
+	user, _ := database.GetUserByUsername(context.Background(), "pinrow")
+	chID, _ := database.CreateChannel(context.Background(), "pinrows", "text", "", "", 0)
+	msgID, _ := database.CreateMessage(context.Background(), chID, user.ID, "pin me", nil)
+	path := fmt.Sprintf("/api/v1/channels/%d/pins/%d", chID, msgID)
+
+	if rr := chPost(t, router, path, token); rr.Code != http.StatusNoContent {
+		t.Fatalf("pin status = %d, want 204; body: %s", rr.Code, rr.Body.String())
+	}
+	if len(broadcaster.pinRows) != 1 {
+		t.Fatalf("pin row fan-outs after a pin = %d, want 1", len(broadcaster.pinRows))
+	}
+	got := broadcaster.pinRows[0]
+	if got.Row.PinnedMessageID != msgID || got.Row.ChannelID != chID || got.Author.ID != user.ID {
+		t.Errorf("fan-out = %+v (author %+v), want target %d channel %d author %d", got.Row, got.Author, msgID, chID, user.ID)
+	}
+
+	// A re-pin, an unpin and a flap inside the window emit nothing more.
+	if rr := chPost(t, router, path, token); rr.Code != http.StatusNoContent {
+		t.Fatalf("re-pin status = %d", rr.Code)
+	}
+	if rr := chDelete(t, router, path, token); rr.Code != http.StatusNoContent {
+		t.Fatalf("unpin status = %d", rr.Code)
+	}
+	if rr := chPost(t, router, path, token); rr.Code != http.StatusNoContent {
+		t.Fatalf("flap pin status = %d", rr.Code)
+	}
+	if len(broadcaster.pinRows) != 1 {
+		t.Errorf("pin row fan-outs after re-pin, unpin and flap = %d, want still 1", len(broadcaster.pinRows))
 	}
 }

@@ -25,7 +25,7 @@ In mount order (`Server/api/router.go`):
 5. **Request Logger** -- structured logging of method, path, status, duration.
 6. **Telemetry HTTP middleware** -- OpenTelemetry tracing; a no-op unless the server was built with `-tags otel` and telemetry is enabled.
 7. **SecurityHeadersWithTLS** -- (adds `Strict-Transport-Security` when TLS is on) sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 0`, `Referrer-Policy: strict-origin-when-cross-origin`, `Content-Security-Policy: default-src 'self'`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, `Cache-Control: no-store`.
-8. **MaxBodySize** -- 1 MiB default for all routes except `/api/v1/uploads` (100 MiB, or `upload.max_size_mb` plus 1 MiB when larger), `/api/v1/admin/plugins/install` (16 MiB envelope), and `/api/v1/users/me/avatar` (2 MiB envelope).
+8. **MaxBodySize** -- 1 MiB default for all routes except `/api/v1/uploads` (100 MiB, or `upload.max_size_mb` plus 1 MiB when larger), `/api/v1/admin/plugins/install` (16 MiB envelope), and `/api/v1/users/me/avatar` and `/api/v1/users/me/banner` (2 MiB envelope).
 9. **Coraza WAF** (optional) -- OWASP Core Rule Set request filtering, mounted only when `server.waf_enabled: true` (see `docs/server-configuration.md`).
 
 Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are resolved from `X-Forwarded-For` only when the peer is listed in `server.trusted_proxies`.
@@ -36,12 +36,13 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 198 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 203 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
 | GET     | `/admin/`                                                            |
 | GET     | `/admin/*`                                                           |
+| PUT     | `/admin/api/afk-channel`                                             |
 | GET     | `/admin/api/archive`                                                 |
 | GET     | `/admin/api/archive/download`                                        |
 | POST    | `/admin/api/archive/link`                                            |
@@ -204,7 +205,11 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | PATCH   | `/api/v1/users/me/`                                                  |
 | DELETE  | `/api/v1/users/me/avatar`                                            |
 | POST    | `/api/v1/users/me/avatar`                                            |
+| DELETE  | `/api/v1/users/me/banner`                                            |
+| POST    | `/api/v1/users/me/banner`                                            |
 | GET     | `/api/v1/users/me/moderation`                                        |
+| GET     | `/api/v1/users/me/notes/{userId}`                                    |
+| PUT     | `/api/v1/users/me/notes/{userId}`                                    |
 | POST    | `/api/v1/users/me/notices/{id}/ack`                                  |
 | PUT     | `/api/v1/users/me/password`                                          |
 | GET     | `/api/v1/users/me/recovery-kit`                                      |
@@ -279,9 +284,25 @@ endpoints return plain-text errors — see their section):
 | `GIF_DISABLED`                  | 503         | GIF proxy is not configured on this server (no `gif.api_key`)                                                                                                                                                                                    |
 | `GIF_FAVORITES_FULL`            | 409         | You have reached the favorite GIF limit (250)                                                                                                                                                                                                    |
 | `PUSH_DISABLED`                 | 503         | Web Push is not enabled on this server (`push.enabled` is false)                                                                                                                                                                                 |
+| `SERVICE_UNAVAILABLE`           | 503         | The request ran past the server's 15 s request deadline and failed (`Retry-After: 2`; see Request deadline below), or the auth store was unavailable while resolving a token                                                                     |
 | `NSFW_ACKNOWLEDGEMENT_REQUIRED` | 403         | Content from a labelled channel requested before the caller acknowledged it (history, around, pins, reaction users, search, attachment bytes — B5-7)                                                                                             |
 | `NOT_NSFW`                      | 409         | `PUT /api/v1/channels/{id}/nsfw-acknowledgement` on a channel that is not labelled                                                                                                                                                               |
 | `CHANNEL_NAME_TAKEN`            | 409         | Admin channel create or rename onto a name the same type already has in that category                                                                                                                                                            |
+
+### Request deadline
+
+Every REST route except the streaming and long-running ones carries a 15 s
+deadline on its request context. A handler that answers 500 or 503 after that
+deadline passed (a database call cancelled behind a stalled writer, say) is
+answered `503 {"error":"SERVICE_UNAVAILABLE","message":"the server is busy; try again"}` with `Retry-After: 2` in place
+of its own error body; a retry is safe, as the server finishes or undoes any partial step.
+The clock starts when the request arrives, so it includes reading the request
+body. Any other status, including a 2xx written after the deadline and a
+specific 5xx such as 502 or 507, is never rewritten. Exempt, with no deadline of their own beyond the transfer and
+archive progress deadlines: the WebSocket upgrade, the LiveKit proxy, file
+uploads and downloads, avatar, banner, emoji and group-icon uploads, client-update, the admin
+log stream, archive, backup, restore, update-apply and restart routes, plugin
+install, enable and disable, and account erasure.
 
 ---
 
@@ -557,6 +578,8 @@ Get the current authenticated user's profile.
   "avatar": "/api/v1/files/uuid",
   "display_name": "Alex",
   "about": "A short bio.",
+  "banner": "/api/v1/files/uuid",
+  "banner_color": "#5865f2",
   "custom_status": "building things",
   "custom_status_expires_at": "2026-10-15T18:00:00Z",
   "status": "online",
@@ -576,6 +599,8 @@ login and the TOTP challenge.
 | `avatar`                   | string       | Avatar URL (`/api/v1/files/{id}` after an upload, or an `https://` URL), or empty string                                                                                                                          |
 | `display_name`             | string\|null | Nickname rendered instead of `username`; null when unset                                                                                                                                                          |
 | `about`                    | string\|null | Profile bio, max 300 characters; null when unset                                                                                                                                                                  |
+| `banner`                   | string\|null | Profile banner image path (`/api/v1/files/{id}`), set with `POST /api/v1/users/me/banner`; null when unset                                                                                                        |
+| `banner_color`             | string\|null | Profile banner colour, `#rgb` or `#rrggbb` in lower case; null when unset                                                                                                                                         |
 | `custom_status`            | string\|null | Free-text status line, max 128 characters, one line (no control characters, line breaks, invisible characters or stacked combining marks); null when unset. Set over WebSocket (`presence_update`), not over REST |
 | `custom_status_expires_at` | string\|null | RFC 3339 UTC instant the custom status clears itself; null when it has no expiry. Set with `presence_update`'s `custom_status_expires_in`; only the owner is told it                                              |
 | `status`                   | string       | One of: `online`, `idle`, `dnd`, `invisible`, `offline`. **This is the caller's own true status**, so `invisible` appears here; every payload describing this user to _anyone else_ reports `offline` instead     |
@@ -809,7 +834,8 @@ event replaces the client's copy rather than patching it).
   "username": "newname",
   "avatar": "https://example.com/pic.png",
   "display_name": "New Name",
-  "about": "A short bio."
+  "about": "A short bio.",
+  "banner_color": "#5865f2"
 }
 ```
 
@@ -819,6 +845,7 @@ event replaces the client's copy rather than patching it).
 | `avatar`              | Optional. Must be an `https://` URL (max 512 chars) or `""` to clear. An avatar on the server's own host must be `/api/v1/files/<uuid>`; any other same-host path is rejected with 400. Upload a file instead with `POST /api/v1/users/me/avatar`.                                                                         |
 | `display_name`        | Optional, 1–32 characters, counted after runs of spaces are collapsed to one. Shown instead of `username` everywhere; `""` clears it and falls back to the username. Rejected if it contains control characters or line breaks, invisible (bidi-override, zero-width) characters, or more than 2 combining marks in a row. |
 | `about`               | Optional, max 300 characters. `""` clears it.                                                                                                                                                                                                                                                                              |
+| `banner_color`        | Optional, `#rgb` or `#rrggbb` (case-insensitive; stored lower-case). `""` clears it. There is deliberately no banner id or URL field: a banner image can only be set by uploading it with `POST /api/v1/users/me/banner`.                                                                                                  |
 | `identity_public_key` | Optional, base64, max 128 characters. Publishes the client's long-term E2EE identity public key for voice TOFU pinning (see [protocol.md](protocol.md), Voice End-to-End Encryption).                                                                                                                                      |
 
 Omitting a field leaves it unchanged; sending `""` clears the nullable ones.
@@ -900,6 +927,61 @@ users. An older server answers 405; fall back to the `PATCH`.
 #### Response 200 OK
 
 The same user object `PATCH /api/v1/users/me` returns, with no `avatar` key.
+
+### POST /api/v1/users/me/banner
+
+Upload a profile banner image and point the authenticated user's banner at it.
+Broadcasts a `user_update` on success. It is the avatar upload with other
+limits: the bytes are stored as an ordinary attachment with no channel
+(counted against the uploader's storage quota), and `users.banner_id` names it.
+`GET /api/v1/files/{id}` admits the file to every authenticated user for
+exactly as long as `banner_id` names it, and refuses it to everyone but the
+uploader once the banner is replaced or removed; the orphan sweep then
+reclaims it. A banner file can never be attached to a message. If the profile
+update fails after the bytes were stored, the unlinked attachment row and the
+stored file are removed and the storage charge is released. The upload sends no
+username, so a rename or About edit made meanwhile is kept.
+
+Not registered when the server has no working storage backend.
+
+**Auth:** Required
+**Rate limit:** 5 uploads/minute per user
+
+#### Request
+
+`multipart/form-data` with a single `file` part.
+
+| Rule       | Value                                                                                                                 |
+| ---------- | --------------------------------------------------------------------------------------------------------------------- |
+| Type       | `image/png`, `image/jpeg` or `image/webp`, sniffed from the file's own bytes (the client's `Content-Type` is ignored) |
+| Size       | 1 MiB                                                                                                                 |
+| Dimensions | At most 1920x960, measured from the sniffed image                                                                     |
+
+GIF and SVG are refused for the reasons given for avatars. The server does not
+re-encode or crop; the client is expected to crop and scale before uploading.
+
+#### Response 201 Created
+
+The same shape as the avatar upload, with `url` set to `/api/v1/files/{id}`.
+
+#### Errors
+
+| Status | Code           | Cause                                                          |
+| ------ | -------------- | -------------------------------------------------------------- |
+| 400    | `BAD_REQUEST`  | Missing `file` part, wrong type, too large, or too many pixels |
+| 429    | `RATE_LIMITED` | Too many uploads                                               |
+
+### DELETE /api/v1/users/me/banner
+
+Remove the authenticated user's banner image. The colour is separate: clear it
+with `PATCH /api/v1/users/me` and `"banner_color": ""`. It shares the `PATCH`
+rate limit and is idempotent: with no banner it still answers 200. Everyone
+receives a `user_update` with `banner: null`. The old file stops being served to
+other users.
+
+#### Response 200 OK
+
+The same user object `PATCH /api/v1/users/me` returns, with `banner: null`.
 
 | Status | Code           | Cause             |
 | ------ | -------------- | ----------------- |
@@ -3760,7 +3842,7 @@ Authorization is two-layered:
 | `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions`, `/user-permissions` and `/access/…`)                                             | `MANAGE_CHANNELS`                                                                            |
 | `GET/POST/PATCH/DELETE /admin/api/roles…` (incl. `/roles/reorder`)                                                                                   | `MANAGE_ROLES`                                                                               |
 | `GET /admin/api/audit-log`                                                                                                                           | `VIEW_AUDIT_LOG`                                                                             |
-| `GET/PATCH /admin/api/settings`                                                                                                                      | `MANAGE_SERVER`                                                                              |
+| `GET/PATCH /admin/api/settings`, `PUT /admin/api/afk-channel`                                                                                        | `MANAGE_SERVER`                                                                              |
 | `GET /admin/api/config`                                                                                                                              | `MANAGE_SERVER`                                                                              |
 | `GET/PATCH /admin/api/config/settings`, `POST /admin/api/restart`                                                                                    | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`)                           |
 | `GET /admin/api/retention`, `GET /admin/api/retention/channels`, `GET /admin/api/retention/preview`, `PUT/DELETE /admin/api/channels/{id}/retention` | `MANAGE_SERVER` — B4-11                                                                      |
@@ -4547,7 +4629,7 @@ audited as `setting_change`.
 A flat map of key → string value. Allowed keys: `server_name`, `server_icon`,
 `motd`, `require_2fa`,
 `registration_mode`, `backup_schedule`, `backup_retention`, `retention_days`,
-`upload_blocked_extensions`, `upload_allowed_extensions`.
+`upload_blocked_extensions`, `upload_allowed_extensions`, `afk_timeout_seconds`.
 Boolean settings
 accept `1/0/true/false` and are normalized to `1`/`0`. `registration_mode`
 accepts `closed`, `invite`, `approval` or `open` (case-insensitive, stored
@@ -4582,6 +4664,12 @@ channel (pinned messages exempt, direct messages never in scope); a
 per-channel override in either direction is
 [`PUT /admin/api/channels/{id}/retention`](#put-adminapichannelsidretention).
 
+`afk_timeout_seconds` (WP 6.10a) is how long a member must have been idle
+before the AFK channel may take them: one of `60`, `300`, `900`, `1800` or
+`3600`, anything else is refused with `400`. A server with no row uses `300`.
+Which channel is the AFK channel is not a setting: see
+[`PUT /admin/api/afk-channel`](#put-adminapiafk-channel).
+
 `server_name` (1–100 bytes) and `motd` (at most 500 bytes) are trimmed and
 held to the same limits the first-run setup wizard enforces.
 
@@ -4605,6 +4693,39 @@ user has TOTP enabled.
 | 400    | `BAD_REQUEST` | Unknown key, a value outside its key's rules above, or `require_2fa` preconditions not met |
 
 ---
+
+### PUT /admin/api/afk-channel
+
+Names the server's AFK channel, or clears it (WP 6.10a). Clearing the old flag
+and setting the new one is one transaction, audited as `afk_channel_change`,
+and a `channel_update` is broadcast for each channel whose flag moved. The AFK
+channel is listen-only: its voice tokens grant no microphone, camera or screen
+sharing.
+
+**Auth:** `MANAGE_SERVER`
+
+#### Request
+
+```json
+{ "channel_id": 12 }
+```
+
+`channel_id` must be present: a channel id flags that channel, `null` clears
+the flag.
+
+#### Response 200 OK
+
+```json
+{ "channel_id": 12 }
+```
+
+#### Errors
+
+| Status | Code            | Cause                                                 |
+| ------ | --------------- | ----------------------------------------------------- |
+| 400    | `BAD_REQUEST`   | `channel_id` missing or not an id or `null`           |
+| 400    | `INVALID_INPUT` | The channel is not a voice channel, or it is archived |
+| 404    | `NOT_FOUND`     | No such channel (a DM id answers the same)            |
 
 ### GET /admin/api/config
 
@@ -4962,6 +5083,7 @@ re-verification against TOCTOU swaps), spawns the new process and shuts down.
 | 409    | `RESTART_PENDING`                                            | A restart from an earlier apply/restore is already pending                                                                                                  |
 | 409    | `UPDATE_IN_PROGRESS`                                         | Another restart-sensitive operation (update apply or backup restore) is running                                                                             |
 | 409    | `NO_UPDATE`                                                  | Already up to date                                                                                                                                          |
+| 503    | `SERVER_SHUTTING_DOWN`                                       | The server began shutting down while the update was being checked or downloaded; nothing was applied, try again once it is back                             |
 | 502    | `UPDATE_CHECK_FAILED` / `MISSING_ASSETS` / `DOWNLOAD_FAILED` | Check, asset or download/verification failure                                                                                                               |
 
 ---

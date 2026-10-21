@@ -209,8 +209,7 @@ export function createQuickSwitcherManager(
           return;
         }
         // A voice channel selected here must go through the same join path the
-        // sidebar row uses — a bare setActiveChannel mounts the chat surface
-        // for a voice channel the user never joined (F8).
+        // sidebar row uses: a pick joins, it does not just open the chat.
         const channel = channelsStore.getState().channels.get(channelId);
         if (channel?.type === "voice" && onJoinVoice !== undefined) {
           onJoinVoice(channelId);

@@ -476,7 +476,7 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 	// re-adds an already-counted mention would otherwise raise the badge twice,
 	// and "only the original insert can raise a badge" is the simplest rule that
 	// is always correct.
-	mentions := s.resolveMentions(ctx, content, userID, msg.ChannelID, isDM)
+	mentions := s.resolveMentions(context.WithoutCancel(ctx), content, userID, msg.ChannelID, isDM) // detached: it swallows read errors, so a spent deadline would empty the set
 	// A reply_ping row is kept by the replace and handed back so the broadcast
 	// keeps the replied-to author highlighted.
 	replyPingID, mErr := s.st.ReplaceMessageMentions(context.WithoutCancel(ctx), msgID, mentions.UserIDs, mentions.Everyone)
@@ -606,9 +606,9 @@ func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64,
 	if msg.Deleted {
 		return nil, fmt.Errorf("%w: cannot delete this message", ErrDeletedMessage)
 	}
-	// A call log or group event row is read-only for everyone, moderators
-	// included. It goes only with its channel, erasure or retention.
-	if msg.Kind != db.MessageKindUser {
+	// Call and group rows are read-only for everyone, moderators included. A
+	// pin row deletes like a message (WP 6.12).
+	if msg.Kind != db.MessageKindUser && msg.Kind != db.MessageKindPinAdd {
 		return nil, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
 	}
 

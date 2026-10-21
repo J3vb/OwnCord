@@ -77,6 +77,7 @@ type Channel struct {
 	IsGroup         int64   `json:"isGroup"`
 	DmOwnerID       *int64  `json:"dmOwnerId"`
 	DmIcon          *string `json:"dmIcon"`
+	Afk             int64   `json:"afk"`
 }
 
 type ChannelOverride struct {
@@ -250,6 +251,11 @@ type MessageRequest struct {
 	State          string  `json:"state"`
 	CreatedAt      string  `json:"createdAt"`
 	DecidedAt      *string `json:"decidedAt"`
+}
+
+type MessageRoleMention struct {
+	MessageID int64 `json:"messageId"`
+	RoleID    int64 `json:"roleId"`
 }
 
 type MessagesFt struct {
@@ -429,6 +435,8 @@ type Role struct {
 	Permissions int64   `json:"permissions"`
 	Position    int64   `json:"position"`
 	IsDefault   int64   `json:"isDefault"`
+	Hoist       int64   `json:"hoist"`
+	Mentionable int64   `json:"mentionable"`
 }
 
 type Session struct {
@@ -488,12 +496,26 @@ type User struct {
 	CustomStatus          *string `json:"customStatus"`
 	RegistrationStatus    string  `json:"registrationStatus"`
 	CustomStatusExpiresAt *string `json:"customStatusExpiresAt"`
+	BannerID              *string `json:"bannerId"`
+	BannerColor           *string `json:"bannerColor"`
 }
 
 type UserBlock struct {
 	BlockerID int64  `json:"blockerId"`
 	BlockedID int64  `json:"blockedId"`
 	CreatedAt string `json:"createdAt"`
+}
+
+type UserNote struct {
+	OwnerID   int64  `json:"ownerId"`
+	TargetID  int64  `json:"targetId"`
+	Note      string `json:"note"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
+type UserRole struct {
+	UserID int64 `json:"userId"`
+	RoleID int64 `json:"roleId"`
 }
 
 type UserStorage struct {

@@ -99,6 +99,18 @@ export function privateIndicator(channelId: number): HTMLSpanElement {
   return badge;
 }
 
+/** The mention badge: it counts the mentions, not the messages. Shared by the
+ *  text row and the voice row (WP 6.1d), so both draw the same markup. */
+export function mentionBadge(channelId: number, count: number): HTMLSpanElement {
+  const badge = createElement(
+    "span",
+    { class: "mention-badge", "data-testid": `channel-mentions-${channelId}` },
+    String(count),
+  );
+  badge.title = shellText("channel.mentions", { count });
+  return badge;
+}
+
 /** Draw one text or announcement row, without handlers. */
 export function drawTextChannelRow(model: TextChannelRowModel): HTMLDivElement {
   const classes = ["channel-item"];
@@ -138,16 +150,7 @@ export function drawTextChannelRow(model: TextChannelRowModel): HTMLDivElement {
   if (model.nsfw) item.appendChild(nsfwIndicator(model.channelId));
   if (model.private) item.appendChild(privateIndicator(model.channelId));
 
-  // The mention badge counts the mentions, not the messages.
-  if (model.mentionCount > 0) {
-    const badge = createElement(
-      "span",
-      { class: "mention-badge", "data-testid": `channel-mentions-${model.channelId}` },
-      String(model.mentionCount),
-    );
-    badge.title = shellText("channel.mentions", { count: model.mentionCount });
-    item.appendChild(badge);
-  }
+  if (model.mentionCount > 0) item.appendChild(mentionBadge(model.channelId, model.mentionCount));
   return item;
 }
 

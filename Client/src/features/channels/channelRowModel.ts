@@ -56,9 +56,9 @@ export type ChannelGroup = {
   readonly orderIds: string;
 };
 
-/** A voice channel's wrapper: what rebuilds it. `active`, `muted`, `unread`
- *  and the mention count are not drawn on it, and the capacity is a chrome
- *  patch (`updateVoiceRow`). */
+/** A voice channel's wrapper: what rebuilds it. `active`, `muted` and `unread`
+ *  are not drawn on it; the capacity and the mention badge are chrome patches
+ *  (`updateVoiceRow`), so a mention never rebuilds the roster. */
 export type VoiceChannelRowModel = {
   readonly kind: "voice";
   readonly channelId: number;

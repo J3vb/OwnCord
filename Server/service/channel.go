@@ -16,6 +16,7 @@ import (
 // listing, permission-filtered access, typing, presence, and read state.
 type ChannelService struct {
 	st    Store
+	afk   AFKStore
 	perms *PermissionService
 	batch *ConnWrites
 	// wakeExpiry nudges the custom status expirer after a status with an
@@ -26,8 +27,13 @@ type ChannelService struct {
 
 // NewChannelService creates a ChannelService.
 func NewChannelService(st Store, perms *PermissionService) *ChannelService {
+	// The AFK pointer lives on a slice interface rather than on Store, which
+	// is ratcheted (datastore_ratchet_test.go). *db.DB satisfies it; a Store
+	// that does not leaves SetAFKChannel answering ErrInternal.
+	afk, _ := st.(AFKStore)
 	return &ChannelService{
 		st:    st,
+		afk:   afk,
 		perms: perms,
 		now:   time.Now,
 	}

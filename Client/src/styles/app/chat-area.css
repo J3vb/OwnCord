@@ -122,6 +122,59 @@
   color: var(--text-normal);
 }
 
+/* ── Call view with its chat beside the grid (WP 6.1b) ──
+   Set by VideoModeController while the active channel is the joined voice
+   channel and the grid is up: the header spans the top row, the grid fills the
+   left column, and messages, typing and the composer stack in a right column. */
+.chat-area--call-chat {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+}
+.chat-area--call-chat > .chat-header {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+.chat-area--call-chat > .video-grid-slot {
+  grid-column: 1;
+  grid-row: 2 / 5;
+}
+.chat-area--call-chat > .messages-slot {
+  grid-column: 2;
+  grid-row: 2;
+}
+.chat-area--call-chat > .typing-slot {
+  grid-column: 2;
+  grid-row: 3;
+}
+.chat-area--call-chat > .input-slot {
+  grid-column: 2;
+  grid-row: 4;
+}
+
+/* Set while the chat column is narrower than the split needs (side panels
+   included): the chat stacks under the grid. */
+.chat-area--call-chat-stacked {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto 45vh minmax(0, 1fr) auto auto;
+}
+.chat-area--call-chat-stacked > .video-grid-slot {
+  grid-column: 1;
+  grid-row: 2;
+}
+.chat-area--call-chat-stacked > .messages-slot {
+  grid-column: 1;
+  grid-row: 3;
+}
+.chat-area--call-chat-stacked > .typing-slot {
+  grid-column: 1;
+  grid-row: 4;
+}
+.chat-area--call-chat-stacked > .input-slot {
+  grid-column: 1;
+  grid-row: 5;
+}
+
 /* ── Slot wrappers (inside .chat-area flex column) ── */
 .messages-slot {
   flex: 1;

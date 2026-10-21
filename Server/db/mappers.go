@@ -78,6 +78,8 @@ func userFromGen(u dbgen.User) *User {
 		RegistrationStatus: u.RegistrationStatus,
 
 		CustomStatusExpiresAt: u.CustomStatusExpiresAt,
+		BannerID:              u.BannerID,
+		BannerColor:           u.BannerColor,
 	}
 }
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 func TestGetMessagesForAPI_ReferencedMessageSnippet(t *testing.T) {
@@ -86,7 +88,7 @@ func TestGetMessagesAroundAndPinned_ReferencedMessage(t *testing.T) {
 
 	parent, _ := database.CreateMessage(ctx, ch, alice, "old", nil)
 	reply, _ := database.CreateMessage(ctx, ch, alice, "re", &parent)
-	if err := database.SetMessagePinned(ctx, reply, true); err != nil {
+	if _, err := database.SetMessagePinned(ctx, db.SetPinnedParams{MessageID: reply, Pinned: true, UserID: 1}); err != nil {
 		t.Fatal(err)
 	}
 

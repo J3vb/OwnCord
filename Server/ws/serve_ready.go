@@ -51,6 +51,8 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 				// is what the "edit my profile" form pre-fills from.
 				"display_name":  user.DisplayName,
 				"about":         user.About,
+				"banner":        user.BannerPath(),
+				"banner_color":  user.BannerColor,
 				"custom_status": customStatus,
 				// RFC 3339 instant the custom status clears itself, or null.
 				"custom_status_expires_at": expiresAtVal,
@@ -272,7 +274,10 @@ func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.C
 			// Age-gate flag. The server enforces content behaviour on a
 			// flagged channel now (B5-7, permissions.CanReadContent); see
 			// nsfw_acknowledged below for the caller's own consent state.
-			"nsfw":    visibleChannels[i].NSFW,
+			"nsfw": visibleChannels[i].NSFW,
+			// The server's one AFK voice channel (migration 068, WP 6.10a):
+			// listen-only, and what the idle sweep moves members into.
+			"afk":     visibleChannels[i].AFK,
 			"private": privacy.Private(visibleChannels[i].ID), // 3D-6, channel-level
 			// Whether THIS caller has acknowledged the label (B5-7). Always
 			// present, like nsfw itself — false for an unlabelled channel,
@@ -290,7 +295,7 @@ func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.C
 		// over one subject, asked only in affordancesFor. The server remains
 		// the authority; these only pre-disable controls.
 		readyAffordances(role, overrides[visibleChannels[i].ID], &visibleChannels[i], timedOut).spreadInto(entry)
-		if visibleChannels[i].Type == "text" || visibleChannels[i].Type == "announcement" {
+		if carriesChatState(visibleChannels[i].Type) {
 			if u, ok := unreadMap[visibleChannels[i].ID]; ok {
 				entry["unread_count"] = u.UnreadCount
 				entry["last_message_id"] = u.LastMessageID
@@ -456,7 +461,6 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 	}
 
 	voiceStates := h.readyVoiceStates(ctx, database, visibleChannels, dmChannels, userID)
-
 	serverName, motd := h.getCachedSettings(ctx)
 
 	notices, err := readyNotices(ctx, database, userID)
@@ -475,6 +479,8 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 				"message_retry_window_seconds": int64(service.MessageRetryWindow.Seconds()),
 				"message_retry_floor_ms":       retryFloorMS,
 				"read_pointer":                 true,
+				"user_notes":                   true,
+				"profile_banners":              true,
 			},
 			Channels:   channelPayloads,
 			DMChannels: dmChannels,

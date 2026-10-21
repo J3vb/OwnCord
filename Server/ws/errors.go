@@ -57,4 +57,10 @@ const (
 	// for a ready-build permit (P5-S04). It carries retry_after_ms, and the
 	// socket closes 1013 right after; the client redials no sooner.
 	ErrCodeServerBusy = "SERVER_BUSY"
+	// ErrCodeRequestTimeout answers a command whose database work ran past the
+	// per-frame deadline (command_deadline.go, WP 4.1b). It means "not
+	// applied": the command was cut short before its commit, so a retry is
+	// safe. It is not SERVER_BUSY, which the client treats as a refused
+	// connect and redials on.
+	ErrCodeRequestTimeout = "REQUEST_TIMEOUT"
 )

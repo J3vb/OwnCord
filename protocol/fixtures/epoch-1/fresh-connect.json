@@ -26,6 +26,8 @@
             "user": {
               "about": "fixture profile text",
               "avatar": "https://fixtures.invalid/alice-avatar.png",
+              "banner": null,
+              "banner_color": null,
               "custom_status": "fixture custom status",
               "custom_status_expires_at": "<ts:null>",
               "display_name": "Alice Fixture",
@@ -46,10 +48,13 @@
               "message_deduplication": true,
               "message_retry_floor_ms": 0,
               "message_retry_window_seconds": 86400,
-              "read_pointer": true
+              "profile_banners": true,
+              "read_pointer": true,
+              "user_notes": true
             },
             "channels": [
               {
+                "afk": false,
                 "can_delete_others": false,
                 "can_moderate_voice": false,
                 "can_pin": false,
@@ -73,6 +78,7 @@
                 "voice_max_video": 25
               },
               {
+                "afk": false,
                 "can_delete_others": false,
                 "can_moderate_voice": false,
                 "can_pin": false,
@@ -80,6 +86,9 @@
                 "can_send": true,
                 "category": "",
                 "id": "<id:number>",
+                "last_message_id": "<id:number>",
+                "last_read_message_id": "<id:number>",
+                "mention_count": 0,
                 "name": "Voice",
                 "nsfw": false,
                 "nsfw_acknowledged": false,
@@ -88,6 +97,7 @@
                 "slow_mode": 0,
                 "topic": "",
                 "type": "voice",
+                "unread_count": 0,
                 "voice_max_users": 0,
                 "voice_max_video": 25
               }
@@ -274,6 +284,8 @@
             "user": {
               "about": null,
               "avatar": null,
+              "banner": null,
+              "banner_color": null,
               "custom_status": null,
               "custom_status_expires_at": "<ts:null>",
               "display_name": null,
@@ -294,10 +306,13 @@
               "message_deduplication": true,
               "message_retry_floor_ms": 0,
               "message_retry_window_seconds": 86400,
-              "read_pointer": true
+              "profile_banners": true,
+              "read_pointer": true,
+              "user_notes": true
             },
             "channels": [
               {
+                "afk": false,
                 "can_delete_others": false,
                 "can_moderate_voice": false,
                 "can_pin": false,
@@ -321,6 +336,7 @@
                 "voice_max_video": 25
               },
               {
+                "afk": false,
                 "can_delete_others": false,
                 "can_moderate_voice": false,
                 "can_pin": false,
@@ -328,6 +344,9 @@
                 "can_send": true,
                 "category": "",
                 "id": "<id:number>",
+                "last_message_id": "<id:number>",
+                "last_read_message_id": "<id:number>",
+                "mention_count": 0,
                 "name": "Voice",
                 "nsfw": false,
                 "nsfw_acknowledged": false,
@@ -336,6 +355,7 @@
                 "slow_mode": 0,
                 "topic": "",
                 "type": "voice",
+                "unread_count": 0,
                 "voice_max_users": 0,
                 "voice_max_video": 25
               }
