@@ -157,11 +157,15 @@ test("Settings: the AFK channel and timeout persist, and the channel is badged",
   await navigate(page, "Settings");
   await expect(page.locator("#s-afk_channel option:checked")).toHaveText("afk-lounge");
   await expect(page.locator("#s-afk_timeout_seconds")).toHaveValue("900");
+  expect(await findUnnamedControls(page.locator("#content"))).toEqual([]);
+  const { ratio } = await textContrast(page.locator("#s-afk_channel-desc"));
+  expect(ratio).toBeGreaterThanOrEqual(Q1.text);
 
   await navigate(page, "Channels");
-  await expect(page.locator(".ch-tbl tr", { hasText: "afk-lounge" }).locator(".badge")).toHaveText(
-    "AFK",
-  );
+  const afkBadge = page.locator(".ch-tbl tr", { hasText: "afk-lounge" }).locator(".badge");
+  await expect(afkBadge).toHaveText("AFK");
+  const badgeContrast = await textContrast(afkBadge);
+  expect(badgeContrast.ratio).toBeGreaterThanOrEqual(Q1.text);
 });
 
 test("Retention: a server-wide window is previewed and applied", async ({

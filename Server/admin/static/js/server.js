@@ -8,7 +8,7 @@
 const EXT_KEYS=['upload_blocked_extensions','upload_allowed_extensions'];
 const AFK_TIMEOUT_DEFAULT='300';
 const AFK_TIMEOUTS=[['60','1 minute'],['300','5 minutes'],['900','15 minutes'],['1800','30 minutes'],['3600','60 minutes']];
-const CONNECT_VOICE_BIT=0x200;
+const AFK_JOIN_BITS=0x202; /* READ_MESSAGES | CONNECT_VOICE: both are needed to join */
 const SETTINGS_KEYS=['server_name','motd','registration_mode','require_2fa','afk_timeout_seconds',...EXT_KEYS];
 /* An extension list as the server stores it: lower case, no dots, deduped,
    comma-separated; so a respelled but equal list is not a change. */
@@ -127,10 +127,13 @@ async function afkWarningsHtml(ch){
   const out=[];
   if(ch.voice_max_users>0)out.push('This channel has a user limit of '+ch.voice_max_users+'. When it is full, idle members stay where they are. Set the limit to 0 so nobody is skipped.');
   try{
+    /* GET /roles is Manage Roles; without it the check is skipped. The
+       channel's list is sorted by position and does not mark the default. */
+    const defId=((await api('GET','/roles'))||[]).find(r=>r.is_default);
     const roles=((await api('GET','/channels/'+ch.id+'/permissions'))||{}).roles||[];
-    const def=roles.reduce((lo,r)=>!lo||r.position<lo.position?r:lo,null);
-    if(def&&(def.permissions&ADMIN_BIT)===0&&(((def.permissions&~def.deny)|def.allow)&CONNECT_VOICE_BIT)===0)
-      out.push('"'+def.role_name+'" cannot connect to this channel, so members without another role that can will not be moved. Allow Connect for it in the channel access settings.');
+    const def=defId&&roles.find(r=>r.role_id===defId.id);
+    if(def&&(def.permissions&ADMIN_BIT)===0&&((((def.permissions&~def.deny)|def.allow)&AFK_JOIN_BITS)!==AFK_JOIN_BITS))
+      out.push('"'+def.role_name+'" cannot join this channel (it needs Read Messages and Connect), so members without another role that can will not be moved. Allow both for it in the channel access settings.');
   }catch(e){}
   return out.map(m=>'<div class="callout-warning" role="note">'+esc(m)+'</div>').join('');
 }

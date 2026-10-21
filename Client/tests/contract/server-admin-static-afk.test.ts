@@ -40,6 +40,7 @@ interface Bridge {
 }
 
 const CONNECT_VOICE = 0x200;
+const READ_MESSAGES = 0x2;
 const CHANNELS = [
   { id: 1, name: "general", type: "text", archived: false, afk: false },
   { id: 2, name: "lounge", type: "voice", archived: false, afk: false, voice_max_users: 0 },
@@ -115,6 +116,14 @@ describe("Server/admin/static — AFK card (WP 6.10d)", () => {
       if (path === "/settings" && method === "PATCH") return { json: {} };
       if (path === "/channels")
         return opts.channels ? { json: opts.channels } : { status: 403, json: { error: "no" } };
+      if (path === "/roles")
+        return {
+          json: [
+            { id: 1, name: "Owner", position: 100, is_default: false },
+            { id: 9, name: "Newcomer", position: 10, is_default: false },
+            { id: 4, name: "Member", position: 40, is_default: true },
+          ],
+        };
       if (/^\/channels\/\d+\/permissions$/.test(path)) return { json: opts.perms ?? role(0, 0) };
       if (path === "/afk-channel") return opts.put ?? { json: { channel_id: null } };
       return { json: {} };
@@ -207,8 +216,40 @@ describe("Server/admin/static — AFK card (WP 6.10d)", () => {
     dom = b.dom;
     await mountSettings(b.bridge, b.doc);
     const warn = b.doc.getElementById("afkWarnings")?.textContent ?? "";
-    expect(warn).toContain("cannot connect");
+    expect(warn).toContain("cannot join");
     expect(warn).toContain("user limit of 4");
+  });
+
+  it("warns when only Read Messages is denied, naming the default role and not a lower custom one", async () => {
+    const calls: FetchCall[] = [];
+    const chans = CHANNELS.map((c) => (c.id === 2 ? { ...c, afk: true } : c));
+    const perms = role(0, READ_MESSAGES);
+    perms.roles.push({
+      role_id: 9,
+      role_name: "Newcomer",
+      position: 10,
+      permissions: 0x663,
+      allow: 0,
+      deny: 0,
+    });
+    const b = await boot(calls, responder({ channels: chans, perms }));
+    dom = b.dom;
+    await mountSettings(b.bridge, b.doc);
+    const warn = b.doc.getElementById("afkWarnings")?.textContent ?? "";
+    expect(warn).toContain('"Member" cannot join');
+    expect(warn).not.toContain("Newcomer");
+  });
+
+  it("renders a role name with markup as text", async () => {
+    const calls: FetchCall[] = [];
+    const chans = CHANNELS.map((c) => (c.id === 2 ? { ...c, afk: true } : c));
+    const perms = role(0, CONNECT_VOICE);
+    perms.roles[1].role_name = "<img src=x onerror=alert(1)>";
+    const b = await boot(calls, responder({ channels: chans, perms }));
+    dom = b.dom;
+    await mountSettings(b.bridge, b.doc);
+    expect(b.doc.querySelector("#afkWarnings img")).toBeNull();
+    expect(b.doc.getElementById("afkWarnings")?.textContent).toContain("<img src=x");
   });
 
   it("shows no warning when the default role can connect and there is no limit", async () => {
