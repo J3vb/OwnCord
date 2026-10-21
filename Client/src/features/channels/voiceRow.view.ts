@@ -300,9 +300,10 @@ export function patchVoiceChannelChrome(wrapper: Element, next: VoiceChannelChro
     afkBadge?.remove();
   } else if (afkBadge === null) {
     const drawn = drawAfk(next.channelId);
-    const capacityBadge = item.querySelector(":scope > .ch-capacity");
-    if (capacityBadge === null) item.appendChild(drawn);
-    else capacityBadge.before(drawn);
+    // Before the capacity and mention badges, as a fresh draw orders them.
+    const later = item.querySelector(":scope > .ch-capacity, :scope > .mention-badge");
+    if (later === null) item.appendChild(drawn);
+    else later.before(drawn);
   }
 
   const badge = item.querySelector(":scope > .ch-capacity");
