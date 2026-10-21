@@ -133,6 +133,19 @@ describe("poll draft caps", () => {
     expect(checkPollDraft(inEmoji)).toEqual([{ kind: "control", index: 0 }]);
   });
 
+  it("also refuses the line and paragraph separators, as the server does, but not a plain space", () => {
+    expect(kinds(draft({ question: "a\u2028b" }))).toEqual(["control"]);
+    expect(kinds(draft({ question: "a\u2029b" }))).toEqual(["control"]);
+    const inAnswer = draft({
+      answers: [
+        { text: "a\u2028b", emoji: "" },
+        { text: "c", emoji: "" },
+      ],
+    });
+    expect(checkPollDraft(inAnswer)).toEqual([{ kind: "control", index: 0 }]);
+    expect(kinds(draft({ question: "a b\u00a0c" }))).toEqual([]);
+  });
+
   it("sends trimmed answers, no blank rows, and emoji only when set", () => {
     const d = draft({
       answers: [

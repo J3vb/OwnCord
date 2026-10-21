@@ -709,15 +709,26 @@
 }
 
 /* Poll composer (WP 6.9b). */
-.poll-composer {
+.modal.poll-composer {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   width: min(520px, 94vw);
+}
+.poll-composer .modal-header {
+  flex: none;
+  padding-bottom: 12px;
+}
+.poll-composer .modal-footer {
+  flex: none;
 }
 .poll-composer .modal-body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: 70vh;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
 }
 .poll-field,

@@ -33,7 +33,7 @@ import {
   type PollDraft,
 } from "../features/messaging/pollModel";
 import { createPoll, type PollWs } from "../features/messaging/pollSend";
-import { messagingText } from "../i18n/messaging";
+import { pollComposerText } from "../i18n/pollComposer";
 import { shellText } from "../i18n/shell";
 
 export interface PollComposerOptions {
@@ -49,45 +49,56 @@ export interface PollComposerOptions {
 const AMBIGUOUS = new Set(["UNCONFIRMED", "OFFLINE", "NETWORK", "REQUEST_TIMEOUT"]);
 
 function durationLabel(hours: number): string {
-  if (hours === 168) return messagingText("poll.duration.week");
+  if (hours === 168) return pollComposerText("duration.week");
   if (hours > 24 && hours % 24 === 0) {
-    return messagingText("poll.duration.days", { count: hours / 24 });
+    return pollComposerText("duration.days", { count: hours / 24 });
   }
-  return messagingText("poll.duration.hours", { count: hours });
+  return pollComposerText("duration.hours", { count: hours });
 }
 
 function createErrorText(code: string): string {
   switch (code) {
     case "BAD_REQUEST":
-      return messagingText("poll.createError.BAD_REQUEST");
+      return pollComposerText("createError.BAD_REQUEST");
     case "FORBIDDEN":
-      return messagingText("poll.createError.FORBIDDEN");
+      return pollComposerText("createError.FORBIDDEN");
     case "RATE_LIMITED":
-      return messagingText("poll.createError.RATE_LIMITED");
+      return pollComposerText("createError.RATE_LIMITED");
     case "SLOW_MODE":
-      return messagingText("poll.createError.SLOW_MODE");
+      return pollComposerText("createError.SLOW_MODE");
     case "TIMED_OUT":
-      return messagingText("poll.createError.TIMED_OUT");
+      return pollComposerText("createError.TIMED_OUT");
     case "OFFLINE":
-      return messagingText("poll.createError.OFFLINE");
+      return pollComposerText("createError.OFFLINE");
     case "NETWORK":
-      return messagingText("poll.createError.NETWORK");
+      return pollComposerText("createError.NETWORK");
     case "UNCONFIRMED":
-      return messagingText("poll.createError.UNCONFIRMED");
+      return pollComposerText("createError.UNCONFIRMED");
     case "REQUEST_TIMEOUT":
-      return messagingText("poll.createError.REQUEST_TIMEOUT");
+      return pollComposerText("createError.REQUEST_TIMEOUT");
     default:
-      return messagingText("poll.createError.other");
+      return pollComposerText("createError.other");
   }
 }
 
 function problemText(problem: DraftProblem): string {
-  return messagingText(`poll.problem.${problem.kind}`);
+  switch (problem.kind) {
+    case "question-empty":
+      return pollComposerText("problem.question-empty");
+    case "question-long":
+      return pollComposerText("problem.question-long");
+    case "answers-few":
+      return pollComposerText("problem.answers-few");
+    case "answer-long":
+      return pollComposerText("problem.answer-long");
+    default:
+      return pollComposerText("problem.control");
+  }
 }
 
 function paintCounter(el: HTMLElement, value: string, max: number): void {
   const used = codePointLength(value.trim());
-  setText(el, messagingText("poll.counter", { used, max }));
+  setText(el, pollComposerText("counter", { used, max }));
   el.classList.toggle("over", used > max);
 }
 
@@ -109,8 +120,8 @@ export function openPollComposer(opts: PollComposerOptions): void {
     class: "form-input",
     type: "text",
     autocomplete: "off",
-    placeholder: messagingText("poll.question.placeholder"),
-    "aria-label": messagingText("poll.question.label"),
+    placeholder: pollComposerText("question.placeholder"),
+    "aria-label": pollComposerText("question.label"),
     "data-testid": "poll-question",
   });
   const questionCounter = createElement("span", {
@@ -120,17 +131,17 @@ export function openPollComposer(opts: PollComposerOptions): void {
   const answersBox = createElement("div", {
     class: "poll-answers",
     role: "group",
-    "aria-label": messagingText("poll.answers.legend"),
+    "aria-label": pollComposerText("answers.legend"),
     "data-testid": "poll-answers",
   });
   const addBtn = createElement(
     "button",
     { class: "btn-modal-cancel poll-add", type: "button", "data-testid": "poll-add-answer" },
-    messagingText("poll.answers.add"),
+    pollComposerText("answers.add"),
   );
   const duration = createElement("select", {
     class: "form-input",
-    "aria-label": messagingText("poll.duration.label"),
+    "aria-label": pollComposerText("duration.label"),
     "data-testid": "poll-duration",
   });
   for (const hours of POLL_DURATIONS) {
@@ -150,12 +161,12 @@ export function openPollComposer(opts: PollComposerOptions): void {
   const postBtn = createElement(
     "button",
     { class: "btn-modal-save", type: "button", "data-testid": "poll-post" },
-    messagingText("poll.post"),
+    pollComposerText("post"),
   );
   const cancelBtn = createElement(
     "button",
     { class: "btn-modal-cancel", type: "button", "data-testid": "poll-cancel" },
-    messagingText("poll.cancel"),
+    pollComposerText("cancel"),
   );
 
   // -- Answer rows -------------------------------------------------------------
@@ -169,7 +180,7 @@ export function openPollComposer(opts: PollComposerOptions): void {
     else setText(btn, emoji);
     btn.setAttribute(
       "aria-label",
-      messagingText(emoji === "" ? "poll.answer.emoji" : "poll.answer.clearEmoji", {
+      pollComposerText(emoji === "" ? "answer.emoji" : "answer.clearEmoji", {
         n: index + 1,
       }),
     );
@@ -188,6 +199,8 @@ export function openPollComposer(opts: PollComposerOptions): void {
       const emojiBtn = createElement("button", {
         class: "poll-emoji-btn",
         type: "button",
+        "aria-haspopup": "dialog",
+        "aria-expanded": "false",
         "data-testid": `poll-emoji-${n}`,
       });
       paintEmoji(emojiBtn, index);
@@ -195,8 +208,8 @@ export function openPollComposer(opts: PollComposerOptions): void {
         class: "form-input",
         type: "text",
         autocomplete: "off",
-        placeholder: messagingText("poll.answer.placeholder", { n }),
-        "aria-label": messagingText("poll.answer.label", { n }),
+        placeholder: pollComposerText("answer.placeholder", { n }),
+        "aria-label": pollComposerText("answer.label", { n }),
         "data-testid": `poll-answer-${n}`,
       });
       text.value = answer.text;
@@ -207,7 +220,7 @@ export function openPollComposer(opts: PollComposerOptions): void {
       const remove = createElement("button", {
         class: "modal-close",
         type: "button",
-        "aria-label": messagingText("poll.answer.remove", { n }),
+        "aria-label": pollComposerText("answer.remove", { n }),
         "data-testid": `poll-remove-${n}`,
       });
       remove.appendChild(createIcon("x", 14));
@@ -276,6 +289,7 @@ export function openPollComposer(opts: PollComposerOptions): void {
     picker?.element.remove();
     picker?.destroy();
     picker = null;
+    for (const btn of rowEmoji.values()) btn.setAttribute("aria-expanded", "false");
   }
 
   function openPicker(index: number, anchor: HTMLElement): void {
@@ -323,12 +337,8 @@ export function openPollComposer(opts: PollComposerOptions): void {
     postBtn.toggleAttribute("disabled", busy || problems.length > 0);
     setText(
       postBtn,
-      messagingText(
-        busy
-          ? "poll.posting"
-          : postError !== null && AMBIGUOUS.has(postError)
-            ? "poll.retry"
-            : "poll.post",
+      pollComposerText(
+        busy ? "posting" : postError !== null && AMBIGUOUS.has(postError) ? "retry" : "post",
       ),
     );
   }
@@ -386,7 +396,7 @@ export function openPollComposer(opts: PollComposerOptions): void {
   closeBtn.appendChild(createIcon("x", 14));
   appendChildren(
     header,
-    createElement("h3", { id: "poll-title" }, messagingText("poll.dialog.title")),
+    createElement("h3", { id: "poll-title" }, pollComposerText("dialog.title")),
     closeBtn,
   );
 
@@ -394,7 +404,7 @@ export function openPollComposer(opts: PollComposerOptions): void {
   appendChildren(questionRow, question, questionCounter);
   const optionsRow = createElement("div", { class: "poll-options" });
   const multiLabel = createElement("label", { class: "poll-switch" });
-  appendChildren(multiLabel, multi, createElement("span", {}, messagingText("poll.multi.label")));
+  appendChildren(multiLabel, multi, createElement("span", {}, pollComposerText("multi.label")));
   appendChildren(optionsRow, duration, multiLabel);
   const body = createElement("div", { class: "modal-body" });
   appendChildren(body, questionRow, answersBox, addBtn, optionsRow, note);

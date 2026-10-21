@@ -63,8 +63,27 @@ function draw(msg: Message, over = {}): HTMLElement {
   return el;
 }
 
-const q = <T extends HTMLElement = HTMLElement>(el: HTMLElement, id: string): T | null =>
-  el.querySelector<T>(`[data-testid="${id}"]`);
+/** The card's message id, from its own `msg-poll-<id>` test id. */
+const cardId = (el: HTMLElement): string =>
+  /^msg-poll-(\d+)$/.exec(el.dataset["testid"] ?? "")?.[1] ?? "";
+const FOCUSABLE = [
+  "poll-vote",
+  "poll-end",
+  "poll-remove",
+  "poll-show-results",
+  "poll-hide-results",
+];
+
+/** Find a control by its short name; focusable controls carry the message id in their test id. */
+const q = <T extends HTMLElement = HTMLElement>(el: HTMLElement, id: string): T | null => {
+  const choice = /^poll-choice-(\d+)$/.exec(id);
+  const full = FOCUSABLE.includes(id)
+    ? `${id}-${cardId(el)}`
+    : choice !== null
+      ? `poll-choice-${cardId(el)}-${choice[1]}`
+      : id;
+  return el.querySelector<T>(`[data-testid="${full}"]`);
+};
 const text = (el: HTMLElement): string => el.textContent?.replace(/\s+/g, " ").trim() ?? "";
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
@@ -196,7 +215,7 @@ describe("voting", () => {
     const radio = oldEl.querySelector<HTMLInputElement>("input")!;
     radio.checked = true;
     radio.dispatchEvent(new Event("change", { bubbles: true }));
-    oldEl.querySelector<HTMLButtonElement>('[data-testid="poll-vote"]')!.click();
+    q<HTMLButtonElement>(oldEl, "poll-vote")!.click();
     // The row is rebuilt by a poll update while the vote is in flight.
     old.abort();
     const fresh = draw(msg, { onPollVote: vote });
@@ -285,6 +304,19 @@ describe("an ended poll", () => {
   });
 });
 
+describe("focusable controls", () => {
+  it("carry their message id, so two polls never share a test id", () => {
+    const a = draw(pollMessage(pollView({}, [0, 0])), { onPollVote: vi.fn() });
+    const b = draw(pollMessage(pollView({}, [0, 0])), { onPollVote: vi.fn() });
+    const ids = [a, b].flatMap((el) => [
+      el.dataset["testid"],
+      ...[...el.querySelectorAll<HTMLElement>("input, button")].map((c) => c.dataset["testid"]),
+    ]);
+    expect(ids.every((id) => id !== undefined && /\d/.test(id))).toBe(true);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
 describe("End poll", () => {
   it("is offered to the author, and only after a confirm sends the request", async () => {
     const end = vi.fn(async () => ok({}));
@@ -303,6 +335,44 @@ describe("End poll", () => {
     await flush();
     // Accepted: the button is gone while the final poll_update is on its way.
     expect(q(el, "poll-end")).toBeNull();
+  });
+
+  it("the confirm stays open when a poll update rebuilds the row, and ends the list's poll", async () => {
+    const end = vi.fn(async () => ok({}));
+    const msg = pollMessage(pollView({}, [0, 0]), {
+      user: { id: ME, username: "me", avatar: null },
+    });
+    const list = new AbortController();
+    const opts = {
+      ...makeOpts({ onPollVote: vi.fn(), onPollEnd: end }),
+      listSignal: list.signal,
+    };
+    const firstRow = new AbortController();
+    const first = renderPollCard(msg, opts, firstRow.signal);
+    document.body.appendChild(first);
+    q(first, "poll-end")!.click();
+    expect(document.querySelector('[data-testid="poll-end-modal"]')).not.toBeNull();
+    // A vote lands: the row is torn down and rebuilt around a new message object.
+    firstRow.abort();
+    first.remove();
+    const second = renderPollCard({ ...msg }, opts, abort.signal);
+    document.body.appendChild(second);
+    expect(document.querySelector('[data-testid="poll-end-modal"]')).not.toBeNull();
+    (document.querySelector('[data-testid="poll-end-confirm"]') as HTMLElement).click();
+    expect(end).toHaveBeenCalledWith(msg.id);
+    await flush();
+    expect(q(second, "poll-end")).toBeNull();
+    // Leaving the channel closes a confirm that is still up.
+    const third = renderPollCard(
+      pollMessage(pollView({}, [0, 0]), { user: { id: ME, username: "me", avatar: null } }),
+      opts,
+      abort.signal,
+    );
+    document.body.appendChild(third);
+    q(third, "poll-end")!.click();
+    expect(document.querySelector('[data-testid="poll-end-modal"]')).not.toBeNull();
+    list.abort();
+    expect(document.querySelector('[data-testid="poll-end-modal"]')).toBeNull();
   });
 
   it("is offered to a moderator for someone else's poll in a channel, not to a member", () => {
@@ -381,7 +451,7 @@ describe("in the message row", () => {
       reactions: [{ emoji: "👍", count: 2, me: false }],
     });
     const row = render(msg);
-    expect(row.querySelector('[data-testid="msg-poll"]')).not.toBeNull();
+    expect(row.querySelector('[data-testid^="msg-poll-"]')).not.toBeNull();
     expect(row.querySelector(".msg-text")).toBeNull();
     expect(row.textContent).not.toContain("📊");
     expect(row.querySelector(".msg-reactions")).not.toBeNull();
@@ -389,13 +459,13 @@ describe("in the message row", () => {
 
   it("a deleted poll is the deleted line, not a card", () => {
     const row = render(pollMessage(pollView({}, [0, 0]), { deleted: true }));
-    expect(row.querySelector('[data-testid="msg-poll"]')).toBeNull();
+    expect(row.querySelector('[data-testid^="msg-poll-"]')).toBeNull();
     expect(row.textContent).toContain("deleted");
   });
 
   it("an ordinary message is unchanged", () => {
     const row = render(makeMessage({ id: 5 }));
-    expect(row.querySelector('[data-testid="msg-poll"]')).toBeNull();
+    expect(row.querySelector('[data-testid^="msg-poll-"]')).toBeNull();
     expect(row.textContent).toContain("hello world");
   });
 });

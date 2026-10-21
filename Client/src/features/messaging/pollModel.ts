@@ -45,7 +45,8 @@ export function codePointLength(text: string): number {
   return n;
 }
 
-const CONTROL = /\p{Cc}/u;
+/** Control characters and the line and paragraph separators: what the server refuses. */
+const CONTROL = /[\p{Cc}\p{Zl}\p{Zp}]/u;
 
 /** A fresh draft: two empty answers, one day, single choice. */
 export function emptyPollDraft(): PollDraft {

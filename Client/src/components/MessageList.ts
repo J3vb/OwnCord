@@ -578,6 +578,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   const shownBlocked = new Set<number>();
   const renderOptions: MessageRenderOptions = {
     ...options,
+    listSignal: disposable.signal,
     get blockedUsers() {
       return blockedUsers();
     },

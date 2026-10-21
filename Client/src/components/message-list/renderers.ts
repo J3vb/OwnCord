@@ -76,6 +76,8 @@ import { atReactionLimit, renderReactions, wireReactionControl } from "./reactio
 export interface MessageRenderOptions extends MessageListOptions {
   /** Authors whose messages are hidden, so a reply quoting one shows no content. */
   readonly blockedUsers?: ReadonlySet<number>;
+  /** The list's own lifetime: owners that must outlive a row rebuild (the End poll confirm) use it. */
+  readonly listSignal?: AbortSignal;
 }
 
 // -- Composite rendering functions --------------------------------------------

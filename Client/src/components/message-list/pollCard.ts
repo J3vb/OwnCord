@@ -14,6 +14,9 @@
  * showing that poll redraws. Votes are not optimistic: the card is busy until
  * the server answers, so there is nothing to roll back.
  *
+ * The End poll confirm belongs to the list (`opts.listSignal`), not the row: a
+ * poll_update rebuilds the row while the dialog is open and must not close it.
+ *
  * The countdown refreshes from one `setOwnedTimeout` owned by the row's signal,
  * re-armed at the next label change, so there is no interval. At `expires_at`
  * the card flips to its ended look on its own; the server's `poll_update` then
@@ -28,8 +31,8 @@ import type { PollAnswer, PollView } from "@lib/types";
 import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
 import type { Message } from "@stores/messages.store";
-import type { MessageListOptions } from "../MessageList";
-import { messagingText } from "../../i18n/messaging";
+import type { MessageRenderOptions } from "./renderers";
+import { pollCardText } from "../../i18n/pollCard";
 import { shellText } from "../../i18n/shell";
 import {
   answerPercent,
@@ -87,25 +90,25 @@ export function pollCardState(messageId: number): CardState {
 function errorText(code: string): string {
   switch (code) {
     case "NOT_FOUND":
-      return messagingText("poll.error.NOT_FOUND");
+      return pollCardText("error.NOT_FOUND");
     case "POLL_ENDED":
-      return messagingText("poll.error.POLL_ENDED");
+      return pollCardText("error.POLL_ENDED");
     case "RATE_LIMITED":
-      return messagingText("poll.error.RATE_LIMITED");
+      return pollCardText("error.RATE_LIMITED");
     case "FORBIDDEN":
-      return messagingText("poll.error.FORBIDDEN");
+      return pollCardText("error.FORBIDDEN");
     case "TIMED_OUT":
-      return messagingText("poll.error.TIMED_OUT");
+      return pollCardText("error.TIMED_OUT");
     case "OFFLINE":
-      return messagingText("poll.error.OFFLINE");
+      return pollCardText("error.OFFLINE");
     case "NETWORK":
-      return messagingText("poll.error.NETWORK");
+      return pollCardText("error.NETWORK");
     case "UNCONFIRMED":
-      return messagingText("poll.error.UNCONFIRMED");
+      return pollCardText("error.UNCONFIRMED");
     case "REQUEST_TIMEOUT":
-      return messagingText("poll.error.REQUEST_TIMEOUT");
+      return pollCardText("error.REQUEST_TIMEOUT");
     default:
-      return messagingText("poll.error.other");
+      return pollCardText("error.other");
   }
 }
 
@@ -118,13 +121,13 @@ function timeLeftText(poll: PollView, now: number): string {
   const left = timeLeft(Math.max(1, Date.parse(poll.expires_at) - now));
   switch (left.unit) {
     case "under-a-minute":
-      return messagingText("poll.endsIn.underMinute");
+      return pollCardText("endsIn.underMinute");
     case "minutes":
-      return messagingText("poll.endsIn.minutes", { count: left.count });
+      return pollCardText("endsIn.minutes", { count: left.count });
     case "hours":
-      return messagingText("poll.endsIn.hours", { count: left.count });
+      return pollCardText("endsIn.hours", { count: left.count });
     default:
-      return messagingText("poll.endsIn.days", { count: left.count });
+      return pollCardText("endsIn.days", { count: left.count });
   }
 }
 
@@ -133,9 +136,9 @@ function confirmEnd(messageId: number, signal: AbortSignal, onConfirm: () => voi
   const titleId = `poll-end-title-${messageId}`;
   const content = createElement("div");
   const header = createElement("div", { class: "modal-header" });
-  header.appendChild(createElement("h3", { id: titleId }, messagingText("poll.endConfirm.title")));
+  header.appendChild(createElement("h3", { id: titleId }, pollCardText("endConfirm.title")));
   const body = createElement("div", { class: "modal-body" });
-  body.appendChild(createElement("p", {}, messagingText("poll.endConfirm.body")));
+  body.appendChild(createElement("p", {}, pollCardText("endConfirm.body")));
   const footer = createElement("div", { class: "modal-footer" });
   const cancel = createElement(
     "button",
@@ -145,7 +148,7 @@ function confirmEnd(messageId: number, signal: AbortSignal, onConfirm: () => voi
   const confirm = createElement(
     "button",
     { class: "btn-danger", type: "button", "data-testid": "poll-end-confirm" },
-    messagingText("poll.endConfirm.confirm"),
+    pollCardText("endConfirm.confirm"),
   );
   footer.append(cancel, confirm);
   content.append(header, body, footer);
@@ -164,7 +167,7 @@ function confirmEnd(messageId: number, signal: AbortSignal, onConfirm: () => voi
 
 export function renderPollCard(
   msg: Message,
-  opts: MessageListOptions,
+  opts: MessageRenderOptions,
   signal: AbortSignal,
 ): HTMLElement {
   const poll = msg.poll!;
@@ -173,8 +176,8 @@ export function renderPollCard(
     class: "msg-poll",
     role: "group",
     tabindex: "-1",
-    "aria-label": messagingText("poll.card.label", { question: poll.question }),
-    "data-testid": "msg-poll",
+    "aria-label": pollCardText("card.label", { question: poll.question }),
+    "data-testid": `msg-poll-${msg.id}`,
   });
   const channel = channelsStore.getState().channels.get(msg.channelId);
   const mayEnd = canEndPoll(msg.user.id, opts.currentUserId, channel, opts.channelType === "dm");
@@ -184,17 +187,14 @@ export function renderPollCard(
   /** Why voting is off right now (null when it is on). */
   const lockReason = (): string | null =>
     opts.onPollVote === undefined
-      ? messagingText("poll.error.other")
+      ? pollCardText("error.other")
       : (reactionLockReason(channelCanReact(msg.channelId)) ??
         connectionLockReason(uiStore.getState().connectionStatus));
 
   function renderStatus(now: number, ended: boolean): void {
     if (statusEl === null) return;
-    const votes = messagingText("poll.votes", { count: poll.results.total_voters });
-    setText(
-      statusEl,
-      `${votes} · ${ended ? messagingText("poll.ended") : timeLeftText(poll, now)}`,
-    );
+    const votes = pollCardText("votes", { count: poll.results.total_voters });
+    setText(statusEl, `${votes} · ${ended ? pollCardText("ended") : timeLeftText(poll, now)}`);
   }
 
   function armTimer(): void {
@@ -237,7 +237,8 @@ export function renderPollCard(
     if (state.busy || opts.onPollEnd === undefined) return;
     state.busy = true;
     state.error = null;
-    draw();
+    // The row may have been rebuilt while the confirm was open: redraw whichever card shows it.
+    state.redraw?.();
     const out = await opts.onPollEnd(msg.id);
     state.busy = false;
     if (out.ok) state.endSent = true;
@@ -266,7 +267,7 @@ export function renderPollCard(
       type: multi ? "checkbox" : "radio",
       name: `poll-${msg.id}`,
       value: String(answer.answer_id),
-      "data-testid": `poll-choice-${answer.answer_id}`,
+      "data-testid": `poll-choice-${msg.id}-${answer.answer_id}`,
     });
     input.checked = state.selected.includes(answer.answer_id);
     if (lock !== null || state.busy) input.disabled = true;
@@ -304,9 +305,9 @@ export function renderPollCard(
     if (mine) {
       const mark = createElement("span", {
         class: "msg-poll-mine",
-        title: messagingText("poll.yourVote"),
+        title: pollCardText("yourVote"),
         role: "img",
-        "aria-label": messagingText("poll.yourVote"),
+        "aria-label": pollCardText("yourVote"),
       });
       mark.appendChild(createIcon("check", 14));
       head.appendChild(mark);
@@ -316,16 +317,12 @@ export function renderPollCard(
         createElement(
           "span",
           { class: "msg-poll-winner" },
-          messagingText(winners.size > 1 ? "poll.tied" : "poll.winner"),
+          pollCardText(winners.size > 1 ? "tied" : "winner"),
         ),
       );
     }
     head.appendChild(
-      createElement(
-        "span",
-        { class: "msg-poll-meta" },
-        messagingText("poll.result", { percent, count }),
-      ),
+      createElement("span", { class: "msg-poll-meta" }, pollCardText("result", { percent, count })),
     );
     const bar = createElement("div", { class: "msg-poll-bar" });
     const fill = createElement("div", { class: "msg-poll-fill" });
@@ -349,10 +346,10 @@ export function renderPollCard(
 
     card.appendChild(createElement("div", { class: "msg-poll-question" }, poll.question));
     const hint = ended
-      ? messagingText("poll.endedFinal")
+      ? pollCardText("endedFinal")
       : results
         ? null
-        : messagingText(poll.allow_multiselect ? "poll.hint.multi" : "poll.hint.single");
+        : pollCardText(poll.allow_multiselect ? "hint.multi" : "hint.single");
     if (hint !== null) {
       card.appendChild(
         createElement("div", { class: "msg-poll-hint", "data-testid": "poll-hint" }, hint),
@@ -377,7 +374,7 @@ export function renderPollCard(
     const actions = createElement("div", { class: "msg-poll-actions" });
     if (!ended) {
       if (voted) {
-        const remove = button(messagingText("poll.removeVote"), "poll-remove", "link");
+        const remove = button(pollCardText("removeVote"), `poll-remove-${msg.id}`, "link");
         if (lock !== null) {
           remove.setAttribute("disabled", "true");
           remove.title = lock;
@@ -385,7 +382,7 @@ export function renderPollCard(
         remove.addEventListener("click", () => void submit([]), { signal });
         actions.appendChild(remove);
       } else if (state.showResults) {
-        const back = button(messagingText("poll.hideResults"), "poll-hide-results", "link");
+        const back = button(pollCardText("hideResults"), `poll-hide-results-${msg.id}`, "link");
         back.addEventListener(
           "click",
           () => {
@@ -396,7 +393,7 @@ export function renderPollCard(
         );
         actions.appendChild(back);
       } else {
-        const show = button(messagingText("poll.showResults"), "poll-show-results", "link");
+        const show = button(pollCardText("showResults"), `poll-show-results-${msg.id}`, "link");
         show.addEventListener(
           "click",
           () => {
@@ -405,7 +402,7 @@ export function renderPollCard(
           },
           { signal },
         );
-        const vote = button(messagingText("poll.vote"), "poll-vote", "primary");
+        const vote = button(pollCardText("vote"), `poll-vote-${msg.id}`, "primary");
         if (state.selected.length === 0 || lock !== null) vote.setAttribute("disabled", "true");
         if (lock !== null) vote.title = lock;
         vote.addEventListener("click", () => void submit(state.selected), { signal });
@@ -425,10 +422,12 @@ export function renderPollCard(
         );
       }
       if (mayEnd && !state.endSent) {
-        const end = button(messagingText("poll.end"), "poll-end", "danger");
-        end.addEventListener("click", () => confirmEnd(msg.id, signal, () => void finish()), {
-          signal,
-        });
+        const end = button(pollCardText("end"), `poll-end-${msg.id}`, "danger");
+        end.addEventListener(
+          "click",
+          () => confirmEnd(msg.id, opts.listSignal ?? signal, () => void finish()),
+          { signal },
+        );
         actions.appendChild(end);
       }
     }
