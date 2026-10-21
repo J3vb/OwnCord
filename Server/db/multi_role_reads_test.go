@@ -347,3 +347,59 @@ func TestListUserIDsByRole_ReadsEveryHolder(t *testing.T) {
 		t.Fatalf("CountRoleMembers = %v, %v; want the holder counted under both roles", counts, err)
 	}
 }
+
+// Effective carries the top role's identity with the OR of every held mask,
+// and its colour is a copy, so editing it never reaches the cached Top.
+func TestMemberRoles_EffectiveTopIdentityORMask(t *testing.T) {
+	color := "#ff0000"
+	m := &db.MemberRoles{
+		Top:   db.Role{ID: 3, Name: "Moderator", Position: 80, Permissions: 0b0011, Color: &color},
+		Perms: 0b0111,
+		IDs:   []int64{3, 4},
+		Masks: []int64{0b0011, 0b0100},
+	}
+	eff := m.Effective()
+	if eff.ID != 3 || eff.Name != "Moderator" || eff.Position != 80 {
+		t.Fatalf("identity = %d/%s/%d, want the top role", eff.ID, eff.Name, eff.Position)
+	}
+	if eff.Permissions != 0b0111 {
+		t.Fatalf("Permissions = %b, want the OR of held masks", eff.Permissions)
+	}
+	*eff.Color = "#00ff00"
+	if *m.Top.Color != "#ff0000" {
+		t.Fatalf("editing Effective().Color changed Top.Color to %s", *m.Top.Color)
+	}
+
+	noColor := (&db.MemberRoles{Top: db.Role{ID: 4}, Perms: 1}).Effective()
+	if noColor.Color != nil || noColor.Permissions != 1 {
+		t.Fatalf("no-colour role: Color = %v, Permissions = %d", noColor.Color, noColor.Permissions)
+	}
+}
+
+// Every role writer fails cleanly, changing nothing, when its context is gone
+// before the transaction starts.
+func TestRoleWriters_CancelledContextChangesNothing(t *testing.T) {
+	database := openMigratedMemory(t)
+	uid, err := database.CreateUser(context.Background(), "cancelled", "hash", int(permissions.MemberRoleID))
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := database.UpdateUserRole(ctx, uid, 3); err == nil {
+		t.Fatal("UpdateUserRole with a cancelled context returned nil")
+	}
+	if err := database.AddUserRole(ctx, uid, 3); err == nil {
+		t.Fatal("AddUserRole with a cancelled context returned nil")
+	}
+	if err := database.RemoveUserRole(ctx, uid, permissions.MemberRoleID); err == nil {
+		t.Fatal("RemoveUserRole with a cancelled context returned nil")
+	}
+	if _, err := database.DeleteRoleReassigning(ctx, 3, permissions.MemberRoleID); err == nil {
+		t.Fatal("DeleteRoleReassigning with a cancelled context returned nil")
+	}
+	if got := heldRoleIDs(t, database, uid); !slices.Equal(got, []int64{permissions.MemberRoleID}) {
+		t.Fatalf("held roles = %v, want only Member", got)
+	}
+}
