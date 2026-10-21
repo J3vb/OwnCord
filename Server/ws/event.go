@@ -51,6 +51,11 @@ type Result struct {
 	// late-joiner replay, resume and grace-window paths relay it. nil means
 	// no change.
 	SetE2EEAnnounce *e2eeAnnounce
+	// SetVoiceWatching, if non-nil, asks the applier to store the sender's
+	// watched-screen-share set on its voice slot and, only if the slot is still
+	// in that channel, relay it to the channel (voice_watch). The relay is not
+	// in Events: the applier emits it after the guarded store succeeds.
+	SetVoiceWatching *voiceWatchSet
 	// SetVoiceJoinToken, if non-nil, caches the voice join token on the client.
 	// Used by voice_token_refresh when falling back to the DB for the token.
 	SetVoiceJoinToken *string

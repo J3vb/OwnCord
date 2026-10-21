@@ -216,7 +216,7 @@ func TestCommandDeadline_EveryTypeClassified(t *testing.T) {
 		"mark_unread", "reaction_add", "reaction_remove", "chat_send", "chat_forward", "chat_edit",
 		"chat_delete", "voice_join", "voice_leave", "voice_mute", "voice_deafen",
 		"voice_camera", "voice_screenshare", "voice_e2ee_announce",
-		"voice_e2ee_offer", "voice_token_refresh", "call_ring", "call_decline",
+		"voice_e2ee_offer", "voice_watch", "voice_token_refresh", "call_ring", "call_decline",
 	}
 	exempt := []string{"voice_mod_mute", "voice_mod_deafen", "voice_mod_move", "voice_mod_kick", "chat_command"}
 

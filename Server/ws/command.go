@@ -233,6 +233,17 @@ type VoiceE2EEAnnounceCmd struct {
 func (c VoiceE2EEAnnounceCmd) Type() string  { return MsgTypeVoiceE2EEAnnounce }
 func (c VoiceE2EEAnnounceCmd) UserID() int64 { return c.userID }
 
+// VoiceWatchCmd represents a voice_watch message: the whole set of users whose
+// screen share the sender watches now. Unvalidated here; handleVoiceWatchV2
+// bounds, filters, dedupes and sorts it.
+type VoiceWatchCmd struct {
+	userID  int64
+	UserIDs []int64
+}
+
+func (c VoiceWatchCmd) Type() string  { return MsgTypeVoiceWatch }
+func (c VoiceWatchCmd) UserID() int64 { return c.userID }
+
 // ChatCommandCmd represents a chat_command (plugin slash command) message.
 type ChatCommandCmd struct {
 	userID    int64
@@ -614,6 +625,16 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 			videoDecode = nil
 		}
 		return VoiceE2EEAnnounceCmd{userID: userID, PublicKey: p.PublicKey, Signature: p.Signature, VideoDecode: videoDecode}, nil
+	},
+
+	MsgTypeVoiceWatch: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
+		var p struct {
+			UserIDs []int64 `json:"user_ids"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("invalid voice_watch payload: %w", err)
+		}
+		return VoiceWatchCmd{userID: userID, UserIDs: p.UserIDs}, nil
 	},
 
 	MsgTypeChatCommand: func(userID int64, reqID string, raw json.RawMessage) (Command, error) {

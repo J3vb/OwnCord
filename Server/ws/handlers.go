@@ -279,6 +279,13 @@ func (h *Hub) handleMessageApply(ctx, fctx context.Context, c *Client, env envel
 	if result.SetE2EEAnnounce != nil {
 		c.setE2EEAnnounce(*result.SetE2EEAnnounce)
 	}
+	if sw := result.SetVoiceWatching; sw != nil {
+		// Relay only when the slot is still in the channel the handler decided
+		// against; a frame that lost a channel switch reaches nobody.
+		if c.voice.setWatchingIfChannel(sw.chID, sw.ids) {
+			h.sendToVoiceChannelExcept(sw.chID, c.userID, buildVoiceWatching(c.userID, sw.ids))
+		}
+	}
 	if result.SetVoiceJoinToken != nil {
 		txn := h.begin(c.userID)
 		txn.setJoinToken(c, *result.SetVoiceJoinToken)

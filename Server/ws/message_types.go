@@ -38,6 +38,7 @@ const (
 	MsgTypeVoiceTokenRefresh = "voice_token_refresh" //nolint:gosec // G101: false positive — message type constant, not a credential
 	MsgTypeVoiceE2EEAnnounce = "voice_e2ee_announce"
 	MsgTypeVoiceE2EEOffer    = "voice_e2ee_offer"
+	MsgTypeVoiceWatch        = "voice_watch"
 	MsgTypeCallRing          = "call_ring"
 	MsgTypeCallDecline       = "call_decline"
 	MsgTypeChatCommand       = "chat_command" // plugin slash-command dispatch (Phase C)
@@ -90,6 +91,7 @@ const (
 	MsgTypeDMRequest           = "dm_request"
 	MsgTypeCallIncoming        = "call_incoming"
 	MsgTypeCallDeclined        = "call_declined"
+	MsgTypeVoiceWatching       = "voice_watching"
 	MsgTypeVoiceE2EEAnnounceBC = "voice_e2ee_announce" // broadcast (same string as client msg)
 	MsgTypeVoiceE2EEOfferRelay = "voice_e2ee_offer"    // relay (same string as client msg)
 	MsgTypeCommandReply        = "command_reply"       // ephemeral plugin reply, sent only to the invoking client

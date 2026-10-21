@@ -138,6 +138,7 @@ var contentBearingKinds = map[string]bool{
 	MsgTypeCallDeclined:        false,
 	MsgTypeVoiceE2EEAnnounceBC: false,
 	MsgTypeVoiceE2EEOfferRelay: false,
+	MsgTypeVoiceWatching:       false,
 	MsgTypeCommandReply:        false, // ephemeral, direct to the invoking client
 	MsgTypeNSFWAck:             false, // the gate's own signal, not gated content
 	MsgTypeModQueue:            false, // a report's public id and state only (B5-8); never message content
