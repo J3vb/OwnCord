@@ -23,6 +23,13 @@ repository's `CHANGELOG.md`, built into a lazy chunk, never fetched) and a
 GitHub link. The first start on a new version shows that version's notes once
 in a "What's new" dialog (`features/whats-new/`); a fresh install does not.
 
+The Safety tab (labelled "Privacy & Safety") lists, top to bottom: Direct messages (two
+switches stored on the server: "Allow direct messages from server members" and
+"Message requests", the second disabled while the first is off; shown only when
+`ready.capabilities.dm_privacy`), Blocked users, moderation notices and
+restrictions, appeals and My reports. A failed save puts the switch back and
+shows an inline error.
+
 **Target rules:**
 
 - A failed save shows an inline error. A successful one is silent: Discord

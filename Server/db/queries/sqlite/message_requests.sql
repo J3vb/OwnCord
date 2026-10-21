@@ -11,6 +11,12 @@ INSERT OR IGNORE INTO trusted_senders (recipient_id, sender_id, source) VALUES (
 -- name: InsertMessageRequest :execrows
 INSERT OR IGNORE INTO message_requests (sender_id, recipient_id, channel_id, first_message_id) VALUES (?, ?, ?, ?);
 
+-- name: InsertAcceptedMessageRequest :execrows
+-- The same one-row-per-pair insert, born decided: used when the recipient has
+-- turned message requests off, so nothing waits in their inbox.
+INSERT OR IGNORE INTO message_requests (sender_id, recipient_id, channel_id, first_message_id, state, decided_at)
+VALUES (?, ?, ?, ?, 'accepted', datetime('now'));
+
 -- name: GetMessageRequestForRecipient :one
 SELECT id, sender_id, recipient_id, channel_id, first_message_id, state, created_at, decided_at
 FROM message_requests

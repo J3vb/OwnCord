@@ -254,7 +254,20 @@ trust (any `trusted_senders` row: accepted, `sent_first` or `grandfathered`).
 The refusal is the same error and text as a block, so the sender cannot tell
 the causes apart, and it happens before any message or request is written. A
 failed read of the setting is an internal error, not a refusal. Group DMs are
-not affected.
+not affected by this gate.
+
+**Recipient opt-out of requests.** With `allow_member_dms` on and
+`user_privacy.message_requests` off, `db.CreateMessageRequest` reads the
+setting inside its own transaction and, for a sender the member does not
+trust, inserts the pair's `message_requests` row as `accepted`, writes
+`trusted_senders(recipient, sender, 'accepted')` next to the `sent_first` edge
+and opens the DM for the recipient. The send then delivers as for a trusted
+sender and sends no `dm_request`. Requests already `pending` stay pending, and
+the pair stays trusted if the setting is turned back on. Two concurrent first
+sends from the same sender keep one row (`INSERT OR IGNORE`); the loser finds
+the trust the winner wrote and is delivered too. Opposite directions are two
+pairs with a row each. A block between the pair, read in the same
+transaction, always stages instead.
 
 ### Abuse cases
 

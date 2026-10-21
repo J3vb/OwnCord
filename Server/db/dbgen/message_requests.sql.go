@@ -96,6 +96,33 @@ func (q *Queries) GetMessageRequestForRecipient(ctx context.Context, arg GetMess
 	return i, err
 }
 
+const insertAcceptedMessageRequest = `-- name: InsertAcceptedMessageRequest :execrows
+INSERT OR IGNORE INTO message_requests (sender_id, recipient_id, channel_id, first_message_id, state, decided_at)
+VALUES (?, ?, ?, ?, 'accepted', datetime('now'))
+`
+
+type InsertAcceptedMessageRequestParams struct {
+	SenderID       int64  `json:"senderId"`
+	RecipientID    int64  `json:"recipientId"`
+	ChannelID      int64  `json:"channelId"`
+	FirstMessageID *int64 `json:"firstMessageId"`
+}
+
+// The same one-row-per-pair insert, born decided: used when the recipient has
+// turned message requests off, so nothing waits in their inbox.
+func (q *Queries) InsertAcceptedMessageRequest(ctx context.Context, arg InsertAcceptedMessageRequestParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, insertAcceptedMessageRequest,
+		arg.SenderID,
+		arg.RecipientID,
+		arg.ChannelID,
+		arg.FirstMessageID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const insertMessageRequest = `-- name: InsertMessageRequest :execrows
 INSERT OR IGNORE INTO message_requests (sender_id, recipient_id, channel_id, first_message_id) VALUES (?, ?, ?, ?)
 `

@@ -423,6 +423,12 @@ export interface ReadyPayload {
      * the upload route is not mounted. Absent means an older server.
      */
     readonly profile_banners?: boolean;
+    /**
+     * The server stores the caller's two direct message privacy settings (WP
+     * 6.8b), read and written over `/users/me/privacy`. Absent means an older
+     * server.
+     */
+    readonly dm_privacy?: boolean;
   };
   readonly channels: readonly ReadyChannel[];
   readonly members: readonly ReadyMember[];
