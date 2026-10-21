@@ -32,8 +32,7 @@ func restartUnwired(reason string) {
 }
 
 // SetRestartHandoff wires restart requests to the main package's restart
-// coordinator. Call once at startup, before the router serves (main.go, next
-// to SetDatabasePath).
+// coordinator. Call once at startup, before the router serves (main.go).
 func SetRestartHandoff(fn func(reason string)) {
 	restartMu.Lock()
 	restartSelf = fn

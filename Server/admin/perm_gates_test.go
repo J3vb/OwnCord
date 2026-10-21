@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"path/filepath"
 	"reflect"
 	"regexp"
 	"sort"
@@ -341,16 +340,15 @@ func TestBackupPolicySettings_BoundedRetention(t *testing.T) {
 // and a POSITIVE CONTROL — an actual Owner-role user — is never refused
 // with 403, proving the walk exercises ownerOnlyMiddleware's real gate
 // rather than routes that would 403 (or 404, or panic) for everyone
-// regardless of role. admin.SetBackupBaseDir points the two backup routes
+// regardless of role. SetupOptions.BackupDir points the two backup routes
 // with real filesystem effects at a temp dir so the Owner's requests stay
 // hermetic.
 func TestOwnerOnlyControlsStayOwnerOnly(t *testing.T) {
 	database := openAdminTestDB(t)
-	admin.SetBackupBaseDir(t.TempDir())
-	t.Cleanup(func() { admin.SetBackupBaseDir(filepath.Join("data", "backups")) })
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database),
+		admin.SetupOptions{BackupDir: t.TempDir()})
 
-	routes := admin.OwnerOnlyRoutesForTest()
+	routes := admin.OwnerOnlyRoutesForTest(handler)
 	got, want := sortedOwnerOnlyRoutes(routes), sortedOwnerOnlyRoutes(expectedOwnerOnlyRoutes)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("admin.OwnerOnlyRoutesForTest() = %+v, want exactly %+v", got, want)

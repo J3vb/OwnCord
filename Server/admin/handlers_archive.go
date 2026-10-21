@@ -38,9 +38,9 @@ const archiveWorkPrefix = "owncord-archive-"
 // The admin panel does not call this directly; it asks for a single-use link
 // (POST /archive/link) and opens that, so the whole archive is never buffered
 // in the page (see archive_link.go). This route stays for direct API callers.
-func handleArchive(database *db.DB, opts SetupOptions) http.Handler {
+func handleArchive(database *db.DB, opts SetupOptions, paths backupPaths) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		serveArchive(w, r, database, opts, actorFromContext(r))
+		serveArchive(w, r, database, opts, paths, actorFromContext(r))
 	})
 }
 
@@ -54,7 +54,7 @@ func writeArchiveBusy(w http.ResponseWriter) {
 // serveArchive builds and streams the archive. actor is who the download is
 // attributed to in the audit log; the caller has already authorised the
 // request (the owner-only route, or a redeemed single-use link).
-func serveArchive(w http.ResponseWriter, r *http.Request, database *db.DB, opts SetupOptions, actor int64) {
+func serveArchive(w http.ResponseWriter, r *http.Request, database *db.DB, opts SetupOptions, paths backupPaths, actor int64) {
 	if opts.RunningCfg == nil {
 		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "server configuration unavailable")
 		return
@@ -73,18 +73,18 @@ func serveArchive(w http.ResponseWriter, r *http.Request, database *db.DB, opts 
 
 	// The work dir lives under backup.dir: the snapshot is a VACUUM INTO
 	// target, and that directory is already the one backups write to.
-	if err := os.MkdirAll(backupBaseDir, 0o750); err != nil {
+	if err := os.MkdirAll(paths.dir, 0o750); err != nil {
 		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not prepare the archive")
 		return
 	}
-	work, err := os.MkdirTemp(backupBaseDir, archiveWorkPrefix)
+	work, err := os.MkdirTemp(paths.dir, archiveWorkPrefix)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not prepare the archive")
 		return
 	}
 	defer func() { _ = os.RemoveAll(work) }()
 
-	zipPath, err := buildArchive(ctx, database, opts, work)
+	zipPath, err := buildArchive(ctx, database, opts, paths, work)
 	if errors.Is(err, errArchiveNoSpace) {
 		writeErr(w, http.StatusInsufficientStorage, "STORAGE_LOW_DISK", err.Error())
 		return
@@ -136,11 +136,11 @@ var archiveBeforeSnapshotHook func()
 // when the build would take the backup volume below server.min_free_disk_mb;
 // that estimate's plan is then retaken, so the zip is written from a walk
 // that follows the snapshot.
-func buildArchive(ctx context.Context, database *db.DB, opts SetupOptions, work string) (string, error) {
+func buildArchive(ctx context.Context, database *db.DB, opts SetupOptions, paths backupPaths, work string) (string, error) {
 	cfg := opts.RunningCfg
 	snapshot := filepath.Join(work, "snapshot.db")
 	plan := func() (*archiveTree, error) {
-		return planTrees(ctx, cfg.Server.DataDir, cfg.Upload.StorageDir, backupBaseDir, work, snapshot)
+		return planTrees(ctx, cfg.Server.DataDir, cfg.Upload.StorageDir, paths, work, snapshot)
 	}
 	t, err := plan()
 	if err != nil {
@@ -239,7 +239,7 @@ func checkArchiveSpace(dir string, need, floor uint64) error {
 // live database file is replaced by the snapshot, and the backup and work
 // directories, the database's WAL sidecars and any in-progress *.tmp file are
 // left out.
-func planTrees(ctx context.Context, dataDir, uploadsDir, backupDir, work, snapshot string) (*archiveTree, error) {
+func planTrees(ctx context.Context, dataDir, uploadsDir string, paths backupPaths, work, snapshot string) (*archiveTree, error) {
 	absData, err := filepath.Abs(dataDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolving data dir: %w", err)
@@ -249,13 +249,13 @@ func planTrees(ctx context.Context, dataDir, uploadsDir, backupDir, work, snapsh
 		return nil, fmt.Errorf("resolving data dir: %w", err)
 	}
 	t := &archiveTree{ctx: ctx, snapshot: snapshot}
-	if t.db, err = resolvePath(dbFilePath); err != nil {
+	if t.db, err = resolvePath(paths.dbFile); err != nil {
 		return nil, fmt.Errorf("resolving database path: %w", err)
 	}
 	if t.uploads, err = resolvePath(uploadsDir); err != nil {
 		return nil, fmt.Errorf("resolving uploads dir: %w", err)
 	}
-	for _, dir := range []string{backupDir, work} {
+	for _, dir := range []string{paths.dir, work} {
 		abs, err := resolvePath(dir)
 		if err != nil {
 			return nil, fmt.Errorf("resolving %s: %w", dir, err)
@@ -367,7 +367,7 @@ func (t *archiveTree) visit(root, prefix, path string, d os.DirEntry, walkErr er
 	}
 	name := filepath.ToSlash(filepath.Join(prefix, rel))
 	// The live database's WAL sidecars are superseded by the snapshot (the
-	// WAL belongs to dbFilePath, not this walk); *.tmp files are in-progress
+	// WAL belongs to the database file, not this walk); *.tmp files are in-progress
 	// writes.
 	if !d.IsDir() && (strings.HasPrefix(path, t.db+"-") || strings.HasSuffix(path, ".tmp")) {
 		return nil

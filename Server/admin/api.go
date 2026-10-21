@@ -2,6 +2,7 @@ package admin
 
 import (
 	"net/http"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -40,11 +41,11 @@ var setupLimiterHook func(*auth.RateLimiter)
 // Force-logout is KICK_MEMBERS; account erasure by an administrator (B4-9)
 // is ADMINISTRATOR with the hierarchy re-checked in the service; recovery
 // credentials (B4-6) are owner-only.
-func mountUserRoutes(r chi.Router, svc *service.Services, hub HubBroadcaster, mod *service.ModerationService) {
+func mountUserRoutes(r chi.Router, owner *ownerOnlyRegistry, svc *service.Services, hub HubBroadcaster, mod *service.ModerationService) {
 	mountMemberActionRoutes(r, "/users", svc, hub, mod)
 	r.With(requirePerm(permissions.Administrator)).
 		Delete("/users/{id}", handleDeleteUser(mod, hub))
-	ownerOnly(r, http.MethodPost, "/users/{id}/recovery-credential", handleIssueRecoveryCredential(svc.Auth))
+	owner.ownerOnly(r, http.MethodPost, "/users/{id}/recovery-credential", handleIssueRecoveryCredential(svc.Auth))
 }
 
 // mountMemberActionRoutes registers the member-list actions the desktop client
@@ -131,18 +132,13 @@ type OwnerOnlyRoute struct {
 	Pattern string
 }
 
-// ownerOnlyRoutes accumulates every route ownerOnly registers during the
-// most recent NewAdminAPI call — reset at the top of NewAdminAPI, since each
-// call builds one fresh router and its own complete set. Not safe for
-// concurrent NewAdminAPI calls (none exist today; production builds exactly
-// one router at startup).
-var ownerOnlyRoutes []OwnerOnlyRoute
-
-// OwnerOnlyRoutesForTest returns the routes the most recent NewAdminAPI call
-// registered through ownerOnly. Test-only surface (admin_test's route-walk
-// test, P2-13 Codex review); production code never reads this.
-func OwnerOnlyRoutesForTest() []OwnerOnlyRoute {
-	return ownerOnlyRoutes
+// ownerOnlyRegistry records every route ownerOnly registers while one
+// NewAdminAPI call builds its router. It belongs to that call's AdminAPI, so
+// two APIs built in one process (every test does) each keep their own
+// complete list. It is only written during construction, on one goroutine,
+// and only read afterwards.
+type ownerOnlyRegistry struct {
+	routes []OwnerOnlyRoute
 }
 
 // ownerOnly is the ONE call site every Owner-gated admin route goes through
@@ -154,9 +150,24 @@ func OwnerOnlyRoutesForTest() []OwnerOnlyRoute {
 // new owner-only route could leave stale (P2-13, Codex review: the previous
 // test hard-coded six routes and had already drifted, missing backup delete
 // and restore).
-func ownerOnly(r chi.Router, method, pattern string, h http.Handler) {
-	ownerOnlyRoutes = append(ownerOnlyRoutes, OwnerOnlyRoute{Method: method, Pattern: pattern})
+func (o *ownerOnlyRegistry) ownerOnly(r chi.Router, method, pattern string, h http.Handler) {
+	o.routes = append(o.routes, OwnerOnlyRoute{Method: method, Pattern: pattern})
 	r.Method(method, pattern, ownerOnlyMiddleware(h))
+}
+
+// AdminAPI is the built /admin/api router together with what NewAdminAPI
+// learned while building it. It embeds the router so it stays a chi.Routes
+// when mounted: the gendocs route walk descends into it.
+type AdminAPI struct {
+	chi.Router
+	owner ownerOnlyRegistry
+}
+
+// ownerOnlyRoutes is a copy of the routes this API registered through
+// ownerOnly. Read through OwnerOnlyRoutesForTest; production code never
+// reads it.
+func (a *AdminAPI) ownerOnlyRoutes() []OwnerOnlyRoute {
+	return slices.Clone(a.owner.routes)
 }
 
 // mountRetentionRoutes registers message retention (B4-11) under
@@ -257,11 +268,12 @@ func mountCategoryPermRoutes(r chi.Router, channels *service.ChannelService) {
 	r.Delete("/channels/categories/{id}/user-permissions/{userId}", handleDeleteCategoryUserPermission(channels))
 }
 
-func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer, allowedOrigins []string, _ PermissionInvalidator, svc *service.Services, opts ...SetupOptions) http.Handler {
+func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer, allowedOrigins []string, _ PermissionInvalidator, svc *service.Services, opts ...SetupOptions) *AdminAPI {
 	r := chi.NewRouter()
-	// Fresh per call: ownerOnly (below) rebuilds this from scratch for the
-	// router this call is about to return.
-	ownerOnlyRoutes = nil
+	// Fresh per call: the registry belongs to the API this call returns, so
+	// no other API shares its list.
+	api := &AdminAPI{Router: r}
+	owner := &api.owner
 
 	// The four services this mux routes to, named once. NewAdminAPI used to
 	// take them as four positional parameters; each B3-8 family that moved an
@@ -281,6 +293,9 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 	if len(opts) > 0 {
 		setupOpts = opts[0]
 	}
+	// Resolved once per API, not held in package globals: two APIs built in
+	// one process keep their own backup directory and database path.
+	paths := newBackupPaths(setupOpts)
 	// Per-router so tests that build hundreds of routers never share restart
 	// state; a real restart replaces the process and clears it anyway.
 	configPending := new(atomic.Bool)
@@ -310,10 +325,10 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 	// plain <a href> so the archive streams to disk rather than being buffered
 	// in the page. The link token IS the authorisation — random, Owner-bound,
 	// single-use and short-lived (POST /archive/link issues it).
-	r.Get("/archive/download", handleArchiveDownload(database, setupOpts))
+	r.Get("/archive/download", handleArchiveDownload(database, setupOpts, paths))
 	// One backup file, redeemed from its own single-use link (POST
 	// /backups/{name}/link) on the same terms as the archive's.
-	r.Get("/backups/{name}/download", handleBackupDownload(database))
+	r.Get("/backups/{name}/download", handleBackupDownload(database, paths))
 
 	// All remaining routes require authentication plus at least one
 	// moderation-capable bit (permissions.AdminPerimeter). Route groups that
@@ -342,7 +357,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		// Attention panel (RI-07): server health detail, ADMINISTRATOR like
 		// the support bundle that carries the same counters.
 		r.With(requirePerm(permissions.Administrator)).Get("/attention", handleGetAttention(svc.Attention))
-		mountUserRoutes(r, svc, hub, mod)
+		mountUserRoutes(r, owner, svc, hub, mod)
 		// The approval-mode registration queue (B4-1): deciding who joins
 		// is server management, not moderation of existing members.
 		r.With(requirePerm(permissions.ManageServer)).
@@ -389,10 +404,10 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 			Get("/audit-log", handleGetAuditLog(settings))
 		// API tokens — Owner-only. Minting a network-reachable, revocation-
 		// surviving bearer credential is gated like backups/updates.
-		ownerOnly(r, http.MethodGet, "/tokens", handleListAPITokens(svc.Tokens))
-		ownerOnly(r, http.MethodPost, "/tokens", handleCreateAPIToken(svc.Tokens))
-		ownerOnly(r, http.MethodDelete, "/tokens/{id}", handleRevokeAPIToken(svc.Tokens))
-		registerConfigOverrideRoutes(r, database, setupOpts, configPending)
+		owner.ownerOnly(r, http.MethodGet, "/tokens", handleListAPITokens(svc.Tokens))
+		owner.ownerOnly(r, http.MethodPost, "/tokens", handleCreateAPIToken(svc.Tokens))
+		owner.ownerOnly(r, http.MethodDelete, "/tokens/{id}", handleRevokeAPIToken(svc.Tokens))
+		registerConfigOverrideRoutes(r, owner, database, setupOpts, configPending)
 		r.Group(func(r chi.Router) {
 			r.Use(requirePerm(permissions.ManageServer))
 			r.Get("/settings", handleGetSettings(settings))
@@ -400,26 +415,33 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 			r.Put("/afk-channel", handlePutAFKChannel(channels, hub))
 			r.Get("/config", handleGetConfigFacts(setupOpts.RunningCfg))
 		})
-		ownerOnly(r, http.MethodPost, "/backup", handleBackup(database))
-		ownerOnly(r, http.MethodGet, "/backups", handleListBackups())
-		ownerOnly(r, http.MethodDelete, "/backups/{name}", handleDeleteBackup(database))
-		ownerOnly(r, http.MethodPost, "/backups/{name}/restore", handleRestoreBackup(database))
-		ownerOnly(r, http.MethodPost, "/backups/{name}/link", handleBackupLink())
-		ownerOnly(r, http.MethodGet, "/archive", handleArchive(database, setupOpts))
-		ownerOnly(r, http.MethodPost, "/archive/link", handleArchiveLink())
-		ownerOnly(r, http.MethodGet, "/updates", handleCheckUpdate(u))
-		ownerOnly(r, http.MethodPost, "/updates/apply", handleApplyUpdate(database, u, hub, version, setupOpts.Background, setupOpts.Shutdown))
+		mountBackupRoutes(r, owner, database, setupOpts, paths)
+		owner.ownerOnly(r, http.MethodGet, "/updates", handleCheckUpdate(u))
+		owner.ownerOnly(r, http.MethodPost, "/updates/apply", handleApplyUpdate(database, u, hub, version, setupOpts.Background, setupOpts.Shutdown))
 	})
 
-	return r
+	return api
+}
+
+// mountBackupRoutes registers the Owner-only backup, restore and archive
+// routes. They share the one backupPaths this API resolved from its
+// SetupOptions, so no handler reads a directory from process-wide state.
+func mountBackupRoutes(r chi.Router, owner *ownerOnlyRegistry, database *db.DB, setupOpts SetupOptions, paths backupPaths) {
+	owner.ownerOnly(r, http.MethodPost, "/backup", handleBackup(database, paths))
+	owner.ownerOnly(r, http.MethodGet, "/backups", handleListBackups(paths))
+	owner.ownerOnly(r, http.MethodDelete, "/backups/{name}", handleDeleteBackup(database, paths))
+	owner.ownerOnly(r, http.MethodPost, "/backups/{name}/restore", handleRestoreBackup(database, paths))
+	owner.ownerOnly(r, http.MethodPost, "/backups/{name}/link", handleBackupLink(paths))
+	owner.ownerOnly(r, http.MethodGet, "/archive", handleArchive(database, setupOpts, paths))
+	owner.ownerOnly(r, http.MethodPost, "/archive/link", handleArchiveLink())
 }
 
 // registerConfigOverrideRoutes mounts the Owner-only admin-panel config
 // overrides: reading and writing config-overrides.json and restarting the
 // process to apply them (or on demand). Changing a server-wide setting and
 // restarting is gated like backups and updates.
-func registerConfigOverrideRoutes(r chi.Router, database *db.DB, setupOpts SetupOptions, pending *atomic.Bool) {
-	ownerOnly(r, http.MethodGet, "/config/settings", handleGetConfigOverrides(setupOpts, pending))
-	ownerOnly(r, http.MethodPatch, "/config/settings", handlePatchConfigOverrides(database, setupOpts, pending))
-	ownerOnly(r, http.MethodPost, "/restart", handleRestartForConfig(database, setupOpts, pending))
+func registerConfigOverrideRoutes(r chi.Router, owner *ownerOnlyRegistry, database *db.DB, setupOpts SetupOptions, pending *atomic.Bool) {
+	owner.ownerOnly(r, http.MethodGet, "/config/settings", handleGetConfigOverrides(setupOpts, pending))
+	owner.ownerOnly(r, http.MethodPatch, "/config/settings", handlePatchConfigOverrides(database, setupOpts, pending))
+	owner.ownerOnly(r, http.MethodPost, "/restart", handleRestartForConfig(database, setupOpts, pending))
 }

@@ -46,12 +46,10 @@ func backdate(t *testing.T, path string, age time.Duration) {
 func TestMaintainBackups_ScheduleAndRetention(t *testing.T) {
 	database := openAdminTestDB(t)
 	dir := t.TempDir()
-	admin.SetBackupBaseDir(dir)
-	t.Cleanup(func() { admin.SetBackupBaseDir(filepath.Join("data", "backups")) })
 	ctx := context.Background()
 
 	// Settings absent → no-op, no error.
-	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database), dir); err != nil {
 		t.Fatalf("MaintainBackups with no settings: %v", err)
 	}
 	if got := listBackupFiles(t, dir); len(got) != 0 {
@@ -61,7 +59,7 @@ func TestMaintainBackups_ScheduleAndRetention(t *testing.T) {
 	// Schedule off → still a no-op.
 	mustSetSetting(t, database, "backup_schedule", "off")
 	mustSetSetting(t, database, "backup_retention", "7")
-	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database), dir); err != nil {
 		t.Fatalf("MaintainBackups with schedule=off: %v", err)
 	}
 	if got := listBackupFiles(t, dir); len(got) != 0 {
@@ -70,7 +68,7 @@ func TestMaintainBackups_ScheduleAndRetention(t *testing.T) {
 
 	// Daily → first tick creates exactly one scheduled backup.
 	mustSetSetting(t, database, "backup_schedule", "daily")
-	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database), dir); err != nil {
 		t.Fatalf("MaintainBackups daily #1: %v", err)
 	}
 	files := listBackupFiles(t, dir)
@@ -80,7 +78,7 @@ func TestMaintainBackups_ScheduleAndRetention(t *testing.T) {
 	first := filepath.Join(dir, files[0])
 
 	// Fresh backup on disk → next tick is a no-op.
-	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database), dir); err != nil {
 		t.Fatalf("MaintainBackups daily #2: %v", err)
 	}
 	if got := listBackupFiles(t, dir); len(got) != 1 {
@@ -90,7 +88,7 @@ func TestMaintainBackups_ScheduleAndRetention(t *testing.T) {
 	// Backup older than a day (but inside retention) → a new one is taken and
 	// the old one is kept.
 	backdate(t, first, 25*time.Hour)
-	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database), dir); err != nil {
 		t.Fatalf("MaintainBackups daily #3: %v", err)
 	}
 	if got := listBackupFiles(t, dir); len(got) != 2 {
@@ -99,7 +97,7 @@ func TestMaintainBackups_ScheduleAndRetention(t *testing.T) {
 
 	// Old backup past the 7-day retention window → pruned; the fresh one stays.
 	backdate(t, first, 8*24*time.Hour)
-	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database), dir); err != nil {
 		t.Fatalf("MaintainBackups daily #4: %v", err)
 	}
 	got := listBackupFiles(t, dir)
@@ -116,8 +114,6 @@ func TestMaintainBackups_ScheduleAndRetention(t *testing.T) {
 func TestMaintainBackups_RetentionNeverDeletesNewest(t *testing.T) {
 	database := openAdminTestDB(t)
 	dir := t.TempDir()
-	admin.SetBackupBaseDir(dir)
-	t.Cleanup(func() { admin.SetBackupBaseDir(filepath.Join("data", "backups")) })
 	ctx := context.Background()
 
 	mustSetSetting(t, database, "backup_schedule", "off")
@@ -134,7 +130,7 @@ func TestMaintainBackups_RetentionNeverDeletesNewest(t *testing.T) {
 	backdate(t, older, 30*24*time.Hour)
 	backdate(t, newer, 20*24*time.Hour)
 
-	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database), dir); err != nil {
 		t.Fatalf("MaintainBackups: %v", err)
 	}
 	got := listBackupFiles(t, dir)
@@ -149,8 +145,6 @@ func TestMaintainBackups_RetentionNeverDeletesNewest(t *testing.T) {
 func TestMaintainBackups_RetentionKeepsPreRestoreCopies(t *testing.T) {
 	database := openAdminTestDB(t)
 	dir := t.TempDir()
-	admin.SetBackupBaseDir(dir)
-	t.Cleanup(func() { admin.SetBackupBaseDir(filepath.Join("data", "backups")) })
 	ctx := context.Background()
 
 	mustSetSetting(t, database, "backup_schedule", "off")
@@ -168,7 +162,7 @@ func TestMaintainBackups_RetentionKeepsPreRestoreCopies(t *testing.T) {
 	backdate(t, ancientSafety, 400*24*time.Hour)
 	backdate(t, newest, time.Hour)
 
-	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database), dir); err != nil {
 		t.Fatalf("MaintainBackups: %v", err)
 	}
 	got := listBackupFiles(t, dir)
@@ -190,8 +184,6 @@ func TestMaintainBackups_RetentionKeepsPreRestoreCopies(t *testing.T) {
 func TestMaintainBackups_RetentionKeepsPreMigrateCopies(t *testing.T) {
 	database := openAdminTestDB(t)
 	dir := t.TempDir()
-	admin.SetBackupBaseDir(dir)
-	t.Cleanup(func() { admin.SetBackupBaseDir(filepath.Join("data", "backups")) })
 	ctx := context.Background()
 
 	mustSetSetting(t, database, "backup_schedule", "off")
@@ -209,7 +201,7 @@ func TestMaintainBackups_RetentionKeepsPreMigrateCopies(t *testing.T) {
 	backdate(t, ancientSafety, 400*24*time.Hour)
 	backdate(t, newest, time.Hour)
 
-	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database), dir); err != nil {
 		t.Fatalf("MaintainBackups: %v", err)
 	}
 	got := listBackupFiles(t, dir)
@@ -235,8 +227,6 @@ func TestMaintainBackups_RetentionKeepsPreMigrateCopies(t *testing.T) {
 func TestMaintainBackups_OutOfRangeRetentionPrunesNothing(t *testing.T) {
 	database := openAdminTestDB(t)
 	dir := t.TempDir()
-	admin.SetBackupBaseDir(dir)
-	t.Cleanup(func() { admin.SetBackupBaseDir(filepath.Join("data", "backups")) })
 	ctx := context.Background()
 
 	mustSetSetting(t, database, "backup_schedule", "off")
@@ -252,7 +242,7 @@ func TestMaintainBackups_OutOfRangeRetentionPrunesNothing(t *testing.T) {
 	backdate(t, older, 400*24*time.Hour)
 	backdate(t, newer, 200*24*time.Hour)
 
-	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database), dir); err != nil {
 		t.Fatalf("MaintainBackups: %v", err)
 	}
 	got := listBackupFiles(t, dir)
@@ -279,8 +269,6 @@ func mustSetSetting(t *testing.T, database interface {
 func TestMaintainBackups_RemovesStaleBackupTemps(t *testing.T) {
 	database := openAdminTestDB(t)
 	dir := t.TempDir()
-	admin.SetBackupBaseDir(dir)
-	t.Cleanup(func() { admin.SetBackupBaseDir(filepath.Join("data", "backups")) })
 	mustSetSetting(t, database, "backup_schedule", "off")
 
 	stale := filepath.Join(dir, "scheduled_20260101_000000.db.123.tmp")
@@ -305,7 +293,7 @@ func TestMaintainBackups_RemovesStaleBackupTemps(t *testing.T) {
 	backdate(t, staleJournal, 25*time.Hour)
 	backdate(t, staleArchive, 25*time.Hour)
 
-	if err := admin.MaintainBackups(context.Background(), database, service.NewSettingsService(database)); err != nil {
+	if err := admin.MaintainBackups(context.Background(), database, service.NewSettingsService(database), dir); err != nil {
 		t.Fatalf("MaintainBackups: %v", err)
 	}
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {

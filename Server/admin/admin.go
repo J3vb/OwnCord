@@ -30,8 +30,8 @@ var (
 )
 
 // SetServedCertificate installs the TLS mode and the served-certificate
-// source for the admin panel to surface. Call once at startup, next to
-// SetDatabasePath. A nil served reports none.
+// source for the admin panel to surface. Call once at startup, before the
+// router serves. A nil served reports none.
 func SetServedCertificate(mode string, served func() auth.ServedCert) {
 	if served == nil {
 		served = func() auth.ServedCert { return auth.ServedCert{} }
@@ -55,7 +55,8 @@ func ServedCertificate() (string, auth.ServedCert) {
 func NewHandler(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer, allowedOrigins []string, permInvalidator PermissionInvalidator, svc *service.Services, opts ...SetupOptions) http.Handler {
 	r := chi.NewRouter()
 
-	// Admin REST API mounted at /api
+	// Admin REST API mounted at /api. *AdminAPI is not a *chi.Mux, so a
+	// NotFound/MethodNotAllowed handler set on r would not reach it.
 	r.Mount("/api", NewAdminAPI(database, version, hub, u, logBuf, allowedOrigins, permInvalidator, svc, opts...))
 
 	// Static files — serve from the "static" sub-tree of the embedded FS.
