@@ -895,6 +895,8 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         /** Omit to leave unchanged; "" clears the field. */
         display_name?: string;
         about?: string;
+        /** `#rgb` / `#rrggbb`; omit to leave unchanged, "" clears (WP 6.11b). */
+        banner_color?: string;
       },
       signal?: AbortSignal,
     ): Promise<MemberResponse> {
@@ -936,6 +938,28 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
           signal,
         );
       }
+    },
+
+    /**
+     * Upload a profile banner (PNG/JPEG/WebP, max 1 MiB, max 1920x960).
+     * `POST /users/me/banner`. A server with attachment storage off advertises
+     * `profile_banners` but does not mount this route, so it answers 404; the
+     * caller turns that into its own message. On success the server has already
+     * broadcast a user_update.
+     */
+    uploadBanner(file: File, signal?: AbortSignal): Promise<UploadResponse> {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      return request<UploadResponse>("POST", "/users/me/banner", formData, signal, {
+        multipart: true,
+      });
+    },
+
+    /** Remove the signed-in user's banner image and return the updated user.
+     *  `DELETE /users/me/banner`; the colour is cleared by `updateProfile`. */
+    removeBanner(signal?: AbortSignal): Promise<MemberResponse> {
+      return request<MemberResponse>("DELETE", "/users/me/banner", undefined, signal);
     },
 
     changePassword(

@@ -37,7 +37,8 @@
   transform: scale(1);
 }
 .upp-banner {
-  height: 60px;
+  height: var(--upp-banner-h, 60px);
+  overflow: hidden;
   flex-shrink: 0;
   background: var(--accent-gradient);
 }
@@ -52,7 +53,7 @@
    avatar, so it straddles the seam. */
 .upp-avatar {
   position: absolute;
-  top: 24px;
+  top: calc(var(--upp-banner-h, 60px) - 36px);
   left: 16px;
   box-sizing: border-box;
   width: 72px;
@@ -251,4 +252,12 @@
   .upp-popup {
     transition: none;
   }
+}
+
+/* A banner picture fills its strip (popup, DM panel and settings card). */
+.banner-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }

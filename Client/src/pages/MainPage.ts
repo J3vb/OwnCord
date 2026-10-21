@@ -8,7 +8,7 @@ import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
 import { bracketBareIPv6Host } from "@lib/ws";
 import type { UserStatus } from "@lib/types";
-import { errorText } from "@lib/api";
+import { ApiClientError, errorText } from "@lib/api";
 import type { ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { desktop } from "../platform/desktop";
@@ -176,7 +176,8 @@ function buildDmProfileUser(channelId: number): DmProfileData | null {
   // Prefer membersStore's status, like the chat header's refreshDmHeader
   // does (ChannelController.ts) -- falling back to dmStore's own copy keeps
   // this correct even for a DM partner who isn't a guild member.
-  const rawStatus = membersStore.getState().members.get(recipient.id)?.status ?? recipient.status;
+  const member = membersStore.getState().members.get(recipient.id);
+  const rawStatus = member?.status ?? recipient.status;
   const status =
     rawStatus === "online" || rawStatus === "idle" || rawStatus === "dnd" || rawStatus === "offline"
       ? rawStatus
@@ -193,6 +194,8 @@ function buildDmProfileUser(channelId: number): DmProfileData | null {
     status,
     about: null,
     joinDate: null,
+    banner: member?.banner ?? null,
+    banner_color: member?.banner_color ?? null,
   };
 }
 
@@ -536,12 +539,18 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       (s) => s.members.get(recipientId)?.status,
       refresh,
     );
+    // A banner change shows without reopening the panel.
+    const unsubBanner = membersStore.subscribeSelector((s) => {
+      const m = s.members.get(recipientId);
+      return `${m?.banner ?? ""}|${m?.banner_color ?? ""}`;
+    }, refresh);
     const unsubDm = dmStore.subscribeSelector(
       (s) => s.channels.find((c) => c.channelId === channelId),
       refresh,
     );
     dmProfileUnsub = () => {
       unsubMembers();
+      unsubBanner();
       unsubDm();
     };
   }
@@ -1224,6 +1233,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             username: updated.username,
             display_name: updated.display_name ?? null,
             about: updated.about ?? null,
+            // An older server sends no banner keys: leave the stored colour be.
+            ...(updated.banner_color === undefined ? {} : { banner_color: updated.banner_color }),
           });
           showToast(account("toast.profileUpdated"), "success");
         } catch (err) {
@@ -1258,6 +1269,34 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         } catch (err) {
           const msg = errorText(err, account("toast.avatarRemoveFailed"));
           showToast(msg, "error");
+          throw err;
+        }
+      },
+      onUploadBanner: async (file) => {
+        try {
+          const uploaded = await api.uploadBanner(file);
+          // The user_update broadcast also lands; this keeps the card from lagging.
+          updateUser({ banner: uploaded.url });
+          showToast(account("toast.bannerUpdated"), "success");
+          return uploaded.url;
+        } catch (err) {
+          // 404: the server advertises banners but has attachment storage off,
+          // so the upload route is not mounted.
+          const msg =
+            err instanceof ApiClientError && err.status === 404
+              ? account("profile.bannerStorageOff")
+              : errorText(err, account("profile.bannerUploadFailed"));
+          showToast(msg, "error");
+          throw err;
+        }
+      },
+      onRemoveBanner: async () => {
+        try {
+          const updated = await api.removeBanner();
+          updateUser({ banner: updated.banner ?? null });
+          showToast(account("toast.bannerRemoved"), "success");
+        } catch (err) {
+          showToast(errorText(err, account("toast.bannerRemoveFailed")), "error");
           throw err;
         }
       },
