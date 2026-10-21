@@ -483,7 +483,7 @@ pipeline as well (`Hub.PurgeMessagesFromReplay`): the dispatch loop is
 drained, the persister flushed, the ring buffer's copies dropped, the
 `events` rows deleted (`DB.DeleteEventsForMessages`, the message-family
 frames — `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`,
-`reaction_update` — naming those ids), and the ids become the hub's tombstone
+`reaction_update`, `poll_update` — naming those ids), and the ids become the hub's tombstone
 set until the next sweep, so a frame about a swept message that a producer
 hands the hub after the purge is dropped; the ids are journaled in
 `retention_runs.purge_pending` before the purge and cleared after it, so a

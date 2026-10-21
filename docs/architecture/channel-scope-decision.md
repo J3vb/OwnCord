@@ -12,7 +12,7 @@ The server sends channel frames to a client over two paths, and they use
 different scopes:
 
 - **Live.** A channel-scoped frame (`chat_message`, `chat_edited`,
-  `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`)
+  `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`, `poll_update`)
   in a server channel goes only to the channel's topic subscribers
   (`deliverGated` in `Server/ws/hub_broadcast.go`). In practice that is the
   channel each connection has focused, plus one exception: a resume while the

@@ -98,6 +98,7 @@ var contentBearingKinds = map[string]bool{
 	MsgTypeChatMessage:     true,
 	MsgTypeChatEdited:      true,
 	MsgTypeReactionUpdate:  true,
+	MsgTypePollUpdate:      true, // names a message and carries its tallies, as reaction_update does
 	MsgTypePluginBroadcast: true, // plugin-authored content posted into a channel
 
 	// ── metadata: no message body ──
@@ -107,6 +108,8 @@ var contentBearingKinds = map[string]bool{
 	MsgTypeChatSendOK:          false, // direct to the sender, who already knows their own content
 	MsgTypeChatForwardOK:       false, // direct to the sender; ids only
 	MsgTypePollCreateOK:        false, // direct to the sender; ids only
+	MsgTypePollVoteOK:          false, // direct to the sender; ids only
+	MsgTypePollEndOK:           false, // direct to the sender; ids only
 	MsgTypeChatDeleted:         false, // ids only
 	MsgTypeChatBulkDeleted:     false, // ids only
 	MsgTypeChatPinned:          false, // ids + flag only, no message body

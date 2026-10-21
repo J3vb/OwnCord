@@ -93,7 +93,10 @@ status statements retain their `cbebd37c` baseline.
 readable fallback of the question and answers, so it follows the message rows. The
 side rows go with the message by cascade. The one new data class is the vote (lifecycle
 row 10a in `data-lifecycle.md`): a voter's rows are public to the community as
-reactions are, and go with the account. Counts are never stored.
+reactions are, and go with the account. Counts are never stored. Voting, ending and
+expiry (WP 6.9b-b) add no data class: a vote is a row of the same table, and ending
+only sets `polls.ended_at` and bumps `polls.version`. The poll expirer keeps no
+state of its own beyond a wake signal and reads the next deadline from the table.
 **Amended 2026-10-21 (threads):** `074_threads.sql` adds the thread columns to
 `channels` (WP 6.9c). A thread is a channel row under a text channel, so its
 messages, attachments, reactions and read state are the existing classes and
