@@ -62,11 +62,13 @@ func TestCreateMessageRequest_OneRowPerPairEver(t *testing.T) {
 	ctx := context.Background()
 	sender, recipient, channelID, msgID := seedMessageRequestPair(t, database, "mrq-create-sender", "mrq-create-recipient")
 
-	created, err := database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID)
+	out, err := database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID)
+	created := out.Created
 	if err != nil || !created {
 		t.Fatalf("first CreateMessageRequest = %v, %v; want true, nil", created, err)
 	}
-	created, err = database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID)
+	out, err = database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID)
+	created = out.Created
 	if err != nil || created {
 		t.Fatalf("second CreateMessageRequest = %v, %v; want false, nil (one row per pair, ever)", created, err)
 	}
@@ -85,7 +87,8 @@ func TestCreateMessageRequest_OneRowPerPairEver(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
-	created, err = database.CreateMessageRequest(ctx, sender, third, otherCh.ID, otherMsgID)
+	out, err = database.CreateMessageRequest(ctx, sender, third, otherCh.ID, otherMsgID)
+	created = out.Created
 	if err != nil || !created {
 		t.Fatalf("CreateMessageRequest for a different pair = %v, %v; want true, nil", created, err)
 	}
@@ -101,7 +104,8 @@ func TestCreateMessageRequest_AlsoWritesSentFirstTrustAtomically(t *testing.T) {
 	ctx := context.Background()
 	sender, recipient, channelID, msgID := seedMessageRequestPair(t, database, "mrq-atomic-sender", "mrq-atomic-recipient")
 
-	created, err := database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID)
+	out, err := database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID)
+	created := out.Created
 	if err != nil || !created {
 		t.Fatalf("CreateMessageRequest = %v, %v; want true, nil", created, err)
 	}

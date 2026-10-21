@@ -2257,6 +2257,14 @@ sender's _later_ sends fail with `ErrBlocked` (Codex P2-9) — that denial is
 the existing block gate (`PUT /api/v1/blocks/{userId}`), unchanged by B5-6,
 and it is visible to the sender by design.
 
+A recipient who has direct messages on and message requests off
+(`message_requests: false` in `/users/me/privacy`) gets no request: the first
+message is recorded as already accepted, the conversation opens for them
+(`dm_channel_open`) and the message is delivered, mentioned and pushed as for
+any trusted sender, with no `dm_request` frame. Requests already in the inbox
+stay `pending`, and turning requests back on keeps that pair trusted. With
+direct messages off the send is refused instead (see above).
+
 Transitions are **recipient-only** and legal **only from `pending`**:
 
 - `accept` — trusts the sender, opens the conversation for the recipient

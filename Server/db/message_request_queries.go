@@ -78,8 +78,21 @@ func (d *DB) TrustSender(ctx context.Context, recipientID, senderID int64, sourc
 	return nil
 }
 
-// CreateMessageRequest stages a pending request for (senderID, recipientID)
-// in channelID, naming firstMessageID as the held message, and — in the SAME
+// MessageRequestOutcome is what CreateMessageRequest decided for one first
+// send.
+type MessageRequestOutcome struct {
+	// Created is true when this call inserted the pair's request row.
+	Created bool
+	// AutoAccepted is true when the recipient has message requests off (and
+	// direct messages on) and trusts the sender after this call: the message
+	// is delivered, not staged.
+	AutoAccepted bool
+	// Opened is true when this call opened the DM for the recipient.
+	Opened bool
+}
+
+// CreateMessageRequest stages first contact for (senderID, recipientID) in
+// channelID, naming firstMessageID as the held message, and — in the SAME
 // transaction — marks senderID as a trusted sender of recipientID (source
 // "sent_first"): senderID initiated, so recipientID's eventual reply is a
 // reply, not a first-contact request back. Codex P2-6: the two writes used
@@ -93,38 +106,88 @@ func (d *DB) TrustSender(ctx context.Context, recipientID, senderID int64, sourc
 // recipient_id) constraint: one row per pair EVER, so a request already
 // existing in ANY state — pending, ignored, deleted, blocked, even
 // accepted, though an accepted pair is trusted and should never reach here
-// — leaves created false and changes nothing. That is what makes a resend
+// — leaves Created false and changes nothing. That is what makes a resend
 // after "ignored" silent (decision 5): there is only ever one row to have
 // created. The trust write itself is unconditional (also INSERT OR IGNORE)
-// regardless of created: a repeat send while the request is still pending
+// regardless of Created: a repeat send while the request is still pending
 // (or already ignored/deleted) just re-affirms a trust row that may already
 // be there, and skipping it on a race would leave the loser of two
 // concurrent first messages without it. Under two concurrent first sends
 // only one request INSERT wins, so first_message_id always names the
 // winner's own message — the same one its dm_request frame carries as a
 // preview (Codex P2-6).
-func (d *DB) CreateMessageRequest(ctx context.Context, senderID, recipientID, channelID, firstMessageID int64) (bool, error) {
+//
+// WP 6.8e: the transaction reads recipientID's user_privacy itself, so a
+// settings change racing the send is decided by this read and by nothing the
+// caller saw earlier. With direct messages allowed and message requests off
+// the row is born "accepted" (decided_at set), recipientID trusts senderID
+// ("accepted") and the DM opens for recipientID, all in this transaction;
+// AutoAccepted is then true and the caller delivers the message instead of
+// staging a request. Any other setting (including direct messages off) takes
+// the staging path above untouched. A caller that finds the pair's row
+// already there reports AutoAccepted whenever recipientID trusts senderID
+// (trust, not the request's state or the current setting, decides delivery),
+// so a racing loser is delivered too; Opened is true for exactly one of them.
+// A block between the pair always takes the staging path.
+func (d *DB) CreateMessageRequest(ctx context.Context, senderID, recipientID, channelID, firstMessageID int64) (MessageRequestOutcome, error) {
+	var out MessageRequestOutcome
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
-		return false, fmt.Errorf("CreateMessageRequest begin: %w", err)
+		return out, fmt.Errorf("CreateMessageRequest begin: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 	q := d.q.WithTx(tx)
 
-	n, err := q.InsertMessageRequest(ctx, dbgen.InsertMessageRequestParams{
-		SenderID: senderID, RecipientID: recipientID, ChannelID: channelID, FirstMessageID: &firstMessageID,
-	})
-	if err != nil {
-		return false, fmt.Errorf("CreateMessageRequest insert: %w", err)
+	priv := DefaultUserPrivacy()
+	row, err := q.GetUserPrivacy(ctx, recipientID)
+	switch {
+	case err == nil:
+		priv = UserPrivacy{AllowMemberDMs: row.AllowMemberDms != 0, MessageRequests: row.MessageRequests != 0}
+	case errors.Is(err, sql.ErrNoRows):
+		// No saved settings: both on, so requests are staged as before.
+	default:
+		return out, fmt.Errorf("CreateMessageRequest privacy: %w", err)
 	}
+	// A block between the pair, read in this transaction, always stages: a
+	// recipient who blocks the sender while the send is in flight never
+	// ends up trusting them.
+	blocked := true
+	if _, err := q.IsEitherBlocked(ctx, dbgen.IsEitherBlockedParams{
+		BlockerID: senderID, BlockedID: recipientID, BlockerID_2: recipientID, BlockedID_2: senderID,
+	}); errors.Is(err, sql.ErrNoRows) {
+		blocked = false
+	} else if err != nil {
+		return out, fmt.Errorf("CreateMessageRequest blocks: %w", err)
+	}
+	autoAccept := priv.AllowMemberDMs && !priv.MessageRequests && !blocked
+
+	var n int64
+	if autoAccept {
+		n, err = q.InsertAcceptedMessageRequest(ctx, dbgen.InsertAcceptedMessageRequestParams{
+			SenderID: senderID, RecipientID: recipientID, ChannelID: channelID, FirstMessageID: &firstMessageID,
+		})
+	} else {
+		n, err = q.InsertMessageRequest(ctx, dbgen.InsertMessageRequestParams{
+			SenderID: senderID, RecipientID: recipientID, ChannelID: channelID, FirstMessageID: &firstMessageID,
+		})
+	}
+	if err != nil {
+		return out, fmt.Errorf("CreateMessageRequest insert: %w", err)
+	}
+	out.Created = n > 0
 	if err := q.TrustSender(ctx, dbgen.TrustSenderParams{RecipientID: senderID, SenderID: recipientID, Source: "sent_first"}); err != nil {
-		return false, fmt.Errorf("CreateMessageRequest trust: %w", err)
+		return out, fmt.Errorf("CreateMessageRequest trust: %w", err)
+	}
+	if autoAccept || (!out.Created && !blocked) {
+		if err := acceptFirstContact(ctx, q, senderID, recipientID, channelID, &out); err != nil {
+			return out, err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		return false, fmt.Errorf("CreateMessageRequest commit: %w", err)
+		return MessageRequestOutcome{}, fmt.Errorf("CreateMessageRequest commit: %w", err)
 	}
-	return n > 0, nil
+	return out, nil
 }
 
 // GetMessageRequest reads request id, scoped to recipientID so one user can
@@ -253,4 +316,34 @@ func (d *DB) AcceptMessageRequest(ctx context.Context, id, recipientID int64) (*
 		return nil, fmt.Errorf("AcceptMessageRequest commit: %w", err)
 	}
 	return fromDBGenMessageRequest(updated), nil
+}
+
+// acceptFirstContact finishes a first send that may be delivered, inside
+// CreateMessageRequest's transaction. The caller that inserted an accepted
+// row writes the recipient's accepted trust edge first. Either way the
+// recipient's trust of the sender decides delivery, not the request's state
+// or the setting as it reads now: a caller that found the pair's row already
+// there is delivered when the recipient trusts the sender, and then (re)opens
+// the DM with INSERT OR IGNORE, so a recipient who closed it meanwhile gets
+// dm_channel_open and exactly one caller reports Opened.
+func acceptFirstContact(ctx context.Context, q *dbgen.Queries, senderID, recipientID, channelID int64, out *MessageRequestOutcome) error {
+	if out.Created {
+		if err := q.TrustSender(ctx, dbgen.TrustSenderParams{RecipientID: recipientID, SenderID: senderID, Source: "accepted"}); err != nil {
+			return fmt.Errorf("CreateMessageRequest accept trust: %w", err)
+		}
+	}
+	trusted, err := q.IsTrustedSender(ctx, dbgen.IsTrustedSenderParams{RecipientID: recipientID, SenderID: senderID})
+	if err != nil {
+		return fmt.Errorf("CreateMessageRequest trusted: %w", err)
+	}
+	if trusted == 0 {
+		return nil
+	}
+	inserted, err := q.OpenDM(ctx, dbgen.OpenDMParams{UserID: recipientID, ChannelID: channelID})
+	if err != nil {
+		return fmt.Errorf("CreateMessageRequest opendm: %w", err)
+	}
+	out.Opened = inserted > 0
+	out.AutoAccepted = true
+	return nil
 }
