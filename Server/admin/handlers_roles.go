@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/J3vb/OwnCord/Server/service"
@@ -29,6 +30,10 @@ func roleServiceUnavailable(w http.ResponseWriter) {
 // writeRoleErr maps RoleService errors onto admin API responses. Separate from
 // writeModerationErr only because NOT_FOUND means "role", not "user".
 func writeRoleErr(w http.ResponseWriter, err error) {
+	if errors.Is(err, service.ErrConflict) {
+		writeErr(w, http.StatusConflict, "ROLE_CONFLICT", err.Error())
+		return
+	}
 	writeSvcErr(w, err, "role not found", "", "role action failed")
 }
 
@@ -40,6 +45,9 @@ type roleRequest struct {
 	Color       *string `json:"color"`
 	Permissions *int64  `json:"permissions"`
 	Position    *int    `json:"position"`
+	// ExpectedPermissions (PATCH only) is the mask the editor loaded; a
+	// stored mask that differs answers 409 ROLE_CONFLICT. Absent skips it.
+	ExpectedPermissions *int64 `json:"expected_permissions"`
 }
 
 func (r roleRequest) toInput() service.RoleInput {
@@ -48,6 +56,8 @@ func (r roleRequest) toInput() service.RoleInput {
 		Color:       r.Color,
 		Permissions: r.Permissions,
 		Position:    r.Position,
+
+		ExpectedPermissions: r.ExpectedPermissions,
 	}
 }
 

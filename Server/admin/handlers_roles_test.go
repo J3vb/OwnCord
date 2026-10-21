@@ -429,3 +429,45 @@ func TestAdminAPI_ReorderRoles_PartialListRefused(t *testing.T) {
 		t.Error("a refused reorder must not broadcast")
 	}
 }
+
+func TestAdminAPI_PatchRole_StaleExpectedPermissionsIs409(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler, hub, inv, token := newRolesHandler(t, database)
+	createUserWithRole(t, database, "member1", 3)
+
+	// Role 3's stored mask is not 1, so an editor that loaded 1 is stale.
+	w := doRequest(t, handler, http.MethodPatch, "/roles/3", token, map[string]any{
+		"permissions":          permissions.ReadMessages,
+		"expected_permissions": 1,
+	})
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"ROLE_CONFLICT"`) {
+		t.Errorf("body = %s, want code ROLE_CONFLICT", w.Body.String())
+	}
+	if len(inv.invalidateUserIDs) != 0 || hub.rolesEnqueues() != 0 {
+		t.Errorf("a refused edit must have no side effects: invalidations=%v roles enqueues=%d",
+			inv.invalidateUserIDs, hub.rolesEnqueues())
+	}
+
+	// The current mask goes through.
+	var stored db.Role
+	rw := doRequest(t, handler, http.MethodGet, "/roles", token, nil)
+	var list []db.Role
+	if err := json.Unmarshal(rw.Body.Bytes(), &list); err != nil {
+		t.Fatalf("unmarshal roles: %v", err)
+	}
+	for _, r := range list {
+		if r.ID == 3 {
+			stored = r
+		}
+	}
+	w = doRequest(t, handler, http.MethodPatch, "/roles/3", token, map[string]any{
+		"permissions":          permissions.ReadMessages,
+		"expected_permissions": stored.Permissions,
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("matching: status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+}
