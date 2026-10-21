@@ -321,6 +321,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   /** Inactivity watcher that flips the status to idle after ten quiet
    *  minutes. Started once the socket is up, torn down with the page. */
   let autoIdle: AutoIdleController | null = null;
+  let speakingActivityTimer: ReturnType<typeof setInterval> | null = null;
   let statusTimerWatcher: StatusTimerWatcher | null = null;
 
   // Toast container for user-facing error feedback
@@ -934,9 +935,18 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           return ch !== null && v.voiceUsers.get(ch)?.get(uid)?.speaking === true;
         },
         (speaking) => {
-          if (speaking) autoIdle?.notifyActivity();
+          if (speakingActivityTimer !== null) clearInterval(speakingActivityTimer);
+          speakingActivityTimer = null;
+          if (!speaking) return;
+          autoIdle?.notifyActivity();
+          // Talking for longer than the idle delay must keep counting.
+          speakingActivityTimer = setInterval(() => autoIdle?.notifyActivity(), 60_000);
         },
       ),
+      () => {
+        if (speakingActivityTimer !== null) clearInterval(speakingActivityTimer);
+        speakingActivityTimer = null;
+      },
     );
 
     unsubscribers.push(

@@ -35,11 +35,13 @@ export function noteAfkMove(channelId: number): void {
   pendingAfkChannelId = channelId;
 }
 
-/** Whether `channelId` is the noted AFK move, consuming the note on a match. */
+/** Whether `channelId` is the noted AFK move. Any self join acknowledgement
+ *  settles the note, so one for a different channel (the user clicked away
+ *  first) does not leave it to fire on a later manual join. */
 export function takeAfkMove(channelId: number): boolean {
-  if (pendingAfkChannelId !== channelId) return false;
+  const matched = pendingAfkChannelId === channelId;
   pendingAfkChannelId = null;
-  return true;
+  return matched;
 }
 
 /** Forget a noted AFK move whose join was refused, abandoned or superseded. */
