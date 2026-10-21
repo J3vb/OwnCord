@@ -167,7 +167,7 @@ func (s *MessageService) pollResult(ctx context.Context, sp SendMessageParams, m
 		IsDM: isDM, Channel: ch, Mentions: []int64{},
 	}
 	// The write is committed; a failed read-back only costs the live block.
-	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), backgroundJobTimeout)
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), pollReadBackTimeout)
 	info, err := s.poll.store.GetPollInfo(readCtx, msg.ID, 0)
 	cancel()
 	if err == nil && info == nil {
@@ -233,6 +233,9 @@ func validatePoll(p PollCreateParams) (*db.PollInput, string, error) {
 			if err := validateEmoji(e); err != nil {
 				return nil, "", err
 			}
+			if strings.IndexFunc(e, pollBreakRune) >= 0 {
+				return nil, "", fmt.Errorf("%w: poll emoji contains control characters", ErrBadRequest)
+			}
 			a.Emoji = &e
 			fallback.WriteString(e + " ")
 		}
@@ -242,6 +245,17 @@ func validatePoll(p PollCreateParams) (*db.PollInput, string, error) {
 	return in, fallback.String(), nil
 }
 
+// pollReadBackTimeout bounds the post-commit read of the new poll's block. The
+// handler runs on the connection's read pump, so a stalled read must not hold
+// it for long; a miss only costs the live block.
+const pollReadBackTimeout = 2 * time.Second
+
+// pollBreakRune reports a rune that would break the one-line-per-field
+// fallback: a control character or a Unicode line or paragraph separator.
+func pollBreakRune(r rune) bool {
+	return unicode.IsControl(r) || unicode.In(r, unicode.Zl, unicode.Zp)
+}
+
 // pollText sanitises one single-line poll field and checks its length in runes.
 // A field that sanitises to nothing, or holds a control character (a newline
 // included), is refused.
@@ -249,17 +263,16 @@ func pollText(raw, field string, maxRunes int) (string, error) {
 	if len(raw) > maxRunes*4 {
 		return "", fmt.Errorf("%w: poll %s exceeds %d characters", ErrBadRequest, field, maxRunes)
 	}
-	text := strings.TrimSpace(sanitizeToFixpoint(raw))
+	clean := sanitizeToFixpoint(raw)
+	if strings.IndexFunc(clean, pollBreakRune) >= 0 {
+		return "", fmt.Errorf("%w: poll %s contains control characters", ErrBadRequest, field)
+	}
+	text := strings.TrimSpace(clean)
 	if text == "" {
 		return "", fmt.Errorf("%w: poll %s cannot be empty", ErrBadRequest, field)
 	}
 	if utf8.RuneCountInString(text) > maxRunes {
 		return "", fmt.Errorf("%w: poll %s exceeds %d characters", ErrBadRequest, field, maxRunes)
-	}
-	if strings.IndexFunc(text, func(r rune) bool {
-		return unicode.IsControl(r) || unicode.In(r, unicode.Zl, unicode.Zp)
-	}) >= 0 {
-		return "", fmt.Errorf("%w: poll %s contains control characters", ErrBadRequest, field)
 	}
 	return text, nil
 }
