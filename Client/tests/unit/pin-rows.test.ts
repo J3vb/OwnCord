@@ -20,7 +20,12 @@ import { messageActionGates } from "@components/message-list/message-actions";
 import { pinRowTarget } from "@components/message-list/pinRows";
 import { shouldGroup } from "@lib/formatting";
 import { isPinRowKind, isServerRowKind } from "@lib/messageKind";
-import { messagesStore, type Message } from "@stores/messages.store";
+import {
+  bulkDeleteMessages,
+  deleteMessage,
+  messagesStore,
+  type Message,
+} from "@stores/messages.store";
 import {
   ME,
   OTHER,
@@ -144,6 +149,41 @@ describe("pin row rendering", () => {
     const next = makeMessage({ id: 10, timestamp: "2024-01-15T12:00:05Z" });
     expect(shouldGroup(prev, row)).toBe(false);
     expect(shouldGroup(row, next)).toBe(false);
+  });
+});
+
+const liveRow = (): Message => pinRow({ replyTo: 4, referencedMessage: null });
+const seed = (rows: Message[]): void => {
+  messagesStore.setState(() => ({
+    messagesByChannel: new Map([[1, rows]]),
+    pendingSends: new Map(),
+    loadedChannels: new Set(),
+    hasMore: new Map(),
+    historyLoadState: new Map(),
+    detachedChannels: new Set(),
+  }));
+};
+const rowNow = (): Message =>
+  messagesStore
+    .getState()
+    .messagesByChannel.get(1)!
+    .find((m) => m.id === 9)!;
+
+describe("a live pin row whose target goes away", () => {
+  it("stops jumping once the target is deleted", () => {
+    seed([makeMessage({ id: 4 }), liveRow()]);
+    expect(pinRowTarget(rowNow())).toBe(4);
+    deleteMessage({ channel_id: 1, message_id: 4 });
+    expect(pinRowTarget(rowNow())).toBeNull();
+    expect(render(rowNow()).querySelector('[data-testid="pin-row-message-9"]')).toBeNull();
+  });
+
+  it("stops jumping once the target is purged, and other deletes leave it alone", () => {
+    seed([liveRow()]);
+    bulkDeleteMessages({ channel_id: 1, ids: [7] });
+    expect(pinRowTarget(rowNow())).toBe(4);
+    bulkDeleteMessages({ channel_id: 1, ids: [7, 4] });
+    expect(pinRowTarget(rowNow())).toBeNull();
   });
 });
 
