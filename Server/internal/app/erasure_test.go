@@ -64,7 +64,7 @@ func TestOpenMarkers_MissingHistoryBootsAndSaysSo(t *testing.T) {
 	open := func(what string) {
 		t.Helper()
 		logs.Reset()
-		markers, err := openMarkers(ctx, log, cfg, database)
+		markers, err := openMarkers(ctx, log, cfg, database, OpenStorage(log, cfg))
 		if err != nil {
 			t.Fatalf("%s: openMarkers: %v (the decision is boot, not refuse)", what, err)
 		}
@@ -142,7 +142,7 @@ func TestOpenMarkers_ReplaysAgainstTheOpenedDatabase(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
 	// First open: generates the key, creates the file, nothing to replay.
-	markers, err := openMarkers(ctx, log, cfg, database)
+	markers, err := openMarkers(ctx, log, cfg, database, OpenStorage(log, cfg))
 	if err != nil {
 		t.Fatalf("openMarkers: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestOpenMarkers_ReplaysAgainstTheOpenedDatabase(t *testing.T) {
 	}
 
 	// Second open — the next start-up: the marker is replayed.
-	reopened, err := openMarkers(ctx, log, cfg, database)
+	reopened, err := openMarkers(ctx, log, cfg, database, OpenStorage(log, cfg))
 	if err != nil {
 		t.Fatalf("openMarkers (second): %v", err)
 	}
@@ -209,7 +209,7 @@ func TestOpenMarkers_ReplaysRetentionMarkers(t *testing.T) {
 		}
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	markers, err := openMarkers(ctx, log, cfg, database)
+	markers, err := openMarkers(ctx, log, cfg, database, OpenStorage(log, cfg))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestOpenMarkers_ReplaysRetentionMarkers(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = markers.Close()
-	reopened, err := openMarkers(ctx, log, cfg, database)
+	reopened, err := openMarkers(ctx, log, cfg, database, OpenStorage(log, cfg))
 	if err != nil {
 		t.Fatal(err)
 	}

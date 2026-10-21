@@ -33,6 +33,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -257,7 +258,7 @@ func genRoutes(w io.Writer) error {
 
 	// internal/app owns hub construction since B3-3, so the route index is
 	// generated over the same collaborators the server runs with.
-	rt, err := app.StartRuntime(cfg, database, nil)
+	rt, err := app.StartRuntime(cfg, database, nil, app.RuntimeInputs{Version: "gendocs", Storage: app.OpenStorage(slog.Default(), cfg)})
 	if err != nil {
 		return fmt.Errorf("building runtime for the route walk: %w", err)
 	}

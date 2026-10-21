@@ -29,7 +29,7 @@ func TestRouter_UpdateApplyRefusedOnceShutdownBegins(t *testing.T) {
 	t.Cleanup(func() { _ = database.Close() })
 
 	cfg := &config.Config{Server: config.ServerConfig{Name: "Test Server", Port: 8443}}
-	rt, err := app.StartRuntime(cfg, database, nil)
+	rt, err := app.StartRuntime(cfg, database, nil, testRuntimeInputs(cfg))
 	if err != nil {
 		t.Fatalf("app.StartRuntime: %v", err)
 	}

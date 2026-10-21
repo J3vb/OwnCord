@@ -19,6 +19,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/plugin"
 	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/storage"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
@@ -110,9 +111,12 @@ type App struct {
 	// pushVAPIDKey is loaded by startPushVAPIDKey and installed on svc.Push
 	// by startHub once the service layer exists (B5-4).
 	pushVAPIDKey *ecdh.PrivateKey
-	// totpKey is loaded by startTOTPKey and handed to api.NewRouter through
-	// Runtime.TOTPKey (WP 5.6f).
-	totpKey  []byte
+	// totpKey is loaded by startTOTPKey and consumed by StartRuntime, which
+	// builds the AuthService with it (WP 5.6f/g).
+	totpKey []byte
+	// storage is the one upload file store, opened by startErasureMarkers
+	// (nil when it could not be) and shared through StartRuntime.
+	storage  *storage.Storage
 	serveCtx context.Context
 
 	closers []closeStep

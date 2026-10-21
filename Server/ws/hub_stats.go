@@ -138,7 +138,7 @@ func (h *Hub) allowTopicFrame(bm broadcastMsg) bool {
 	if bm.senderID != 0 {
 		key += ":" + strconv.FormatInt(bm.senderID, 10)
 	}
-	if h.limiter.Allow(key, topicRateLimitPerSecond, time.Second) {
+	if h.limiter.Allow(key, topicRateLimitPerSecond, time.Duration(topicRateWindow.Load())) {
 		return true
 	}
 	h.latency.topicSheds.Add(1)
@@ -428,3 +428,10 @@ func (h *Hub) EventPersisterStats() (persisted, dropped, flushes, errs uint64, o
 // single channel topic, per sender. Prevents a busy channel from saturating
 // the broadcast loop and starving other channels.
 const topicRateLimitPerSecond = 100
+
+// topicRateWindow is the window topicRateLimitPerSecond counts over: one
+// second. Atomic so a test can widen it while another test's hub still reads
+// it, and so a slow runner cannot spread a burst across two windows.
+var topicRateWindow atomic.Int64
+
+func init() { topicRateWindow.Store(int64(time.Second)) }

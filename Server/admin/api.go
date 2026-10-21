@@ -31,8 +31,8 @@ var setupLimiterHook func(*auth.RateLimiter)
 // process. Every distinct source IP that ever hits POST /setup leaves an
 // entry that Allow itself only prunes on a repeat call from that same key —
 // a one-shot caller's entry sits forever unless something sweeps the whole
-// map. api/router.go reaps its own limiter with RateLimiter.StartCleanup, a
-// goroutine parked in a ticker select until a stop channel closes — but
+// map. The app reaps the main limiter with RateLimiter.RunCleanup on its own
+// cancellable context (internal/app/limiter_cleanup.go) — but
 // mountUserRoutes registers the member-management routes under the
 // authenticated perimeter. Ban/unban and role change are authorized inside
 // ModerationService (BAN_MEMBERS / MANAGE_ROLES + hierarchy), so PATCH stays

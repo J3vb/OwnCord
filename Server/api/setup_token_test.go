@@ -70,7 +70,7 @@ func setupTokenRouter(t *testing.T, token string) http.Handler {
 			"127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7",
 		},
 	}}
-	rt, err := app.StartRuntime(cfg, database, nil)
+	rt, err := app.StartRuntime(cfg, database, nil, testRuntimeInputs(cfg))
 	if err != nil {
 		t.Fatalf("app.StartRuntime: %v", err)
 	}

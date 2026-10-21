@@ -104,12 +104,16 @@ A-2026-07-06, backlog item 12). The per-file table is in
 the one place that builds the long-lived parts and wires them together. It
 builds the persistent rate limiter, `service.New`, the LiveKit client and its
 optional managed subprocess, and the `ws.Hub` (through a validated
-`ws.HubOptions`). It returns an `api.Runtime`.
+`ws.HubOptions`). It also builds the `AuthService`, the updater and takes the
+one upload `storage.Storage`, runs `wireAuth` (the service setters that need the
+hub or the store) before the hub's dispatch goroutine starts, and returns an
+`api.Runtime`.
 
-`api.NewRouter` (`Server/api/router.go`) then mounts the routes. It loads the
-TOTP key, builds the global middleware chain, mounts the routes, owns the
-admin and plugin-admin handlers, and starts its own background goroutines,
-such as the rate-limiter cleanup ticker. `app.startRouter` calls it.
+`api.NewRouter` (`Server/api/router.go`) then only mounts: it builds the global
+middleware chain, mounts the routes and the admin and plugin-admin handlers
+over the collaborators in the `Runtime`, and constructs nothing of its own. The
+rate-limiter cleanup ticker is an app-owned goroutine (`limiter-cleanup`), and
+the TOTP key is loaded by the `totp-key` stage. `app.startRouter` calls it.
 `main.go` does only process-level wiring: config, TLS, the database, event
 persistence, the HTTP server and shutdown.
 

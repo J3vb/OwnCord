@@ -242,7 +242,7 @@ func enabledBrowserHostingRouter(t *testing.T) http.Handler {
 		Upload: config.UploadConfig{MaxSizeMB: 1, StorageDir: filepath.Join(dir, "uploads")},
 	}
 
-	rt, rtErr := app.StartRuntime(cfg, database, nil)
+	rt, rtErr := app.StartRuntime(cfg, database, nil, testRuntimeInputs(cfg))
 	if rtErr != nil {
 		t.Fatalf("app.StartRuntime: %v", rtErr)
 	}
