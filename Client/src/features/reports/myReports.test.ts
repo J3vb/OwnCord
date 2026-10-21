@@ -1,7 +1,7 @@
 // B9-10: My reports in the Safety tab — the reporter's own summary only,
 // with loading, empty, error/retry and late-result states.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { OwnReportSummary } from "@lib/api";
+import type { DmPrivacy, OwnReportSummary } from "@lib/api";
 // Loaded up front: the Blocked users section lazily imports it, and its module-level
 // listener must not first appear inside a test.
 import "@components/message-list/avatar";
@@ -23,6 +23,9 @@ const api = {
   },
   listBlocks: () => new Promise<{ blocked_user_ids: number[] }>(() => undefined),
   unblockUser: () => Promise.resolve(),
+  // Never asked: the pane only loads Direct messages with the dm_privacy capability.
+  getDmPrivacy: () => new Promise<DmPrivacy>(() => undefined),
+  putDmPrivacy: () => new Promise<DmPrivacy>(() => undefined),
 };
 let tab: AbortController;
 let restoreTZ: () => void;
