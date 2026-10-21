@@ -50,6 +50,11 @@ type PermissionService struct {
 	// its DB read and refuses to cache if it changed, so an invalidation that
 	// races a populate can't be lost (F6).
 	gen uint64
+	// onInvalidate, when set, is told about every invalidation AFTER the cache
+	// has been dropped and mu released (all=true for a full flush). It exists
+	// so a harness can observe which evictions a service issued; install it
+	// before the service is shared (SetInvalidationObserver).
+	onInvalidate func(userID int64, all bool)
 	// loads coalesces concurrent cache-miss loads per (user, generation), so a
 	// burst of requests after an invalidation costs one pair of store reads.
 	loads singleflight.Group
@@ -297,6 +302,7 @@ func (s *PermissionService) InvalidateUser(userID int64) {
 	delete(s.cache, userID)
 	s.gen++
 	s.mu.Unlock()
+	s.notifyInvalidated(userID, false)
 }
 
 // InvalidateChannel removes cached permissions for ALL users, since a
@@ -307,6 +313,7 @@ func (s *PermissionService) InvalidateChannel(_ int64) {
 	s.cache = make(map[int64]*cachedPerms)
 	s.gen++
 	s.mu.Unlock()
+	s.notifyInvalidated(0, true)
 }
 
 // InvalidateAll clears the entire permission cache.
@@ -315,6 +322,20 @@ func (s *PermissionService) InvalidateAll() {
 	s.cache = make(map[int64]*cachedPerms)
 	s.gen++
 	s.mu.Unlock()
+	s.notifyInvalidated(0, true)
+}
+
+// SetInvalidationObserver installs fn to be told of every invalidation after
+// the cache has been dropped. Call it before the service is shared; it is not
+// safe against concurrent Invalidate* calls. nil removes the observer.
+func (s *PermissionService) SetInvalidationObserver(fn func(userID int64, all bool)) {
+	s.onInvalidate = fn
+}
+
+func (s *PermissionService) notifyInvalidated(userID int64, all bool) {
+	if s.onInvalidate != nil {
+		s.onInvalidate(userID, all)
+	}
 }
 
 // Checker returns the underlying stateless permissions.Checker for cases

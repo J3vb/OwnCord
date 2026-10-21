@@ -178,3 +178,32 @@ func TestWireAuth_NonNilErasureSwapsQuietly(t *testing.T) {
 		t.Fatalf("wireAuth logged an error with svc.Erasure present; log output = %q", out)
 	}
 }
+
+// TestWireAuth_WiresPermissionNotifiers pins the WP 5.1a composition-root
+// wiring: the role, channel and moderation services own permission
+// invalidation and fan-out, so each must receive the hub as its
+// PermissionChangeNotifier. A service left without one silently skips the live
+// fan-out (no sidebar, topic or role-list update) while still committing.
+func TestWireAuth_WiresPermissionNotifiers(t *testing.T) {
+	svc := &service.Services{
+		Roles:      service.NewRoleService(nil, nil),
+		Channels:   service.NewChannelService(nil, nil),
+		Moderation: service.NewModerationService(nil, nil),
+	}
+	hub := &ws.Hub{}
+
+	wireAuth(svc, newWireAuthTestAuthSvc(t), nil, hub)
+
+	for name, v := range map[string]reflect.Value{
+		"Roles":      reflect.ValueOf(svc.Roles).Elem().FieldByName("notifier"),
+		"Channels":   reflect.ValueOf(svc.Channels).Elem().FieldByName("notifier"),
+		"Moderation": reflect.ValueOf(svc.Moderation).Elem().FieldByName("permNotifier"),
+	} {
+		if !v.IsValid() {
+			t.Fatalf("%s service has no permission notifier field (renamed?)", name)
+		}
+		if v.IsNil() {
+			t.Errorf("%s.SetPermissionNotifier was not called by wireAuth", name)
+		}
+	}
+}

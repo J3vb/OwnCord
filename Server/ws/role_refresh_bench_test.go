@@ -55,6 +55,11 @@ func BenchmarkPatchUserRole_Handler(b *testing.B) {
 				}
 				hub.RegisterNowForTest(ws.NewTestClientWithUser(hub, u, 0, make(chan []byte, 256)))
 			}
+			// The services own the fan-out since WP 5.1a; install the hub as
+			// their notifier as the composition root does.
+			svcs.Moderation.SetPermissionNotifier(hub)
+			svcs.Roles.SetPermissionNotifier(hub)
+			svcs.Channels.SetPermissionNotifier(hub)
 			adminID, err := database.CreateUser(ctx, "bench-admin", "hash", 1)
 			if err != nil {
 				b.Fatalf("CreateUser admin: %v", err)

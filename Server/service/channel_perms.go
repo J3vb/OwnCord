@@ -13,8 +13,9 @@ import (
 //
 // The override policy the admin handlers used to hold: escalation and
 // hierarchy guards, mask clamping, the write/clear/audit sequence, and who
-// must be invalidated afterwards. Handlers decode and fan out; every
-// permission decision lives here.
+// must be invalidated afterwards. Handlers decode and respond; every
+// permission decision, and the invalidation and fan-out after it (WP 5.1a),
+// lives here.
 
 // requireGrantableChannelOverride refuses an override whose allow or deny
 // mask contains a bit the actor's own role does not hold. Without this, any
@@ -55,10 +56,10 @@ func (s *ChannelService) ChannelPermissions(ctx context.Context, channelID int64
 	return roles, users, nil
 }
 
-// OverrideResult carries what the caller fans out after an override
-// mutation: the response row fields and who must have cached permissions
-// invalidated. AffectedAll means the narrow list could not be read — the
-// fail-safe is a full flush, because a missed eviction is a stale grant.
+// OverrideResult carries the response row fields of an override mutation and
+// who had cached permissions invalidated (the service has already done it).
+// AffectedAll means the narrow list could not be read — the fail-safe is a
+// full flush, because a missed eviction is a stale grant.
 type OverrideResult struct {
 	Role          *db.Role
 	User          *db.User
@@ -127,7 +128,9 @@ func (s *ChannelService) PutRoleOverride(ctx context.Context, actorID int64, act
 		fmt.Sprintf("set overrides for role %s on #%s (allow=%#x deny=%#x)", role.Name, ch.Name, allow, deny))
 
 	affected, all := s.roleOverrideAffected(ctx, roleID)
-	return OverrideResult{Role: role, Allow: allow, Deny: deny, AffectedUsers: affected, AffectedAll: all}, nil
+	res := OverrideResult{Role: role, Allow: allow, Deny: deny, AffectedUsers: affected, AffectedAll: all}
+	s.applyOverrideEffects(res, ch)
+	return res, nil
 }
 
 // DeleteRoleOverride clears a role-layer override. Clearing is a permission
@@ -148,7 +151,9 @@ func (s *ChannelService) DeleteRoleOverride(ctx context.Context, actorID int64, 
 		fmt.Sprintf("cleared overrides for role %s on #%s", role.Name, ch.Name))
 
 	affected, all := s.roleOverrideAffected(ctx, roleID)
-	return OverrideResult{Role: role, AffectedUsers: affected, AffectedAll: all}, nil
+	res := OverrideResult{Role: role, AffectedUsers: affected, AffectedAll: all}
+	s.applyOverrideEffects(res, ch)
+	return res, nil
 }
 
 // resolveOverrideUser loads the target user for a user-layer override
@@ -214,7 +219,9 @@ func (s *ChannelService) PutUserOverride(ctx context.Context, actorID int64, act
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "channel_user_perms_update", "channel", ch.ID,
 		fmt.Sprintf("set overrides for user %s on #%s (allow=%#x deny=%#x)", user.Username, ch.Name, allow, deny))
 
-	return OverrideResult{User: user, Allow: allow, Deny: deny, AffectedUsers: []int64{userID}}, nil
+	res := OverrideResult{User: user, Allow: allow, Deny: deny, AffectedUsers: []int64{userID}}
+	s.applyOverrideEffects(res, ch)
+	return res, nil
 }
 
 // DeleteUserOverride clears a per-user override, gated identically to
@@ -232,5 +239,7 @@ func (s *ChannelService) DeleteUserOverride(ctx context.Context, actorID int64, 
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "channel_user_perms_clear", "channel", ch.ID,
 		fmt.Sprintf("cleared overrides for user %s on #%s", user.Username, ch.Name))
 
-	return OverrideResult{User: user, AffectedUsers: []int64{userID}}, nil
+	res := OverrideResult{User: user, AffectedUsers: []int64{userID}}
+	s.applyOverrideEffects(res, ch)
+	return res, nil
 }
