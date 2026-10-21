@@ -213,6 +213,7 @@ func (h *Hub) BroadcastEmojiUpdate(list []*db.Emoji) {
 // reconnect exactly like chat_deleted does.
 func (h *Hub) BroadcastChatBulkDeleted(channelID int64, messageIDs []int64) {
 	h.BroadcastToChannel(channelID, buildChatBulkDeleted(channelID, messageIDs))
+	h.noteIfThread(channelID)
 }
 
 // BroadcastMemberBan sends a member_ban message to all connected clients

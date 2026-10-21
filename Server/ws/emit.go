@@ -26,6 +26,18 @@ func (h *Hub) EmitEvents(ctx context.Context, events []Event) {
 	h.emitEventsFrom(ctx, 0, events)
 }
 
+// bumpOnDMOpen raises the visibility watermark for a dm_channel_open, which is
+// unsequenced and targeted, so replay can never deliver it: any client resuming
+// from a seq at or before the open must take the full-ready path (whose
+// payload includes DM channels). Ratcheted upward only (bumpVisibilityWatermark):
+// a plain Store(Load(&h.seq)) let a writer that read an older h.seq overwrite a
+// concurrently stored higher watermark.
+func bumpOnDMOpen(h *Hub, ev Event) {
+	if _, isOpen := ev.(DMChannelOpenEvent); isOpen {
+		h.bumpVisibilityWatermark()
+	}
+}
+
 func (h *Hub) emitEventsFrom(ctx context.Context, senderID int64, events []Event) {
 	for _, ev := range events {
 		switch e := ev.(type) {
@@ -123,15 +135,12 @@ func (h *Hub) emitEventsFrom(ctx context.Context, senderID int64, events []Event
 			// unreachable DM channel. Bump the visibility watermark so any
 			// client resuming from a seq at or before the open takes the
 			// full-ready path (whose payload includes DM channels).
-			if _, isOpen := ev.(DMChannelOpenEvent); isOpen {
-				// Ratcheted upward only: see bumpVisibilityWatermark on Hub.
-				// A plain Store(Load(&h.seq)) here (as on the other two
-				// writers) let a writer that read an older h.seq overwrite a
-				// concurrently stored higher watermark, silently regressing
-				// mustFullResync's boundary.
-				h.bumpVisibilityWatermark()
-			}
+			bumpOnDMOpen(h, ev)
 			h.SendToUserHigh(e.TargetUserID(), e.Payload())
+		case ThreadNoteEvent:
+			// Not a ChannelEvent: the coalescer sequences the thread_changed
+			// frame itself when it flushes (thread_coalescer.go).
+			h.handleThreadNote(e.ThreadNote()) //nolint:contextcheck // the coalescer timer is owned by the hub lifecycle, not by this request
 		case ActivityEvent:
 			// Not a ChannelEvent: it takes no seq and no topic, only a note for
 			// the coalescer, which flushes it off this goroutine.

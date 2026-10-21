@@ -226,7 +226,6 @@ type Hub struct {
 	// participant with the lowest userID in the channel. Protected by keyHolderMu.
 	keyHolderMu     syncutil.RWMutex
 	voiceKeyHolders map[int64]int64
-
 	// Presence coalescer (QueuePresence): latest presence per user, flush armed. Guarded by presenceMu.
 	presenceMu         syncutil.Mutex
 	presenceQueue      map[int64]pendingPresence
@@ -235,6 +234,7 @@ type Hub struct {
 	members            memberCache         // the ready payloads' shared member list (serve_ready_members_cache.go)
 	activity           activityState       // channel_activity coalescer (channel_activity.go)
 	roleRefresh        roleRefreshState    // role-change fan-out worker (role_refresh.go)
+	threadHub          threadHub           // thread service and thread_changed coalescer (thread_coalescer.go); timers guarded by mu
 }
 
 // Run starts the hub's dispatch loop. It blocks until Stop is called.

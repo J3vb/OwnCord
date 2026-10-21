@@ -37,10 +37,18 @@ type ChannelPrivacySnapshot struct {
 	overrides    map[int64]db.ChannelOverride
 }
 
-// Private reports whether the channel is private in this snapshot. A channel
-// without an override row is judged on the role's base permissions; one deleted
-// after the snapshot was read is simply never asked about.
-func (s ChannelPrivacySnapshot) Private(channelID int64) bool {
+// PrivateOf reports whether the channel row is private in this snapshot. A
+// thread has no override of its own (WP 6.9c), so it is judged on its parent's.
+// It is the only exported verdict: the snapshot keys overrides by parent and
+// ordinary channel ids, so a bare id could be a thread and be judged public.
+func (s ChannelPrivacySnapshot) PrivateOf(ch *db.Channel) bool {
+	return s.private(ch.AuthorityID())
+}
+
+// private is the verdict for a parent or ordinary channel id. A channel without
+// an override row is judged on the role's base permissions; one deleted after
+// the snapshot was read is simply never asked about.
+func (s ChannelPrivacySnapshot) private(channelID int64) bool {
 	if !s.hasDefault {
 		return false
 	}
@@ -66,7 +74,8 @@ func (s *ChannelPrivacyService) Snapshot(ctx context.Context) (ChannelPrivacySna
 }
 
 // ChannelIsPrivate answers for one channel with two small reads: the default
-// role, then its override there. No default role is (false, nil).
+// role, then its override there. No default role is (false, nil). channelID is
+// a parent or ordinary channel id; a thread id has no override row of its own.
 func (s *ChannelPrivacyService) ChannelIsPrivate(ctx context.Context, channelID int64) (bool, error) {
 	role, err := s.st.GetDefaultRole(ctx)
 	if err != nil {

@@ -233,6 +233,7 @@ var deadlineBound = []string{
 	"GET /api/v1/channels/{id}/messages/around/{messageId}",
 	"GET /api/v1/channels/{id}/messages/{messageId}/reactions/{emoji}/users",
 	"GET /api/v1/channels/{id}/pins",
+	"GET /api/v1/channels/{id}/threads",
 	"GET /api/v1/diagnostics/connectivity",
 	"GET /api/v1/dm-requests/",
 	"GET /api/v1/dms/",

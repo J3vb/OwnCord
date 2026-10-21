@@ -44,6 +44,7 @@ func (a *App) stages() []stage {
 		{"audit-writer", a.startAuditWriter},
 		{"maintenance", a.startMaintenance},
 		{"status-expiry", a.startStatusExpiry},
+		{"thread-archiver", a.startThreadArchiver},
 		{"call-log", a.startCallLog},
 		{"pprof", a.startPprof},
 		{"acme", a.startACME},

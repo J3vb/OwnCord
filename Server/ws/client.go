@@ -30,6 +30,10 @@ type Client struct {
 	userID    int64
 	user      *db.User
 	channelID int64 // currently viewed channel for channel-scoped broadcasts
+	// threadID is the second subscription slot (WP 6.9c thread_focus): the
+	// thread open beside the focused channel, 0 for none. It is a channel id
+	// like channelID, so its topic is ChannelTopic(threadID). Guarded by mu.
+	threadID int64
 	// voice is this connection's voice membership (voice_registry.go):
 	// channel, join token, completed flag, E2EE announce and the moderator
 	// stash, all guarded by voice.voiceMu.
@@ -141,6 +145,13 @@ func (c *Client) getLastActivity() time.Time {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.lastActivity
+}
+
+// getThreadID returns the thread in the second focus slot under mu.
+func (c *Client) getThreadID() int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.threadID
 }
 
 // getChannelID returns the currently focused channel ID under mu.

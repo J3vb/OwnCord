@@ -51,6 +51,7 @@
               "message_retry_window_seconds": 86400,
               "profile_banners": true,
               "read_pointer": true,
+              "threads": true,
               "user_notes": true
             },
             "channels": [
@@ -314,6 +315,7 @@
               "message_retry_window_seconds": 86400,
               "profile_banners": true,
               "read_pointer": true,
+              "threads": true,
               "user_notes": true
             },
             "channels": [

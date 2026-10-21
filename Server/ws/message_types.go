@@ -14,8 +14,12 @@ const ProtocolEpoch = 1
 const (
 	MsgTypeAuth              = "auth"
 	MsgTypeChatSend          = "chat_send"
-	MsgTypeChatForward       = "chat_forward" // forward one message to one target channel or DM (WP 6.9a)
-	MsgTypePollCreate        = "poll_create"  // post a poll as a message (WP 6.9b)
+	MsgTypeChatForward       = "chat_forward"  // forward one message to one target channel or DM (WP 6.9a)
+	MsgTypePollCreate        = "poll_create"   // post a poll as a message (WP 6.9b)
+	MsgTypeThreadCreate      = "thread_create" // start a thread on a text-channel message (WP 6.9c)
+	MsgTypeThreadUpdate      = "thread_update"
+	MsgTypeThreadDelete      = "thread_delete"
+	MsgTypeThreadFocus       = "thread_focus" // the second subscription slot: the thread open beside the focused channel, or null to close it (WP 6.9c)
 	MsgTypeChatEdit          = "chat_edit"
 	MsgTypeChatDelete        = "chat_delete"
 	MsgTypeReactionAdd       = "reaction_add"
@@ -54,6 +58,10 @@ const (
 	MsgTypeChatSendOK          = "chat_send_ok"
 	MsgTypeChatForwardOK       = "chat_forward_ok"
 	MsgTypePollCreateOK        = "poll_create_ok"
+	MsgTypeThreadCreateOK      = "thread_create_ok"
+	MsgTypeThreadUpdateOK      = "thread_update_ok"
+	MsgTypeThreadChanged       = "thread_changed" // WP 6.9c: a thread was created, renamed, archived, locked or took a message; absolute ThreadInfo, sequenced on the parent channel, at most one per thread per 2 s
+	MsgTypeThreadDeleted       = "thread_deleted" // WP 6.9c: a thread was deleted; {channel_id (parent), thread_id}, sequenced on the parent channel
 	MsgTypeChatEdited          = "chat_edited"
 	MsgTypeChatDeleted         = "chat_deleted"
 	MsgTypeChatPinned          = "chat_pinned" // a message was pinned or unpinned in a channel the recipient can read

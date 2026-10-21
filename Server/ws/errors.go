@@ -63,4 +63,11 @@ const (
 	// safe. It is not SERVER_BUSY, which the client treats as a refused
 	// connect and redials on.
 	ErrCodeRequestTimeout = "REQUEST_TIMEOUT"
+	// ErrCodeThreadExists answers a thread_create for a message that already
+	// has a thread (WP 6.9c). The payload carries thread_id, the existing
+	// thread, so the client opens it instead of failing.
+	ErrCodeThreadExists = "THREAD_EXISTS"
+	// ErrCodeThreadLocked refines FORBIDDEN: the thread is locked and only a
+	// moderator (MANAGE_MESSAGES) may post, react, pin or change it.
+	ErrCodeThreadLocked = "THREAD_LOCKED"
 )

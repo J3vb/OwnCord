@@ -415,7 +415,7 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 	}
 	return &readyFields{
 		head: readyHead{
-			Capabilities: readyCapabilities(retryFloorMS),
+			Capabilities: readyCapabilities(retryFloorMS, h.threadHub.svc != nil),
 			Categories:   categories,
 			Channels:     channelPayloads,
 			DMChannels:   dmChannels,

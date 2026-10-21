@@ -23,18 +23,19 @@ All client-server real-time communication happens over a single WebSocket connec
 10. [Typing Indicators](#typing-indicators)
 11. [Presence](#presence)
 12. [Channel Focus and Read State](#channel-focus-and-read-state)
-13. [Channel Updates](#channel-updates)
-14. [Member Updates](#member-updates)
-15. [Moderation Queue](#moderation-queue)
-16. [Moderator Actions](#moderator-actions)
-17. [Voice Signaling](#voice-signaling)
-18. [Voice Moderation](#voice-moderation)
-19. [Voice End-to-End Encryption](#voice-end-to-end-encryption)
-20. [Direct Messages](#direct-messages)
-21. [Server Restart](#server-restart)
-22. [Error Handling](#error-handling)
-23. [Rate Limits](#rate-limits)
-24. [Message Type Reference Table](#message-type-reference-table)
+13. [Threads](#threads)
+14. [Channel Updates](#channel-updates)
+15. [Member Updates](#member-updates)
+16. [Moderation Queue](#moderation-queue)
+17. [Moderator Actions](#moderator-actions)
+18. [Voice Signaling](#voice-signaling)
+19. [Voice Moderation](#voice-moderation)
+20. [Voice End-to-End Encryption](#voice-end-to-end-encryption)
+21. [Direct Messages](#direct-messages)
+22. [Server Restart](#server-restart)
+23. [Error Handling](#error-handling)
+24. [Rate Limits](#rate-limits)
+25. [Message Type Reference Table](#message-type-reference-table)
 
 ---
 
@@ -485,7 +486,7 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
 
 ### Payload Fields
 
-**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true, "user_notes": true, "profile_banners": true, "dm_privacy": true }`. `dm_privacy` means the server stores the two direct message privacy settings (`GET` and `PUT /api/v1/users/me/privacy`, body `{ "allow_member_dms": bool, "message_requests": bool }`, both required); a client that does not see it shows no privacy controls. The server applies them to direct messages (see `dm_request`). `profile_banners` means the server supports profile banners (`POST` and `DELETE /api/v1/users/me/banner`, `banner_color` on `PATCH /api/v1/users/me`); a client that does not see it shows no banner controls. `user_notes` means the server stores private profile notes (`GET` and `PUT /api/v1/users/me/notes/{userId}`); a client that does not see it keeps notes in local storage. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
+**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true, "user_notes": true, "profile_banners": true, "dm_privacy": true, "threads": true }`. `threads` means the server supports the thread frames and `GET /api/v1/channels/{id}/threads` (see Threads); a client that does not see it shows no thread controls. `ready` never lists thread rows. `dm_privacy` means the server stores the two direct message privacy settings (`GET` and `PUT /api/v1/users/me/privacy`, body `{ "allow_member_dms": bool, "message_requests": bool }`, both required); a client that does not see it shows no privacy controls. The server applies them to direct messages (see `dm_request`). `profile_banners` means the server supports profile banners (`POST` and `DELETE /api/v1/users/me/banner`, `banner_color` on `PATCH /api/v1/users/me`); a client that does not see it shows no banner controls. `user_notes` means the server stores private profile notes (`GET` and `PUT /api/v1/users/me/notes/{userId}`); a client that does not see it keeps notes in local storage. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
 These fields advertise retry-safe `chat_send` support. Older servers omit them;
 clients must not infer support from the protocol epoch or silently retry a
 durable pending message against a server that no longer advertises support.
@@ -1615,6 +1616,83 @@ many channels are busy.
 
 `ready` and `mention_count` stay authoritative: a missed or dropped frame costs
 nothing, and a server that predates the frame simply never sends one.
+
+---
+
+## Threads
+
+A thread is a discussion started on one message of a text channel. It is a channel row of type `thread` under that channel (its parent) and has no permission state of its own: who can see it, read it and post in it is answered by the parent's roles and overrides, plus the thread's `locked` flag. `ready` and `channel_create` never carry thread rows. A client learns a thread from the `thread` field on its starter message (history, `chat_message`), from `thread_changed`, from `thread_create_ok`, and from the list route.
+
+### ThreadInfo
+
+```json
+{
+  "id": 91,
+  "parent_id": 5,
+  "name": "Release plan",
+  "owner_id": 12,
+  "starter_message_id": 4410,
+  "archived": false,
+  "locked": false,
+  "auto_archive_minutes": 1440,
+  "message_count": 7,
+  "last_message_at": "2026-10-21T09:30:00Z",
+  "created_at": "2026-10-20T08:00:00Z"
+}
+```
+
+`owner_id` and `starter_message_id` are `null` once the user or message is erased. `last_message_at` is `null` for a thread with no replies. `message_count` counts user messages. History rows and `chat_message` carry `thread` only on the starter message. A live `chat_message` for a message that has just been sent never has it; the thread arrives as `thread_create_ok` and `thread_changed`.
+
+### thread_create (Client -> Server)
+
+```json
+{
+  "type": "thread_create",
+  "id": "req-uuid",
+  "payload": {
+    "channel_id": 5,
+    "message_id": 4410,
+    "name": "Release plan",
+    "auto_archive_minutes": 1440
+  }
+}
+```
+
+`name` is 1 to 100 runes after sanitising. `auto_archive_minutes` is one of 60, 1440, 4320 or 10080; omitted or 0 means 1440. The caller needs `READ_MESSAGES` and `SEND_MESSAGES` in the parent, which must be a text channel. The starter must be a live user message in that channel that has no thread. A message has at most one thread, and that makes the create idempotent without a request key: a retry by the thread's owner (a lost `thread_create_ok`) is answered with the same `thread_create_ok`, before the rate gate and without announcing anything. Rate limited to 5 per 10 minutes per user (`RATE_LIMITED`).
+
+Errors: `THREAD_EXISTS` (the message already has a thread that the caller did not make; the error payload carries `thread_id`, so the loser of a race learns the winner), `NOT_FOUND`, `FORBIDDEN`, `BAD_REQUEST`, `RATE_LIMITED`.
+
+### thread_create_ok (Server -> Client, direct)
+
+`{ "thread": ThreadInfo }`, with the request `id`. Sockets that have the parent channel focused (subscribed to its topic) hear `thread_changed`; others learn the thread from the list route or the starter message when they open the channel.
+
+### thread_update (Client -> Server)
+
+`{ "thread_id": 91, "name"?: string, "archived"?: bool, "locked"?: bool, "auto_archive_minutes"?: int }`; an absent field is unchanged. The thread's owner may rename, archive, unarchive and change the idle period. Only a user with `MANAGE_MESSAGES` may set `locked`. A locked thread belongs to moderators: the owner's change is `THREAD_LOCKED`. Answered with `thread_update_ok` (`{ "thread_id": 91 }`); the new state reaches everyone as `thread_changed`.
+
+### thread_delete (Client -> Server)
+
+`{ "thread_id": 91 }`. Moderators (`MANAGE_MESSAGES`) only. The thread and its messages are removed, an audit row is written, and the starter message may start a new thread.
+
+### thread_focus (Client -> Server)
+
+`{ "thread_id": 91 }`, or `null` to close. A second focus slot beside `channel_focus`: the thread open beside the focused channel. It subscribes the socket to the thread's frames (ordinary `chat_message`, `chat_edited`, reactions and so on, sequenced on the thread) and, like `channel_focus`, marks the thread read. The caller needs `READ_MESSAGES` in the **parent**. `channel_focus`, `mark_read` and `mark_unread` still refuse a thread id. The slot is revalidated after the subscribe, and is dropped silently when the parent's overrides, a role change, a timeout or the thread's deletion take the right away. It is not carried across a reconnect: re-send `thread_focus` after `ready`. Over its own budget of 5 per second it answers `RATE_LIMITED`.
+
+### thread_changed (Server -> Client, broadcast)
+
+`{ "thread": ThreadInfo }` with the thread's absolute state, sequenced on the **parent** channel, so it reaches the sockets subscribed to the parent's topic (those with it focused) and is replayed to them on reconnect; it is not broadcast to every viewer of the channel list. Sent for a create, an update, a post to the thread (count and activity) and an automatic archive. The server sends at most one per thread per 2 seconds: the first change goes out at once, and later changes in the window fold into one trailing frame. Its name may disclose content, so a channel marked NSFW is withheld until acknowledged.
+
+### thread_deleted (Server -> Client, broadcast)
+
+`{ "channel_id": 5, "thread_id": 91 }`, sequenced on the parent. A socket that had the thread open also receives an unsequenced copy, because it need not be subscribed to the parent. A client ignores a `thread_changed` for a thread id it has already seen deleted: a change read just before the delete may be sequenced after it.
+
+### Idle archive
+
+An open thread is archived when `auto_archive_minutes` pass with no message. A post to an archived thread reopens it in the same transaction; a locked thread stays archived until a moderator reopens it.
+
+### Thread list
+
+`GET /api/v1/channels/{id}/threads` (see the REST reference) lists a channel's threads, gated by the parent's `READ_MESSAGES`.
 
 ---
 
@@ -3009,6 +3087,8 @@ warm resume served by replay never waits for a permit.
 | `NOT_FOUND`                | Channel or message not found                                                                                                                                                                                                                                                     |
 | `FORBIDDEN`                | Missing required permission                                                                                                                                                                                                                                                      |
 | `NOT_KEY_HOLDER`           | `voice_e2ee_offer` sent by a participant who is not the channel's key holder                                                                                                                                                                                                     |
+| `THREAD_EXISTS`            | The message already has a thread; the error carries `thread_id`                                                                                                                                                                                                                  |
+| `THREAD_LOCKED`            | The thread is locked; only a moderator may post in it or change it                                                                                                                                                                                                               |
 | `RATE_LIMITED`             | Too many requests (the error carries only `code` and `message`; REST 429s carry a `Retry-After` header, WS errors do not)                                                                                                                                                        |
 | `ALREADY_JOINED`           | Already in this voice channel                                                                                                                                                                                                                                                    |
 | `CHANNEL_FULL`             | Voice channel at capacity                                                                                                                                                                                                                                                        |
@@ -3097,6 +3177,8 @@ All rate limits are enforced server-side using a token bucket rate limiter.
 | Poll create (`poll_create`)              | 5     | 10 minutes                                 | `RATE_LIMITED` error |
 | Plugin command (`chat_command`)          | 5     | 1 second                                   | `RATE_LIMITED` error |
 | Channel focus                            | 5     | 1 second                                   | Deferred             |
+| Thread create                            | 5     | 10 minutes                                 | `RATE_LIMITED` error |
+| Thread focus                             | 5     | 1 second (own budget)                      | `RATE_LIMITED` error |
 | Mark read                                | 5     | 1 second (own budget, separate from focus) | Silently dropped     |
 | Ping                                     | 2     | 1 second                                   | Silently dropped     |
 
@@ -3137,6 +3219,8 @@ tables below add per-type behavioral notes.
 | `reaction_remove`     | 5/sec                                |                                                                 |
 | `typing_start`        | 1/3sec/channel                       | Silently dropped                                                |
 | `channel_focus`       | 5/sec (deferred, see above)          | Updates read state                                              |
+| `thread_focus`        | 5/sec, own budget (`RATE_LIMITED`)   | Second focus slot for a thread; marks it read                   |
+| `thread_create`       | 5/10min                              | `RATE_LIMITED`; a retry by the owner is free                    |
 | `mark_read`           | 5/sec, own budget (silently dropped) | Updates read state without moving focus; answers `read_state`   |
 | `mark_unread`         | 5/sec, own budget (`RATE_LIMITED`)   | Moves the read pointer back; answers `read_state`               |
 | `presence_update`     | 1/10sec                              |                                                                 |
@@ -3170,6 +3254,10 @@ tables below add per-type behavioral notes.
 | `chat_send_ok`        | No       | Direct to sender                                                                                       |
 | `chat_forward_ok`     | No       | Direct to sender                                                                                       |
 | `poll_create_ok`      | No       | Direct to sender                                                                                       |
+| `thread_create_ok`    | No       | Direct to sender                                                                                       |
+| `thread_update_ok`    | No       | Direct to sender                                                                                       |
+| `thread_changed`      | Yes      | Parent channel (coalesced, at most 1 per thread per 2 s)                                               |
+| `thread_deleted`      | Yes      | Parent channel; unsequenced copy to sockets with the thread open                                       |
 | `chat_edited`         | Yes      | Channel or DM participants                                                                             |
 | `chat_deleted`        | Yes      | Channel or DM participants                                                                             |
 | `chat_bulk_deleted`   | Yes      | Channel                                                                                                |

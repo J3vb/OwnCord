@@ -164,6 +164,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"ws/hub_presence.go":              {Disposition: "adapter", Note: "presence coalescer; pure BroadcastStatus helper and the MemberSummary shape"},
 	"ws/channel_categories.go":        {Disposition: "adapter", Note: "ChannelCategory type in the channel_categories frame and ready's categories slot; the list is read through ReadySnapshotReader and handed in by the service"},
 	"ws/channel_payload.go":           {Disposition: "adapter", Note: "narrows a db.Channel row to the channel_create/channel_update wire shape"},
+	"ws/hub_visibility_threads.go":    {Disposition: "adapter", Note: "held-thread admission and the readable-channel set resolve through the VisibilityReader seam; db types in signatures"},
 	"ws/hub_visibility.go":            {Disposition: "adapter", Note: "visibility and audience resolve through the VisibilityReader seam; db types in signatures"},
 	"ws/messages.go":                  {Disposition: "adapter", Note: "wire types + pure status helpers"},
 	"ws/readers.go":                   {Disposition: "adapter", Note: "the hub's read seams plus the service-backed VoiceStore, PresenceStamper and SocketAuthenticator: db types in the interface signatures, and DBReaders wiring the handle behind the read seams"},

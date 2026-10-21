@@ -61,6 +61,18 @@ func (h *Hub) revokeTopicsNotIn(ctx context.Context, userID int64, allowed map[i
 		if ch != nil && ch.Type == "dm" {
 			continue
 		}
+		// A thread topic (the second focus slot) is released with no frame:
+		// the parent's own channel_delete is what tells the client, and a
+		// thread was never a sidebar channel. A deleted thread (ch nil) is
+		// released the same way when it is the slot's thread.
+		if (ch != nil && ch.IsThread()) || (ch == nil && h.holdsThread(userID, chID)) {
+			live := h.GetClient(userID)
+			if live == nil {
+				return nil, false
+			}
+			h.releaseThreadSocket(live, chID, nil)
+			continue
+		}
 		if revokeUnreadableChannelsPreActRaceHook != nil {
 			revokeUnreadableChannelsPreActRaceHook(userID)
 		}

@@ -11,6 +11,9 @@ import (
 type ClientError struct {
 	Code    string
 	Message string
+	// ThreadID, when non-zero, rides in the error payload as thread_id: the
+	// existing thread a THREAD_EXISTS refusal names.
+	ThreadID int64
 }
 
 func (e ClientError) Error() string { return e.Code + ": " + e.Message }
@@ -40,6 +43,10 @@ type Result struct {
 	// so the drain does not mark the channel read. Meaningful only with
 	// DeferChannelFocus.
 	DeferChannelFocusNoRead bool
+	// SetThreadID, if non-nil, moves the client's second focus slot (the thread
+	// panel, thread_focus); 0 closes it. Applied with the same live
+	// revalidation as SetChannelID.
+	SetThreadID *int64
 	// SetPresence, if non-nil, records the presence the handler just
 	// committed as the client's live presence (presentableMembers and
 	// presence snapshots read it). Applied before Events are emitted, so a

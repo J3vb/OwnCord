@@ -143,15 +143,8 @@ func (d *DB) CreateMessageDelivery(ctx context.Context, p MessageDeliveryParams)
 	if p.Content == "" && len(linked) == 0 {
 		return nil, ErrMessageDeliveryEmpty
 	}
-	if p.Forward != nil {
-		if err := insertForwardRow(ctx, q, r.ID, p.Forward); err != nil {
-			return nil, err
-		}
-	}
-	if p.Poll != nil {
-		if err := insertPollRows(ctx, q, r.ID, p.Poll); err != nil {
-			return nil, err
-		}
+	if err := insertMessageSideRows(ctx, q, r.ID, p); err != nil {
+		return nil, err
 	}
 	if err := q.InsertMessageDeliveryReceipt(ctx, dbgen.InsertMessageDeliveryReceiptParams{
 		UserID: p.UserID, ClientMessageID: p.ClientMessageID, ChannelID: p.ChannelID,
@@ -160,10 +153,28 @@ func (d *DB) CreateMessageDelivery(ctx context.Context, p MessageDeliveryParams)
 		return nil, fmt.Errorf("message delivery receipt insert: %w", err)
 	}
 	advanceAuthorReadState(ctx, q, p.UserID, p.ChannelID, r.ID)
+	if err := touchThreadOnPost(ctx, q, p.ChannelID); err != nil {
+		return nil, fmt.Errorf("message delivery: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("message delivery commit: %w", err)
 	}
 	return &MessageDelivery{Message: messageFromGen(r), LinkedAttachmentIDs: linked}, nil
+}
+
+// insertMessageSideRows writes the forward block or poll a message carries.
+func insertMessageSideRows(ctx context.Context, q *dbgen.Queries, messageID int64, p MessageDeliveryParams) error {
+	if p.Forward != nil {
+		if err := insertForwardRow(ctx, q, messageID, p.Forward); err != nil {
+			return err
+		}
+	}
+	if p.Poll != nil {
+		if err := insertPollRows(ctx, q, messageID, p.Poll); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // DeleteExpiredMessageDeliveryReceipts is the periodic maintenance sweep.

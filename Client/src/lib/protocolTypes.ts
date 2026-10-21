@@ -23,6 +23,10 @@ export const ServerMessageType = {
   CHAT_SEND_OK: "chat_send_ok",
   CHAT_FORWARD_OK: "chat_forward_ok",
   POLL_CREATE_OK: "poll_create_ok",
+  THREAD_CREATE_OK: "thread_create_ok",
+  THREAD_UPDATE_OK: "thread_update_ok",
+  THREAD_CHANGED: "thread_changed", // WP 6.9c: a thread was created, renamed, archived, locked or took a message; absolute ThreadInfo, sequenced on the parent channel, at most one per thread per 2 s
+  THREAD_DELETED: "thread_deleted", // WP 6.9c: a thread was deleted; {channel_id (parent), thread_id}, sequenced on the parent channel
   CHAT_EDITED: "chat_edited",
   CHAT_DELETED: "chat_deleted",
   CHAT_PINNED: "chat_pinned", // a message was pinned or unpinned in a channel the recipient can read
@@ -82,6 +86,10 @@ export const ClientMessageType = {
   CHAT_SEND: "chat_send",
   CHAT_FORWARD: "chat_forward", // forward one message to one target channel or DM (WP 6.9a)
   POLL_CREATE: "poll_create", // post a poll as a message (WP 6.9b)
+  THREAD_CREATE: "thread_create", // start a thread on a text-channel message (WP 6.9c)
+  THREAD_UPDATE: "thread_update",
+  THREAD_DELETE: "thread_delete",
+  THREAD_FOCUS: "thread_focus", // the second subscription slot: the thread open beside the focused channel, or null to close it (WP 6.9c)
   CHAT_EDIT: "chat_edit",
   CHAT_DELETE: "chat_delete",
   REACTION_ADD: "reaction_add",

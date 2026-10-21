@@ -53,8 +53,10 @@ const (
 	// live in db/polls.go and PollStore is a slice interface in service.
 	// 6.9c-a1 adds one (129 to 130): Channel.Thread, json:"-", a single
 	// nested struct so the thread columns stay off the wire; ChannelThread
-	// lives in db/channel_thread.go, outside the count. Any further tag fails.
-	modelsJSONTagBaseline = 130
+	// lives in db/channel_thread.go, outside the count.
+	// 6.9c-a2 adds one (130 to 131): MessageAPIResponse.Thread, the optional
+	// thread summary on a starter message. Any further tag fails.
+	modelsJSONTagBaseline = 131
 
 	// storeFullSurfaceBaseline is the compiler's own method count for Store,
 	// promoted methods from the cross-package embeds included (309 plus the 9

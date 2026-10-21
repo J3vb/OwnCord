@@ -228,7 +228,6 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		h.coldReplayLimit = opts.ReplayColdLimit
 	}
 	h.initLife() // the hub's own lifecycle, ended by closeStop
-
 	// V2 handler registrations (need Hub fields for deps).
 	registerPingHandler(reg, PingDeps{Limiter: h.limiter})
 
@@ -270,6 +269,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	}
 
 	registerChatHandlers(reg, chatDeps)
+	h.wireThreads(reg, svc)
 	h.focusDeps = presenceDeps
 	registerPresenceHandlers(reg, presenceDeps)
 	registerReactionHandlers(reg, reactionDeps)

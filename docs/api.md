@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 215 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 216 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -139,6 +139,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/api/v1/channels/{id}/pins`                                         |
 | DELETE  | `/api/v1/channels/{id}/pins/{messageId}`                             |
 | POST    | `/api/v1/channels/{id}/pins/{messageId}`                             |
+| GET     | `/api/v1/channels/{id}/threads`                                      |
 | GET     | `/api/v1/client-update/{target}/{current_version}`                   |
 | GET     | `/api/v1/diagnostics/connectivity`                                   |
 | GET     | `/api/v1/dm-requests/`                                               |
@@ -1446,6 +1447,25 @@ Get all pinned messages for a channel.
 #### Response 200 OK
 
 Returns `{ "messages": [...], "has_more": false }`, most recently pinned first (messages pinned before migration 056 have no pin time and sort last). At most 1000 pins are returned; `has_more` is `true` only when the channel holds more and the list was truncated.
+
+---
+
+### GET /api/v1/channels/{id}/threads
+
+List the threads of a text channel, newest activity first.
+
+**Auth:** Required
+**Permission:** `READ_MESSAGES` on the channel
+
+| Query      | Description                                                                   |
+| ---------- | ----------------------------------------------------------------------------- |
+| `archived` | `0` (default) for open threads, `1` for archived ones                         |
+| `before`   | The previous page's `next_before` (an opaque cursor); omit for the first page |
+| `limit`    | Page size, default 50, at most 100                                            |
+
+#### Response 200 OK
+
+`{ "threads": [ThreadInfo, ...], "has_more": bool, "next_before": string }`; `next_before` is the cursor for the following page and is `""` when `has_more` is false. The cursor carries the last row's activity time and id, so activity in that thread between requests does not shift the paging; see [Threads](protocol.md#threads) for `ThreadInfo`. `400 BAD_REQUEST` for a malformed query, `403 FORBIDDEN` without read, `404 NOT_FOUND` for an unknown channel or a thread id.
 
 ---
 

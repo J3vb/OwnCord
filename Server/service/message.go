@@ -81,6 +81,7 @@ type DeleteMessageResult struct {
 	ChannelID int64
 	IsDM      bool
 	IsMod     bool
+	IsThread  bool // the message lived in a thread (its count moved)
 	// DM-specific.
 	ParticipantIDs []int64
 }

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -164,16 +165,19 @@ func handleChatForwardV2(ctx context.Context, cmd Command, info ClientInfo, deps
 // channelSendResult is a committed non-DM send: the sequenced chat_message,
 // then the note the channel_activity coalescer records.
 func channelSendResult(reply, broadcast []byte, channelID, authorID int64, result *service.SendMessageResult) Result {
-	return Result{
-		Reply: reply,
-		Events: []Event{
-			channelEvt{evType: MsgTypeChatMessage, channelID: channelID, payload: broadcast},
-			channelActivityEvt{
-				channelID: channelID, msgID: result.MessageID, authorID: authorID,
-				mentions: result.Mentions, everyone: result.MentionsEveryone, hereOnly: result.MentionsHere,
-			},
+	events := []Event{
+		channelEvt{evType: MsgTypeChatMessage, channelID: channelID, payload: broadcast},
+		channelActivityEvt{
+			channelID: channelID, msgID: result.MessageID, authorID: authorID,
+			mentions: result.Mentions, everyone: result.MentionsEveryone, hereOnly: result.MentionsHere,
 		},
 	}
+	if result.Channel != nil && result.Channel.IsThread() {
+		// The post moved the thread's count and last activity, and reopened it
+		// if it was archived: tell the parent's viewers (coalesced).
+		events = append(events, threadNoteEvt{threadID: channelID})
+	}
+	return Result{Reply: reply, Events: events}
 }
 
 // handleChatEditV2 processes a chat_edit command via the MessageService.
@@ -218,11 +222,17 @@ func handleChatDeleteV2(ctx context.Context, cmd Command, info ClientInfo, deps 
 			channelEvt{evType: MsgTypeChatDeleted, channelID: result.ChannelID, payload: deletedPayload},
 			result.ParticipantIDs)}}
 	}
-	return Result{Events: []Event{channelEvt{
+	events := []Event{channelEvt{
 		evType:    MsgTypeChatDeleted,
 		channelID: result.ChannelID,
 		payload:   deletedPayload,
-	}}}
+	}}
+	if result.IsThread {
+		// The delete moved the thread's count and last message: tell the
+		// parent's viewers (coalesced).
+		events = append(events, threadNoteEvt{threadID: result.ChannelID})
+	}
+	return Result{Events: events}
 }
 
 // dmEventOrFallback returns the participant-targeted DM event, falling back
@@ -256,6 +266,10 @@ func serviceErrorToResult(err error) Result {
 		return Result{Error: ClientError{Code: ErrCodeTimedOut, Message: err.Error()}}
 	case errors.Is(err, service.ErrCallNeedsAcceptance):
 		return Result{Error: ClientError{Code: ErrCodeCallRequiresAcceptance, Message: err.Error()}}
+	case errors.Is(err, permissions.ErrThreadLocked):
+		// A locked thread (WP 6.9c) refuses a post, reaction, pin or change
+		// with its own code; it wraps ErrForbidden, so this precedes it.
+		return Result{Error: ClientError{Code: ErrCodeThreadLocked, Message: err.Error()}}
 	case errors.Is(err, service.ErrForbidden), errors.Is(err, service.ErrBlocked):
 		return Result{Error: ClientError{Code: ErrCodeForbidden, Message: err.Error()}}
 	case errors.Is(err, service.ErrDeletedMessage):

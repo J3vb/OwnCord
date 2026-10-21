@@ -212,6 +212,11 @@ func (h *Hub) listRoleChannels(ctx context.Context) (*roleChannels, bool) {
 	}
 	rc := &roleChannels{known: make(map[int64]struct{}, len(channels)), dms: make(map[int64]struct{})}
 	for i := range channels {
+		if channels[i].IsThread() {
+			// A thread has no sidebar entry and no verdict of its own: the
+			// verdict loop settles the one a socket holds from its parent's.
+			continue
+		}
 		rc.known[channels[i].ID] = struct{}{}
 		if channels[i].Type == "dm" {
 			rc.dms[channels[i].ID] = struct{}{}
@@ -309,6 +314,16 @@ func (h *Hub) roleRefreshVerdicts(ctx context.Context, uid int64, rc *roleChanne
 		}
 		if ch.Type == "dm" {
 			allowed[chID] = true
+			continue
+		}
+		if ch.IsThread() {
+			// A held thread topic follows its parent's verdict and gets no
+			// sidebar frame: threads are never channel_create'd.
+			v, err := h.roleThreadVerdict(ctx, uid, ch, allowed)
+			if err != nil {
+				return nil, nil, false
+			}
+			allowed[chID] = v
 			continue
 		}
 		sub, err := h.subjectFor(ctx, uid, chID)
