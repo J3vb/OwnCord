@@ -20,6 +20,9 @@ type ChannelService struct {
 	cats  CategoryStore
 	perms *PermissionService
 	batch *ConnWrites
+	// notifier re-derives channel audiences after an override change (WP
+	// 5.1a). Set once before the server serves; nil is a no-op.
+	notifier PermissionChangeNotifier
 	// wakeExpiry nudges the custom status expirer after a status with an
 	// expiry commits; nil when none is installed.
 	wakeExpiry func()

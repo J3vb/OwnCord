@@ -26,7 +26,7 @@ func newRolesHandler(t *testing.T, database *db.DB) (http.Handler, *mockHub, *mo
 	hub := &mockHub{}
 	inv := &mockPermInvalidator{}
 	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv,
-		newTestServices(database))
+		newTestServicesFor(database, hub, inv))
 	return handler, hub, inv, createAdminUser(t, database)
 }
 
