@@ -82,7 +82,7 @@ var FileSizeOverrides = map[string]FileSizeOverride{
 		Note:    "bans, kicks, the moderation log",
 	},
 	"api/router.go": {
-		Ceiling: 950,
+		Ceiling: 880,
 		Class:   classGrandfathered,
 		Note:    "the route table and middleware chain",
 	},

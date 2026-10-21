@@ -76,7 +76,7 @@ func fullRouterWithConfig(t *testing.T, mutate func(*config.Config)) (http.Handl
 		mutate(cfg)
 	}
 
-	rt, rtErr := app.StartRuntime(cfg, database, nil)
+	rt, rtErr := app.StartRuntime(cfg, database, nil, testRuntimeInputs(cfg))
 	if rtErr != nil {
 		t.Fatalf("app.StartRuntime: %v", rtErr)
 	}

@@ -31,8 +31,9 @@ const erasureKeyRelPath = "erasure.key"
 // before the hub, the router or any listener exists, so a restored backup
 // never serves an erased account (B4-10, BPR-053). The erasure run here is
 // the full one: rows, audit unlinking and files, through the same runner
-// the routes use later, minus the hub (nobody is connected yet).
-func openMarkers(ctx context.Context, log *slog.Logger, cfg *config.Config, database *db.DB) (*db.MarkerStore, error) {
+// the routes use later, minus the hub (nobody is connected yet). store is the
+// one upload store (nil when it could not be opened).
+func openMarkers(ctx context.Context, log *slog.Logger, cfg *config.Config, database *db.DB, store *storage.Storage) (*db.MarkerStore, error) {
 	// Whether this install has an erasure key, and whether it has a marker file,
 	// both read before the calls that create them.
 	_, keyStatErr := os.Stat(filepath.Join(cfg.Server.DataDir, erasureKeyRelPath))
@@ -72,8 +73,8 @@ func openMarkers(ctx context.Context, log *slog.Logger, cfg *config.Config, data
 	runner := service.NewErasureService(database)
 	runner.SetMarkers(markers)
 	var files service.FileRemover
-	if store, storeErr := storage.New(cfg.Upload.StorageDir, cfg.Upload.MaxSizeMB); storeErr != nil {
-		log.Warn("erasure markers: upload storage unavailable at start-up; a replayed erasure journals its files", "error", storeErr)
+	if store == nil {
+		log.Warn("erasure markers: upload storage unavailable at start-up; a replayed erasure journals its files")
 	} else {
 		files = store
 		runner.SetFiles(store)

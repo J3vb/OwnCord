@@ -28,9 +28,9 @@ func TestRequestPathGo_OutsideScopeIsNotChecked(t *testing.T) {
 }
 
 func TestRequestPathGo_AllowlistCounts(t *testing.T) {
-	const listed = "api/router.go" // GoAllow count 1
-	none := "package api\nfunc a() {}\n"
-	one := "package api\nfunc a() { go func() {}() }\n"
+	const listed = "service/mention_worker.go" // GoAllow count 1
+	none := "package service\nfunc a() {}\n"
+	one := "package service\nfunc a() { go func() {}() }\n"
 	two := one + "func b() { go func() {}() }\n"
 	if got := requestPathViolations(t, listed, one); len(got) != 0 {
 		t.Errorf("listed file at its count: %v, want none", got)
