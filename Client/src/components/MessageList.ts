@@ -547,6 +547,18 @@ export type MessageListComponent = MountableComponent & {
   isEditing(): boolean;
 };
 
+/** The scroll viewport's geometry. Reading it forces layout when the DOM is
+ *  dirty, so a scroll frame reads it once and passes the result down. */
+interface ScrollMetrics {
+  readonly scrollTop: number;
+  readonly clientHeight: number;
+  readonly scrollHeight: number;
+}
+
+function readMetrics(el: HTMLElement): ScrollMetrics {
+  return { scrollTop: el.scrollTop, clientHeight: el.clientHeight, scrollHeight: el.scrollHeight };
+}
+
 export function createMessageList(options: MessageListOptions): MessageListComponent {
   const disposable = new Disposable();
   const unsubscribers: Array<() => void> = [];
@@ -874,32 +886,41 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // veto the reader's own send.
   const keepBottom = (): boolean => (isNearBottom() && !loadingNewer) || followOwnSend();
 
-  function isNearBottom(threshold = SCROLL_BOTTOM_THRESHOLD): boolean {
+  /** The metrics handleScroll read this frame, for the scroll rAF's renderWindow
+   *  to reuse. Dropped by any renderWindow or scrollToBottom, so it never
+   *  outlives a pass or a write that could have moved the viewport. */
+  let scrollSnapshot: ScrollMetrics | null = null;
+
+  function isNearBottom(threshold = SCROLL_BOTTOM_THRESHOLD, m?: ScrollMetrics): boolean {
     if (root === null) return true;
-    const { scrollTop, scrollHeight, clientHeight } = root;
+    const { scrollTop, scrollHeight, clientHeight } = m ?? readMetrics(root);
     return scrollHeight - scrollTop - clientHeight < threshold;
   }
 
   /** The true bottom (1 px tolerates fractional scrollTop on HiDPI), unlike the 100 px isNearBottom. */
-  function isAtBottom(): boolean {
+  function isAtBottom(m?: ScrollMetrics): boolean {
     if (root === null) return true;
-    const { scrollTop, scrollHeight, clientHeight } = root;
+    const { scrollTop, scrollHeight, clientHeight } = m ?? readMetrics(root);
     return scrollHeight - scrollTop - clientHeight <= 1;
   }
 
   function scrollToBottom(): void {
     if (root === null) return;
+    scrollSnapshot = null;
     root.scrollTop = root.scrollHeight;
   }
 
-  function updateScrollToBottomBtn(): void {
+  /** What the pill shows now, so a scroll burst writes the DOM only on a change. */
+  let btnShownKey = "";
+
+  function updateScrollToBottomBtn(m?: ScrollMetrics): void {
     if (scrollToBottomBtn === null) return;
-    if (isNearBottom()) {
-      scrollToBottomBtn.classList.remove("visible");
-      newBelowCount = 0;
-    } else {
-      scrollToBottomBtn.classList.add("visible");
-    }
+    const near = isNearBottom(SCROLL_BOTTOM_THRESHOLD, m);
+    if (near) newBelowCount = 0;
+    const key = `${near ? 1 : 0}:${newBelowCount}`;
+    if (key === btnShownKey) return;
+    btnShownKey = key;
+    scrollToBottomBtn.classList.toggle("visible", !near);
     if (scrollToBottomCount === null) return;
     const shown = formatBadgeCount(newBelowCount);
     scrollToBottomCount.hidden = newBelowCount === 0;
@@ -1012,12 +1033,12 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    * The bottom-in-view check alone also covers focus returning while the reader
    * is scrolled up.
    */
-  function markReadIfSeen(): void {
+  function markReadIfSeen(m?: ScrollMetrics): void {
     if (root === null) return;
     if (channelsStore.getState().activeChannelId !== options.channelId) return;
-    if (!isAtBottom() || isChannelAway(options.channelId)) {
+    if (!isAtBottom(m) || isChannelAway(options.channelId)) {
       bottomMarked = false;
-      noteVisibleRowsSeen();
+      noteVisibleRowsSeen(m);
       return;
     }
     // The cached bottom of a revisit predates what arrived while away; keep
@@ -1044,11 +1065,12 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    * server must follow). Records only; nothing is sent here. Reads the height
    * tree, not the DOM, so a scroll event costs one lookup.
    */
-  function noteVisibleRowsSeen(): void {
+  function noteVisibleRowsSeen(m?: ScrollMetrics): void {
     if (root === null || !readPointerEnabled() || isChannelCovered()) return;
     if (newDividerDeferred || virtualItems.length === 0) return;
     // The last pixel in view: a row starting exactly at the bottom edge is not.
-    const bottom = root.scrollTop + Math.max(root.clientHeight - 1, 0);
+    const { scrollTop, clientHeight } = m ?? readMetrics(root);
+    const bottom = scrollTop + Math.max(clientHeight - 1, 0);
     for (let i = Math.min(offsetToIndex(bottom), virtualItems.length - 1); i >= 0; i--) {
       const item = virtualItems[i]!;
       if (item.kind === "blocked-run" && !item.expanded) {
@@ -1307,7 +1329,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
   /** Slide the rendered window to [start, end), which overlaps it: release the
    *  rows that left, render only the rows that entered, keep the rest. */
-  function shiftWindow(start: number, end: number): void {
+  function shiftWindow(
+    start: number,
+    end: number,
+    view: Pick<ScrollMetrics, "scrollTop" | "clientHeight">,
+  ): void {
     if (contentContainer === null) return;
     // Rows that stay were measured when they entered or by the ResizeObserver
     // pass, so only the rows that leave (here, before they are released: one
@@ -1324,7 +1350,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const keptEdge = kept === undefined ? 0 : edgeOf(kept);
     // Only a row the reader could see is worth holding: a jump to the top
     // shows the rows above it instead, laid out as they really are.
-    const hold = kept !== undefined && keptEdge < (root?.clientHeight ?? 0) && root!.scrollTop > 0;
+    const hold = kept !== undefined && keptEdge < view.clientHeight && view.scrollTop > 0;
     for (let i = 0; i < rows.length; i++) {
       const globalIdx = renderedStart + i;
       if (globalIdx < start || globalIdx >= end) releaseRow(rows[i]!);
@@ -1359,12 +1385,12 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     el.querySelector("textarea")?.focus({ preventScroll: true });
   }
 
-  function renderWindow(): void {
+  function renderWindow(m?: ScrollMetrics): void {
     if (root === null || contentContainer === null || topSpacer === null || bottomSpacer === null)
       return;
 
-    const scrollTop = root.scrollTop;
-    const clientHeight = root.clientHeight;
+    scrollSnapshot = null;
+    const { scrollTop, clientHeight } = m ?? readMetrics(root);
     lastViewportHeight = clientHeight;
 
     if (virtualItems.length === 0) {
@@ -1447,7 +1473,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       end > renderedStart &&
       contentContainer.children.length === renderedEnd - renderedStart
     ) {
-      shiftWindow(start, end);
+      shiftWindow(start, end, { scrollTop, clientHeight });
       return;
     }
     if (!rangeAlreadyRendered) {
@@ -2050,8 +2076,13 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
     // Load older messages well before the top (DP-46); the floor keeps the
     // trigger working when the viewport has no height yet.
+    // The frame's only layout read: everything below, and the rAF's renderWindow,
+    // works from this snapshot, so the DOM writes in between cannot force a
+    // second layout.
+    const m = readMetrics(root);
+    scrollSnapshot = m;
     const nearTop =
-      root.scrollTop < Math.max(SCROLL_TOP_THRESHOLD, root.clientHeight * SCROLL_TOP_VIEWPORTS);
+      m.scrollTop < Math.max(SCROLL_TOP_THRESHOLD, m.clientHeight * SCROLL_TOP_VIEWPORTS);
     if (!nearTop) olderRetryAt = 0;
     if (
       nearTop &&
@@ -2065,7 +2096,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // A detached window pages DOWN toward the present as the reader nears its
     // bottom; the page that reaches the newest message reattaches it.
     const nearBottomZone = isNearBottom(
-      Math.max(SCROLL_BOTTOM_THRESHOLD, root.clientHeight * SCROLL_BOTTOM_VIEWPORTS),
+      Math.max(SCROLL_BOTTOM_THRESHOLD, m.clientHeight * SCROLL_BOTTOM_VIEWPORTS),
+      m,
     );
     if (!nearBottomZone) newerRetryAt = 0;
     if (
@@ -2087,18 +2119,18 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     }
 
     // Update floating scroll-to-bottom button visibility
-    updateScrollToBottomBtn();
+    updateScrollToBottomBtn(m);
     // Before markReadIfSeen, which asks isChannelAway. The 100 px auto-scroll
     // threshold on purpose: inside it a new message is scrolled into view.
-    setLiveTailInView(options.channelId, isNearBottom());
+    setLiveTailInView(options.channelId, isNearBottom(SCROLL_BOTTOM_THRESHOLD, m));
     // Reaching the bottom counts as seeing it (P4-03 step A).
-    markReadIfSeen();
+    markReadIfSeen(m);
 
     // Debounce virtual window updates to animation frames
     if (scrollRafId === 0) {
       scrollRafId = requestAnimationFrame(() => {
         scrollRafId = 0;
-        renderWindow();
+        renderWindow(scrollSnapshot ?? undefined);
       });
     }
   }
@@ -2178,6 +2210,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       class: "scroll-to-bottom-btn",
       "aria-label": messagingText("scrollToBottom"),
     });
+    btnShownKey = "";
     scrollToBottomBtn.append("↓");
     scrollToBottomCount = createElement("span", {
       class: "scroll-to-bottom-count",
@@ -2346,7 +2379,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
     // Focus returning with the bottom already in view counts as seeing it
     // (P4-03 step A). Owned by disposable.signal so destroy() releases it.
-    window.addEventListener("focus", markReadIfSeen, { signal: disposable.signal });
+    window.addEventListener("focus", () => markReadIfSeen(), { signal: disposable.signal });
 
     // Shift reveals the hover bar's Pin and Delete (WP 3A-7): one pair of
     // window listeners toggles a class on the list root, and CSS shows the
@@ -2853,6 +2886,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     topSpacer = null;
     bottomSpacer = null;
     scrollToBottomBtn = null;
+    btnShownKey = "";
+    scrollSnapshot = null;
     unreadBar = null;
     unreadBarLabel = null;
     unreadAnnouncer = null;
