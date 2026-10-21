@@ -234,6 +234,7 @@ type Hub struct {
 	presenceRepair     presenceRepairState // dropped presence and its repair (hub_presence.go)
 	members            memberCache         // the ready payloads' shared member list (serve_ready_members_cache.go)
 	activity           activityState       // channel_activity coalescer (channel_activity.go)
+	roleRefresh        roleRefreshState    // role-change fan-out worker (role_refresh.go)
 }
 
 // Run starts the hub's dispatch loop. It blocks until Stop is called.
@@ -248,8 +249,7 @@ func (h *Hub) Run() {
 	}
 	h.running.Store(true)
 	defer h.dispatchExited.Store(true)
-	h.sweeps.Go(h.runRemovedVoiceWatch)
-	h.sweeps.Go(h.runChannelActivityLife)
+	h.startSweepWorkers()
 	var panicCount int
 	var lastPanicReset time.Time
 

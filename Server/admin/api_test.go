@@ -1691,15 +1691,18 @@ type mockHub struct {
 	channelUpdates      []*db.Channel
 	channelDeleteIDs    []int64
 	memberBanIDs        []int64
-	memberUpdates       []memberUpdateCall
 	visibilityRefreshes []*db.Channel
-	// allVisibilityRefreshes counts RefreshAllChannelVisibility calls — the
-	// role-edit equivalent of visibilityRefreshes.
-	allVisibilityRefreshes int
-	rolesUpdates           [][]*db.Role
-	clientCount            int
-	bulkDeletes            []bulkDeleteCall
-	voiceCleanupIDs        []int64
+	// roleRefreshes records every EnqueueRoleRefresh call (WP 4.4b): the one
+	// call a role mutation makes, which replaced the RefreshAllChannelVisibility
+	// count and the per-user member_update calls.
+	roleRefreshes []ws.RoleRefresh
+	// onEnqueue, when set, runs inside EnqueueRoleRefresh (ordering probes).
+	onEnqueue       func(r ws.RoleRefresh)
+	revokedIDs      []int64
+	rolesUpdates    [][]*db.Role
+	clientCount     int
+	bulkDeletes     []bulkDeleteCall
+	voiceCleanupIDs []int64
 	// onVoiceCleanup lets a test observe DB state at cleanup time (ordering
 	// vs. the channel-delete cascade).
 	onVoiceCleanup func(channelID int64)
@@ -1710,11 +1713,6 @@ type mockHub struct {
 type bulkDeleteCall struct {
 	channelID  int64
 	messageIDs []int64
-}
-
-type memberUpdateCall struct {
-	userID   int64
-	roleName string
 }
 
 type restartCall struct {
@@ -1753,16 +1751,51 @@ func (m *mockHub) BroadcastChatBulkDeleted(channelID int64, messageIDs []int64) 
 	m.bulkDeletes = append(m.bulkDeletes, bulkDeleteCall{channelID, messageIDs})
 }
 
-func (m *mockHub) BroadcastMemberUpdate(userID int64, roleName string) {
-	m.memberUpdates = append(m.memberUpdates, memberUpdateCall{userID, roleName})
+func (m *mockHub) RevokeUnreadableChannels(userID int64) {
+	m.revokedIDs = append(m.revokedIDs, userID)
+}
+
+func (m *mockHub) EnqueueRoleRefresh(r ws.RoleRefresh) {
+	m.roleRefreshes = append(m.roleRefreshes, r)
+	if m.onEnqueue != nil {
+		m.onEnqueue(r)
+	}
+}
+
+// visibilityEnqueues counts the enqueues that ask for a visibility refresh of
+// some user (or of every connected user): what allVisibilityRefreshes counted.
+func (m *mockHub) visibilityEnqueues() int {
+	n := 0
+	for _, r := range m.roleRefreshes {
+		if len(r.Visibility) > 0 || r.AllConnected {
+			n++
+		}
+	}
+	return n
+}
+
+// rolesEnqueues counts the enqueues that ask for a roles_update.
+func (m *mockHub) rolesEnqueues() int {
+	n := 0
+	for _, r := range m.roleRefreshes {
+		if r.Roles {
+			n++
+		}
+	}
+	return n
+}
+
+// memberUpdateIDs lists every user an enqueue asked a member_update for.
+func (m *mockHub) memberUpdateIDs() []int64 {
+	var ids []int64
+	for _, r := range m.roleRefreshes {
+		ids = append(ids, r.MemberUpdate...)
+	}
+	return ids
 }
 
 func (m *mockHub) RefreshChannelVisibility(ch *db.Channel) {
 	m.visibilityRefreshes = append(m.visibilityRefreshes, ch)
-}
-
-func (m *mockHub) RefreshAllChannelVisibility() {
-	m.allVisibilityRefreshes++
 }
 
 func (m *mockHub) BroadcastRolesUpdate(roles []*db.Role) {

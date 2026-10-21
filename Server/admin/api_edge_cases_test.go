@@ -626,7 +626,7 @@ func TestAdminAPI_PatchUser_BanWithoutReason(t *testing.T) {
 // ─── PatchUser — role change broadcasts ────────────────────────────────────
 
 // TestAdminAPI_PatchUser_RoleChangeBroadcast verifies that changing a user's
-// role results in a BroadcastMemberUpdate call via the hub.
+// role enqueues a member_update for that user via the hub's role-refresh worker.
 func TestAdminAPI_PatchUser_RoleChangeBroadcast(t *testing.T) {
 	database := openAdminTestDB(t)
 	hub := &mockHub{}
@@ -641,8 +641,8 @@ func TestAdminAPI_PatchUser_RoleChangeBroadcast(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
-	if len(hub.memberUpdates) == 0 {
-		t.Error("BroadcastMemberUpdate not called after role change")
+	if !slices.Contains(hub.memberUpdateIDs(), targetUID) {
+		t.Errorf("no member_update enqueued for the user after the role change: %+v", hub.roleRefreshes)
 	}
 }
 

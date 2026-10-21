@@ -53,6 +53,9 @@
 //	3 S   activityState.flushMu      channel_activity.go:105  DB reads under activityFlushTimeout, then
 //	                                                          activityState.mu, then Hub.mu, PubSub.mu and
 //	                                                          Client.mu one at a time
+//	3 S   roleRefreshState.flushMu   role_refresh.go:74       DB reads, then roleRefreshState.mu, then Hub.mu,
+//	                                                          PubSub.mu, timeoutViewState.mu and Client.mu one
+//	                                                          at a time (role_refresh.go:24-30)
 //	3 S   Hub.uploadPolicyMu         hub.go:224               a DB read, then Hub.settingsMu, then Hub.mu (R),
 //	                                                          then Client.mu (hub_settings.go:93-113)
 //	3 S   Client.focusMu             client.go:86             Client.mu, PubSub.mu, DB reads (focus_defer.go:21,
@@ -91,6 +94,7 @@
 //	9     EventRingBuffer.mu RW      ringbuffer.go:14         leaf
 //	9     memberCache.mu             serve_ready_members_cache.go:33  leaf
 //	9     activityState.mu           channel_activity.go:95   leaf
+//	9     roleRefreshState.mu        role_refresh.go:66       leaf; may be taken under Hub.seqMu
 //	9     restartNoticeGate.mu       restart_notice.go:16     leaf
 //	9     userLocks.mu               user_locks.go:30         leaf, but see userLocks.tryLock below
 //	-     LiveKitProcess.mu          livekit_process.go:37    unranked: independent subsystem
