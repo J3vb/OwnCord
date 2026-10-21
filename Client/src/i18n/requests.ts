@@ -47,6 +47,7 @@ export const requestsText = defineCatalog("requests", {
   "profile.memberSince": "MEMBER SINCE",
   "profile.note": "NOTE",
   "profile.notePlaceholder": "Click to add a note",
+  "profile.noteNotSaved": "Note not saved",
   "profile.message": " Message",
   "profile.call": " Call",
   "profile.offlineReason": "You are not connected to the server right now.",

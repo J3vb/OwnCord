@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createUserProfilePopup, type UserProfileData } from "@components/UserProfilePopup";
+import { createNoteBinding } from "../../src/features/profiles/userNotes";
 
 function makeUser(overrides?: Partial<UserProfileData>): UserProfileData {
   return {
@@ -537,6 +538,52 @@ describe("UserProfilePopup profile fields", () => {
       expect(btn("upp-message-btn")?.hasAttribute("aria-disabled")).toBe(false);
       expect(btn("upp-call-btn")?.title).toBe("");
       popup.destroy?.();
+    });
+  });
+
+  describe("private note (6.11c)", () => {
+    const localNote = () =>
+      createNoteBinding(
+        { api: null, host: "a.example.com", sessionSignal: new AbortController().signal },
+        42,
+      );
+
+    it("note hidden on own card", () => {
+      // The opener passes no binding for the viewer's own card.
+      const popup = createUserProfilePopup({ user: makeUser(), anchorX: 10, anchorY: 10 });
+      popup.mount(container);
+      expect(container.querySelector('[data-testid="upp-note"]')).toBeNull();
+      expect(container.querySelector(".upp-note")?.childElementCount).toBe(0);
+      popup.destroy?.();
+    });
+
+    it("maxlength 256", () => {
+      const note = localNote();
+      const popup = createUserProfilePopup({
+        user: makeUser(),
+        anchorX: 10,
+        anchorY: 10,
+        note,
+        onNoteFlush: () => note.destroy(),
+      });
+      popup.mount(container);
+      const input = container.querySelector<HTMLTextAreaElement>('[data-testid="upp-note"]');
+      expect(input?.maxLength).toBe(256);
+      popup.destroy?.();
+    });
+
+    it("flushes the note on destroy", () => {
+      const onNoteFlush = vi.fn();
+      const popup = createUserProfilePopup({
+        user: makeUser(),
+        anchorX: 10,
+        anchorY: 10,
+        note: localNote(),
+        onNoteFlush,
+      });
+      popup.mount(container);
+      popup.destroy?.();
+      expect(onNoteFlush).toHaveBeenCalledOnce();
     });
   });
 });

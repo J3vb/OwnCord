@@ -23,6 +23,7 @@ import { blocksStore } from "../../stores/blocks.store";
 import { uiStore } from "../../stores/ui.store";
 import { channelsStore } from "../../stores/channels.store";
 import { roleChangeChoices } from "../moderation/roleAssignment";
+import { createNoteBinding, currentNotesContext } from "./userNotes";
 
 /** What the popup's action buttons do. Each is omitted when the caller has no
  *  handler for it, and all are withheld for the signed-in user's own card. */
@@ -142,11 +143,18 @@ export function openUserProfilePopup(options: OpenUserProfilePopupOptions): () =
       await onChangeRole?.(userId, username, role);
     },
   };
+  // Captured now, not when the card mounts or closes: a flush on close must
+  // use the session that opened the card, whatever has been switched to since.
+  const notesContext = isSelf ? null : currentNotesContext();
+  const note = notesContext === null ? undefined : createNoteBinding(notesContext, userId);
   const seq = ++popupSeq;
 
   import("../../components/UserProfilePopup").then(
     ({ createUserProfilePopup }) => {
-      if (seq !== popupSeq || signal?.aborted === true) return;
+      if (seq !== popupSeq || signal?.aborted === true) {
+        note?.destroy();
+        return;
+      }
       const popup = createUserProfilePopup({
         user: {
           id: live.id,
@@ -163,6 +171,7 @@ export function openUserProfilePopup(options: OpenUserProfilePopupOptions): () =
         anchorX,
         anchorY,
         roleControl,
+        ...(note === undefined ? {} : { note, onNoteFlush: () => note.destroy() }),
         ...(onMessage === undefined ? {} : { onMessage: (id: number) => onMessage(id) }),
         ...(onCall === undefined ? {} : { onCall: (id: number) => onCall(id) }),
         ...(onReport === undefined
@@ -184,7 +193,10 @@ export function openUserProfilePopup(options: OpenUserProfilePopupOptions): () =
       activePopup = popup;
       popup.mount(document.body);
     },
-    () => showToast(reportEntryText("profileLoadFailed"), "error"),
+    () => {
+      note?.destroy();
+      showToast(reportEntryText("profileLoadFailed"), "error");
+    },
   );
 
   return () => {

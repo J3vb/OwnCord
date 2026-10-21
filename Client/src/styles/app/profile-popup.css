@@ -160,6 +160,7 @@
 /* Both sections are always built and left empty when the user has no data for
    them, so they have to collapse rather than render as blank panels. */
 .upp-about,
+.upp-note,
 .upp-join-date {
   margin-top: 12px;
   padding: 12px;
@@ -167,6 +168,7 @@
   background: var(--bg-secondary);
 }
 .upp-about:empty,
+.upp-note:empty,
 .upp-join-date:empty {
   display: none;
 }
@@ -183,6 +185,31 @@
   font-size: var(--font-size-sm);
   color: var(--text-normal);
   overflow-wrap: anywhere;
+}
+/* The viewer's private note: a plain box in the section, with the failed-save
+   line under it (empty while all is well). */
+.upp-note-input {
+  display: block;
+  width: 100%;
+  resize: vertical;
+  box-sizing: border-box;
+  background: var(--bg-primary);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--header-primary);
+  font-size: var(--font-size-sm);
+  padding: 8px;
+  font-family: inherit;
+}
+.upp-note-error,
+.dps-note-error {
+  margin-top: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--red);
+}
+.upp-note-error:empty,
+.dps-note-error:empty {
+  display: none;
 }
 .upp-divider {
   height: 1px;

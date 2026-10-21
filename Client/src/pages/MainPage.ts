@@ -72,6 +72,7 @@ import {
   setReactionUsersFetcher,
   clearReactionUsersCache,
 } from "../features/messaging/reactionUsers";
+import { createNotesContext, setNotesContextSource } from "../features/profiles/userNotes";
 import { markAllRead, setMarkReadSender } from "@lib/read-state";
 import { setMarkUnreadSender } from "@components/message-list/mark-unread";
 import { onChannelReselect, stepChannel } from "@lib/channel-navigation";
@@ -278,6 +279,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     const res = await api.getReactionUsers(channelId, messageId, emoji);
     return res.users;
   });
+
+  // Cards opened from anywhere (member list, message author) take the notes
+  // context of this session when they open, never later.
+  setNotesContextSource(() => createNotesContext(api, apiConfig.host ?? ""));
 
   const limiters = createRateLimiterSet();
 
@@ -565,6 +570,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         dmProfileSidebar = createDmProfileSidebar({
           user: profileUser,
           host: apiConfig.host ?? "",
+          notes: createNotesContext(api, apiConfig.host ?? ""),
           focus,
           onClose: () => {
             closeDmProfileByUser();
@@ -2134,6 +2140,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         contentNav = null;
       });
       step("teardownToast", teardownToast);
+      step("notesContext", () => setNotesContextSource(null));
       // Full voice cleanup — tears down room, callbacks, ws ref, serverHost.
       // Prevents stale module-level state persisting across logout/reconnect cycles.
       step("voiceCleanupAll", voiceCleanupAll);
