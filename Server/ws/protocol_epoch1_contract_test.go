@@ -1954,7 +1954,7 @@ func journeyChannelCRUD(t *testing.T, r *epochRig) {
 	b.expect("channel_create")
 
 	if err := r.db.AdminUpdateChannel(ctx, id, db.ChannelUpdate{
-		Name: "news", Topic: "edited topic", Category: "Info", SlowMode: 10, Position: 3, VoiceMaxVideo: 25,
+		Name: "news", Topic: "edited topic", CategoryID: ch.CategoryID, SlowMode: 10, Position: 3, VoiceMaxVideo: 25,
 	}); err != nil {
 		t.Fatalf("AdminUpdateChannel: %v", err)
 	}

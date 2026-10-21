@@ -1,35 +1,47 @@
 -- name: ListChannels :many
-SELECT id, name, type, COALESCE(category, '') AS category, COALESCE(topic, '') AS topic,
-       position, slow_mode, archived, created_at,
-       COALESCE(voice_max_users, 0) AS voice_max_users,
-       voice_quality,
-       mixing_threshold,
-       COALESCE(voice_max_video, 0) AS voice_max_video,
-       nsfw,
-       afk
-FROM channels ORDER BY position ASC, id ASC;
+SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
+       COALESCE(c.category_id, 0) AS category_id,
+       COALESCE(cc.position, 0) AS category_position,
+       COALESCE(c.topic, '') AS topic,
+       c.position, c.slow_mode, c.archived, c.created_at,
+       COALESCE(c.voice_max_users, 0) AS voice_max_users,
+       c.voice_quality,
+       c.mixing_threshold,
+       COALESCE(c.voice_max_video, 0) AS voice_max_video,
+       c.nsfw,
+       c.afk
+FROM channels c
+LEFT JOIN channel_categories cc ON cc.id = c.category_id ORDER BY c.position ASC, c.id ASC;
 
 -- name: GetChannel :one
-SELECT id, name, type, COALESCE(category, '') AS category, COALESCE(topic, '') AS topic,
-       position, slow_mode, archived, created_at,
-       COALESCE(voice_max_users, 0) AS voice_max_users,
-       voice_quality,
-       mixing_threshold,
-       COALESCE(voice_max_video, 0) AS voice_max_video,
-       nsfw,
-       afk
-FROM channels WHERE id = ?;
+SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
+       COALESCE(c.category_id, 0) AS category_id,
+       COALESCE(cc.position, 0) AS category_position,
+       COALESCE(c.topic, '') AS topic,
+       c.position, c.slow_mode, c.archived, c.created_at,
+       COALESCE(c.voice_max_users, 0) AS voice_max_users,
+       c.voice_quality,
+       c.mixing_threshold,
+       COALESCE(c.voice_max_video, 0) AS voice_max_video,
+       c.nsfw,
+       c.afk
+FROM channels c
+LEFT JOIN channel_categories cc ON cc.id = c.category_id WHERE c.id = ?;
 
 -- name: GetAFKChannel :one
-SELECT id, name, type, COALESCE(category, '') AS category, COALESCE(topic, '') AS topic,
-       position, slow_mode, archived, created_at,
-       COALESCE(voice_max_users, 0) AS voice_max_users,
-       voice_quality,
-       mixing_threshold,
-       COALESCE(voice_max_video, 0) AS voice_max_video,
-       nsfw,
-       afk
-FROM channels WHERE afk = 1;
+SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
+       COALESCE(c.category_id, 0) AS category_id,
+       COALESCE(cc.position, 0) AS category_position,
+       COALESCE(c.topic, '') AS topic,
+       c.position, c.slow_mode, c.archived, c.created_at,
+       COALESCE(c.voice_max_users, 0) AS voice_max_users,
+       c.voice_quality,
+       c.mixing_threshold,
+       COALESCE(c.voice_max_video, 0) AS voice_max_video,
+       c.nsfw,
+       c.afk
+FROM channels c
+LEFT JOIN channel_categories cc ON cc.id = c.category_id WHERE c.afk = 1;
 
 -- name: ClearAFKChannel :exec
 UPDATE channels SET afk = 0 WHERE afk = 1;
@@ -38,7 +50,7 @@ UPDATE channels SET afk = 0 WHERE afk = 1;
 UPDATE channels SET afk = 1 WHERE id = ? AND type = 'voice' AND archived = 0;
 
 -- name: CreateChannel :execresult
-INSERT INTO channels (name, type, category, topic, position) VALUES (?, ?, ?, ?, ?);
+INSERT INTO channels (name, type, category_id, topic, position) VALUES (?, ?, ?, ?, ?);
 
 -- name: UpdateChannel :exec
 UPDATE channels SET name = ?, topic = ?, slow_mode = ? WHERE id = ?;
@@ -54,7 +66,7 @@ DELETE FROM channels WHERE id = ?;
 
 -- name: AdminUpdateChannel :exec
 UPDATE channels
-SET name = ?, topic = ?, category = ?, slow_mode = ?, position = ?, archived = ?,
+SET name = ?, topic = ?, category_id = ?, slow_mode = ?, position = ?, archived = ?,
     nsfw = ?, voice_max_users = ?, voice_max_video = ?
 WHERE id = ?;
 

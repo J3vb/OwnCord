@@ -12,7 +12,7 @@ import (
 
 const adminUpdateChannel = `-- name: AdminUpdateChannel :exec
 UPDATE channels
-SET name = ?, topic = ?, category = ?, slow_mode = ?, position = ?, archived = ?,
+SET name = ?, topic = ?, category_id = ?, slow_mode = ?, position = ?, archived = ?,
     nsfw = ?, voice_max_users = ?, voice_max_video = ?
 WHERE id = ?
 `
@@ -20,7 +20,7 @@ WHERE id = ?
 type AdminUpdateChannelParams struct {
 	Name          string  `json:"name"`
 	Topic         *string `json:"topic"`
-	Category      *string `json:"category"`
+	CategoryID    *int64  `json:"categoryId"`
 	SlowMode      int64   `json:"slowMode"`
 	Position      int64   `json:"position"`
 	Archived      int64   `json:"archived"`
@@ -34,7 +34,7 @@ func (q *Queries) AdminUpdateChannel(ctx context.Context, arg AdminUpdateChannel
 	_, err := q.db.ExecContext(ctx, adminUpdateChannel,
 		arg.Name,
 		arg.Topic,
-		arg.Category,
+		arg.CategoryID,
 		arg.SlowMode,
 		arg.Position,
 		arg.Archived,
@@ -56,22 +56,22 @@ func (q *Queries) ClearAFKChannel(ctx context.Context) error {
 }
 
 const createChannel = `-- name: CreateChannel :execresult
-INSERT INTO channels (name, type, category, topic, position) VALUES (?, ?, ?, ?, ?)
+INSERT INTO channels (name, type, category_id, topic, position) VALUES (?, ?, ?, ?, ?)
 `
 
 type CreateChannelParams struct {
-	Name     string  `json:"name"`
-	Type     string  `json:"type"`
-	Category *string `json:"category"`
-	Topic    *string `json:"topic"`
-	Position int64   `json:"position"`
+	Name       string  `json:"name"`
+	Type       string  `json:"type"`
+	CategoryID *int64  `json:"categoryId"`
+	Topic      *string `json:"topic"`
+	Position   int64   `json:"position"`
 }
 
 func (q *Queries) CreateChannel(ctx context.Context, arg CreateChannelParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, createChannel,
 		arg.Name,
 		arg.Type,
-		arg.Category,
+		arg.CategoryID,
 		arg.Topic,
 		arg.Position,
 	)
@@ -115,33 +115,39 @@ func (q *Queries) DeleteChannelUserPermission(ctx context.Context, arg DeleteCha
 }
 
 const getAFKChannel = `-- name: GetAFKChannel :one
-SELECT id, name, type, COALESCE(category, '') AS category, COALESCE(topic, '') AS topic,
-       position, slow_mode, archived, created_at,
-       COALESCE(voice_max_users, 0) AS voice_max_users,
-       voice_quality,
-       mixing_threshold,
-       COALESCE(voice_max_video, 0) AS voice_max_video,
-       nsfw,
-       afk
-FROM channels WHERE afk = 1
+SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
+       COALESCE(c.category_id, 0) AS category_id,
+       COALESCE(cc.position, 0) AS category_position,
+       COALESCE(c.topic, '') AS topic,
+       c.position, c.slow_mode, c.archived, c.created_at,
+       COALESCE(c.voice_max_users, 0) AS voice_max_users,
+       c.voice_quality,
+       c.mixing_threshold,
+       COALESCE(c.voice_max_video, 0) AS voice_max_video,
+       c.nsfw,
+       c.afk
+FROM channels c
+LEFT JOIN channel_categories cc ON cc.id = c.category_id WHERE c.afk = 1
 `
 
 type GetAFKChannelRow struct {
-	ID              int64   `json:"id"`
-	Name            string  `json:"name"`
-	Type            string  `json:"type"`
-	Category        string  `json:"category"`
-	Topic           string  `json:"topic"`
-	Position        int64   `json:"position"`
-	SlowMode        int64   `json:"slowMode"`
-	Archived        int64   `json:"archived"`
-	CreatedAt       string  `json:"createdAt"`
-	VoiceMaxUsers   int64   `json:"voiceMaxUsers"`
-	VoiceQuality    *string `json:"voiceQuality"`
-	MixingThreshold *int64  `json:"mixingThreshold"`
-	VoiceMaxVideo   int64   `json:"voiceMaxVideo"`
-	Nsfw            int64   `json:"nsfw"`
-	Afk             int64   `json:"afk"`
+	ID               int64   `json:"id"`
+	Name             string  `json:"name"`
+	Type             string  `json:"type"`
+	Category         string  `json:"category"`
+	CategoryID       int64   `json:"categoryId"`
+	CategoryPosition int64   `json:"categoryPosition"`
+	Topic            string  `json:"topic"`
+	Position         int64   `json:"position"`
+	SlowMode         int64   `json:"slowMode"`
+	Archived         int64   `json:"archived"`
+	CreatedAt        string  `json:"createdAt"`
+	VoiceMaxUsers    int64   `json:"voiceMaxUsers"`
+	VoiceQuality     *string `json:"voiceQuality"`
+	MixingThreshold  *int64  `json:"mixingThreshold"`
+	VoiceMaxVideo    int64   `json:"voiceMaxVideo"`
+	Nsfw             int64   `json:"nsfw"`
+	Afk              int64   `json:"afk"`
 }
 
 func (q *Queries) GetAFKChannel(ctx context.Context) (GetAFKChannelRow, error) {
@@ -152,6 +158,8 @@ func (q *Queries) GetAFKChannel(ctx context.Context) (GetAFKChannelRow, error) {
 		&i.Name,
 		&i.Type,
 		&i.Category,
+		&i.CategoryID,
+		&i.CategoryPosition,
 		&i.Topic,
 		&i.Position,
 		&i.SlowMode,
@@ -168,33 +176,39 @@ func (q *Queries) GetAFKChannel(ctx context.Context) (GetAFKChannelRow, error) {
 }
 
 const getChannel = `-- name: GetChannel :one
-SELECT id, name, type, COALESCE(category, '') AS category, COALESCE(topic, '') AS topic,
-       position, slow_mode, archived, created_at,
-       COALESCE(voice_max_users, 0) AS voice_max_users,
-       voice_quality,
-       mixing_threshold,
-       COALESCE(voice_max_video, 0) AS voice_max_video,
-       nsfw,
-       afk
-FROM channels WHERE id = ?
+SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
+       COALESCE(c.category_id, 0) AS category_id,
+       COALESCE(cc.position, 0) AS category_position,
+       COALESCE(c.topic, '') AS topic,
+       c.position, c.slow_mode, c.archived, c.created_at,
+       COALESCE(c.voice_max_users, 0) AS voice_max_users,
+       c.voice_quality,
+       c.mixing_threshold,
+       COALESCE(c.voice_max_video, 0) AS voice_max_video,
+       c.nsfw,
+       c.afk
+FROM channels c
+LEFT JOIN channel_categories cc ON cc.id = c.category_id WHERE c.id = ?
 `
 
 type GetChannelRow struct {
-	ID              int64   `json:"id"`
-	Name            string  `json:"name"`
-	Type            string  `json:"type"`
-	Category        string  `json:"category"`
-	Topic           string  `json:"topic"`
-	Position        int64   `json:"position"`
-	SlowMode        int64   `json:"slowMode"`
-	Archived        int64   `json:"archived"`
-	CreatedAt       string  `json:"createdAt"`
-	VoiceMaxUsers   int64   `json:"voiceMaxUsers"`
-	VoiceQuality    *string `json:"voiceQuality"`
-	MixingThreshold *int64  `json:"mixingThreshold"`
-	VoiceMaxVideo   int64   `json:"voiceMaxVideo"`
-	Nsfw            int64   `json:"nsfw"`
-	Afk             int64   `json:"afk"`
+	ID               int64   `json:"id"`
+	Name             string  `json:"name"`
+	Type             string  `json:"type"`
+	Category         string  `json:"category"`
+	CategoryID       int64   `json:"categoryId"`
+	CategoryPosition int64   `json:"categoryPosition"`
+	Topic            string  `json:"topic"`
+	Position         int64   `json:"position"`
+	SlowMode         int64   `json:"slowMode"`
+	Archived         int64   `json:"archived"`
+	CreatedAt        string  `json:"createdAt"`
+	VoiceMaxUsers    int64   `json:"voiceMaxUsers"`
+	VoiceQuality     *string `json:"voiceQuality"`
+	MixingThreshold  *int64  `json:"mixingThreshold"`
+	VoiceMaxVideo    int64   `json:"voiceMaxVideo"`
+	Nsfw             int64   `json:"nsfw"`
+	Afk              int64   `json:"afk"`
 }
 
 func (q *Queries) GetChannel(ctx context.Context, id int64) (GetChannelRow, error) {
@@ -205,6 +219,8 @@ func (q *Queries) GetChannel(ctx context.Context, id int64) (GetChannelRow, erro
 		&i.Name,
 		&i.Type,
 		&i.Category,
+		&i.CategoryID,
+		&i.CategoryPosition,
 		&i.Topic,
 		&i.Position,
 		&i.SlowMode,
@@ -395,33 +411,39 @@ func (q *Queries) GetUserChannelPermissions(ctx context.Context, userID int64) (
 }
 
 const listChannels = `-- name: ListChannels :many
-SELECT id, name, type, COALESCE(category, '') AS category, COALESCE(topic, '') AS topic,
-       position, slow_mode, archived, created_at,
-       COALESCE(voice_max_users, 0) AS voice_max_users,
-       voice_quality,
-       mixing_threshold,
-       COALESCE(voice_max_video, 0) AS voice_max_video,
-       nsfw,
-       afk
-FROM channels ORDER BY position ASC, id ASC
+SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
+       COALESCE(c.category_id, 0) AS category_id,
+       COALESCE(cc.position, 0) AS category_position,
+       COALESCE(c.topic, '') AS topic,
+       c.position, c.slow_mode, c.archived, c.created_at,
+       COALESCE(c.voice_max_users, 0) AS voice_max_users,
+       c.voice_quality,
+       c.mixing_threshold,
+       COALESCE(c.voice_max_video, 0) AS voice_max_video,
+       c.nsfw,
+       c.afk
+FROM channels c
+LEFT JOIN channel_categories cc ON cc.id = c.category_id ORDER BY c.position ASC, c.id ASC
 `
 
 type ListChannelsRow struct {
-	ID              int64   `json:"id"`
-	Name            string  `json:"name"`
-	Type            string  `json:"type"`
-	Category        string  `json:"category"`
-	Topic           string  `json:"topic"`
-	Position        int64   `json:"position"`
-	SlowMode        int64   `json:"slowMode"`
-	Archived        int64   `json:"archived"`
-	CreatedAt       string  `json:"createdAt"`
-	VoiceMaxUsers   int64   `json:"voiceMaxUsers"`
-	VoiceQuality    *string `json:"voiceQuality"`
-	MixingThreshold *int64  `json:"mixingThreshold"`
-	VoiceMaxVideo   int64   `json:"voiceMaxVideo"`
-	Nsfw            int64   `json:"nsfw"`
-	Afk             int64   `json:"afk"`
+	ID               int64   `json:"id"`
+	Name             string  `json:"name"`
+	Type             string  `json:"type"`
+	Category         string  `json:"category"`
+	CategoryID       int64   `json:"categoryId"`
+	CategoryPosition int64   `json:"categoryPosition"`
+	Topic            string  `json:"topic"`
+	Position         int64   `json:"position"`
+	SlowMode         int64   `json:"slowMode"`
+	Archived         int64   `json:"archived"`
+	CreatedAt        string  `json:"createdAt"`
+	VoiceMaxUsers    int64   `json:"voiceMaxUsers"`
+	VoiceQuality     *string `json:"voiceQuality"`
+	MixingThreshold  *int64  `json:"mixingThreshold"`
+	VoiceMaxVideo    int64   `json:"voiceMaxVideo"`
+	Nsfw             int64   `json:"nsfw"`
+	Afk              int64   `json:"afk"`
 }
 
 func (q *Queries) ListChannels(ctx context.Context) ([]ListChannelsRow, error) {
@@ -438,6 +460,8 @@ func (q *Queries) ListChannels(ctx context.Context) ([]ListChannelsRow, error) {
 			&i.Name,
 			&i.Type,
 			&i.Category,
+			&i.CategoryID,
+			&i.CategoryPosition,
 			&i.Topic,
 			&i.Position,
 			&i.SlowMode,

@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 205 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 215 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -56,6 +56,11 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/admin/api/backups/{name}/restore`                                  |
 | GET     | `/admin/api/channels`                                                |
 | POST    | `/admin/api/channels`                                                |
+| GET     | `/admin/api/channels/categories`                                     |
+| POST    | `/admin/api/channels/categories`                                     |
+| PUT     | `/admin/api/channels/categories/order`                               |
+| DELETE  | `/admin/api/channels/categories/{id}`                                |
+| PATCH   | `/admin/api/channels/categories/{id}`                                |
 | DELETE  | `/admin/api/channels/{id}`                                           |
 | PATCH   | `/admin/api/channels/{id}`                                           |
 | GET     | `/admin/api/channels/{id}/access/explain`                            |
@@ -177,6 +182,11 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/moderation/appeals/{id}/assign`                             |
 | POST    | `/api/v1/moderation/appeals/{id}/decide`                             |
 | POST    | `/api/v1/moderation/channels/`                                       |
+| GET     | `/api/v1/moderation/channels/categories`                             |
+| POST    | `/api/v1/moderation/channels/categories`                             |
+| PUT     | `/api/v1/moderation/channels/categories/order`                       |
+| DELETE  | `/api/v1/moderation/channels/categories/{id}`                        |
+| PATCH   | `/api/v1/moderation/channels/categories/{id}`                        |
 | DELETE  | `/api/v1/moderation/channels/{id}`                                   |
 | PATCH   | `/api/v1/moderation/channels/{id}`                                   |
 | GET     | `/api/v1/moderation/members/`                                        |
@@ -290,6 +300,8 @@ endpoints return plain-text errors — see their section):
 | `NSFW_ACKNOWLEDGEMENT_REQUIRED` | 403         | Content from a labelled channel requested before the caller acknowledged it (history, around, pins, reaction users, search, attachment bytes — B5-7)                                                                                             |
 | `NOT_NSFW`                      | 409         | `PUT /api/v1/channels/{id}/nsfw-acknowledgement` on a channel that is not labelled                                                                                                                                                               |
 | `CHANNEL_NAME_TAKEN`            | 409         | Admin channel create or rename onto a name the same type already has in that category                                                                                                                                                            |
+| `CATEGORY_NAME_TAKEN`           | 409         | Category create or rename onto a name another category already has, ignoring case                                                                                                                                                                |
+| `CATEGORY_LIST_STALE`           | 409         | `PUT .../categories/order` with an id set that is not exactly the current set of categories; nothing is written                                                                                                                                  |
 
 ### Request deadline
 
@@ -1130,19 +1142,21 @@ List all channels the authenticated user has `READ_MESSAGES` permission for. DM 
 ]
 ```
 
-| Field             | Type   | Description                                                                                                               |
-| ----------------- | ------ | ------------------------------------------------------------------------------------------------------------------------- |
-| `id`              | int64  | Channel ID                                                                                                                |
-| `name`            | string | Channel name                                                                                                              |
-| `type`            | string | `text`, `voice`, or `announcement` (announcement channels are read like text but only `MANAGE_MESSAGES` holders can post) |
-| `topic`           | string | Channel topic/description                                                                                                 |
-| `category`        | string | Category grouping                                                                                                         |
-| `position`        | int    | Sort order within category                                                                                                |
-| `slow_mode`       | int    | Slow-mode delay in seconds (0 = disabled)                                                                                 |
-| `archived`        | bool   | Whether the channel is archived                                                                                           |
-| `nsfw`            | bool   | Age-restriction label, enforced server-side (B5-7): its content needs the caller's own acknowledgement (see below)        |
-| `voice_max_users` | int    | Voice capacity, 0 = unlimited. Enforced on join (`CHANNEL_FULL`)                                                          |
-| `voice_max_video` | int    | Simultaneous cameras/screen shares, 0 = unlimited. Enforced on publish (`VIDEO_LIMIT`)                                    |
+| Field               | Type   | Description                                                                                                               |
+| ------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `id`                | int64  | Channel ID                                                                                                                |
+| `name`              | string | Channel name                                                                                                              |
+| `type`              | string | `text`, `voice`, or `announcement` (announcement channels are read like text but only `MANAGE_MESSAGES` holders can post) |
+| `topic`             | string | Channel topic/description                                                                                                 |
+| `category`          | string | Name of the channel's category, `""` when none                                                                            |
+| `category_id`       | int64  | The category's id, `0` when none (WP 6.5a)                                                                                |
+| `category_position` | int    | The category's position in the category order, `0` when none                                                              |
+| `position`          | int    | Sort order within category                                                                                                |
+| `slow_mode`         | int    | Slow-mode delay in seconds (0 = disabled)                                                                                 |
+| `archived`          | bool   | Whether the channel is archived                                                                                           |
+| `nsfw`              | bool   | Age-restriction label, enforced server-side (B5-7): its content needs the caller's own acknowledgement (see below)        |
+| `voice_max_users`   | int    | Voice capacity, 0 = unlimited. Enforced on join (`CHANNEL_FULL`)                                                          |
+| `voice_max_video`   | int    | Simultaneous cameras/screen shares, 0 = unlimited. Enforced on publish (`VIDEO_LIMIT`)                                    |
 
 #### The `nsfw` flag
 
@@ -5382,8 +5396,8 @@ The full role list after the reorder, position descending.
 
 ## Channel Management (admin)
 
-`POST /admin/api/channels` takes `{name, type, category, topic, position}`;
-`PATCH /admin/api/channels/{id}` takes `{name, topic, category, slow_mode,
+`POST /admin/api/channels` takes `{name, type, category_id, category, topic, position}`;
+`PATCH /admin/api/channels/{id}` takes `{name, topic, category_id, category, slow_mode,
 position, archived, nsfw, voice_max_users, voice_max_video}` and seeds every
 omitted field from the current row, so a partial body is safe.
 
@@ -5417,11 +5431,38 @@ to a synthetic "Voice" group only for voice channels with no category at all.
 (Before phase 5 the server refused any non-voice channel under a category
 literally named "Voice Channels", and any voice channel outside it.)
 
-`PATCH` accepts `category`, so moving a channel between categories is an edit
-rather than a delete-and-recreate. An empty string makes it uncategorized.
+`PATCH` accepts `category_id`, so moving a channel between categories is an edit
+rather than a delete-and-recreate. `0` makes it uncategorized, and an id that
+does not exist is `400 INVALID_INPUT`. The older `category` name string still
+works on create and `PATCH`: it is matched to a category by name ignoring case,
+a name that matches none creates the category, and an empty string means none.
+`category_id` wins when both are sent, and a `PATCH` that names neither leaves
+the category alone.
+
+### Categories (WP 6.5a)
+
+A category is an object with an `id`, a `name` (at most 100 characters, unique
+ignoring case) and a `position`. Five routes manage them, all behind
+`MANAGE_CHANNELS`, mounted under both `/admin/api/channels` and
+`/api/v1/moderation/channels`:
+
+| Route                        | Body           | Result                                                                                                               |
+| ---------------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `GET  .../categories`        | none           | `200` array of `{id, name, position}` by `(position, id)`                                                            |
+| `POST .../categories`        | `{name}`       | `201` the new category, appended last. `409 CATEGORY_NAME_TAKEN` on a duplicate                                      |
+| `PUT  .../categories/order`  | `{ids: [...]}` | `200` the new list. The ids must be exactly the current set: `409 CATEGORY_LIST_STALE` and nothing written otherwise |
+| `PATCH .../categories/{id}`  | `{name}`       | `200` the renamed category. `404` when missing, `409 CATEGORY_NAME_TAKEN` on a duplicate                             |
+| `DELETE .../categories/{id}` | none           | `204`. Its channels are not deleted: they keep their overrides and become uncategorized                              |
+
+Every mutation is audited (`category_create`, `category_rename`,
+`category_reorder`, `category_delete`). A rename, reorder or delete changes the
+`category`, `category_id` and `category_position` of the channels in the
+touched categories, so the server re-broadcasts `channel_update` for each of
+them and then sends `channel_categories` to connected managers (see
+[protocol.md](protocol.md#channel_categories-server---client)).
 
 A name already used by another channel of the same `type` in the same
-`category` is refused with `409 CHANNEL_NAME_TAKEN`, ignoring case: a create,
+category (`category_id`) is refused with `409 CHANNEL_NAME_TAKEN`, ignoring case: a create,
 or a `PATCH` that changes the name or the category. It is a check at write
 time, not a database constraint, so channels that already share a name are
 left as they are, and a `PATCH` that leaves both name and category alone still

@@ -10,23 +10,25 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// channelFields carries the 15 columns shared by GetChannelRow and
+// channelFields carries the 17 columns shared by GetChannelRow and
 // ListChannelsRow; both generated row types are structurally identical, so a
 // single mapper narrows either to the domain Channel model.
 type channelFields struct {
-	ID              int64
-	Name            string
-	Type            string
-	Category        string
-	Topic           string
-	Position        int64
-	SlowMode        int64
-	Archived        int64
-	CreatedAt       string
-	VoiceMaxUsers   int64
-	VoiceQuality    *string
-	MixingThreshold *int64
-	VoiceMaxVideo   int64
+	ID               int64
+	Name             string
+	Type             string
+	Category         string
+	CategoryID       int64
+	CategoryPosition int64
+	Topic            string
+	Position         int64
+	SlowMode         int64
+	Archived         int64
+	CreatedAt        string
+	VoiceMaxUsers    int64
+	VoiceQuality     *string
+	MixingThreshold  *int64
+	VoiceMaxVideo    int64
 	// Nsfw keeps sqlc's spelling, not the domain model's NSFW: the two
 	// generated row types are narrowed by a direct struct conversion, which
 	// requires identical field names.
@@ -36,21 +38,23 @@ type channelFields struct {
 
 func channelFromFields(f channelFields) Channel {
 	return Channel{
-		ID:              f.ID,
-		Name:            f.Name,
-		Type:            f.Type,
-		Category:        f.Category,
-		Topic:           f.Topic,
-		Position:        int(f.Position),
-		SlowMode:        int(f.SlowMode),
-		Archived:        f.Archived != 0,
-		CreatedAt:       f.CreatedAt,
-		VoiceMaxUsers:   int(f.VoiceMaxUsers),
-		VoiceQuality:    f.VoiceQuality,
-		MixingThreshold: ptrI64toI(f.MixingThreshold),
-		VoiceMaxVideo:   int(f.VoiceMaxVideo),
-		NSFW:            f.Nsfw != 0,
-		AFK:             f.Afk != 0,
+		ID:               f.ID,
+		Name:             f.Name,
+		Type:             f.Type,
+		Category:         f.Category,
+		CategoryID:       f.CategoryID,
+		CategoryPosition: int(f.CategoryPosition),
+		Topic:            f.Topic,
+		Position:         int(f.Position),
+		SlowMode:         int(f.SlowMode),
+		Archived:         f.Archived != 0,
+		CreatedAt:        f.CreatedAt,
+		VoiceMaxUsers:    int(f.VoiceMaxUsers),
+		VoiceQuality:     f.VoiceQuality,
+		MixingThreshold:  ptrI64toI(f.MixingThreshold),
+		VoiceMaxVideo:    int(f.VoiceMaxVideo),
+		NSFW:             f.Nsfw != 0,
+		AFK:              f.Afk != 0,
 	}
 }
 
@@ -80,19 +84,17 @@ func (d *DB) GetChannel(ctx context.Context, id int64) (*Channel, error) {
 	return &ch, nil
 }
 
-// CreateChannel inserts a new channel and returns the assigned ID.
+// CreateChannel inserts a new channel and returns the assigned ID. A
+// non-empty category is resolved by name ignoring case and created when
+// missing, in the same transaction as the insert (see CreateChannelIn).
 func (d *DB) CreateChannel(ctx context.Context, name, chanType, category, topic string, position int) (int64, error) {
-	res, err := d.q.CreateChannel(ctx, dbgen.CreateChannelParams{
-		Name:     name,
-		Type:     chanType,
-		Category: strToNullPtr(category),
-		Topic:    strToNullPtr(topic),
-		Position: int64(position),
+	return d.CreateChannelIn(ctx, NewChannel{
+		Name:         name,
+		Type:         chanType,
+		CategoryName: category,
+		Topic:        topic,
+		Position:     position,
 	})
-	if err != nil {
-		return 0, fmt.Errorf("CreateChannel: %w", err)
-	}
-	return res.LastInsertId()
 }
 
 // UpdateChannel modifies name, topic, and slow_mode for the given channel.

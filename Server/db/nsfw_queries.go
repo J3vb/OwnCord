@@ -130,31 +130,8 @@ func (d *DB) DeleteNSFWAcknowledgementsForChannel(ctx context.Context, channelID
 // from 1 to 0 — turning it on writes nothing extra (decision 13's own
 // comment: "flipping on writes nothing").
 func (d *DB) AdminUpdateChannelClearingNSFW(ctx context.Context, id int64, u ChannelUpdate) error {
-	tx, err := d.writer.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("AdminUpdateChannelClearingNSFW begin: %w", err)
-	}
-	defer tx.Rollback() //nolint:errcheck
-	q := d.q.WithTx(tx)
-	if err := q.AdminUpdateChannel(ctx, dbgen.AdminUpdateChannelParams{
-		Name:          u.Name,
-		Topic:         strToNullPtr(u.Topic),
-		Category:      strToNullPtr(u.Category),
-		SlowMode:      int64(u.SlowMode),
-		Position:      int64(u.Position),
-		Archived:      b2i64(u.Archived),
-		Nsfw:          b2i64(u.NSFW),
-		VoiceMaxUsers: int64(u.VoiceMaxUsers),
-		VoiceMaxVideo: int64(u.VoiceMaxVideo),
-		ID:            id,
-	}); err != nil {
-		return fmt.Errorf("AdminUpdateChannelClearingNSFW update: %w", err)
-	}
-	if err := q.DeleteNSFWAcknowledgementsForChannel(ctx, id); err != nil {
-		return fmt.Errorf("AdminUpdateChannelClearingNSFW clear acks: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("AdminUpdateChannelClearingNSFW commit: %w", err)
+	if err := d.adminUpdateChannel(ctx, id, u, true); err != nil {
+		return fmt.Errorf("AdminUpdateChannelClearingNSFW: %w", err)
 	}
 	return nil
 }

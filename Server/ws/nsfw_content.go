@@ -144,6 +144,7 @@ var contentBearingKinds = map[string]bool{
 	MsgTypeModQueue:            false, // a report's public id and state only (B5-8); never message content
 	MsgTypeModAction:           false, // a warning/timeout notice to its own subject (B5-9); never message content
 	MsgTypeMemberTimeouts:      false, // active-timeout ids and expiries to moderators and the target (WP 3C-7c); never message content
+	MsgTypeChannelCategories:   false, // category ids, names and positions to MANAGE_CHANNELS holders only (WP 6.5a); never message content
 	MsgTypeAppealStatus:        false, // an appeal's state to its own appellant only (B5-10); never message content
 	MsgTypeMentionCount:        false, // a channel id and this user's own mention total only (DP-27); never message content
 	MsgTypeReadState:           false, // a channel id and this user's own read pointer and counts only (3D-5c); never message content

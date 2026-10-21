@@ -804,7 +804,7 @@ func TestNSFW_UnlabellingDeletesAcknowledgementsAndRelabellingReprompts(t *testi
 	if err != nil || existing == nil {
 		t.Fatalf("GetChannel: %v", err)
 	}
-	if _, err := f.svc.Channels.AdminUpdateChannel(ctx, f.authorID, existing, service.AdminChannelUpdate{
+	if _, _, err := f.svc.Channels.AdminUpdateChannel(ctx, f.authorID, existing, service.AdminChannelUpdate{
 		Name: existing.Name, NSFW: false,
 	}, nil); err != nil {
 		t.Fatalf("AdminUpdateChannel (unlabel): %v", err)
@@ -817,7 +817,7 @@ func TestNSFW_UnlabellingDeletesAcknowledgementsAndRelabellingReprompts(t *testi
 	if err != nil || existing == nil {
 		t.Fatalf("GetChannel (re-read): %v", err)
 	}
-	if _, err := f.svc.Channels.AdminUpdateChannel(ctx, f.authorID, existing, service.AdminChannelUpdate{
+	if _, _, err := f.svc.Channels.AdminUpdateChannel(ctx, f.authorID, existing, service.AdminChannelUpdate{
 		Name: existing.Name, NSFW: true,
 	}, nil); err != nil {
 		t.Fatalf("AdminUpdateChannel (relabel): %v", err)

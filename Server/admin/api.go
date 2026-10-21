@@ -95,6 +95,13 @@ func mountChannelActionRoutes(r chi.Router, base string, channels *service.Chann
 	r.Group(func(r chi.Router) {
 		r.Use(requirePerm(permissions.ManageChannels))
 		r.Post(create, handleCreateChannel(channels, hub))
+		// Categories (WP 6.5a). "/categories/order" is registered before
+		// "/categories/{id}" so "order" is never read as an id.
+		r.Get(base+"/categories", handleListCategories(channels))
+		r.Post(base+"/categories", handleCreateCategory(channels, hub))
+		r.Put(base+"/categories/order", handleReorderCategories(channels, hub))
+		r.Patch(base+"/categories/{id}", handleRenameCategory(channels, hub))
+		r.Delete(base+"/categories/{id}", handleDeleteCategory(channels, hub))
 		r.Patch(base+"/{id}", handlePatchChannel(channels, hub))
 		r.Delete(base+"/{id}", handleDeleteChannel(channels, hub))
 	})

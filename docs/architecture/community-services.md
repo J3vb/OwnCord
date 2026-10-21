@@ -81,7 +81,12 @@ forward by cascade. A forward is an ordinary message of the forwarder, carrying 
 snapshot of text and its own copies of the files (class 12, charged to the
 forwarder's quota), so it adds no data class and follows the message and
 attachment rows. Forwards of an erased user's message stay without any author
-(`data-lifecycle.md`, O1). Other historical
+(`data-lifecycle.md`, O1).
+**Amended 2026-10-21 (channel categories):** `072_channel_categories.sql` adds
+`channel_categories` and `channels.category_id` (WP 6.5a). A category is a name and
+a position an administrator writes, holds no user content and no personal data, and
+is shared by every member who can see a channel in it, so it adds no data class. A
+channel outlives its category (`ON DELETE SET NULL`). Other historical
 status statements retain their `cbebd37c` baseline.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each
 service are documented"). **Input to:** HP-5, and to the retention and
