@@ -62,6 +62,7 @@ type slotSnap struct {
 	joinToken string
 	completed bool
 	e2ee      e2eeAnnounce
+	watching  []int64
 }
 
 // modFlags is the moderator-imposed mute/deafen stash (see voiceSlot's
@@ -93,6 +94,7 @@ type voiceSlot struct {
 	// while its voice_states row stays behind for nothing to reap (OC-0270).
 	voiceJoinCompleted bool
 	e2ee               e2eeAnnounce // the last voice_e2ee_announce (key, signature, video decode list)
+	watching           []int64      // users whose screen share this member watches (voice_watch); sorted, never aliased
 	// pendingModServerMuted/pendingModServerDeafened stash a moderator-imposed
 	// mute/deafen across a server-driven leave (voice_mod_move), which deletes
 	// the voice_states row those flags normally live in before the target's
@@ -130,6 +132,7 @@ func (s *voiceSlot) setState(chID int64, joinToken string) {
 	// trip and completion guard even run); only voiceJoinComplete may mark it
 	// done, via markCompletedIfMatch.
 	s.voiceJoinCompleted = false
+	s.watching = nil // a new join instance watches nothing yet
 }
 
 // adoptJoinToken sets the join token only when the slot is in a channel and
@@ -163,7 +166,7 @@ func (s *voiceSlot) markCompletedIfMatch(chID int64, joinToken string) bool {
 
 // snapLocked copies the membership. The caller holds voiceMu.
 func (s *voiceSlot) snapLocked() slotSnap {
-	return slotSnap{chID: s.voiceChID, joinToken: s.voiceJoinToken, completed: s.voiceJoinCompleted, e2ee: s.e2ee}
+	return slotSnap{chID: s.voiceChID, joinToken: s.voiceJoinToken, completed: s.voiceJoinCompleted, e2ee: s.e2ee, watching: s.watching}
 }
 
 // resetLocked empties the membership: channel, token, completed flag and E2EE
@@ -173,6 +176,7 @@ func (s *voiceSlot) resetLocked() {
 	s.voiceJoinToken = ""
 	s.voiceJoinCompleted = false
 	s.e2ee = e2eeAnnounce{}
+	s.watching = nil
 }
 
 // clearState clears the membership and returns the old channel ID, join token
@@ -256,6 +260,7 @@ func (s *voiceSlot) adopt(snap slotSnap) bool {
 	s.voiceJoinToken = snap.joinToken
 	s.voiceJoinCompleted = snap.completed
 	s.e2ee = snap.e2ee
+	s.watching = snap.watching
 	return true
 }
 
@@ -300,4 +305,26 @@ func (s *voiceSlot) e2eeCopy() e2eeAnnounce {
 	s.voiceMu.Lock()
 	defer s.voiceMu.Unlock()
 	return s.e2ee.clone()
+}
+
+// setWatchingIfChannel stores a copy of ids as the watched-screen-share set,
+// only while the slot is in chID (and chID is a real channel), reporting
+// whether it stored. A frame decided against an old channel cannot land on a
+// newer membership.
+func (s *voiceSlot) setWatchingIfChannel(chID int64, ids []int64) bool {
+	s.voiceMu.Lock()
+	defer s.voiceMu.Unlock()
+	if chID == 0 || s.voiceChID != chID {
+		return false
+	}
+	s.watching = append([]int64(nil), ids...)
+	return true
+}
+
+// watchingCopy returns a copy of the watched-screen-share set that shares no
+// storage with the slot (nil when empty).
+func (s *voiceSlot) watchingCopy() []int64 {
+	s.voiceMu.Lock()
+	defer s.voiceMu.Unlock()
+	return append([]int64(nil), s.watching...)
 }

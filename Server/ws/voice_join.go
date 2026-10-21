@@ -577,6 +577,7 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, txn *voiceTxn, c *Client, c
 	// reconnecting client — voice_e2ee_announce itself is an unsequenced
 	// pub/sub frame that no reconnect replay tier can ever recover (OC-0276).
 	h.sendVoicePeerKeys(c, channelID)
+	h.sendVoicePeerWatching(c, channelID)
 
 	// Send voice_config to the joiner. h.defaultVoiceQuality (the operator's
 	// voice.quality config) is the only source. A per-channel voice_quality

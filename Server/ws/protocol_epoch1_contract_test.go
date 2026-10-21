@@ -670,6 +670,7 @@ func TestEpoch1Fixtures(t *testing.T) {
 		{"dm-request-ignored", journeyDMRequestIgnored},
 		{"resume-replay", journeyResumeReplay},
 		{"voice-join-e2ee-leave", journeyVoiceJoinE2EELeave},
+		{"voice-watch", journeyVoiceWatch},
 	}
 	for _, j := range journeys {
 		t.Run(j.name, func(t *testing.T) {
@@ -1249,6 +1250,59 @@ func journeyVoiceJoinE2EELeave(t *testing.T, r *epochRig) {
 		},
 	})
 	b.expect("voice_e2ee_offer")
+
+	a.send(map[string]any{"type": "voice_leave", "payload": map[string]any{}})
+	a.expect("voice_leave")
+	b.expect("voice_leave")
+	a.barrier()
+	b.barrier()
+}
+
+// journeyVoiceWatch records who-watches-what: two members share a room, alice
+// reports that she watches bob's screen share (voice_watch), bob receives the
+// unsequenced voice_watching relay, then bob clears his own (empty) set and
+// alice receives that. The sender never gets its own frame.
+func journeyVoiceWatch(t *testing.T, r *epochRig) {
+	_, bobID, aliceTok, bobTok := r.seedBaseline(t)
+
+	a, b := r.dial(t, "a"), r.dial(t, "b")
+	a.authenticate(aliceTok)
+	b.authenticate(bobTok)
+	a.drain("member_join", "presence_batch")
+
+	a.record, b.record = true, true
+
+	a.send(map[string]any{
+		"type":    "voice_join",
+		"payload": map[string]any{"channel_id": voiceChannelID},
+	})
+	a.expect("voice_token")
+	a.expect("voice_state")
+	a.expect("voice_config")
+	b.expect("voice_state")
+
+	b.send(map[string]any{
+		"type":    "voice_join",
+		"payload": map[string]any{"channel_id": voiceChannelID},
+	})
+	b.expect("voice_token")
+	b.expect("voice_state")
+	b.expect("voice_state")
+	b.expect("voice_config")
+	a.expect("voice_state")
+
+	// Duplicates and alice's own id (1) are dropped; the relay is sorted.
+	a.send(map[string]any{
+		"type":    "voice_watch",
+		"payload": map[string]any{"user_ids": []any{bobID, bobID, 1}},
+	})
+	b.expect("voice_watching")
+
+	b.send(map[string]any{
+		"type":    "voice_watch",
+		"payload": map[string]any{"user_ids": []any{}},
+	})
+	a.expect("voice_watching")
 
 	a.send(map[string]any{"type": "voice_leave", "payload": map[string]any{}})
 	a.expect("voice_leave")
