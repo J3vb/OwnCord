@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -28,6 +29,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 	"github.com/J3vb/OwnCord/Server/telemetry"
 	"github.com/J3vb/OwnCord/Server/updater"
+	"github.com/J3vb/OwnCord/Server/webclient"
 	"github.com/J3vb/OwnCord/Server/ws"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -75,7 +77,11 @@ type Runtime struct {
 	// avatar and emoji routes are then not mounted.
 	Storage *storage.Storage
 	// Updater serves the admin update card and the client auto-update route.
-	Updater   *updater.Updater
+	Updater *updater.Updater
+	// WebClient is the browser client bundle the portal serves when
+	// server.browser_client_enabled is on (6.13a). Nil uses the one embedded
+	// in this binary (webclient.Assets); tests hand in an fstest.MapFS.
+	WebClient fs.FS
 	Lifecycle // the app's job group and shutdown signal (setup_options.go)
 }
 
@@ -87,14 +93,8 @@ func warnOnServerConfig(cfg *config.Config) {
 	if slices.Contains(cfg.Server.AllowedOrigins, "*") {
 		slog.Warn("AllowedOrigins contains wildcard '*' — consider restricting to specific origins for production use")
 	}
-	// BG-01: browser-client hosting is an owner opt-in and this build ships no
-	// browser assets, so the key mounts nothing yet. Say so rather than let an
-	// operator who turned it on conclude the server is broken; the bundle, its
-	// route and its own CSP arrive with B8.
-	if cfg.Server.BrowserClientEnabled {
-		slog.Warn("server.browser_client_enabled is set, but this build hosts no browser client — " +
-			"the key has no effect yet: no route is mounted and no asset is served")
-	}
+	_, bundled := webclient.Assets()
+	warnOnBrowserClient(cfg, bundled)
 	warnOnVoiceNodeIP(cfg)
 	if cfg.Voice.LiveKitURL != "" && cfg.Voice.NodeIP != "" && cfg.Voice.AdvertiseInternalIP {
 		slog.Warn("voice.node_ip is ignored while voice.advertise_internal_ip is on — LiveKit detects its public address over STUN instead",
@@ -180,13 +180,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Channel and message REST routes are mounted after hub creation (below)
 	// so the hub can fan a bulk delete out as one chat_bulk_deleted event.
 
-	// GIF proxy — keeps the Klipy API key server-side. Mounted unconditionally;
-	// with no key configured the endpoints answer 503 GIF_DISABLED so the
-	// client can hide the picker rather than discover a 404.
-	MountGIFRoutes(r, svc.Sessions, limiter, cfg, svc.GIFFavorites)
-	if cfg.GIF.APIKey == "" {
-		slog.Info("gif.api_key not set — GIF picker disabled (clients will hide it)")
-	}
+	mountGIF(r, cfg, svc, limiter)
 
 	// Web Push subscription storage (B5-4) — nothing dispatches yet.
 	// Mounted unconditionally; with push.enabled false every route answers
@@ -278,6 +272,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	r.Mount("/api/v1/moderation/members", admin.NewMemberAPI(svc, hub, svc.Permissions))
 	// Channel create, edit and delete, mounted the same way for the same reason.
 	r.Mount("/api/v1/moderation/channels", admin.NewChannelAPI(svc, hub))
+	mountBrowserClient(r, cfg, rt.WebClient)
 	r.Group(func(r chi.Router) {
 		r.Use(AdminIPRestrict("server.admin_allowed_cidrs", cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies))
 		r.Mount("/admin", adminHandler)

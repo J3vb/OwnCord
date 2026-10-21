@@ -332,3 +332,13 @@ func parseGIFLimit(raw string) (int, bool) {
 	}
 	return n, true
 }
+
+// mountGIF mounts the GIF proxy, which keeps the Klipy API key server-side.
+// Mounted unconditionally; with no key configured the endpoints answer 503
+// GIF_DISABLED so the client can hide the picker rather than discover a 404.
+func mountGIF(r chi.Router, cfg *config.Config, svc *service.Services, limiter *auth.RateLimiter) {
+	MountGIFRoutes(r, svc.Sessions, limiter, cfg, svc.GIFFavorites)
+	if cfg.GIF.APIKey == "" {
+		slog.Info("gif.api_key not set — GIF picker disabled (clients will hide it)")
+	}
+}

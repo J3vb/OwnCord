@@ -29,9 +29,9 @@ server:
   #                           # pprof is on (0 disables); sees SQLite writer contention.
   # pprof_mutex_profile_fraction: 5        # sample 1 in N contended mutex events
   #                           # when pprof is on (0 disables).
-  # browser_client_enabled: false  # host a browser client from this server.
-  #                           # Owner opt-in, off by default. This build ships no
-  #                           # browser assets, so turning it on hosts nothing yet.
+  # browser_client_enabled: false  # host the browser client from this server.
+  #                           # Owner opt-in, off by default. Builds without the
+  #                           # browser bundle answer GET / with a 404 note.
   # reachability_report_enabled: false
   #                           # add a "reachability" block to the admin-only
   #                           # GET /api/v1/diagnostics/connectivity: this host's
