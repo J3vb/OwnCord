@@ -1,5 +1,6 @@
 import { muteChannel, unmuteChannel } from "@lib/channel-mutes";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { ApiClientError } from "@lib/api";
 import {
   selectDmConversation,
   handleCreateDm,
@@ -371,6 +372,59 @@ describe("SidebarDmHelpers", () => {
       await handleCreateDm(20, deps);
 
       expect(mockShow).toHaveBeenCalledWith("Network error", "error");
+    });
+
+    it("shows the app's neutral text for a 403, never the server's", async () => {
+      const mockShow = vi.fn();
+      const mockApi = {
+        createDm: vi
+          .fn()
+          .mockRejectedValue(
+            new ApiClientError(403, "FORBIDDEN", "cannot create DM: server words"),
+          ),
+      };
+      const deps = makeDeps({
+        api: mockApi as unknown as DmHelperDeps["api"],
+        getToast: vi.fn().mockReturnValue({ show: mockShow }),
+      });
+
+      await handleCreateDm(20, deps);
+
+      expect(mockShow).toHaveBeenCalledWith("You can't message this user right now.", "error");
+    });
+
+    it("keeps the server's own text for a 403 that is not FORBIDDEN", async () => {
+      const mockShow = vi.fn();
+      const mockApi = {
+        createDm: vi
+          .fn()
+          .mockRejectedValue(new ApiClientError(403, "TIMED_OUT", "You are timed out")),
+      };
+      const deps = makeDeps({
+        api: mockApi as unknown as DmHelperDeps["api"],
+        getToast: vi.fn().mockReturnValue({ show: mockShow }),
+      });
+
+      await handleCreateDm(20, deps);
+
+      expect(mockShow).toHaveBeenCalledTimes(1);
+      expect(mockShow.mock.calls[0]![0]).toBe("You are timed out");
+    });
+
+    it("keeps the normal error copy for a 404", async () => {
+      const mockShow = vi.fn();
+      const mockApi = {
+        createDm: vi.fn().mockRejectedValue(new ApiClientError(404, "NOT_FOUND", "user not found")),
+      };
+      const deps = makeDeps({
+        api: mockApi as unknown as DmHelperDeps["api"],
+        getToast: vi.fn().mockReturnValue({ show: mockShow }),
+      });
+
+      await handleCreateDm(20, deps);
+
+      expect(mockShow).toHaveBeenCalledTimes(1);
+      expect(mockShow.mock.calls[0]![0]).toBe("That item no longer exists.");
     });
 
     it("shows generic error toast for non-Error exceptions", async () => {

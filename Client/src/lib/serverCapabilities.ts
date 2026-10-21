@@ -15,6 +15,7 @@ export interface ReadyCapabilityFlags {
   readonly read_pointer?: boolean;
   readonly user_notes?: boolean;
   readonly profile_banners?: boolean;
+  readonly dm_privacy?: boolean;
 }
 
 /** The last full `ready`'s capabilities; null until one arrives. */
@@ -61,4 +62,13 @@ export function userNotesEnabled(): boolean {
  */
 export function profileBannersEnabled(): boolean {
   return caps?.profile_banners === true;
+}
+
+/**
+ * Whether the server stores the two direct message privacy settings (WP 6.8b):
+ * `GET` and `PUT` `/users/me/privacy`. False hides Settings > Safety > Direct
+ * messages.
+ */
+export function dmPrivacyEnabled(): boolean {
+  return caps?.dm_privacy === true;
 }

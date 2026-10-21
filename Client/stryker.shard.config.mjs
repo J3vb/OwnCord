@@ -314,6 +314,7 @@ export const shards = {
   "safety-moderation-5": [
     "src/features/blocks/blockActions.ts",
     "src/features/safety/BlockedUsers.ts",
+    "src/features/safety/DmPrivacy.ts",
     "src/features/message-requests/api.ts",
     "src/features/message-requests/wsHandlers.ts",
     "src/features/moderation/AppealDetail.ts",
