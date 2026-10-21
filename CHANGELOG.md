@@ -59,6 +59,10 @@ and only when it changes something a contributor or fork holder must do
 
 - Pinning a message now leaves a line in the chat for everyone who can read it ("X pinned a message to this channel"), in channels, DMs and group DMs. It makes no sound and is never a mention; pinning the same message again within 10 minutes adds no second line. The pinner (or Manage Messages in a channel) can delete the line. Clients without the matching update show it as plain text.
 
+**Voice**
+
+- Members who stay idle in a server voice channel are now moved to the AFK channel once it is set, after the AFK timeout on top of the client's own idle delay. A member who could not join the AFK channel, a DM or group call, and a member who comes back first are left alone. A moderator mute or deafen is kept through the move, and the member returns by joining a channel themselves. The client does not show why yet and the admin panel has no card for it.
+
 **Desktop UI**
 
 - Opening a voice call now opens the voice channel's text chat beside the video grid (stacked under it in a narrow window); leaving the call keeps the chat, and moving to another voice channel follows to its chat. A **Hide chat** / **Show chat** button in the header (shown during a call on that channel) keeps the grid full width, and a voice channel now shows a speaker in its header instead of `#`.

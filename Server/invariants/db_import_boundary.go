@@ -170,6 +170,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"ws/serve_ready.go":               {Disposition: "adapter", Note: "ready snapshot reads through ReadySnapshotReader; fresh-connect stale-voice cleanup through VoiceService"},
 	"ws/serve_ready_encode.go":        {Disposition: "adapter", Note: "encodes the ready frame buildReady read (P5-O01); db row types and the status vocabulary only"},
 	"ws/serve_ready_members_cache.go": {Disposition: "adapter", Note: "the ready payload's shared member-list read (DP-37), through ReadySnapshotReader; MemberSummary type"},
+	"ws/voice_afk.go":                 {Disposition: "adapter", Note: "Channel type and the idle status const in the AFK sweep; the AFK channel and the target's access read through the DispatchReader seam, capacity read through VoiceService"},
 	"ws/voice_join.go":                {Disposition: "adapter", Note: "Channel/VoiceState/ChannelOverride types in the join sequence; VoiceService owns the voice_states reads and writes"},
 	"ws/voice_moderation.go":          {Disposition: "adapter", Note: "Role/VoiceState types in the moderation gate; VoiceService owns the writes, the rollback and the audit row"},
 	"ws/voice_registry_txn.go":        {Disposition: "adapter", Note: "VoiceState type in persistJoin's signature; VoiceService owns the voice_states reads and writes"},

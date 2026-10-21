@@ -2182,6 +2182,25 @@ voice instead of moved").
 Sent only to the moved user. The client tears down its LiveKit session and joins
 `to_channel_id`.
 
+`reason` is optional and absent on a moderator move. `"afk"` means the server's
+AFK sweep moved a member who had been idle (presence `idle`) in a server voice
+channel for the AFK timeout (`afk_timeout_seconds`) to the AFK channel:
+
+```json
+{ "type": "voice_moved", "payload": { "to_channel_id": 12, "reason": "afk" } }
+```
+
+The sweep runs every 60 seconds and moves at most 25 members per run, oldest
+idle first. It moves only a member who could join the AFK channel themselves
+(`CONNECT_VOICE`, not archived, room under `voice_max_users`) and only out of a
+server voice channel, never out of a DM or group call; otherwise the member
+stays where they are. A member whose socket has dropped is not moved. The
+move is the same eviction plus client re-join as a moderator move: a server
+mute or deafen survives it, and for 60 seconds an automatic `voice_join` to the
+channel left is refused (a `user_initiated` join is not), so nothing returns the
+member automatically. No audit row is written. A client that does not know
+`reason` ignores it and re-joins as for a moderator move.
+
 ### voice_mod_kick (Client -> Server)
 
 ```json

@@ -92,7 +92,7 @@ func (h *Hub) CustomStatusExpired(userID int64, expiresAt string) {
 		// presence (if any) is still owed, so it is not dropped either.
 		return
 	}
-	if !c.presence.CompareAndSwap(cur, &livePresence{status: cur.status}) {
+	if !c.presence.CompareAndSwap(cur, &livePresence{status: cur.status, idleSince: cur.idleSince}) {
 		return
 	}
 	// Like every user-chosen presence, this supersedes a queued connect entry.

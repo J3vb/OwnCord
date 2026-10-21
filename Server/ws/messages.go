@@ -215,7 +215,13 @@ type voiceStatePayload struct {
 // through the normal voice_join path.
 type voiceMovedPayload struct {
 	ToChannelID int64 `json:"to_channel_id"`
+	// Reason says why the server moved the client; "afk" for the idle sweep
+	// (WP 6.10b). Omitted for a moderator move, so those bytes are unchanged.
+	Reason string `json:"reason,omitempty"`
 }
+
+// voiceMovedReasonAFK is voice_moved's reason for a move by the AFK sweep.
+const voiceMovedReasonAFK = "afk"
 
 // voiceDisconnectedPayload tells one client a moderator removed it from voice.
 type voiceDisconnectedPayload struct {
@@ -679,10 +685,12 @@ func buildVoiceState(state db.VoiceState) []byte {
 }
 
 // buildVoiceMoved constructs a voice_moved message for the moved client.
-func buildVoiceMoved(toChannelID int64) []byte {
+//
+// reason is "" for a moderator move and "afk" for the AFK sweep's.
+func buildVoiceMoved(toChannelID int64, reason string) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeVoiceMoved,
-		Payload: voiceMovedPayload{ToChannelID: toChannelID},
+		Payload: voiceMovedPayload{ToChannelID: toChannelID, Reason: reason},
 	})
 }
 
