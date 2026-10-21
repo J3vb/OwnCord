@@ -10,6 +10,56 @@ import (
 	"strings"
 )
 
+const bumpPollVersionIfOpen = `-- name: BumpPollVersionIfOpen :one
+UPDATE polls SET version = version + 1
+WHERE message_id = ? AND ended_at IS NULL AND expires_at > strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+RETURNING version
+`
+
+// The conditional write of a vote: it moves the version only while the poll is
+// open by the database clock, so a vote can never land after the end or the
+// expiry. No row means the poll closed first.
+func (q *Queries) BumpPollVersionIfOpen(ctx context.Context, messageID int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, bumpPollVersionIfOpen, messageID)
+	var version int64
+	err := row.Scan(&version)
+	return version, err
+}
+
+const deletePollUserVotes = `-- name: DeletePollUserVotes :exec
+DELETE FROM poll_votes WHERE message_id = ? AND user_id = ?
+`
+
+type DeletePollUserVotesParams struct {
+	MessageID int64 `json:"messageId"`
+	UserID    int64 `json:"userId"`
+}
+
+func (q *Queries) DeletePollUserVotes(ctx context.Context, arg DeletePollUserVotesParams) error {
+	_, err := q.db.ExecContext(ctx, deletePollUserVotes, arg.MessageID, arg.UserID)
+	return err
+}
+
+const endPollIfOpen = `-- name: EndPollIfOpen :one
+UPDATE polls SET ended_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), version = version + 1
+WHERE message_id = ? AND ended_at IS NULL
+RETURNING version, ended_at
+`
+
+type EndPollIfOpenRow struct {
+	Version int64   `json:"version"`
+	EndedAt *string `json:"endedAt"`
+}
+
+// The conditional write of an end, by button or by timer. No row means the poll
+// was already ended (or does not exist).
+func (q *Queries) EndPollIfOpen(ctx context.Context, messageID int64) (EndPollIfOpenRow, error) {
+	row := q.db.QueryRowContext(ctx, endPollIfOpen, messageID)
+	var i EndPollIfOpenRow
+	err := row.Scan(&i.Version, &i.EndedAt)
+	return i, err
+}
+
 const getPollAnswerCountsByMessageIDs = `-- name: GetPollAnswerCountsByMessageIDs :many
 SELECT message_id, answer_id, COUNT(*) AS votes
 FROM poll_votes WHERE message_id IN (/*SLICE:ids*/?)
@@ -98,6 +148,40 @@ func (q *Queries) GetPollAnswersByMessageIDs(ctx context.Context, ids []int64) (
 		return nil, err
 	}
 	return items, nil
+}
+
+const getPollForVote = `-- name: GetPollForVote :one
+SELECT p.allow_multiselect, p.version, p.ended_at, m.channel_id, m.user_id AS author_id, m.deleted,
+       CAST(p.ended_at IS NOT NULL OR p.expires_at <= strftime('%Y-%m-%dT%H:%M:%SZ', 'now') AS INTEGER) AS ended
+FROM polls p JOIN messages m ON m.id = p.message_id
+WHERE p.message_id = ?
+`
+
+type GetPollForVoteRow struct {
+	AllowMultiselect int64   `json:"allowMultiselect"`
+	Version          int64   `json:"version"`
+	EndedAt          *string `json:"endedAt"`
+	ChannelID        int64   `json:"channelId"`
+	AuthorID         int64   `json:"authorId"`
+	Deleted          int64   `json:"deleted"`
+	Ended            int64   `json:"ended"`
+}
+
+// A poll joined to its message, read inside the vote or end transaction. ended
+// is 1 when the poll was ended or its expiry has passed by the database clock.
+func (q *Queries) GetPollForVote(ctx context.Context, messageID int64) (GetPollForVoteRow, error) {
+	row := q.db.QueryRowContext(ctx, getPollForVote, messageID)
+	var i GetPollForVoteRow
+	err := row.Scan(
+		&i.AllowMultiselect,
+		&i.Version,
+		&i.EndedAt,
+		&i.ChannelID,
+		&i.AuthorID,
+		&i.Deleted,
+		&i.Ended,
+	)
+	return i, err
 }
 
 const getPollMeta = `-- name: GetPollMeta :one
@@ -323,4 +407,139 @@ func (q *Queries) InsertPollAnswer(ctx context.Context, arg InsertPollAnswerPara
 		arg.Emoji,
 	)
 	return err
+}
+
+const insertPollVote = `-- name: InsertPollVote :exec
+INSERT INTO poll_votes (message_id, answer_id, user_id) VALUES (?, ?, ?)
+`
+
+type InsertPollVoteParams struct {
+	MessageID int64 `json:"messageId"`
+	AnswerID  int64 `json:"answerId"`
+	UserID    int64 `json:"userId"`
+}
+
+func (q *Queries) InsertPollVote(ctx context.Context, arg InsertPollVoteParams) error {
+	_, err := q.db.ExecContext(ctx, insertPollVote, arg.MessageID, arg.AnswerID, arg.UserID)
+	return err
+}
+
+const listDuePolls = `-- name: ListDuePolls :many
+SELECT p.message_id, m.channel_id, m.user_id AS author_id, m.deleted
+FROM polls p JOIN messages m ON m.id = p.message_id
+WHERE p.ended_at IS NULL AND p.expires_at <= ?1
+ORDER BY p.expires_at, p.message_id
+LIMIT ?2
+`
+
+type ListDuePollsParams struct {
+	Now     string `json:"now"`
+	MaxRows int64  `json:"maxRows"`
+}
+
+type ListDuePollsRow struct {
+	MessageID int64 `json:"messageId"`
+	ChannelID int64 `json:"channelId"`
+	AuthorID  int64 `json:"authorId"`
+	Deleted   int64 `json:"deleted"`
+}
+
+// Polls to end: not yet ended and expired at or before now, oldest first.
+func (q *Queries) ListDuePolls(ctx context.Context, arg ListDuePollsParams) ([]ListDuePollsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listDuePolls, arg.Now, arg.MaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDuePollsRow{}
+	for rows.Next() {
+		var i ListDuePollsRow
+		if err := rows.Scan(
+			&i.MessageID,
+			&i.ChannelID,
+			&i.AuthorID,
+			&i.Deleted,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPollAnswerIDs = `-- name: ListPollAnswerIDs :many
+SELECT answer_id FROM poll_answers WHERE message_id = ? ORDER BY answer_id
+`
+
+func (q *Queries) ListPollAnswerIDs(ctx context.Context, messageID int64) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, listPollAnswerIDs, messageID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var answer_id int64
+		if err := rows.Scan(&answer_id); err != nil {
+			return nil, err
+		}
+		items = append(items, answer_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPollUserAnswerIDs = `-- name: ListPollUserAnswerIDs :many
+SELECT answer_id FROM poll_votes WHERE message_id = ? AND user_id = ? ORDER BY answer_id
+`
+
+type ListPollUserAnswerIDsParams struct {
+	MessageID int64 `json:"messageId"`
+	UserID    int64 `json:"userId"`
+}
+
+func (q *Queries) ListPollUserAnswerIDs(ctx context.Context, arg ListPollUserAnswerIDsParams) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, listPollUserAnswerIDs, arg.MessageID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var answer_id int64
+		if err := rows.Scan(&answer_id); err != nil {
+			return nil, err
+		}
+		items = append(items, answer_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const nextPollExpiry = `-- name: NextPollExpiry :one
+SELECT expires_at FROM polls WHERE ended_at IS NULL ORDER BY expires_at LIMIT 1
+`
+
+// The soonest expiry among polls not yet ended, served by the partial index.
+func (q *Queries) NextPollExpiry(ctx context.Context) (string, error) {
+	row := q.db.QueryRowContext(ctx, nextPollExpiry)
+	var expires_at string
+	err := row.Scan(&expires_at)
+	return expires_at, err
 }
