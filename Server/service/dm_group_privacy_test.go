@@ -286,3 +286,27 @@ func TestAddGroupMembers_RefusalBodyIdentical(t *testing.T) {
 		}
 	}
 }
+
+// A failed reachability read refuses the add as an internal error and adds
+// nobody.
+func TestAddGroupMembers_ReachabilityReadErrorFailsClosed(t *testing.T) {
+	f := newGroupMembershipFixture(t)
+	dms := NewDMService(&failingReachabilityStore{DB: f.database}, f.mod.perms)
+
+	before := f.members(t)
+	_, err := dms.AddGroupMembers(context.Background(), fixtureMember, f.dm, []int64{fixtureOwner})
+	if !errors.Is(err, ErrInternal) {
+		t.Fatalf("err = %v, want ErrInternal", err)
+	}
+	if got := f.members(t); !slices.Equal(got, before) {
+		t.Errorf("members = %v, want unchanged %v", got, before)
+	}
+}
+
+type failingReachabilityStore struct {
+	*db.DB
+}
+
+func (s *failingReachabilityStore) GroupDMTargetsRefuse(context.Context, int64, []int64) (bool, error) {
+	return false, errors.New("read failed")
+}

@@ -11,6 +11,8 @@ var _ PrivacyStore = (*db.DB)(nil)
 
 var _ DMPrivacyReader = (*db.DB)(nil)
 
+var _ groupReachabilityReader = (*db.DB)(nil)
+
 // PrivacyStore is the data access the privacy service needs. *db.DB satisfies
 // it; it is deliberately not part of Store.
 type PrivacyStore interface {

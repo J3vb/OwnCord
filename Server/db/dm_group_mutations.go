@@ -38,6 +38,9 @@ func (d *DB) CreateGroupDMChannel(ctx context.Context, name string, ownerID int6
 	if err := requireReachableTargets(ctx, tx, ownerID, slices.DeleteFunc(slices.Clone(participantIDs), func(id int64) bool { return id == ownerID })); err != nil {
 		return nil, err
 	}
+	if err := requireNoBlockedPair(ctx, tx, participantIDs, participantIDs); err != nil {
+		return nil, err
+	}
 
 	res, err := tx.ExecContext(ctx, `INSERT INTO channels (name, type, is_group, dm_owner_id) VALUES (?, 'dm', 1, ?)`, name, ownerID)
 	if err != nil {
