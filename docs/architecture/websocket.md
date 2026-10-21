@@ -196,13 +196,39 @@ membership row.
 | Stale-voice-state sweep       | every 60 s                                                                                                                                                                           |
 | LiveKit membership reconciler | every 60 s (`voice_reconcile.go`; see [livekit-setup.md](../livekit-setup.md))                                                                                                       |
 | Removed-participant watch     | every 2 s, only while an SFU identity the server removed is still within its token lifetime (`voice_removed_watch.go`)                                                               |
+| Channel-activity worker       | coalesces unread hints for unfocused readable channels; leading-edge 1 s window (`channel_activity.go`, WP 2B-2)                                                                     |
+| Role-refresh worker           | fans a committed role change out per affected user, off the request goroutine; coalesces pending users (`role_refresh.go`, WP 4.4b, see below)                                       |
 | Panic containment             | on the run loop: 3 panics in 60 s, or one Windows memory fault (SRE-08), stops the hub and exits the process                                                                         |
 | LiveKit client and subprocess | the client, and the optional managed `livekit-server` process                                                                                                                        |
 | Voice E2EE key-holder map     | see [voice-e2ee.md](voice-e2ee.md)                                                                                                                                                   |
 
 Each sweep and watch tick runs with a timeout under the hub's lifecycle
 context. So `Stop` cancels it and `Done()` waits for it (`hub_sweep.go`,
-`hub_stop.go`).
+`hub_stop.go`). The two coalescing workers run on that context too, and
+`finishRun` joins them.
+
+**Role-refresh worker (WP 4.4b).** An admin role handler commits, invalidates
+the permission cache and makes one `Hub.EnqueueRoleRefresh` call; it never
+waits on the fan-out. For the members it names directly it also calls
+`Hub.RevokeUnreadableChannels`, so their held channels are released as the
+request answers. The worker takes the pending users in rounds. Each affected
+member's held topics are released before their sidebar is sent. For each
+user whose role changed it revokes held topics first, then sends
+`channel_create`/`channel_delete` in chunks (a client that does not drain is
+kicked, never sent `BANNED`), then paces `member_update` with the role name
+read at send time, redelivers the timeout views to those users only, and ends
+with one `roles_update`. A user who reconnects while its refresh is pending or
+running takes a full `ready`; every other reconnect still resumes by replay. A
+crash or restart drops what is pending, and clients converge on reconnect from
+committed state.
+
+**Lock order for the worker.** `roleRefreshState.mu` is a leaf: it may be taken
+under `seqMu` (the reconnect check calls `covers`) and `seqMu` is never taken
+under it. It is never held across I/O or a send, or while taking `h.mu`,
+`timeoutView.mu` or any `Client.mu`. `flushMu`, which serialises rounds, sits
+above everything a round takes, and enqueue never takes it. The
+channel-activity coalescer follows the same rule (`activity.mu` is a leaf,
+`flushMu` above it).
 
 Collaborators are passed in up front through the validated `ws.HubOptions`
 (`Server/ws/hub_options.go`). `NewHub` runs `validateHubOptions` before it
@@ -212,7 +238,7 @@ The event-persistence pair is still attached after the hub is running
 `Server/internal/app/persistence.go`). That hot-swap after `Run` is the timing
 dependency the audit note names.
 
-**Source of truth:** `Server/ws/hub.go`, `Server/ws/hub_content_gate.go`, `Server/ws/serve.go`,
+**Source of truth:** `Server/ws/hub.go`, `Server/ws/hub_content_gate.go`, `Server/ws/role_refresh.go`, `Server/ws/serve.go`,
 `Server/ws/client.go`, `Server/ws/handlers.go`, `Server/ws/command.go`,
 `Server/ws/pubsub.go`, `Server/ws/ringbuffer.go`, `Server/ws/event_persister.go`,
 `Server/ws/message_types.go`, `Server/migrations/014_events_table.sql`.

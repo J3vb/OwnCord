@@ -21,9 +21,9 @@ import (
 // queues.
 type timeoutViewState struct {
 	mu syncutil.Mutex
-	// gen counts role refreshes. RefreshAllChannelVisibility bumps it under
-	// mu on entry, and every caller of RefreshAllChannelVisibility has
-	// already invalidated the permission cache by then (the cache's own generation drops any population that
+	// gen counts role refreshes. refreshVisibilityUsers bumps it under mu on
+	// entry, and every caller (the role-refresh worker, RefreshAllChannelVisibility)
+	// has already invalidated the permission cache by then (the cache's own generation drops any population that
 	// raced the invalidation). So a verdict resolved after reading gen sees
 	// every role change whose refresh has bumped it; a delivery that finds gen
 	// moved resolves again.
@@ -77,18 +77,22 @@ func (h *Hub) bumpTimeoutViewGen() {
 var timeoutVerdictLookupHook func(userID int64) error
 
 // resolveTimeoutVerdicts resolves permissions.CanModerate for every
-// connected user, outside every lock. The verdict is three-way: true
+// connected user, outside every lock. only, when non-nil, restricts the pass
+// to those users (a role refresh resolves just the users whose role changed);
+// nil means everyone. The verdict is three-way: true
 // (moderator), false (not a moderator), or absent from the map (unknown: the
 // lookup failed or ran out of time). An unknown user is skipped by the
 // delivery, so a transient lookup failure neither narrows a moderator's list
 // nor widens anyone else's; the next delivery or ready settles it.
-func (h *Hub) resolveTimeoutVerdicts(ctx context.Context) map[int64]bool {
+func (h *Hub) resolveTimeoutVerdicts(ctx context.Context, only map[int64]struct{}) map[int64]bool {
 	ctx, cancel := context.WithTimeout(ctx, timeoutVerdictBudget)
 	defer cancel()
 	h.mu.RLock()
 	ids := make([]int64, 0, len(h.clients))
 	for uid := range h.clients {
-		ids = append(ids, uid)
+		if _, ok := only[uid]; only == nil || ok {
+			ids = append(ids, uid)
+		}
 	}
 	h.mu.RUnlock()
 	verdicts := make(map[int64]bool, len(ids))
@@ -106,8 +110,8 @@ func (h *Hub) resolveTimeoutVerdicts(ctx context.Context) map[int64]bool {
 	return verdicts
 }
 
-// deliverTimeoutViews resolves every connected user's moderator verdict and
-// then, under timeoutView.mu, sends each evaluated user's live client its
+// deliverTimeoutViews resolves every connected user's moderator verdict (only
+// restricts that to a set, nil meaning everyone) and then, under timeoutView.mu, sends each evaluated user's live client its
 // view when wants says so. wants runs under timeoutView.mu.
 //
 // When a role refresh moves timeoutView.gen while the verdicts are being
@@ -120,11 +124,11 @@ func (h *Hub) resolveTimeoutVerdicts(ctx context.Context) map[int64]bool {
 // When the timeout mirror is not loaded it reloads it once, outside
 // timeoutView.mu, and tries again; it returns false, having sent nothing,
 // only when that reload fails or the mirror is still unloaded.
-func (h *Hub) deliverTimeoutViews(ctx context.Context, wants func(c *Client, isMod bool) bool) bool {
+func (h *Hub) deliverTimeoutViews(ctx context.Context, only map[int64]struct{}, wants func(c *Client, isMod bool) bool) bool {
 	reloaded := false
 	for {
 		gen := h.timeoutViewGenNow()
-		verdicts := h.resolveTimeoutVerdicts(ctx)
+		verdicts := h.resolveTimeoutVerdicts(ctx, only)
 		if timeoutViewResolvedHook != nil {
 			timeoutViewResolvedHook()
 		}

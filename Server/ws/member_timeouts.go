@@ -74,7 +74,7 @@ func (h *Hub) publishMemberTimeouts(targetID int64) {
 	if h.perms == nil {
 		return
 	}
-	ok := h.deliverTimeoutViews(context.Background(), func(c *Client, isMod bool) bool {
+	ok := h.deliverTimeoutViews(context.Background(), nil, func(c *Client, isMod bool) bool {
 		return isMod || c.userID == targetID
 	})
 	if !ok {
@@ -82,23 +82,31 @@ func (h *Hub) publishMemberTimeouts(targetID int64) {
 	}
 }
 
-// refreshTimeoutViewsAfterRoleChange runs at the end of every
-// RefreshAllChannelVisibility, after the caller invalidated the permission
-// cache. A role edit can make a client a moderator or stop it being one:
-// moderators get the full list again, and a client that holds the full list
-// but is no longer a moderator gets its own-only list, replacing it. Clients
-// holding their own-only list that stay non-moderators get nothing.
+// refreshTimeoutViewsAfterRoleChange runs at the end of a role refresh, after
+// the caller invalidated the permission cache. A role edit can make a client a
+// moderator or stop it being one: moderators get the full list again, and a
+// client that holds the full list but is no longer a moderator gets its own-only
+// list, replacing it. Clients holding their own-only list that stay
+// non-moderators get nothing. only restricts the pass to the users whose role
+// changed (nil: every connected user), so an unaffected moderator keeps the
+// list it already holds.
 //
-// RefreshAllChannelVisibility bumps timeoutView.gen on entry, so a publish
-// that resolved its verdicts before this role change resolves them again;
+// refreshVisibilityUsers bumps timeoutView.gen on entry, so a publish that
+// resolved its verdicts before this role change resolves them again;
 // begin/endTargetedFanout force a resume across it onto a full ready.
 func (h *Hub) refreshTimeoutViewsAfterRoleChange() {
+	h.refreshTimeoutViewsFor(context.Background(), nil)
+}
+
+// refreshTimeoutViewsFor is refreshTimeoutViewsAfterRoleChange over only (nil:
+// every connected user), against ctx.
+func (h *Hub) refreshTimeoutViewsFor(ctx context.Context, only map[int64]struct{}) {
 	if h.perms == nil {
 		return
 	}
 	h.beginTargetedFanout()
 	defer h.endTargetedFanout()
-	ok := h.deliverTimeoutViews(context.Background(), func(c *Client, isMod bool) bool {
+	ok := h.deliverTimeoutViews(ctx, only, func(c *Client, isMod bool) bool {
 		return isMod || c.timeouts.full.Load()
 	})
 	if !ok {
