@@ -256,9 +256,11 @@ trust, inserts the pair's `message_requests` row as `accepted`, writes
 `trusted_senders(recipient, sender, 'accepted')` next to the `sent_first` edge
 and opens the DM for the recipient. The send then delivers as for a trusted
 sender and sends no `dm_request`. Requests already `pending` stay pending, and
-the pair stays trusted if the setting is turned back on. A concurrent pair of
-first sends keeps one row (`INSERT OR IGNORE`); the loser finds the trust the
-winner wrote and is delivered too.
+the pair stays trusted if the setting is turned back on. Two concurrent first
+sends from the same sender keep one row (`INSERT OR IGNORE`); the loser finds
+the trust the winner wrote and is delivered too. Opposite directions are two
+pairs with a row each. A block between the pair, read in the same
+transaction, always stages instead.
 
 ### Abuse cases
 

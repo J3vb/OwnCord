@@ -293,3 +293,86 @@ func TestRequestsOff_PendingRequestsStayPending(t *testing.T) {
 		t.Errorf("recipient trust rows = %d, want 0", n)
 	}
 }
+
+// A block that lands after the gate's reads and before the transaction stages
+// the request instead: the recipient never trusts a sender they blocked.
+func TestRequestsOff_BlockDuringFirstSendStages(t *testing.T) {
+	database, svc := newMessageRequestFixture(t)
+	ctx := context.Background()
+	setPrivacy(t, database, 2, true, false)
+	svc.Messages.afterFirstContactTrustCheck = func() {
+		if err := database.BlockUser(ctx, 2, 1); err != nil {
+			t.Errorf("BlockUser: %v", err)
+		}
+	}
+
+	res := sendFirst(t, svc, 1, "hi")
+
+	if len(res.OpenedDMFor) != 0 || !slices.Equal(res.ParticipantIDs, []int64{1}) {
+		t.Errorf("OpenedDMFor = %v, ParticipantIDs = %v; want nothing opened, sender only", res.OpenedDMFor, res.ParticipantIDs)
+	}
+	if n := countRows(t, database, `SELECT COUNT(*) FROM trusted_senders WHERE recipient_id = 2 AND sender_id = 1`); n != 0 {
+		t.Errorf("recipient trust rows = %d, want 0", n)
+	}
+	if n := countRows(t, database, `SELECT COUNT(*) FROM dm_open_state WHERE user_id = 2`); n != 0 {
+		t.Errorf("recipient dm_open_state rows = %d, want 0", n)
+	}
+	if err := database.UnblockUser(ctx, 2, 1); err != nil {
+		t.Fatalf("UnblockUser: %v", err)
+	}
+	if n := countRows(t, database, `SELECT COUNT(*) FROM trusted_senders WHERE recipient_id = 2 AND sender_id = 1`); n != 0 {
+		t.Errorf("recipient trust rows after unblock = %d, want 0", n)
+	}
+}
+
+// Trust, not the request's state or the setting as it reads now, decides
+// delivery for the loser of a same-sender race: the winner (run inside the
+// loser's hook) accepts and opens, the recipient then closes the DM and turns
+// requests back on, and the loser is still delivered and reopens the DM.
+func TestRequestsOff_LoserDeliveredAfterSettingFlipsBack(t *testing.T) {
+	database, svc := newMessageRequestFixture(t)
+	setPrivacy(t, database, 2, true, false)
+
+	var winner *SendMessageResult
+	nested := false
+	svc.Messages.afterFirstContactTrustCheck = func() {
+		if nested {
+			return
+		}
+		nested = true
+		winner = sendFirst(t, svc, 1, "winner")
+		if err := database.CloseDM(context.Background(), 2, 50); err != nil {
+			t.Errorf("CloseDM: %v", err)
+		}
+		setPrivacy(t, database, 2, true, true)
+	}
+
+	loser := sendFirst(t, svc, 1, "loser")
+
+	for name, r := range map[string]*SendMessageResult{"winner": winner, "loser": loser} {
+		if r == nil || !slices.Equal(sorted(r.ParticipantIDs), []int64{1, 2}) {
+			t.Errorf("%s: result = %+v; want delivered to [1 2]", name, r)
+		}
+		if r != nil && (!slices.Equal(r.OpenedDMFor, []int64{2}) || len(r.RequestCreatedFor) != 0) {
+			t.Errorf("%s: OpenedDMFor = %v, RequestCreatedFor = %v; want one open each, no request", name, r.OpenedDMFor, r.RequestCreatedFor)
+		}
+	}
+	if n := countRows(t, database, `SELECT COUNT(*) FROM message_requests`); n != 1 {
+		t.Errorf("request rows = %d, want 1", n)
+	}
+}
+
+// Trust persists: once accepted, turning direct messages off does not cut the
+// sender off. Only a block does.
+func TestRequestsOff_TrustPersistsWhenDMsTurnedOff(t *testing.T) {
+	database, svc := newMessageRequestFixture(t)
+	setPrivacy(t, database, 2, true, false)
+	sendFirst(t, svc, 1, "first")
+
+	setPrivacy(t, database, 2, false, false)
+	res := sendFirst(t, svc, 1, "second")
+
+	if !slices.Equal(sorted(res.ParticipantIDs), []int64{1, 2}) {
+		t.Errorf("ParticipantIDs = %v, want [1 2]", res.ParticipantIDs)
+	}
+}

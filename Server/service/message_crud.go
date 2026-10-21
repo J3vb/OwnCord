@@ -322,10 +322,12 @@ func (s *MessageService) sendMessageDMSideEffects(ctx context.Context, p SendMes
 
 	// The live-delivery audience: the sender plus every other participant who
 	// trusts them (one-to-one) or every participant (group) — see
-	// DMAudience — derived from the same read. The loop above writes no row
-	// that changes it: a staged request's trust edge points the other way
-	// (the recipient becomes trusted BY the sender), so a recipient this
-	// very send just staged a request for is correctly excluded.
+	// DMAudience — derived from the same read. A staged request's trust edge
+	// points the other way (the recipient becomes trusted BY the sender), so
+	// a recipient this send just staged a request for is correctly excluded;
+	// the one write that adds a recipient is the gate's accepted edge for a
+	// recipient with message requests off, which marks that target trusted
+	// in this very slice.
 	if s.messageRequests == nil {
 		result.ParticipantIDs = dmTargetIDs(targets)
 	} else {
