@@ -98,7 +98,7 @@ func TestNewRouter_DeleteAccount_BroadcastsMemberBanOverWS(t *testing.T) {
 		},
 	}
 
-	rt, rtErr := app.StartRuntime(cfg, database, nil)
+	rt, rtErr := app.StartRuntime(cfg, database, nil, testRuntimeInputs(cfg))
 	if rtErr != nil {
 		t.Fatalf("app.StartRuntime: %v", rtErr)
 	}

@@ -1,4 +1,4 @@
-package api
+package app
 
 import (
 	"github.com/J3vb/OwnCord/Server/service"

@@ -152,11 +152,11 @@ func TestLen_AfterLockouts(t *testing.T) {
 	}
 }
 
-// ─── StartCleanup ─────────────────────────────────────────────────────────────
+// ─── RunCleanup ───────────────────────────────────────────────────────────────
 
-// TestStartCleanup_RunsPeriodically verifies that StartCleanup evicts stale
+// TestRunCleanup_RunsPeriodically verifies that RunCleanup evicts stale
 // entries automatically without a manual Cleanup call.
-func TestStartCleanup_RunsPeriodically(t *testing.T) {
+func TestRunCleanup_RunsPeriodically(t *testing.T) {
 	rl := auth.NewRateLimiter()
 	shortWindow := 20 * time.Millisecond
 
@@ -167,11 +167,11 @@ func TestStartCleanup_RunsPeriodically(t *testing.T) {
 		t.Fatalf("expected 1 window entry before cleanup, got %d", wins)
 	}
 
-	stop := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
 	// Run cleanup every 10 ms with a 20 ms max window so the stale entry is
 	// evicted after the first tick.
-	go rl.StartCleanup(10*time.Millisecond, stop)
-	defer close(stop)
+	go rl.RunCleanup(ctx, 10*time.Millisecond)
+	defer cancel()
 
 	// Give the ticker at least two cycles to fire.
 	deadline := time.Now().Add(200 * time.Millisecond)
@@ -184,29 +184,28 @@ func TestStartCleanup_RunsPeriodically(t *testing.T) {
 
 	wins, _ = rl.Len()
 	if wins != 0 {
-		t.Errorf("StartCleanup did not evict stale entry within 200 ms; Len().windows = %d", wins)
+		t.Errorf("RunCleanup did not evict stale entry within 200 ms; Len().windows = %d", wins)
 	}
 }
 
-// TestStartCleanup_StopsOnSignal verifies that closing the stop channel
-// terminates the background goroutine (no leak).  We cannot observe the
-// goroutine directly, but we verify no panic/deadlock occurs after stop.
-func TestStartCleanup_StopsOnSignal(t *testing.T) {
+// TestRunCleanup_ReturnsOnCancel verifies that cancelling the context ends
+// the loop (no leak).
+func TestRunCleanup_ReturnsOnCancel(t *testing.T) {
 	rl := auth.NewRateLimiter()
-	stop := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
 
 	done := make(chan struct{})
 	go func() {
-		rl.StartCleanup(10*time.Millisecond, stop)
+		rl.RunCleanup(ctx, 10*time.Millisecond)
 		close(done)
 	}()
 
-	close(stop)
+	cancel()
 
 	select {
 	case <-done:
 		// goroutine exited cleanly
 	case <-time.After(500 * time.Millisecond):
-		t.Error("StartCleanup goroutine did not exit after stop channel was closed")
+		t.Error("RunCleanup did not return after its context was cancelled")
 	}
 }
