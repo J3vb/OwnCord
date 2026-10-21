@@ -105,9 +105,9 @@ func (s *stopJoinLeaveStore) LeaveIfMatch(ctx context.Context, _, _ int64, _ str
 }
 
 func TestVoiceLeaveRetry_JoinedByStopHub(t *testing.T) {
-	old := voiceLeaveRetryTimeout
-	voiceLeaveRetryTimeout = time.Hour // only the hub stop may end the retry
-	t.Cleanup(func() { voiceLeaveRetryTimeout = old })
+	old := voiceLeaveRetryTimeout.Load()
+	voiceLeaveRetryTimeout.Store(int64(time.Hour)) // only the hub stop may end the retry
+	t.Cleanup(func() { voiceLeaveRetryTimeout.Store(old) })
 
 	database := newHarvestVoiceDB(t)
 	voice := &stopJoinLeaveStore{VoiceService: service.NewVoiceService(database), ended: make(chan error, 4)}
