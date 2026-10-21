@@ -19,8 +19,8 @@ import (
 // Thin adapters over service.ChannelService (B3-8 channel family, part 2):
 // the escalation guard (clearing a deny is a grant), the hierarchy rules,
 // mask clamping, the writes and their audit rows all live in the service.
-// The handlers decode, delegate, invalidate cached permissions from the
-// result, and fan the visibility refresh out to the hub.
+// The handlers decode, delegate and respond; the service also invalidates
+// cached permissions and refreshes channel visibility (WP 5.1a).
 
 // getPermChannel resolves the channel for an override request through the
 // one S-04 policy (service.ChannelService.ResolveGuildChannel): a DM id
@@ -36,24 +36,6 @@ func getPermChannel(channels *service.ChannelService, w http.ResponseWriter, r *
 // the override paths distinguish "role not found" from "user not found".
 func writeOverrideErr(w http.ResponseWriter, err error) {
 	writeSvcErr(w, err, "", "", "channel permission action failed")
-}
-
-// applyOverrideResult runs the post-mutation fan-out: cached-permission
-// invalidation narrowed to who the mutation can affect (with the full-flush
-// fail-safe — a missed eviction is a stale grant), BEFORE the hub call,
-// because RefreshChannelVisibility resolves visibility through the same
-// cache.
-func applyOverrideResult(res service.OverrideResult, ch *db.Channel, hub HubBroadcaster, permInvalidator PermissionInvalidator) {
-	if permInvalidator != nil {
-		if res.AffectedAll {
-			permInvalidator.InvalidateAll()
-		} else {
-			invalidateUsers(permInvalidator, res.AffectedUsers)
-		}
-	}
-	if hub != nil {
-		hub.RefreshChannelVisibility(ch)
-	}
 }
 
 // channelPermissionsResponse is the JSON shape for GET .../permissions.
@@ -121,7 +103,7 @@ func overrideMutationSetup(channels *service.ChannelService, w http.ResponseWrit
 	return ch, targetID, actorRole, true
 }
 
-func handlePutChannelPermission(channels *service.ChannelService, hub HubBroadcaster, permInvalidator PermissionInvalidator) http.HandlerFunc {
+func handlePutChannelPermission(channels *service.ChannelService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req putChannelPermissionRequest
 		ch, roleID, actorRole, ok := overrideMutationSetup(channels, w, r, "roleId", "invalid role id", &req)
@@ -134,7 +116,6 @@ func handlePutChannelPermission(channels *service.ChannelService, hub HubBroadca
 			writeOverrideErr(w, err)
 			return
 		}
-		applyOverrideResult(res, ch, hub, permInvalidator)
 		writeJSON(w, http.StatusOK, db.ChannelRoleOverride{
 			RoleID:      res.Role.ID,
 			RoleName:    res.Role.Name,
@@ -146,19 +127,18 @@ func handlePutChannelPermission(channels *service.ChannelService, hub HubBroadca
 	}
 }
 
-func handleDeleteChannelPermission(channels *service.ChannelService, hub HubBroadcaster, permInvalidator PermissionInvalidator) http.HandlerFunc {
+func handleDeleteChannelPermission(channels *service.ChannelService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ch, roleID, actorRole, ok := overrideMutationSetup(channels, w, r, "roleId", "invalid role id", nil)
 		if !ok {
 			return
 		}
 
-		res, err := channels.DeleteRoleOverride(r.Context(), actorFromContext(r), actorRole, ch, roleID)
+		_, err := channels.DeleteRoleOverride(r.Context(), actorFromContext(r), actorRole, ch, roleID)
 		if err != nil {
 			writeOverrideErr(w, err)
 			return
 		}
-		applyOverrideResult(res, ch, hub, permInvalidator)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -168,10 +148,11 @@ func handleDeleteChannelPermission(channels *service.ChannelService, hub HubBroa
 // channel_user_overrides is the last layer of the resolution order (base role
 // perms -> role override -> user override), so these two endpoints can grant a
 // single member access to a channel their role is denied, or take it away
-// without minting a role for them. They invalidate only the target user's
-// cached permissions: a per-user override cannot change anyone else's verdict.
+// without minting a role for them. The service invalidates only the target
+// user's cached permissions: a per-user override cannot change anyone else's
+// verdict.
 
-func handlePutChannelUserPermission(channels *service.ChannelService, hub HubBroadcaster, permInvalidator PermissionInvalidator) http.HandlerFunc {
+func handlePutChannelUserPermission(channels *service.ChannelService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req putChannelPermissionRequest
 		ch, userID, actorRole, ok := overrideMutationSetup(channels, w, r, "userId", "invalid user id", &req)
@@ -184,7 +165,6 @@ func handlePutChannelUserPermission(channels *service.ChannelService, hub HubBro
 			writeOverrideErr(w, err)
 			return
 		}
-		applyOverrideResult(res, ch, hub, permInvalidator)
 		writeJSON(w, http.StatusOK, db.ChannelUserOverride{
 			UserID:   res.User.ID,
 			Username: res.User.Username,
@@ -195,19 +175,18 @@ func handlePutChannelUserPermission(channels *service.ChannelService, hub HubBro
 	}
 }
 
-func handleDeleteChannelUserPermission(channels *service.ChannelService, hub HubBroadcaster, permInvalidator PermissionInvalidator) http.HandlerFunc {
+func handleDeleteChannelUserPermission(channels *service.ChannelService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ch, userID, actorRole, ok := overrideMutationSetup(channels, w, r, "userId", "invalid user id", nil)
 		if !ok {
 			return
 		}
 
-		res, err := channels.DeleteUserOverride(r.Context(), actorFromContext(r), actorRole, ch, userID)
+		_, err := channels.DeleteUserOverride(r.Context(), actorFromContext(r), actorRole, ch, userID)
 		if err != nil {
 			writeOverrideErr(w, err)
 			return
 		}
-		applyOverrideResult(res, ch, hub, permInvalidator)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

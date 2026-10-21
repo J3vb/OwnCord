@@ -45,17 +45,6 @@ type HubBroadcaster interface {
 	// messages after a channel permission override change so each connected
 	// client's sidebar reflects its new visibility without a reconnect.
 	RefreshChannelVisibility(ch *db.Channel)
-	// RevokeUnreadableChannels releases the channel topics a user's live
-	// client holds that the user's current role cannot read. Handlers call it
-	// for the users they name, after invalidating the permission cache and
-	// before the request answers; EnqueueRoleRefresh carries the rest.
-	RevokeUnreadableChannels(userID int64)
-	// EnqueueRoleRefresh hands a committed role mutation's fan-out to the
-	// hub's background worker and returns at once (WP 4.4b): held topics,
-	// sidebar, affordances and timeout view for the users whose role changed,
-	// a paced member_update, and one roles_update. The caller commits and
-	// invalidates the permission cache first.
-	EnqueueRoleRefresh(r ws.RoleRefresh)
 	// BroadcastRolesUpdate ships the full role list to every connected client
 	// after a role mutation, so name colors and permission-gated affordances
 	// converge without a reconnect.
@@ -70,8 +59,12 @@ type HubBroadcaster interface {
 
 // ─── PermissionInvalidator ───────────────────────────────────────────────────
 
-// PermissionInvalidator allows admin handlers to invalidate the permission
-// cache when roles or permissions change. Satisfied by *service.PermissionService.
+// PermissionInvalidator was how admin handlers invalidated the permission cache
+// when roles or permissions changed. Since WP 5.1a the services do that
+// themselves (service.PermissionChangeNotifier's callers invalidate first), so
+// the admin constructors accept the value but no longer use it; it is kept so
+// their signatures, and every caller, stay unchanged. Satisfied by
+// *service.PermissionService.
 type PermissionInvalidator interface {
 	InvalidateUser(userID int64)
 	InvalidateAll()

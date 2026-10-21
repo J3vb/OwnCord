@@ -136,14 +136,15 @@ var DBImportAllow = map[string]DBImportEntry{
 	"cmd/gendocs/main.go":         {Disposition: "boundary", Note: "docs generator migrates its own in-memory catalog", Calls: calls{"Close": 2, "QueryContext": 2}, Hands: calls{"api.NewRouter": 1, "app.StartRuntime": 1}},
 	"plugin/pluginstore.go":       {Disposition: "adapter", Note: "PluginRow type only; the store is injected"},
 	// ── ws ────────────────────────────────────────────────────────────────
-	"ws/client.go":          {Disposition: "adapter", Note: "db.User type on the connection"},
-	"ws/deps.go":            {Disposition: "adapter", Note: "dispatch helpers read through the DispatchReader seam (readers.go); db types in signatures"},
-	"ws/event.go":           {Disposition: "adapter", Note: "pure BroadcastStatus helper"},
-	"ws/event_persister.go": {Disposition: "adapter", Note: "PersistedEvent type; store is an interface"},
-	"ws/eventstore.go":      {Disposition: "adapter", Note: "PersistedEvent type; store is an interface"},
-	"ws/handlers.go":        {Disposition: "adapter", Note: "command handlers read through the DispatchReader seam; db types in payload shapes"},
-	"ws/handlers_chat.go":   {Disposition: "adapter", Note: "pure NewDMChannelInfo helper"},
-	"ws/hub.go":             {Disposition: "boundary", Note: "Hub state holds the handle the families read through; no calls"},
+	"ws/client.go":              {Disposition: "adapter", Note: "db.User type on the connection"},
+	"ws/deps.go":                {Disposition: "adapter", Note: "dispatch helpers read through the DispatchReader seam (readers.go); db types in signatures"},
+	"ws/event.go":               {Disposition: "adapter", Note: "pure BroadcastStatus helper"},
+	"ws/event_persister.go":     {Disposition: "adapter", Note: "PersistedEvent type; store is an interface"},
+	"ws/eventstore.go":          {Disposition: "adapter", Note: "PersistedEvent type; store is an interface"},
+	"ws/handlers.go":            {Disposition: "adapter", Note: "command handlers read through the DispatchReader seam; db types in payload shapes"},
+	"ws/handlers_chat.go":       {Disposition: "adapter", Note: "pure NewDMChannelInfo helper"},
+	"ws/permission_notifier.go": {Disposition: "adapter", Note: "service.PermissionChangeNotifier adapter; db.Channel in a signature only"},
+	"ws/hub.go":                 {Disposition: "boundary", Note: "Hub state holds the handle the families read through; no calls"},
 	// B6-14: no import of its own — the replay purge reaches Hub.db directly,
 	// and deliberately. Since WP 2A-7 (ARCH-007) purgeReplay installs the
 	// tombstones and drops the ring's copies under seqMu, releases it, flushes
