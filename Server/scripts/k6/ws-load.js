@@ -553,7 +553,10 @@ const ROLE_FLIP_ROLE = __ENV.K6_ROLE_FLIP_ROLE || "Moderator";
 const ROLE_FLIP_FROM_S = SCALE_BOUNDS[1];
 const ROLE_FLIP_UNTIL_S = SCALE_HERD_AT_S;
 // The renamed default role: short enough for the 32-character role name limit.
-// A slow handler is a measurement, not a status-0 error.
+// A slow handler is a measurement, not a status-0 error. The restoring ticks
+// split what is left before the herd between their two PATCHes instead, so a
+// restore that cannot finish times out as a counted error rather than being
+// cut off unrecorded by the scenario's graceful stop.
 const ROLE_FLIP_TIMEOUT = "120s";
 const ROLE_FLIP_SUFFIX = "-lt";
 // ADD_REACTIONS (0x0040): a bit that changes the role's mask without touching
@@ -2396,7 +2399,8 @@ function roleFlipResolve() {
     user = rows.find((u) => u.username === ROLE_FLIP_USER) || null;
     if (rows.length < 500) break;
   }
-  if (!user) return null;
+  // Only a user starting in the default role can be restored to where it began.
+  if (!user || user.role_id !== base.id) return null;
   return { base, other, userId: user.id };
 }
 
@@ -2419,7 +2423,10 @@ export function roleFlipScenario() {
     // the state moves only on a 200, so a failed PATCH is retried, not skipped.
     const flipUser = last ? false : !rfUserFlipped;
     const flipRole = last ? false : !rfRoleFlipped;
-    const slow = { headers, timeout: ROLE_FLIP_TIMEOUT };
+    const timeout = last
+      ? `${Math.max(1, Math.floor((ROLE_FLIP_UNTIL_S - nowS) / 2))}s`
+      : ROLE_FLIP_TIMEOUT;
+    const slow = { headers, timeout };
 
     let t0 = Date.now();
     const userRes = http.patch(

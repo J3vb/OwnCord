@@ -1032,8 +1032,8 @@ const flipRoutes = (h) => {
     { id: 4, name: "Member", permissions: 1635, is_default: true },
   ];
   h.routes["/admin/api/users"] = [
-    { id: 7, username: "loadtest20" },
-    { id: 9, username: "loadtest2000" },
+    { id: 7, username: "loadtest20", role_id: 4 },
+    { id: 9, username: "loadtest2000", role_id: 4 },
   ];
 };
 
@@ -1107,6 +1107,15 @@ test("role flip counts an unresolvable role or user as an error and retries, nev
   assert.equal(h.patches.length, 2);
 });
 
+test("role flip refuses a user that does not start in the default role", () => {
+  const h = harness(flipEnv(), 1, flipFiles);
+  flipRoutes(h);
+  h.routes["/admin/api/users"] = [{ id: 9, username: "loadtest2000", role_id: 3 }];
+  h.evaluate("roleFlipScenario()");
+  assert.equal(h.patches.length, 0);
+  assert.equal(h.metrics.role_flip_errors.length, 1);
+});
+
 test("role flip observer records broadcast drops and dispatch lag per phase, and the summary publishes them", () => {
   const h = harness(flipEnv(), 1, flipFiles);
   h.at(200);
@@ -1146,7 +1155,7 @@ test("role flip observer records broadcast drops and dispatch lag per phase, and
   assert.equal(steady.queue_disconnects, 0);
 });
 
-test("role flip uses a long PATCH timeout and stops before the herd with everything restored", () => {
+test("role flip uses a long PATCH timeout, restores inside the pre-herd window, and stops before the herd", () => {
   const h = harness(flipEnv(), 1, flipFiles);
   flipRoutes(h);
   const until = h.evaluate("ROLE_FLIP_UNTIL_S");
@@ -1156,7 +1165,11 @@ test("role flip uses a long PATCH timeout and stops before the herd with everyth
     h.at(t);
     h.evaluate("roleFlipScenario()");
   }
-  for (const call of h.patches) assert.equal(call.params.timeout, "120s");
+  // A flipping tick waits long; a restoring tick's two PATCHes fit before the herd.
+  for (const call of h.patches) {
+    const s = parseInt(call.params.timeout, 10);
+    assert.ok(call.params.timeout === "120s" || 2 * s <= 30, call.params.timeout);
+  }
   // The last PATCHed state is the original one, for the user and the role.
   const users = h.patches.filter((p) => p.url.includes("/users/"));
   const roles = h.patches.filter((p) => p.url.includes("/roles/"));
@@ -1176,4 +1189,5 @@ test("role flip uses a long PATCH timeout and stops before the herd with everyth
   failing.evaluate("roleFlipScenario()");
   assert.deepEqual(failing.patches.at(-2).payload, { role_id: 4 });
   assert.deepEqual(failing.patches.at(-1).payload, { name: "Member", permissions: 1635 });
+  assert.equal(failing.patches.at(-1).params.timeout, "2s");
 });
