@@ -871,6 +871,9 @@ jobs:
       - name: Self-test the Claude Code Bash hook
         run: node --test scripts/claude-hook.test.mjs
 
+      - name: Self-test the CI cost report
+        run: node --test scripts/ci-cost-report.test.mjs
+
       # RL-07. FINDINGS.md is not tracked, so it cannot drift -- but L-07 also
       # asks that the rendering be reproducible and that CI reject a generation
       # failure. Rendering twice and comparing tests both: the render must
@@ -1663,7 +1666,9 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.native == 'true') }}
     runs-on: windows-latest
-    timeout-minutes: 100
+    # 2026-09-21..10-21: 2,921 runs, p99 25 min, max 63, none near the old
+    # 100 (docs/audits/2026-10-21-ci-cost.md). A hang now frees its slot sooner.
+    timeout-minutes: 70
     defaults:
       run:
         working-directory: Client/
