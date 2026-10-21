@@ -131,6 +131,39 @@ test("Settings: registration is chosen from radio cards and persists", async ({
   await expect(page.getByRole("tab", { name: /Pending/ })).toHaveAttribute("aria-selected", "true");
 });
 
+test("Settings: the AFK channel and timeout persist, and the channel is badged", async ({
+  page,
+  seededAdminServer,
+}) => {
+  const owner = seededAdminServer.owner;
+  if (!owner) throw new Error("seeded server has no owner");
+  await seededAdminServer.api(
+    "/admin/api/channels",
+    { name: "afk-lounge", type: "voice" },
+    owner.token,
+  );
+
+  await signInAsOwner(page, seededAdminServer);
+  await navigate(page, "Settings");
+
+  await page.locator("#s-afk_channel").selectOption({ label: "afk-lounge" });
+  await expect(page.locator("#afkChannelState")).toHaveText("Saved");
+  await page.locator("#s-afk_timeout_seconds").selectOption("900");
+  await page.locator("#saveSettingsBtn").click();
+  await expect(page.locator("#settingsSaveState")).toHaveText("All changes saved");
+
+  await page.reload();
+  await expect(page.locator("#adminShell")).toBeVisible({ timeout: 10_000 });
+  await navigate(page, "Settings");
+  await expect(page.locator("#s-afk_channel option:checked")).toHaveText("afk-lounge");
+  await expect(page.locator("#s-afk_timeout_seconds")).toHaveValue("900");
+
+  await navigate(page, "Channels");
+  await expect(page.locator(".ch-tbl tr", { hasText: "afk-lounge" }).locator(".badge")).toHaveText(
+    "AFK",
+  );
+});
+
 test("Retention: a server-wide window is previewed and applied", async ({
   page,
   seededAdminServer,

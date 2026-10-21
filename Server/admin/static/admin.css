@@ -253,6 +253,7 @@ input,select,textarea{font-family:inherit;border:none}
 .save-bar-status{margin-right:auto;font-size:13px;color:var(--text-muted)}
 .btn-row{display:flex;gap:8px;flex-wrap:wrap}
 .callout-warning{background:rgba(242,184,75,.1);border:1px solid rgba(242,184,75,.35);color:var(--text-warning);font-size:13px;padding:10px 12px;border-radius:var(--radius-sm);margin-top:12px;line-height:1.45}
+.afk-ctrl{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
 .check-row{display:flex;align-items:center;gap:8px;margin-top:12px;cursor:pointer}
 .check-row input{width:16px;height:16px;accent-color:var(--accent);flex-shrink:0}
 .modal-list{margin:12px 0 0 20px;display:grid;gap:6px;color:var(--text-muted)}

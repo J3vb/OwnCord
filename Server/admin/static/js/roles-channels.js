@@ -37,7 +37,7 @@ async function renderChannels(){
       const id=ch.id||ch.ID;const name=ch.name||ch.Name||'';const type=ch.type||ch.Type||'text';
       const archived=ch.archived||ch.Archived||false;
       html+='<tr data-channel="'+esc(id)+'"><td><div class="ch-name"><span class="ch-type" title="'+esc(CH_TYPE_NAME[type]||type)+'">'+chIcon(type)+'<span class="sr-only">'+esc(CH_TYPE_NAME[type]||type)+'</span></span><strong>'+esc(name)+'</strong>'
-        +(archived?'<span class="badge badge-muted">Archived</span>':'')+'</div></td>';
+        +(archived?'<span class="badge badge-muted">Archived</span>':'')+(ch.afk?'<span class="badge badge-accent">AFK</span>':'')+'</div></td>';
       const lockBtn=type==='dm'?'':'<button class="act-btn" title="Who can see this" aria-label="Who can see #'+esc(name)+'" data-action="openChannelPermsModal" data-args="'+actArgs(id,name)+'">'+I.lock+'</button>';
       state.channelCache[id]=ch;
       if(ch.category||ch.Category)catSet.add(ch.category||ch.Category);
