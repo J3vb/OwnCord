@@ -121,6 +121,8 @@ export interface ChannelControllerOptions {
   readonly focusFallback?: () => void;
   /** Join the DM call a live call log row stands for (WP 3B-9c). */
   readonly onJoinCall?: (channelId: number) => void;
+  /** Open the pinned-messages panel (the "pinned messages" link of a pin row, WP 6.12). */
+  readonly onOpenPins?: () => void;
 }
 
 export interface ChannelController {
@@ -1353,6 +1355,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       channelType,
       currentUserId: userId,
       ...(opts.onJoinCall !== undefined && { onJoinCall: opts.onJoinCall }),
+      ...(opts.onOpenPins !== undefined && { onOpenPins: opts.onOpenPins }),
       onScrollTop: () => {
         if (channelAbort !== null) {
           return msgCtrl.loadOlderMessages(channelId, channelAbort.signal);

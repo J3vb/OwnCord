@@ -6,7 +6,7 @@
 
 import { copyWithToast, isDeveloperMode } from "../../features/developer-mode/developerTools";
 import { channelBitOrRole } from "@lib/permissions";
-import { isServerRowKind } from "@lib/messageKind";
+import { isPinRowKind, isServerRowKind } from "@lib/messageKind";
 import { formatMessageLink } from "@lib/deep-link";
 import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
@@ -62,7 +62,9 @@ export function isActionableMessage(msg: Message): boolean {
 export function messageActionGates(msg: Message, opts: MessageListOptions): MessageActionGates {
   const sent = isActionableMessage(msg);
   // A server row (call log, group event) is read-only: only Copy ID (developer mode) applies.
+  // A pin row additionally offers Delete under the ordinary rule (the server accepts it).
   const on = sent && !isServerRowKind(msg.kind);
+  const deletable = on || (sent && isPinRowKind(msg.kind));
   const own = msg.user.id === opts.currentUserId;
   const channel = channelsStore.getState().channels.get(msg.channelId);
   const isDm = opts.channelType === "dm";
@@ -73,7 +75,7 @@ export function messageActionGates(msg: Message, opts: MessageListOptions): Mess
   const canPin = isDm || channelBitOrRole(channel?.canPin);
   // Own message (always), or someone else's where the channel allows it. A DM
   // never lets anyone delete the other participant's messages.
-  const canDelete = on && (own || (!isDm && channelBitOrRole(channel?.canDeleteOthers)));
+  const canDelete = deletable && (own || (!isDm && channelBitOrRole(channel?.canDeleteOthers)));
   return {
     react: gate(on, on ? reactionLockReason(channelCanReact(msg.channelId)) : null),
     edit: gate(on && own),

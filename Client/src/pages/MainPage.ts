@@ -1761,6 +1761,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onContentGated: closeActiveLightbox,
       focusFallback: focusReachable,
       onJoinCall: joinDmCall,
+      onOpenPins: () => {
+        void chatAreaResult.openPinnedPanel();
+      },
     });
 
     // Wire voice error callback to toast
