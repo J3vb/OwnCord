@@ -125,6 +125,7 @@ function createMockWsClient(): MockWsClient {
 
 function resetAllStores(): void {
   channelsStore.setState(() => ({
+    categories: [],
     channels: new Map(),
     activeChannelId: null,
     roles: [],

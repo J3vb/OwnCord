@@ -167,6 +167,7 @@ beforeEach(() => {
   }));
   dmStore.setState(() => ({ channels: [dm()] }));
   channelsStore.setState(() => ({
+    categories: [],
     channels: new Map([
       [
         7,

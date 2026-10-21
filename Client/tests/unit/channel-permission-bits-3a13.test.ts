@@ -106,7 +106,12 @@ describe("channel permission bits (3A-13)", () => {
     container.querySelector<HTMLElement>("[data-testid='msg-react-11']")!;
 
   beforeEach(() => {
-    channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+    channelsStore.setState(() => ({
+      channels: new Map(),
+      activeChannelId: null,
+      roles: [],
+      categories: [],
+    }));
     messagesStore.setState(() => ({
       messagesByChannel: new Map(),
       pendingSends: new Map(),

@@ -55,6 +55,7 @@ function openMove(
   onReorder: (reorders: readonly ChannelReorderData[]) => void,
 ): void {
   channelsStore.setState(() => ({
+    categories: [],
     channels: new Map(rows.map((c) => [c.id, c])),
     activeChannelId: null,
     roles: [],
@@ -121,6 +122,7 @@ describe("channel context menu - injected access", () => {
     }));
     const rows = [channel(1, 0), channel(2, 1)];
     channelsStore.setState(() => ({
+      categories: [],
       channels: new Map(rows.map((c) => [c.id, c])),
       activeChannelId: null,
       roles: [],

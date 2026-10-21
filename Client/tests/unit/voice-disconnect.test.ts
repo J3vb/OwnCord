@@ -40,6 +40,7 @@ function resetStores(): void {
     isAuthenticated: false,
   }));
   channelsStore.setState(() => ({
+    categories: [],
     channels: new Map(),
     activeChannelId: null,
     roles: [],

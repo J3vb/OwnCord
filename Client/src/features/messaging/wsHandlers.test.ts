@@ -567,6 +567,7 @@ describe("DM preview follows an edit or delete of its last message", () => {
 // The focus source is document.hasFocus(), as in lib/notifications.ts.
 function seedActiveChannel(lastMessageId: number | null = null): void {
   channelsStore.setState(() => ({
+    categories: [],
     channels: new Map([
       [
         1,
@@ -606,7 +607,12 @@ describe("handleChatMessage counts the active channel while the window is unfocu
   afterEach(() => {
     vi.restoreAllMocks();
     setDmChannels([]);
-    channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+    channelsStore.setState(() => ({
+      channels: new Map(),
+      activeChannelId: null,
+      roles: [],
+      categories: [],
+    }));
   });
 
   it("counts a message in the active, attached channel while the window is unfocused", () => {
@@ -688,7 +694,12 @@ describe("handleChatMessage counts the active channel while its live tail is out
   afterEach(() => {
     setLiveTailInView(1, true);
     vi.restoreAllMocks();
-    channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+    channelsStore.setState(() => ({
+      channels: new Map(),
+      activeChannelId: null,
+      roles: [],
+      categories: [],
+    }));
   });
 
   it("counts a message and a mention while the list is scrolled up", () => {

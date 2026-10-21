@@ -43,7 +43,12 @@ describe("ChannelSidebar — mark as read", () => {
   beforeEach(() => {
     sent = [];
     setMarkReadSender((id) => sent.push(id));
-    channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+    channelsStore.setState(() => ({
+      channels: new Map(),
+      activeChannelId: null,
+      roles: [],
+      categories: [],
+    }));
     dmStore.setState(() => ({ channels: [] }));
     membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
     uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));

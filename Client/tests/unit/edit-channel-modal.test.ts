@@ -29,6 +29,7 @@ describe("EditChannelModal", () => {
       channelType: "text",
       channelTopic: overrides?.channelTopic,
       channelCategory: overrides?.channelCategory,
+      channelCategoryId: overrides?.channelCategoryId,
       channelSlowMode: overrides?.channelSlowMode,
       channelNsfw: overrides?.channelNsfw,
       channelVoiceMaxUsers: overrides?.channelVoiceMaxUsers,
@@ -122,50 +123,79 @@ describe("EditChannelModal", () => {
     modal.destroy?.();
   });
 
-  it("pre-fills the category input and includes the edited category in onSave", async () => {
+  const categorySelect = (): HTMLSelectElement =>
+    container.querySelector("[data-testid='edit-channel-category-select']") as HTMLSelectElement;
+  const save = (): void =>
+    (container.querySelector("[data-testid='edit-channel-submit']") as HTMLButtonElement).click();
+  const realCategories = [
+    { id: 1, name: "general", type: "text", category: "Chat", category_id: 2, position: 0 },
+    { id: 2, name: "lounge", type: "voice", category: "Gaming", category_id: 5, position: 1 },
+  ] as const;
+
+  it("pre-selects the channel's category and sends the chosen category_id", async () => {
+    setChannels(realCategories);
+    const onSave = vi.fn(async () => {});
+    const { modal } = makeModal({ onSave, channelCategory: "Chat", channelCategoryId: 2 });
+    expect(categorySelect().value).toBe("id:2");
+
+    categorySelect().value = "id:5";
+    save();
+    await vi.waitFor(() => {
+      expect(onSave).toHaveBeenCalledWith({ category_id: 5 });
+    });
+    modal.destroy?.();
+  });
+
+  it("offers No category first, then the known categories", () => {
+    setChannels(realCategories);
+    const { modal } = makeModal({ channelCategory: "Chat", channelCategoryId: 2 });
+    expect(Array.from(categorySelect().options).map((o) => [o.value, o.textContent])).toEqual([
+      ["", "No category"],
+      ["id:2", "Chat"],
+      ["id:5", "Gaming"],
+    ]);
+    modal.destroy?.();
+  });
+
+  it("sends the legacy name on a server that sends no ids", async () => {
+    setChannels([
+      { id: 1, name: "general", type: "text", category: "Chat", position: 0 },
+      { id: 2, name: "lounge", type: "voice", category: "Gaming", position: 1 },
+    ]);
     const onSave = vi.fn(async () => {});
     const { modal } = makeModal({ onSave, channelCategory: "Chat" });
-    const categoryInput = container.querySelector(
-      "[data-testid='edit-channel-category-input']",
-    ) as HTMLInputElement;
-    expect(categoryInput.value).toBe("Chat");
-    categoryInput.value = "  Gaming  ";
-
-    (container.querySelector("[data-testid='edit-channel-submit']") as HTMLButtonElement).click();
-
+    expect(categorySelect().value).toBe("name:Chat");
+    categorySelect().value = "name:Gaming";
+    save();
     await vi.waitFor(() => {
       expect(onSave).toHaveBeenCalledWith({ category: "Gaming" });
     });
     modal.destroy?.();
   });
 
-  it("suggests the categories already in use via a datalist", () => {
-    setChannels([
-      { id: 1, name: "general", type: "text", category: "Chat", position: 0 },
-      { id: 2, name: "lounge", type: "voice", category: "Gaming", position: 1 },
-    ]);
-    const { modal } = makeModal({ channelCategory: "Chat" });
-    const values = Array.from(
-      container.querySelector("#edit-channel-categories")?.querySelectorAll("option") ?? [],
-    ).map((o) => o.getAttribute("value"));
-    expect(values).toEqual(["Chat", "Gaming"]);
+  // Choosing No category is how a channel becomes uncategorized: category_id 0
+  // must reach onSave rather than being dropped as "unchanged". The name goes
+  // too, so a server from before categories clears it as well.
+  it("submits No category as category_id 0", async () => {
+    setChannels(realCategories);
+    const onSave = vi.fn(async () => {});
+    const { modal } = makeModal({ onSave, channelCategory: "Chat", channelCategoryId: 2 });
+    categorySelect().value = "";
+    save();
+    await vi.waitFor(() => {
+      expect(onSave).toHaveBeenCalledWith({ category_id: 0, category: "" });
+    });
     modal.destroy?.();
   });
 
-  // Blanking the category is how a channel becomes uncategorized — an empty
-  // string must reach onSave rather than being dropped as "unchanged".
-  it("submits an emptied category", async () => {
+  it("sends nothing for the category while it is untouched", async () => {
+    setChannels(realCategories);
     const onSave = vi.fn(async () => {});
-    const { modal } = makeModal({ onSave, channelCategory: "Chat" });
-    (
-      container.querySelector("[data-testid='edit-channel-category-input']") as HTMLInputElement
-    ).value = "";
-
-    (container.querySelector("[data-testid='edit-channel-submit']") as HTMLButtonElement).click();
-
-    await vi.waitFor(() => {
-      expect(onSave).toHaveBeenCalledWith({ category: "" });
-    });
+    const { modal } = makeModal({ onSave, channelCategory: "Chat", channelCategoryId: 2 });
+    (container.querySelector("[data-testid='edit-channel-name-input']") as HTMLInputElement).value =
+      "renamed";
+    save();
+    await vi.waitFor(() => expect(onSave).toHaveBeenCalledWith({ name: "renamed" }));
     modal.destroy?.();
   });
 
@@ -631,7 +661,7 @@ describe("EditChannelModal", () => {
         ].map((l) => l.textContent);
       expect(labelOf("edit-channel-name-input")).toEqual(["Name"]);
       expect(labelOf("edit-channel-topic-input")).toEqual(["Topic"]);
-      expect(labelOf("edit-channel-category-input")).toEqual(["Category"]);
+      expect(labelOf("edit-channel-category-select")).toEqual(["Category"]);
       expect(labelOf("edit-channel-slowmode-select")).toEqual(["Slow Mode"]);
       expect(labelOf("edit-channel-max-users-input")).toEqual(["User Limit"]);
       expect(labelOf("edit-channel-max-video-input")).toEqual(["Video Limit"]);

@@ -56,6 +56,7 @@ function resetStores(): void {
   // Role lookups read the dispatcher-updated channels.store (see the role-source
   // unification). Seed via the same setRoles action the dispatcher calls.
   channelsStore.setState(() => ({
+    categories: [],
     channels: new Map(),
     activeChannelId: null,
     roles: [

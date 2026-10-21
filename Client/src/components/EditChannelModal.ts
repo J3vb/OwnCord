@@ -4,9 +4,9 @@
  * Mounted only for actors holding MANAGE_CHANNELS; the server enforces the same
  * bit on the PATCH behind it.
  *
- * Category is free text with a <datalist> of the categories already in use:
- * moving a channel between groups is a rename, not a recreate, and no category
- * name is special (a voice channel groups under whatever it carries).
+ * Category is a <select> of the known categories and "No category" (WP 6.5b):
+ * moving a channel between groups is an edit, not a recreate, and no category
+ * is special (a voice channel groups under whatever it carries).
  *
  * Slow mode is a preset <select> rather than a number box. The server accepts
  * any value in 0…21600, but the useful values are a short list, and a free
@@ -22,14 +22,15 @@ import { createIcon } from "@lib/icons";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
 import { errorText } from "@lib/api";
 import type { MountableComponent } from "@lib/safe-render";
-import {
-  channelsStore,
-  getKnownCategories,
-  type Channel,
-  type ChannelsState,
-} from "@stores/channels.store";
+import { channelsStore, type Channel, type ChannelsState } from "@stores/channels.store";
 import { shellText } from "../i18n/shell";
 import { channelTypeLabel, MAX_CHANNEL_TOPIC_LENGTH } from "./channelTypes";
+import {
+  buildCategorySelect,
+  categoryFields,
+  categoryOptionValue,
+  setCategoryValue,
+} from "./channelCategorySelect";
 
 /** The server's ceiling for `slow_mode`, mirrored so the UI cannot exceed it. */
 export const MAX_SLOW_MODE_SECONDS = 21600;
@@ -79,6 +80,8 @@ export function clampVoiceLimit(value: number): number {
 export interface EditChannelData {
   readonly name?: string;
   readonly topic?: string;
+  /** The chosen category's id (0 = none); `category` carries the name on a server that sends no ids. */
+  readonly category_id?: number;
   readonly category?: string;
   readonly slow_mode?: number;
   readonly nsfw?: boolean;
@@ -100,8 +103,10 @@ export interface EditChannelModalOptions {
   readonly channelType: string;
   /** Current channel topic ("" = none). */
   readonly channelTopic?: string;
-  /** Current channel category ("" = uncategorized). */
+  /** Current channel category name ("" = uncategorized). */
   readonly channelCategory?: string;
+  /** Current channel category id (0 or absent = none, or a server that sends no ids). */
+  readonly channelCategoryId?: number;
   /** Current cooldown in seconds (0 = off). */
   readonly channelSlowMode?: number;
   /** Whether the channel is currently flagged age-restricted. */
@@ -147,6 +152,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     channelType,
     channelTopic,
     channelCategory,
+    channelCategoryId,
     channelSlowMode,
     channelNsfw,
     channelVoiceMaxUsers,
@@ -225,28 +231,19 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     topicInput.value = channelTopic ?? "";
     appendChildren(topicGroup, topicLabel, topicInput);
 
-    // Channel category (free text, suggestions from the categories in use)
+    // Channel category: a select of the known categories, "No category" first.
     const categoryGroup = createElement("div", { class: "form-group" });
     const categoryLabel = createElement(
       "label",
       { class: "form-label", for: "edit-channel-category" },
       shellText("channelForm.category"),
     );
-    const categoryInput = createElement("input", {
-      id: "edit-channel-category",
-      class: "form-input",
-      type: "text",
-      list: "edit-channel-categories",
-      autocomplete: "off",
-      placeholder: shellText("channelForm.categoryPlaceholder"),
-      "data-testid": "edit-channel-category-input",
-    });
-    categoryInput.value = channelCategory ?? "";
-    const categoryList = createElement("datalist", { id: "edit-channel-categories" });
-    for (const known of getKnownCategories()) {
-      categoryList.appendChild(createElement("option", { value: known }));
-    }
-    appendChildren(categoryGroup, categoryLabel, categoryInput, categoryList);
+    const categorySelect = buildCategorySelect(
+      "edit-channel-category",
+      "edit-channel-category-select",
+      categoryOptionValue(channelCategoryId ?? 0, channelCategory ?? ""),
+    );
+    appendChildren(categoryGroup, categoryLabel, categorySelect);
 
     // Slow mode (presets; a stored off-preset value keeps its own option)
     const currentSlowMode = clampSlowMode(channelSlowMode ?? 0);
@@ -370,13 +367,13 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
           d.topic = v;
         },
       ),
-      textField(
-        categoryInput,
-        (ch) => ch.category ?? "",
-        (d, v) => {
-          d.category = v;
-        },
-      ),
+      {
+        applied: categorySelect.value,
+        read: () => categorySelect.value,
+        write: (value) => setCategoryValue(categorySelect, String(value)),
+        fromChannel: (ch) => categoryOptionValue(ch.categoryId ?? 0, ch.category ?? ""),
+        send: (d) => Object.assign(d, categoryFields(categorySelect.value)),
+      },
       {
         applied: slowSelect.value,
         read: () => slowSelect.value,

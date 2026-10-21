@@ -8,6 +8,7 @@ import type { ReadyChannel } from "../../src/lib/types";
 
 function resetStore(): void {
   channelsStore.setState(() => ({
+    categories: [],
     channels: new Map(),
     activeChannelId: null,
     roles: [],

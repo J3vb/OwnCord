@@ -180,6 +180,10 @@ export interface ReadyChannel {
   readonly name: string;
   readonly type: ChannelType;
   readonly category: string | null;
+  /** The category's id, 0 when none (WP 6.5a). Absent from older servers: group by `category`. */
+  readonly category_id?: number;
+  /** The category's place in the category order, 0 when none (WP 6.5a). */
+  readonly category_position?: number;
   /** Channel topic ("" = none). Absent from older servers. */
   readonly topic?: string;
   readonly position: number;
@@ -400,6 +404,18 @@ export interface AuthErrorPayload {
   readonly min_epoch?: number;
 }
 
+/** One channel category, as the managers' list carries it (WP 6.5a). */
+export interface ChannelCategory {
+  readonly id: number;
+  readonly name: string;
+  readonly position: number;
+}
+
+/** channel_categories — the managers' full category list, replacing what they hold (WP 6.5a). */
+export interface ChannelCategoriesPayload {
+  readonly categories: readonly ChannelCategory[];
+}
+
 export interface ReadyPayload {
   readonly capabilities?: {
     readonly message_deduplication?: boolean;
@@ -431,6 +447,12 @@ export interface ReadyPayload {
     readonly dm_privacy?: boolean;
   };
   readonly channels: readonly ReadyChannel[];
+  /**
+   * The full category list, present only for a viewer holding MANAGE_CHANNELS
+   * (WP 6.5a). Absent for everyone else and for older servers, which derive
+   * their groups from the channels alone.
+   */
+  readonly categories?: readonly ChannelCategory[];
   readonly members: readonly ReadyMember[];
   readonly voice_states: readonly ReadyVoiceState[];
   readonly roles: readonly ReadyRole[];
@@ -688,6 +710,10 @@ export interface ChannelCreatePayload {
   readonly name: string;
   readonly type: ChannelType;
   readonly category: string | null;
+  /** See ReadyChannel.category_id. */
+  readonly category_id?: number;
+  /** See ReadyChannel.category_position. */
+  readonly category_position?: number;
   readonly topic?: string;
   readonly position: number;
   readonly slow_mode?: number;
@@ -732,6 +758,10 @@ export interface ChannelUpdatePayload {
    * the sidebar regroups without a reconnect.
    */
   readonly category?: string | null;
+  /** See ReadyChannel.category_id — absent means unchanged. */
+  readonly category_id?: number;
+  /** See ReadyChannel.category_position — absent means unchanged. */
+  readonly category_position?: number;
   readonly position?: number;
   readonly slow_mode?: number;
   /** See ReadyChannel.nsfw — the age-restriction label the server enforces. */
@@ -1234,6 +1264,7 @@ export type ServerMessage =
   | (WsEnvelope<PresenceBatchPayload> & { readonly type: "presence_batch" })
   | (WsEnvelope<ChannelCreatePayload> & { readonly type: "channel_create" })
   | (WsEnvelope<ChannelUpdatePayload> & { readonly type: "channel_update" })
+  | (WsEnvelope<ChannelCategoriesPayload> & { readonly type: "channel_categories" })
   | (WsEnvelope<ChannelDeletePayload> & { readonly type: "channel_delete" })
   | (WsEnvelope<NsfwAckPayload> & { readonly type: "nsfw_ack" })
   | (WsEnvelope<VoiceStatePayload> & { readonly type: "voice_state" })

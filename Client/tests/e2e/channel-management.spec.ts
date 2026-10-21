@@ -106,6 +106,8 @@ const TEXT_CHANNEL = {
   type: "text",
   position: 0,
   category: "Text Channels",
+  category_id: 1,
+  category_position: 0,
   topic: "Say hi",
   slow_mode: 300,
   nsfw: true,
@@ -118,6 +120,8 @@ const VOICE_CHANNEL = {
   type: "voice",
   position: 1,
   category: "Voice Channels",
+  category_id: 2,
+  category_position: 1,
   topic: "Hang out",
   slow_mode: 0,
   nsfw: false,
@@ -128,7 +132,7 @@ const VOICE_CHANNEL = {
 const CHANNELS = [TEXT_CHANNEL, VOICE_CHANNEL];
 
 /** An uncategorized voice channel groups under the synthetic "Voice" header,
- *  whose "+" pre-selects the voice type (defaultTypeForCategory). */
+ *  whose "+" pre-selects the voice type and No category. */
 const UNCATEGORIZED = [
   { id: 1, name: "general", type: "text", position: 0, category: null },
   { id: 5, name: "Lounge", type: "voice", position: 1, category: null },
@@ -140,6 +144,8 @@ interface MockOpts {
   admin?: { status: number; body: unknown };
   /** Status/body for POST /channels/{id}/messages/purge. */
   purge?: { status: number; body: unknown };
+  /** The manager's category list (ready.categories); omitted = the key is absent. */
+  categories?: unknown[];
 }
 
 async function openSession(page: Page, opts: MockOpts = {}): Promise<void> {
@@ -165,6 +171,7 @@ async function openSession(page: Page, opts: MockOpts = {}): Promise<void> {
       simulateWsFlow: true,
       readyOverrides: {
         channels: opts.channels ?? CHANNELS,
+        ...(opts.categories === undefined ? {} : { categories: opts.categories }),
         members: MOCK_MEMBERS_MULTI_ROLE,
       },
     }),
@@ -195,9 +202,7 @@ test.describe("Create Channel modal", () => {
     const modal = page.locator("[data-testid='create-channel-modal']");
     await expect(modal).toBeVisible({ timeout: 5_000 });
     await expect(modal.locator("#create-channel-title")).toHaveText("Create Channel");
-    await expect(page.locator("[data-testid='channel-category-input']")).toHaveValue(
-      "Text Channels",
-    );
+    await expect(page.locator("[data-testid='channel-category-select']")).toHaveValue("id:1");
     await expect(page.locator("[data-testid='channel-type-select']")).toHaveValue("text");
   });
 
@@ -218,7 +223,7 @@ test.describe("Create Channel modal", () => {
     expect(JSON.parse(call.body ?? "{}")).toEqual({
       name: "new-lounge",
       type: "voice",
-      category: "Text Channels",
+      category_id: 1,
       // A new channel goes to the bottom of its kind in the category.
       position: 1,
     });
@@ -270,7 +275,7 @@ test.describe("Create Channel modal", () => {
     await page.locator("[data-testid='create-channel-voice']").click();
 
     await expect(page.locator("[data-testid='create-channel-modal']")).toBeVisible();
-    await expect(page.locator("[data-testid='channel-category-input']")).toHaveValue("Voice");
+    await expect(page.locator("[data-testid='channel-category-select']")).toHaveValue("");
     await expect(page.locator("[data-testid='channel-type-select']")).toHaveValue("voice");
   });
 });
@@ -289,9 +294,7 @@ test.describe("Edit Channel modal", () => {
     await expect(modal).toBeVisible({ timeout: 5_000 });
     await expect(page.locator("[data-testid='edit-channel-name-input']")).toHaveValue("general");
     await expect(page.locator("[data-testid='edit-channel-topic-input']")).toHaveValue("Say hi");
-    await expect(page.locator("[data-testid='edit-channel-category-input']")).toHaveValue(
-      "Text Channels",
-    );
+    await expect(page.locator("[data-testid='edit-channel-category-select']")).toHaveValue("id:1");
     await expect(page.locator("[data-testid='edit-channel-slowmode-select']")).toHaveValue("300");
     await expect(page.locator("[data-testid='edit-channel-nsfw-checkbox']")).toBeChecked();
     // A text channel gets no voice-limit section.
@@ -324,6 +327,7 @@ test.describe("Edit Channel modal", () => {
     });
     // Only changed fields are sent, so another admin's edit to the rest is kept.
     expect(body).not.toHaveProperty("category");
+    expect(body).not.toHaveProperty("category_id");
     expect(body).not.toHaveProperty("voice_max_users");
     expect(body).not.toHaveProperty("voice_max_video");
     await expect(page.locator("[data-testid='edit-channel-modal']")).not.toBeVisible();
@@ -530,5 +534,103 @@ test.describe("Channel context menu", () => {
     await expect(page.locator("[data-testid='ctx-edit-channel']")).toHaveText("Edit Channel");
     await expect(page.locator("[data-testid='ctx-delete-channel']")).toHaveText("Delete Channel");
     await expect(page.locator("[data-testid='ctx-purge-messages']")).toHaveText("Purge Messages…");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Category management (WP 6.5b)
+// ---------------------------------------------------------------------------
+
+const CATEGORIES = [
+  { id: 1, name: "Text Channels", position: 0 },
+  { id: 2, name: "Voice Channels", position: 1 },
+  { id: 3, name: "Archive", position: 2 },
+];
+
+test.describe("Category management", () => {
+  async function openCategoryMenu(page: Page, id: number): Promise<void> {
+    await page.locator(`.category[data-category-id='${id}']`).click({ button: "right" });
+    await expect(page.locator("[data-testid='category-context-menu']")).toBeVisible({
+      timeout: 5_000,
+    });
+  }
+  const categoryCalls = (calls: readonly CapturedCall[]): CapturedCall[] =>
+    calls.filter((c) => (c.url ?? "").includes("/api/v1/moderation/channels/categories"));
+
+  test("a manager sees an empty category and its management entries", async ({ page }) => {
+    await openSession(page, { categories: CATEGORIES });
+    await expect(page.locator(".category[data-category-id='3']")).toBeVisible();
+    await openCategoryMenu(page, 3);
+    for (const id of ["create", "rename", "move-up", "move-down", "delete"]) {
+      await expect(page.locator(`[data-testid='ctx-category-${id}']`)).toBeVisible();
+    }
+  });
+
+  test("without a category list the empty category is not drawn", async ({ page }) => {
+    await openSession(page);
+    await expect(page.locator(".category[data-category-id='1']")).toBeVisible();
+    await expect(page.locator(".category[data-category-id='3']")).toHaveCount(0);
+  });
+
+  test("Create Category from the header menu POSTs the name", async ({ page }) => {
+    await openSession(page, { categories: CATEGORIES });
+    await openCategoryMenu(page, 1);
+    await page.locator("[data-testid='ctx-category-create']").click();
+    await page.locator("[data-testid='category-name-input']").fill("Games");
+    await page.locator("[data-testid='category-name-submit']").click();
+
+    const call = await waitForCapturedCall(page, (c) =>
+      (c.url ?? "").endsWith("/api/v1/moderation/channels/categories"),
+    );
+    expect(call.method).toBe("POST");
+    expect(JSON.parse(call.body ?? "{}")).toEqual({ name: "Games" });
+  });
+
+  test("Rename Category PATCHes the new name", async ({ page }) => {
+    await openSession(page, { categories: CATEGORIES });
+    await openCategoryMenu(page, 3);
+    await page.locator("[data-testid='ctx-category-rename']").click();
+    await expect(page.locator("[data-testid='category-name-input']")).toHaveValue("Archive");
+    await page.locator("[data-testid='category-name-input']").fill("Old stuff");
+    await page.locator("[data-testid='category-name-submit']").click();
+
+    const call = await waitForCapturedCall(page, (c) => (c.url ?? "").endsWith("/categories/3"));
+    expect(call.method).toBe("PATCH");
+    expect(JSON.parse(call.body ?? "{}")).toEqual({ name: "Old stuff" });
+  });
+
+  test("Delete Category confirms that channels move to no category, then DELETEs", async ({
+    page,
+  }) => {
+    await openSession(page, { categories: CATEGORIES });
+    await openCategoryMenu(page, 3);
+    await page.locator("[data-testid='ctx-category-delete']").click();
+    await expect(page.locator("[data-testid='delete-category-modal']")).toContainText(
+      "No channels or messages are deleted",
+    );
+    expect(categoryCalls(await getCapturedCalls(page))).toEqual([]);
+    await page.locator("[data-testid='delete-category-confirm']").click();
+
+    const call = await waitForCapturedCall(page, (c) => (c.url ?? "").endsWith("/categories/3"));
+    expect(call.method).toBe("DELETE");
+  });
+
+  test("Move Up PUTs the full id list with the category swapped", async ({ page }) => {
+    await openSession(page, { categories: CATEGORIES });
+    await openCategoryMenu(page, 3);
+    await page.locator("[data-testid='ctx-category-move-up']").click();
+
+    const call = await waitForCapturedCall(page, (c) =>
+      (c.url ?? "").endsWith("/categories/order"),
+    );
+    expect(call.method).toBe("PUT");
+    expect(JSON.parse(call.body ?? "{}")).toEqual({ ids: [1, 3, 2] });
+  });
+
+  test("the server menu offers Create Category to a manager", async ({ page }) => {
+    await openSession(page, { categories: CATEGORIES });
+    await page.locator("[data-testid='server-name']").click();
+    await page.locator("[data-testid='server-menu-create-category']").click();
+    await expect(page.locator("[data-testid='create-category-modal']")).toBeVisible();
   });
 });

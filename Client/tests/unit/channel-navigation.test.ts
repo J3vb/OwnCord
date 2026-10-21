@@ -54,7 +54,12 @@ function makeDm(overrides: Partial<DmChannel> = {}): DmChannel {
 
 describe("channel-navigation", () => {
   beforeEach(() => {
-    channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+    channelsStore.setState(() => ({
+      channels: new Map(),
+      activeChannelId: null,
+      roles: [],
+      categories: [],
+    }));
     dmStore.setState(() => ({ channels: [] }));
     uiStore.setState((prev) => ({ ...prev, sidebarMode: "channels", activeDmUserId: null }));
   });
@@ -211,6 +216,7 @@ describe("channel-navigation", () => {
   describe("stepChannel", () => {
     function seed(channels: Channel[], active: number | null = null): void {
       channelsStore.setState(() => ({
+        categories: [],
         channels: new Map(channels.map((c) => [c.id, c])),
         activeChannelId: active,
         roles: [],

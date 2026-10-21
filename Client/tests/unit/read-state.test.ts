@@ -59,7 +59,12 @@ let sent: number[];
 beforeEach(() => {
   sent = [];
   setMarkReadSender((id) => sent.push(id));
-  channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  channelsStore.setState(() => ({
+    channels: new Map(),
+    activeChannelId: null,
+    roles: [],
+    categories: [],
+  }));
   dmStore.setState(() => ({ channels: [] }));
 });
 

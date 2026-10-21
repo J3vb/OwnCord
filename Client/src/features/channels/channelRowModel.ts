@@ -11,7 +11,7 @@
  * the wrapper rebuild: the create-only chrome and the handler bindings.
  */
 
-import { groupChannelsByCategory, categoryLabel } from "../../stores/channels.store";
+import { categoryGroups, groupLabel } from "../../stores/channels.store";
 import type { Channel, ChannelsState } from "../../stores/channels.store";
 import { mutedRowHidden } from "../../lib/hide-muted-channels";
 import { hasPermission, permissionsForRoleIn, roleHasPermissionIn } from "../../lib/permissions";
@@ -30,6 +30,8 @@ export interface ChannelListInputs {
   readonly selfRole: string;
   /** The role list from `ready` (identity). */
   readonly roles: ChannelsState["roles"];
+  /** `channelsStore.categories` (identity): the manager's list, empty for everyone else. */
+  readonly categories: ChannelsState["categories"];
   /** `uiStore.collapsedCategories` (identity). */
   readonly collapsed: ReadonlySet<string>;
   /** The Hide Muted Channels preference. */
@@ -50,8 +52,16 @@ export interface ChannelListContext {
 
 /** One category's channels in display order. */
 export type ChannelGroup = {
-  /** Category name, or null for the uncategorized group. */
+  /**
+   * The group's key: `cat:<id>` for a real category (so a rename keeps it), the
+   * category name on a server that sends no ids, the synthetic Voice key, or
+   * null for uncategorized text. Collapse state is saved under it.
+   */
+  readonly key: string | null;
+  /** The category's name; null for the uncategorized group. */
   readonly name: string | null;
+  /** The category's id; 0 for a group that is not a real category. */
+  readonly categoryId: number;
   readonly channels: readonly Channel[];
   readonly orderIds: string;
 };
@@ -90,14 +100,18 @@ export function channelAccess(list: Pick<ChannelListInputs, "roles" | "selfRole"
   };
 }
 
-/** One entry per category, in the map's order; the null name is the
- *  uncategorized group. */
-export function channelGroups(list: Pick<ChannelListInputs, "channels">): ChannelGroup[] {
-  const groups: ChannelGroup[] = [];
-  for (const [name, channels] of groupChannelsByCategory(list.channels)) {
-    groups.push({ name, channels, orderIds: channels.map((c) => c.id).join(",") });
-  }
-  return groups;
+/** One entry per group, in sidebar order (D7); the null key is the uncategorized
+ *  group. A manager's empty categories are groups with no channels. */
+export function channelGroups(
+  list: Pick<ChannelListInputs, "channels" | "categories" | "roles" | "selfRole">,
+): ChannelGroup[] {
+  // The list is the managers'; a viewer who lost MANAGE_CHANNELS mid-session
+  // still holds it in the store, so it only counts while the role has the bit.
+  const categories = channelAccess(list).manageChannels ? list.categories : [];
+  return categoryGroups(list.channels, categories).map((g) => ({
+    ...g,
+    orderIds: g.channels.map((c) => c.id).join(","),
+  }));
 }
 
 /** Whether a voice channel has people in it, or is the one you are connected to. */
@@ -140,7 +154,7 @@ export function visibleRows(
   voice: Occupancy,
   ctx: ChannelListContext,
 ): Channel[] {
-  const collapsed = g.name !== null && list.collapsed.has(g.name);
+  const collapsed = g.key !== null && list.collapsed.has(g.key);
   return g.channels.filter(
     (ch) =>
       !mutedRowHidden(
@@ -161,11 +175,15 @@ export function categoryGroupModel(
   list: ChannelListInputs,
   ctx: ChannelListContext,
 ): CategoryGroupModel {
-  if (g.name === null) return { name: null, label: "", collapsed: false, showCreate: false };
+  if (g.key === null || g.name === null) {
+    return { key: null, name: null, categoryId: 0, label: "", collapsed: false, showCreate: false };
+  }
   return {
+    key: g.key,
     name: g.name,
-    label: categoryLabel(g.name),
-    collapsed: list.collapsed.has(g.name),
+    categoryId: g.categoryId,
+    label: groupLabel(g),
+    collapsed: list.collapsed.has(g.key),
     showCreate: ctx.canCreate && channelAccess(list).manageChannels,
   };
 }

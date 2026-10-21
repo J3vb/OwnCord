@@ -162,6 +162,7 @@ describe("notifyIncomingMessage", () => {
 
     // Set up channels store
     channelsStore.setState(() => ({
+      categories: [],
       channels: new Map([
         [
           1,

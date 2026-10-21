@@ -27,6 +27,7 @@ import type {
   ApiError,
   ChannelType,
   ChannelResponse,
+  ChannelCategory,
   EmojiResponse,
   InviteResponse,
   UploadResponse,
@@ -1760,7 +1761,13 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       data: {
         name: string;
         type: ChannelType;
-        category: string;
+        /**
+         * The category's id, 0 for none (WP 6.5a). It wins over `category`
+         * when both are sent; a server from before 6.5a ignores it.
+         */
+        category_id?: number;
+        /** The category name (legacy): matched ignoring case, created when new, "" = none. */
+        category?: string;
         topic?: string;
         position?: number;
       },
@@ -1774,8 +1781,10 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       data: {
         name?: string;
         topic?: string;
-        // Moving a channel between categories is a rename of free text; an
-        // omitted field keeps the channel's current category server-side.
+        // Moving a channel between categories is an edit; an omitted field
+        // keeps the channel's current category server-side. `category_id` (0 =
+        // none) wins over the legacy `category` name when both are sent.
+        category_id?: number;
         category?: string;
         slow_mode?: number;
         position?: number;
@@ -1801,6 +1810,42 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
     adminDeleteChannel(id: number, signal?: AbortSignal): Promise<void> {
       return channelRequest<void>("DELETE", `/${id}`, undefined, signal);
+    },
+
+    // ── Admin: Channel categories (WP 6.5a) ──────────────────
+    // The list itself arrives over the socket (ready.categories and the
+    // channel_categories event), so there is no GET here.
+
+    /** Create a category, appended last. 409 CATEGORY_NAME_TAKEN on a duplicate name. */
+    adminCreateCategory(name: string, signal?: AbortSignal): Promise<ChannelCategory> {
+      return channelRequest<ChannelCategory>("POST", "/categories", { name }, signal);
+    },
+
+    /** Rename a category: every channel in it follows. 409 CATEGORY_NAME_TAKEN, 404 when gone. */
+    adminRenameCategory(id: number, name: string, signal?: AbortSignal): Promise<ChannelCategory> {
+      return channelRequest<ChannelCategory>("PATCH", `/categories/${id}`, { name }, signal);
+    },
+
+    /** Delete a category. Its channels are not deleted: they become uncategorized. */
+    adminDeleteCategory(id: number, signal?: AbortSignal): Promise<void> {
+      return channelRequest<void>("DELETE", `/categories/${id}`, undefined, signal);
+    },
+
+    /**
+     * Put the categories in `ids` order. `ids` must be exactly the server's
+     * current set: anything else is refused with 409 CATEGORY_LIST_STALE and
+     * nothing is written.
+     */
+    adminReorderCategories(
+      ids: readonly number[],
+      signal?: AbortSignal,
+    ): Promise<readonly ChannelCategory[]> {
+      return channelRequest<readonly ChannelCategory[]>(
+        "PUT",
+        "/categories/order",
+        { ids },
+        signal,
+      );
     },
 
     // ── Members (moderation) ────────────────────────────────

@@ -206,6 +206,7 @@ function getMockUpdate(factory: MockedFn): MockedFn {
 
 function resetStores(): void {
   channelsStore.setState(() => ({
+    categories: [],
     channels: new Map(),
     activeChannelId: null,
     roles: [],

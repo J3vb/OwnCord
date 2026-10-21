@@ -34,6 +34,7 @@ import {
   handleChannelCreate,
   handleChannelDelete,
   handleChannelUpdate,
+  handleChannelCategories,
   handleMentionCount,
   handleReadState,
   handleMarkUnreadError,
@@ -267,6 +268,9 @@ export function wireDispatcher(
   unsubs.push(ws.on(S.CHANNEL_CREATE, handleChannelCreate));
 
   unsubs.push(ws.on(S.CHANNEL_UPDATE, handleChannelUpdate));
+
+  // channel_categories: the manager's category list, replaced wholesale (WP 6.5a).
+  unsubs.push(ws.on(S.CHANNEL_CATEGORIES, handleChannelCategories));
 
   unsubs.push(ws.on(S.CHANNEL_DELETE, handleChannelDelete));
 

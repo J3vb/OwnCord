@@ -39,7 +39,12 @@ describe("category context menu", () => {
     vi.useFakeTimers();
     sent = [];
     setMarkReadSender((id) => sent.push(id));
-    channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+    channelsStore.setState(() => ({
+      channels: new Map(),
+      activeChannelId: null,
+      roles: [],
+      categories: [],
+    }));
     dmStore.setState(() => ({ channels: [] }));
     membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
     uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));
@@ -149,7 +154,12 @@ describe("category context menu", () => {
 
 describe("text before voice inside a category (N23)", () => {
   beforeEach(() => {
-    channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+    channelsStore.setState(() => ({
+      channels: new Map(),
+      activeChannelId: null,
+      roles: [],
+      categories: [],
+    }));
     setChannels([
       { id: 1, name: "lobby", type: "voice", category: "Mix", position: 0 },
       { id: 2, name: "chat", type: "text", category: "Mix", position: 1 },
@@ -160,16 +170,16 @@ describe("text before voice inside a category (N23)", () => {
   });
 
   it("lists text-type channels first, each kind in position order", () => {
-    const grouped = getChannelsByCategory();
+    const grouped = getChannelsByCategory([]);
     expect(grouped.get("Mix")!.map((c) => c.id)).toEqual([2, 3, 1, 4]);
   });
 
   it("keeps the category order the position sort gave", () => {
-    expect([...getChannelsByCategory().keys()]).toEqual(["Only Voice", "Mix"]);
+    expect([...getChannelsByCategory([]).keys()]).toEqual(["Only Voice", "Mix"]);
   });
 
   it("Move Up/Down swaps only within the same kind", () => {
-    const live = getChannelsByCategory().get("Mix")!;
+    const live = getChannelsByCategory([]).get("Mix")!;
     const onReorder = vi.fn();
     const el = document.createElement("div");
     document.body.appendChild(el);
