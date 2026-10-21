@@ -144,4 +144,15 @@ describe("MessageList scroll frame layout reads", () => {
     expect(setAttr.mock.calls.filter(([name]) => name === "aria-label")).toHaveLength(1);
     expect(btn.classList.contains("visible")).toBe(true);
   });
+
+  it("renders for the live scrollTop when a write lands between the scroll event and its rAF", () => {
+    root.dispatchEvent(new Event("scroll"));
+    // PageUp from the message box moves the viewport before the frame runs.
+    msgList.scrollPage(-1);
+    expect(scrollTop).toBeLessThan(5000);
+    resetReads();
+    for (const cb of rafs.splice(0)) cb(0);
+    // The frame must read the moved position, not reuse the one from the event.
+    expect(reads.scrollTop).toBeGreaterThanOrEqual(1);
+  });
 });

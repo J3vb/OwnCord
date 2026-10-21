@@ -891,6 +891,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    *  outlives a pass or a write that could have moved the viewport. */
   let scrollSnapshot: ScrollMetrics | null = null;
 
+  /** The one place the list moves the viewport: a write invalidates the frame's
+   *  snapshot, so the rAF cannot render for the position from before it. */
+  function setScrollTop(top: number): void {
+    if (root === null) return;
+    scrollSnapshot = null;
+    root.scrollTop = top;
+  }
+
   function isNearBottom(threshold = SCROLL_BOTTOM_THRESHOLD, m?: ScrollMetrics): boolean {
     if (root === null) return true;
     const { scrollTop, scrollHeight, clientHeight } = m ?? readMetrics(root);
@@ -906,8 +914,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
   function scrollToBottom(): void {
     if (root === null) return;
-    scrollSnapshot = null;
-    root.scrollTop = root.scrollHeight;
+    setScrollTop(root.scrollHeight);
   }
 
   /** What the pill shows now, so a scroll burst writes the DOM only on a change. */
@@ -1013,7 +1020,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function scrollPage(direction: 1 | -1): void {
     if (root === null) return;
     // About what the browser's own PageDown moves, keeping a line of context.
-    root.scrollTop += direction * Math.round(root.clientHeight * PAGE_SCROLL_FRACTION);
+    setScrollTop(root.scrollTop + direction * Math.round(root.clientHeight * PAGE_SCROLL_FRACTION));
   }
 
   /** A messagesByChannel / historyLoadState change landed: refresh the bar and the open position. */
@@ -1324,7 +1331,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function holdRow(el: Element, edge: number): void {
     if (root === null) return;
     const delta = edgeOf(el) - edge;
-    if (Math.abs(delta) >= 1) root.scrollTop += delta;
+    if (Math.abs(delta) >= 1) setScrollTop(root.scrollTop + delta);
   }
 
   /** Slide the rendered window to [start, end), which overlaps it: release the
@@ -1793,7 +1800,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       if (prepended) renderWindow();
     } else {
       const anchorAt = nextIndex.get(anchorKey)!;
-      root.scrollTop = Math.max(0, offsetBefore(anchorAt) + anchorOffset);
+      setScrollTop(Math.max(0, offsetBefore(anchorAt) + anchorOffset));
       if (prepended) {
         // The page above is spacer only: draw the rows now in view, then
         // re-place the anchor against the heights they measured.
@@ -1912,14 +1919,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         const estTotal = totalHeight();
         if (topSpacer !== null) topSpacer.style.height = "0px";
         if (bottomSpacer !== null) bottomSpacer.style.height = `${estTotal}px`;
-        root.scrollTop = Math.max(0, estTotal - root.clientHeight);
+        setScrollTop(Math.max(0, estTotal - root.clientHeight));
       } else if (hold !== undefined && root !== null) {
         const at = virtualItems.findIndex((item, i) => keyOf(item, i) === hold.key);
         if (at !== -1) {
           const estTotal = totalHeight();
           if (topSpacer !== null) topSpacer.style.height = "0px";
           if (bottomSpacer !== null) bottomSpacer.style.height = `${estTotal}px`;
-          root.scrollTop = Math.max(0, offsetBefore(at) - hold.edge);
+          setScrollTop(Math.max(0, offsetBefore(at) - hold.edge));
         }
       } else if (anchorMessageId !== null && root !== null) {
         const newIdx = virtualItems.findIndex(
@@ -1933,7 +1940,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
           const estTotal = totalHeight();
           if (topSpacer !== null) topSpacer.style.height = "0px";
           if (bottomSpacer !== null) bottomSpacer.style.height = `${estTotal}px`;
-          root.scrollTop = Math.max(0, offsetBefore(newIdx) + anchorOffsetInItem);
+          setScrollTop(Math.max(0, offsetBefore(newIdx) + anchorOffsetInItem));
         }
       }
 
@@ -2467,7 +2474,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         if (atBottom) {
           scrollToBottom();
         } else {
-          root.scrollTop = offsetBefore(anchorIdx) + anchorOffset;
+          setScrollTop(offsetBefore(anchorIdx) + anchorOffset);
         }
         keepEditorCaretInView();
       });
@@ -2905,7 +2912,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     if (root === null) return false;
     const target = Math.max(0, offsetBefore(idx) + offset);
     if (Math.abs(target - root.scrollTop) < 1) return false;
-    root.scrollTop = target;
+    setScrollTop(target);
     renderWindow();
     return true;
   }
@@ -2976,7 +2983,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const item = virtualItems[idx];
     if (item?.kind !== "message") return false;
     const messageId = item.message.id;
-    root.scrollTop = offsetBefore(idx);
+    setScrollTop(offsetBefore(idx));
     // Force the rebuild path: a scroll-driven renderWindow only moves spacers,
     // so without this the target row can sit outside the rendered window and
     // there is nothing to flash (and nothing to look at after the scroll).
@@ -3088,7 +3095,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const box = edit?.session?.element;
     if (box === undefined) return;
     const over = box.getBoundingClientRect().bottom - root.getBoundingClientRect().bottom;
-    if (over > 0) root.scrollTop += over;
+    if (over > 0) setScrollTop(root.scrollTop + over);
   }
 
   function startEdit(
