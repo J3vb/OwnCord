@@ -72,7 +72,7 @@ func (h *Hub) sendVoicePeerWatching(c *Client, channelID int64) {
 		if !ok {
 			continue
 		}
-		if ids := peer.voice.watchingCopy(); len(ids) > 0 {
+		if ids := peer.voice.watchingIfChannel(channelID); len(ids) > 0 {
 			c.sendMsg(buildVoiceWatching(uid, ids))
 		}
 	}

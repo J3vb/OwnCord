@@ -305,3 +305,17 @@ func TestSetState_ClearsWatching(t *testing.T) {
 		t.Errorf("new join instance kept %v", got)
 	}
 }
+
+func TestWatchingIfChannel_OnlyForCurrentChannel(t *testing.T) {
+	var s voiceSlot
+	s.setState(7, "tok")
+	if !s.setWatchingIfChannel(7, []int64{3}) {
+		t.Fatal("store refused for the current channel")
+	}
+	if got := s.watchingIfChannel(7); !reflect.DeepEqual(got, []int64{3}) {
+		t.Fatalf("watchingIfChannel(7) = %v, want [3]", got)
+	}
+	if got := s.watchingIfChannel(8); got != nil {
+		t.Fatalf("watchingIfChannel(8) = %v, want nil", got)
+	}
+}

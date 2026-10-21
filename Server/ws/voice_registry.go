@@ -94,7 +94,7 @@ type voiceSlot struct {
 	// while its voice_states row stays behind for nothing to reap (OC-0270).
 	voiceJoinCompleted bool
 	e2ee               e2eeAnnounce // the last voice_e2ee_announce (key, signature, video decode list)
-	watching           []int64      // users whose screen share this member watches (voice_watch); sorted, never aliased
+	watching           []int64      // users whose screen share this member watches (voice_watch); sorted, replaced and never changed in place
 	// pendingModServerMuted/pendingModServerDeafened stash a moderator-imposed
 	// mute/deafen across a server-driven leave (voice_mod_move), which deletes
 	// the voice_states row those flags normally live in before the target's
@@ -326,5 +326,17 @@ func (s *voiceSlot) setWatchingIfChannel(chID int64, ids []int64) bool {
 func (s *voiceSlot) watchingCopy() []int64 {
 	s.voiceMu.Lock()
 	defer s.voiceMu.Unlock()
+	return append([]int64(nil), s.watching...)
+}
+
+// watchingIfChannel returns a copy of the set only while the slot is in chID,
+// read under one voiceMu hold, so a peer that moved on is not reported for
+// its old channel.
+func (s *voiceSlot) watchingIfChannel(chID int64) []int64 {
+	s.voiceMu.Lock()
+	defer s.voiceMu.Unlock()
+	if chID == 0 || s.voiceChID != chID {
+		return nil
+	}
 	return append([]int64(nil), s.watching...)
 }
