@@ -86,6 +86,9 @@ import {
   resetMessageRequests,
 } from "../../src/features/message-requests/store";
 import type { ServerMessage } from "../../src/lib/types";
+import { showToast } from "@lib/toast";
+import * as livekitSession from "@lib/livekitSession";
+import { createOutgoingCall, createRingController } from "../../src/lib/call-ring";
 
 // ─── fixture loading ─────────────────────────────────────────────────────────
 
@@ -529,6 +532,196 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
     expect(getChannelVoiceUsers(2).some((u) => u.userId === USER_ID)).toBe(false);
   });
 
+  // ── WP 7.3a: voice self-state, moderation, calls and error frames ─────────
+
+  /** Let the voice handlers' lazy `livekitSession()` import and the `.then`
+   *  bodies that follow it run before the assertion reads their effects. */
+  async function settle(): Promise<void> {
+    await vi.dynamicImportSettled();
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+  }
+
+  it("voice-self-state: each voice_state broadcast sets exactly the flags it carries", async () => {
+    // alice's connection records her own joins and her own eight toggles. The
+    // fixture does not keep user ids stable across frames, so one id is pinned
+    // for every alice frame; bob's relayed state (the second frame) is left out.
+    const USER_ID = 8200;
+    const frames = s2cFrames("voice-self-state", "voice_state").filter(
+      (f) => (f.payload as { username?: string }).username === "alice",
+    );
+    // Join, then mute on/off, deafen on/off, camera on/off, screenshare on/off.
+    const expected = [
+      { muted: false, deafened: false, camera: false, screenshare: false },
+      { muted: true, deafened: false, camera: false, screenshare: false },
+      { muted: false, deafened: false, camera: false, screenshare: false },
+      { muted: false, deafened: true, camera: false, screenshare: false },
+      { muted: false, deafened: false, camera: false, screenshare: false },
+      { muted: false, deafened: false, camera: true, screenshare: false },
+      { muted: false, deafened: false, camera: false, screenshare: false },
+      { muted: false, deafened: false, camera: false, screenshare: true },
+      { muted: false, deafened: false, camera: false, screenshare: false },
+    ];
+    // Both connections record alice's states; the list is the first n of them.
+    const aliceOnly = frames.slice(0, expected.length);
+    expect(aliceOnly).toHaveLength(expected.length);
+    const counter = { n: 0 };
+    for (const [i, frame] of aliceOnly.entries()) {
+      await send(frame, { user_id: USER_ID }, counter);
+      const user = getChannelVoiceUsers(2).find((u) => u.userId === USER_ID);
+      expect(user, `voice_state ${i}`).toMatchObject(expected[i]!);
+    }
+  });
+
+  it("voice-moderation: server mute and deafen land in the roster's server_* flags", async () => {
+    // bob is the target; his connection records each broadcast.
+    const USER_ID = 8201;
+    const states = s2c("voice-moderation", "b")
+      .map((f) => f.frame)
+      .filter(
+        (f) => f.type === "voice_state" && (f.payload as { username?: string }).username === "bob",
+      );
+    // After the join relay: server mute on, off, server deafen on (implies mute), off.
+    const flags = states.map((f) => {
+      const p = f.payload as { server_muted: boolean; server_deafened: boolean };
+      return [p.server_muted, p.server_deafened];
+    });
+    expect(flags).toEqual([
+      [false, false],
+      [true, false],
+      [false, false],
+      [true, true],
+      [false, false],
+    ]);
+    const counter = { n: 0 };
+    for (const frame of states) {
+      await send(frame, { user_id: USER_ID }, counter);
+      const p = frame.payload as { server_muted: boolean; server_deafened: boolean };
+      const user = getChannelVoiceUsers(2).find((u) => u.userId === USER_ID);
+      expect(user).toMatchObject({
+        serverMuted: p.server_muted,
+        serverDeafened: p.server_deafened,
+      });
+    }
+  });
+
+  it("voice-moderation-move-kick: voice_moved leaves the room and re-joins the fixture's destination", async () => {
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 2 }));
+    ws.clearSent();
+    // The server fixture normalises every *_id, to_channel_id included, so the
+    // destination (the seeded second voice channel) is pinned here rather than
+    // read from the fixture.
+    await dispatch("voice-moderation-move-kick", "voice_moved", { to_channel_id: 3 });
+    await settle();
+    expect(vi.mocked(livekitSession.leaveVoice)).toHaveBeenCalledWith(false);
+    expect(voiceStore.getState().currentChannelId).toBe(3);
+    expect(ws.getSentMessages().map((m) => ({ type: m.type, payload: m.payload }))).toEqual([
+      { type: "voice_join", payload: { channel_id: 3 } },
+    ]);
+  });
+
+  it("voice-moderation-move-kick: voice_disconnected tears the session down and toasts the reason", async () => {
+    // The kick's voice_leave has already cleared the store by the time this
+    // arrives (the ordinary path), so currentChannelId is null here.
+    vi.mocked(showToast).mockClear();
+    vi.mocked(livekitSession.leaveVoice).mockClear();
+    await dispatch("voice-moderation-move-kick", "voice_disconnected");
+    await settle();
+    expect(vi.mocked(livekitSession.leaveVoice)).toHaveBeenCalledWith(false);
+    expect(voiceStore.getState().currentChannelId).toBeNull();
+    expect(vi.mocked(showToast)).toHaveBeenCalledWith(
+      "You were disconnected from voice by a moderator",
+      "error",
+    );
+  });
+
+  it("voice-moderation-move-kick: a voice_disconnected for another channel than the live one is stale", async () => {
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 2 }));
+    vi.mocked(showToast).mockClear();
+    // The fixture's frame names channel 3; the client has since joined 2.
+    await dispatch("voice-moderation-move-kick", "voice_disconnected");
+    await settle();
+    expect(voiceStore.getState().currentChannelId).toBe(2);
+    expect(vi.mocked(showToast)).not.toHaveBeenCalled();
+  });
+
+  it("voice-mod-denied: the error frame becomes a toast with the server's text", async () => {
+    vi.mocked(showToast).mockClear();
+    await dispatch("voice-mod-denied", "error");
+    expectConsole("error", "Server error");
+    expect(vi.mocked(showToast)).toHaveBeenCalledTimes(1);
+    const [text, kind] = vi.mocked(showToast).mock.calls[0]!;
+    // serverErrorText capitalises the server's message; the code is FORBIDDEN.
+    expect(text).toBe("Cannot moderate a user of equal or higher rank");
+    expect(kind).toBe("error");
+  });
+
+  it("voice-token-refresh: the refresh reply is a voice_token the dispatcher hands to the session", async () => {
+    // The first voice_token on a is the join's, the second the refresh's.
+    const tokens = s2c("voice-token-refresh", "a").filter((f) => f.frame.type === "voice_token");
+    expect(tokens).toHaveLength(2);
+    vi.mocked(livekitSession.handleVoiceToken).mockClear();
+    await send(tokens[1]!.frame, {}, { n: 0 });
+    await settle();
+    expect(vi.mocked(livekitSession.handleVoiceToken)).toHaveBeenCalledTimes(1);
+    // (token, url, channel_id, direct_url, is_key_holder): the refresh
+    // reply names the room alice is in and keeps her key-holder flag.
+    expect(vi.mocked(livekitSession.handleVoiceToken)).toHaveBeenCalledWith(
+      expect.stringMatching(/^tok-/),
+      "/livekit",
+      2,
+      expect.any(String),
+      true,
+    );
+  });
+
+  // call_incoming / call_declined are not dispatcher frames: MainPage subscribes
+  // to them itself (pages/MainPage.ts), and mounting the whole page is out of
+  // scope for a contract test. So these two feed the fixture's payload through
+  // the same state machines MainPage hands it to (lib/call-ring.ts), mapping
+  // the fields exactly as MainPage does with a caller no member store knows.
+
+  it("call-ring-decline: call_incoming rings with the fixture's caller and channel", () => {
+    const payload = s2cFrame("call-ring-decline", "call_incoming").payload as {
+      channel_id: number;
+      from_user: number;
+      username: string;
+    };
+    expect(payload).toEqual({ channel_id: 3, from_user: 1, username: "alice" });
+    const onRingStateChange = vi.fn();
+    const onChime = vi.fn();
+    const ring = createRingController({
+      onRingStateChange,
+      onChime,
+      onAccept: vi.fn(),
+      onDecline: vi.fn(),
+    });
+    ring.incoming({
+      channelId: payload.channel_id,
+      fromUserId: payload.from_user,
+      fromUsername: payload.username,
+    });
+    expect(ring.current()).toEqual({ channelId: 3, fromUserId: 1, fromUsername: "alice" });
+    expect(onRingStateChange).toHaveBeenCalledWith(ring.current());
+    expect(onChime).toHaveBeenCalledWith(true);
+    ring.destroy();
+  });
+
+  it("call-ring-decline: call_declined ends the caller's outgoing ring for the fixture's channel", () => {
+    const payload = s2cFrame("call-ring-decline", "call_declined").payload as {
+      channel_id: number;
+      from_user: number;
+      username: string;
+    };
+    expect(payload).toEqual({ channel_id: 3, from_user: 2, username: "bob" });
+    const onChange = vi.fn();
+    const outgoing = createOutgoingCall({ onChange });
+    outgoing.start(payload.channel_id, [payload.from_user]);
+    expect(outgoing.current()?.phase).toBe("ringing");
+    outgoing.declined(payload.channel_id, payload.from_user);
+    expect(outgoing.current()).toEqual({ channelId: 3, phase: "declined", pending: [] });
+    outgoing.destroy();
+  });
+
   it("every fixture connection replays end to end without a handler throw", async () => {
     for (const [journey, tr] of FIXTURES) {
       for (const conn of Object.keys(tr.connections)) {
@@ -543,6 +736,8 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
         // auth-failure is the one journey whose handler deliberately logs an
         // error; claim it so the console guard does not fail the run.
         if (journey === "auth-failure") expectConsole("error", "Auth failed");
+        // voice-mod-denied's error frame is logged by the same handler.
+        if (journey === "voice-mod-denied" && conn === "b") expectConsole("error", "Server error");
       }
     }
   });
