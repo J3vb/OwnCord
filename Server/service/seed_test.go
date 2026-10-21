@@ -126,16 +126,35 @@ func seedChannel(t testing.TB, database *db.DB, ch *db.Channel) {
 	if ctype == "" {
 		ctype = "text"
 	}
+	// A category name resolves to a channel_categories row (ignoring case),
+	// created when missing, exactly as the legacy free-text field does.
+	var categoryID any
+	if ch.Category != "" {
+		if _, err := database.ExecContext(context.Background(),
+			`INSERT OR IGNORE INTO channel_categories (name, position)
+			 VALUES (?, (SELECT COALESCE(MAX(position), -1) + 1 FROM channel_categories))`,
+			ch.Category,
+		); err != nil {
+			t.Fatalf("seedChannel(%d) category: %v", ch.ID, err)
+		}
+		var id int64
+		if err := database.QueryRowContext(context.Background(),
+			`SELECT id FROM channel_categories WHERE name = ? COLLATE NOCASE`, ch.Category,
+		).Scan(&id); err != nil {
+			t.Fatalf("seedChannel(%d) category id: %v", ch.ID, err)
+		}
+		categoryID = id
+	}
 	_, err := database.ExecContext(context.Background(),
-		`INSERT INTO channels (id, name, type, category, topic, position)
+		`INSERT INTO channels (id, name, type, category_id, topic, position)
 		 VALUES (?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
 		     name=excluded.name,
 		     type=excluded.type,
-		     category=excluded.category,
+		     category_id=excluded.category_id,
 		     topic=excluded.topic,
 		     position=excluded.position`,
-		ch.ID, ch.Name, ctype, nullStr(ch.Category), nullStr(ch.Topic), ch.Position,
+		ch.ID, ch.Name, ctype, categoryID, nullStr(ch.Topic), ch.Position,
 	)
 	if err != nil {
 		t.Fatalf("seedChannel(%d): %v", ch.ID, err)

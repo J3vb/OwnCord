@@ -163,6 +163,16 @@ func TestRequestDeadline_ResponseControllerReachesConnection(t *testing.T) {
 // "METHOD /pattern" as chi.Walk reports them, or "* /prefix/*" for a mounted
 // handler that answers every method (postureKey).
 var deadlineBound = []string{
+	"GET /admin/api/channels/categories",
+	"POST /admin/api/channels/categories",
+	"PUT /admin/api/channels/categories/order",
+	"PATCH /admin/api/channels/categories/{id}",
+	"DELETE /admin/api/channels/categories/{id}",
+	"GET /api/v1/moderation/channels/categories",
+	"POST /api/v1/moderation/channels/categories",
+	"PUT /api/v1/moderation/channels/categories/order",
+	"PATCH /api/v1/moderation/channels/categories/{id}",
+	"DELETE /api/v1/moderation/channels/categories/{id}",
 	"DELETE /api/v1/uploads/{id}",
 	"DELETE /admin/api/backups/{name}",
 	"DELETE /admin/api/channels/{id}",

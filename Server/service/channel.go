@@ -17,6 +17,7 @@ import (
 type ChannelService struct {
 	st    Store
 	afk   AFKStore
+	cats  CategoryStore
 	perms *PermissionService
 	batch *ConnWrites
 	// wakeExpiry nudges the custom status expirer after a status with an
@@ -31,9 +32,11 @@ func NewChannelService(st Store, perms *PermissionService) *ChannelService {
 	// is ratcheted (datastore_ratchet_test.go). *db.DB satisfies it; a Store
 	// that does not leaves SetAFKChannel answering ErrInternal.
 	afk, _ := st.(AFKStore)
+	cats, _ := st.(CategoryStore)
 	return &ChannelService{
 		st:    st,
 		afk:   afk,
+		cats:  cats,
 		perms: perms,
 		now:   time.Now,
 	}

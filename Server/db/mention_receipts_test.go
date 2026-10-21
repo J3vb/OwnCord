@@ -63,7 +63,7 @@ func TestMigration063_MentionReceiptsSchema(t *testing.T) {
 	// Both cascades: a user delete and a message delete remove their receipts.
 	alice := seedUser(t, database, "alice")
 	bob := seedUser(t, database, "bob")
-	ch := seedChannel(t, database, "general")
+	ch := seedChannelRawSQL(t, database, "general")
 	m1, err := database.CreateMessage(ctx, ch, alice, "one", nil)
 	if err != nil {
 		t.Fatalf("CreateMessage: %v", err)
@@ -106,7 +106,7 @@ func TestMigration063_BackfillOnlyBadgedRows(t *testing.T) {
 	idle := seedUser(t, database, "idle")
 	alice := seedUser(t, database, "alice")
 	blocked := seedUser(t, database, "blocked")
-	ch := seedChannel(t, database, "general")
+	ch := seedChannelRawSQL(t, database, "general")
 
 	send := func(author int64, content string, mentions []int64, everyone bool) int64 {
 		t.Helper()
@@ -155,7 +155,7 @@ func TestIncrementMentionCountsBatch_ReceiptOnlyForAdmitted(t *testing.T) {
 	author := seedUser(t, database, "author")
 	fresh := seedUser(t, database, "fresh")
 	guarded := seedUser(t, database, "guarded")
-	ch := seedChannel(t, database, "general")
+	ch := seedChannelRawSQL(t, database, "general")
 	live, err := database.CreateMessage(ctx, ch, author, "live", nil)
 	if err != nil {
 		t.Fatalf("CreateMessage: %v", err)
@@ -197,7 +197,7 @@ func TestMentionReceipts_CascadeOnMessageHardDelete(t *testing.T) {
 	ctx := context.Background()
 	author := seedUser(t, database, "author")
 	reader := seedUser(t, database, "reader")
-	ch := seedChannel(t, database, "general")
+	ch := seedChannelRawSQL(t, database, "general")
 	m, err := database.CreateMessageWithMentions(ctx, ch, author, "hi @reader", nil, []int64{reader}, 0, false)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions: %v", err)

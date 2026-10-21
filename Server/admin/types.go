@@ -33,6 +33,10 @@ type HubBroadcaster interface {
 	BroadcastChannelCreate(ch *db.Channel)
 	BroadcastChannelUpdate(ch *db.Channel)
 	BroadcastChannelDelete(channelID int64)
+	// BroadcastChannelCategories sends the full category list to the connected
+	// clients that hold MANAGE_CHANNELS (permission evaluated at send time),
+	// and to nobody else, after a category mutation (WP 6.5a).
+	BroadcastChannelCategories(cats []db.ChannelCategory)
 	BroadcastMemberBan(userID int64)
 	// BroadcastChatBulkDeleted tells a channel's subscribers that messageIDs
 	// were deleted at once (one committed batch of a ban's message purge).

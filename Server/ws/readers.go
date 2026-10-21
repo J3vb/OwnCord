@@ -53,6 +53,9 @@ type ReadySnapshotReader interface {
 	VisibilityReader
 	ListRoles(ctx context.Context) ([]*db.Role, error)
 	ListMembers(ctx context.Context) ([]db.MemberSummary, error)
+	// ListChannelCategories backs ready's categories (WP 6.5a), read only for
+	// a MANAGE_CHANNELS holder.
+	ListChannelCategories(ctx context.Context) ([]db.ChannelCategory, error)
 	// MemberGeneration and NextMemberBanLapse decide when the shared
 	// ListMembers result (serve_ready_members_cache.go) must be read again.
 	MemberGeneration(ctx context.Context) (int64, error)

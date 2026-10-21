@@ -78,6 +78,14 @@ type Channel struct {
 	DmOwnerID       *int64  `json:"dmOwnerId"`
 	DmIcon          *string `json:"dmIcon"`
 	Afk             int64   `json:"afk"`
+	CategoryID      *int64  `json:"categoryId"`
+}
+
+type ChannelCategory struct {
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	Position  int64  `json:"position"`
+	CreatedAt string `json:"createdAt"`
 }
 
 type ChannelOverride struct {

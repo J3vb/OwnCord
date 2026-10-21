@@ -150,19 +150,24 @@ type Role struct {
 
 // Channel represents a row in the channels table.
 type Channel struct {
-	ID              int64   `json:"id"`
-	Name            string  `json:"name"`
-	Type            string  `json:"type"`
-	Category        string  `json:"category"`
-	Topic           string  `json:"topic"`
-	Position        int     `json:"position"`
-	SlowMode        int     `json:"slow_mode"`
-	Archived        bool    `json:"archived"`
-	CreatedAt       string  `json:"created_at"`
-	VoiceMaxUsers   int     `json:"voice_max_users"`
-	VoiceQuality    *string `json:"voice_quality,omitempty"`
-	MixingThreshold *int    `json:"mixing_threshold,omitempty"`
-	VoiceMaxVideo   int     `json:"voice_max_video"`
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Category string `json:"category"`
+	// CategoryID / CategoryPosition come from the LEFT JOIN on
+	// channel_categories (migration 072). CategoryID 0 means uncategorized,
+	// and Category is then "". Both are identical for every recipient.
+	CategoryID       int64   `json:"category_id"`
+	CategoryPosition int     `json:"category_position"`
+	Topic            string  `json:"topic"`
+	Position         int     `json:"position"`
+	SlowMode         int     `json:"slow_mode"`
+	Archived         bool    `json:"archived"`
+	CreatedAt        string  `json:"created_at"`
+	VoiceMaxUsers    int     `json:"voice_max_users"`
+	VoiceQuality     *string `json:"voice_quality,omitempty"`
+	MixingThreshold  *int    `json:"mixing_threshold,omitempty"`
+	VoiceMaxVideo    int     `json:"voice_max_video"`
 	// NSFW marks the channel as possibly carrying sensitive content. It is
 	// metadata only: the server stores, ships and audits it but imposes no
 	// content behaviour of its own (see migration 025). Clients decide what

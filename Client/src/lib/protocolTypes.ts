@@ -50,6 +50,7 @@ export const ServerMessageType = {
   MOD_QUEUE: "mod_queue", // B5-8: a report queue change, to connected MODERATE_MEMBERS/Administrator holders only
   MOD_ACTION: "mod_action", // B5-9: a warning or timeout applied to the live target, targeted and unsequenced -- not replayed
   MEMBER_TIMEOUTS: "member_timeouts", // WP 3C-7c: the active-timeout list, to connected MODERATE_MEMBERS/Administrator holders (everyone) and each timed-out member (own entry only); targeted, unsequenced, never replayed -- replaces the viewer's list wholesale
+  CHANNEL_CATEGORIES: "channel_categories", // WP 6.5a: the full channel category list {categories:[{id,name,position}]}, sent per connected client only to MANAGE_CHANNELS/Administrator holders after any category mutation (permission evaluated at send time); targeted, unsequenced, never replayed -- replaces the manager's list wholesale. Everyone else derives groups from the category fields on the channels they can see
   APPEAL_STATUS: "appeal_status", // B5-10: an appeal's state changed, to the appellant only, targeted and unsequenced -- not replayed
   MENTION_COUNT: "mention_count", // DP-27: this user's read_states.mention_count changed in a channel; targeted and unsequenced -- the live taskbar/tray badge signal
   READ_STATE: "read_state", // WP 3D-5c: the caller's read pointer moved in a channel (after every accepted mark_read and mark_unread); targeted to the caller and unsequenced -- not replayed
