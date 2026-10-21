@@ -148,6 +148,10 @@ var erasureStatements = []struct {
 	{"message_call_participants", `DELETE FROM message_call_participants WHERE user_id = ?`},
 	{"message_delivery_receipts", `DELETE FROM message_delivery_receipts WHERE user_id = ?`},
 	{"reactions", `DELETE FROM reactions WHERE user_id = ?`},
+	// Poll votes (migration 073, WP 6.9b). Votes on polls the subject authored
+	// went with those messages above. Counts are always recomputed, so the
+	// polls the subject voted in read exactly on the next update or read.
+	{"poll_votes", `DELETE FROM poll_votes WHERE user_id = ?`},
 	{"read_states", `DELETE FROM read_states WHERE user_id = ?`},
 	// Mention ledger (migration 063): receipts naming the subject as the
 	// recipient. Receipts for the subject's own messages go with those messages

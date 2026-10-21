@@ -47,6 +47,10 @@ type MessageDeliveryParams struct {
 	// the snapshot, AttachmentIDs are the sender's own clones of the original's
 	// files, and the transaction re-checks the original before it writes.
 	Forward *ForwardRow
+	// Poll, when set, makes this send a poll (WP 6.9b): the poll row and its
+	// answers commit with the message and the receipt. Content is the readable
+	// fallback text the service built from the same fields.
+	Poll *PollInput
 }
 
 // MessageDelivery is the committed result. A duplicate carries only the
@@ -141,6 +145,11 @@ func (d *DB) CreateMessageDelivery(ctx context.Context, p MessageDeliveryParams)
 	}
 	if p.Forward != nil {
 		if err := insertForwardRow(ctx, q, r.ID, p.Forward); err != nil {
+			return nil, err
+		}
+	}
+	if p.Poll != nil {
+		if err := insertPollRows(ctx, q, r.ID, p.Poll); err != nil {
 			return nil, err
 		}
 	}

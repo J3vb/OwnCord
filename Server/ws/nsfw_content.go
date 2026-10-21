@@ -106,6 +106,7 @@ var contentBearingKinds = map[string]bool{
 	MsgTypeReady:               false, // buildReady carries channel/member/voice state only, never message content
 	MsgTypeChatSendOK:          false, // direct to the sender, who already knows their own content
 	MsgTypeChatForwardOK:       false, // direct to the sender; ids only
+	MsgTypePollCreateOK:        false, // direct to the sender; ids only
 	MsgTypeChatDeleted:         false, // ids only
 	MsgTypeChatBulkDeleted:     false, // ids only
 	MsgTypeChatPinned:          false, // ids + flag only, no message body

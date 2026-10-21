@@ -40,6 +40,7 @@ var FS embed.FS
 
 // Order is every migration reversal, newest first — the order to run them in.
 var Order = []string{
+	"073_polls.down.sql",
 	"072_channel_categories.down.sql",
 	"071_message_forwards.down.sql",
 	"070_user_privacy.down.sql",

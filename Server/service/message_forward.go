@@ -140,6 +140,17 @@ func (s *MessageService) forwardSource(ctx context.Context, p ForwardParams) (*f
 	if err := permissions.CanReadContent(readSubject(ctx, s.st, s.perms, p.UserID, ch)); err != nil {
 		return nil, notFound
 	}
+	// A poll cannot be forwarded (WP 6.9b): a copy would carry only the fallback
+	// text and drop the voting. After the read gate, so it leaks nothing.
+	if s.poll.store != nil {
+		meta, err := s.poll.store.GetPollMeta(ctx, msg.ID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: read forward source: %w", ErrInternal, err)
+		}
+		if meta != nil {
+			return nil, fmt.Errorf("%w: a poll cannot be forwarded", ErrBadRequest)
+		}
+	}
 	origin := db.ForwardRow{SourceMessageID: &msg.ID, SourceChannelID: msg.ChannelID, SourceTimestamp: msg.Timestamp}
 	prior, err := s.forward.store.GetMessageForward(ctx, msg.ID)
 	if err != nil {
@@ -285,14 +296,7 @@ func (s *MessageService) forwardResult(ctx context.Context, sp SendMessageParams
 	if !s.sendMessageDMSideEffects(ctx, sp, result) {
 		return result
 	}
-	if s.pushNotifier != nil {
-		bgCtx, channelID, authorID, participants := context.WithoutCancel(ctx), sp.ChannelID, sp.UserID, result.ParticipantIDs
-		s.runBackground(bgCtx, "push dispatch", func(ctx context.Context) {
-			ctx, cancel := context.WithTimeout(ctx, backgroundJobTimeout)
-			defer cancel()
-			s.pushNotifier.Notify(ctx, channelID, authorID, participants)
-		})
-	}
+	s.pushDMParticipants(ctx, sp, result)
 	slog.Debug("message forwarded", "user", sp.Username, "channel_id", sp.ChannelID, "msg_id", msg.ID)
 	return result
 }

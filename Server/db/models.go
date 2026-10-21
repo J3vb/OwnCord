@@ -312,6 +312,8 @@ type MessageAPIResponse struct {
 	GroupEvent *GroupEventInfo `json:"group_event,omitempty"`
 	// Forward is set only on a forwarded message (WP 6.9a). See ForwardInfo.
 	Forward *ForwardInfo `json:"forward,omitempty"`
+	// Poll is set only on a poll message (WP 6.9b). See PollInfo.
+	Poll *PollInfo `json:"poll,omitempty"`
 }
 
 // GroupEventInfo is the group_event block of a group DM row. Which fields are

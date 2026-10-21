@@ -103,7 +103,7 @@ The sequence number system enables reconnection with state recovery.
 | DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                                                                                   |
 | DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                                                                                                |
 | Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                                                                                          |
-| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `chat_forward_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                                                                                                |
+| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `chat_forward_ok`, `poll_create_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                                                                              |
 
 **Presence is sequenced, but droppable.** Connect and disconnect presence
 arrives as `presence_batch` (one frame per coalescing window), a status change
@@ -822,6 +822,67 @@ source row is read again inside it, so a source deleted (or whose channel was
 made unreadable) in the meantime is refused with `NOT_FOUND`, nothing is stored
 and the quota is released.
 
+### poll_create (Client -> Server)
+
+Post a poll as a message (WP 6.9b). Creating is sending: the sender needs the same
+permissions in the channel as for `chat_send`, slow mode is charged, and a DM obeys
+its blocks, timeouts and message requests.
+
+```json
+{
+  "type": "poll_create",
+  "id": "550e8400-e29b-41d4-a716-446655440002",
+  "payload": {
+    "client_message_id": "1773484200000:3f2b8a52-6d1c-4a0e-9f4b-0c7d5e1a2b35",
+    "channel_id": 9,
+    "question": "Lunch?",
+    "answers": [{ "text": "Pizza" }, { "text": "Sushi", "emoji": "🍣" }],
+    "duration_hours": 24,
+    "allow_multiselect": false
+  }
+}
+```
+
+`client_message_id` is required, as for `chat_forward`: a retry after a lost
+acknowledgement is answered from the receipt and never posts a second poll. Reusing
+an id for another poll is a `CONFLICT`. Every text is sanitised first and then
+bounded in characters: the question 1 to 300, 2 to 10 answers of 1 to 55 each. A
+field that is empty after sanitising, or holds a control character (a newline
+included), is refused with `BAD_REQUEST`. Duplicate answer text is allowed. `emoji`
+is optional and is a Unicode emoji or a `:shortcode:`, as for a reaction.
+`duration_hours` is one of 1, 4, 8, 24, 72 or 168. `allow_multiselect` defaults to
+false. Answer ids are 1 to n in input order.
+
+Beyond the send rate limit (10 per second), a user may create 5 polls per 10 minutes
+(`RATE_LIMITED`). A retry answered from a receipt is not charged.
+
+The poll is an ordinary message (`kind` 0) whose `content` is a readable fallback
+that has no words of any language: `📊 <question>`, then one line `- [<emoji> ]<answer>`
+per answer. A client that does not know polls shows that text, and search finds the
+poll by it. The sequenced `chat_message` carries the `poll` block described under
+`chat_message`, with `mentions: []` whatever the text holds: a poll never pings and
+sends no channel push. A poll cannot be edited or forwarded.
+
+### poll_create_ok (Server -> Client)
+
+Direct response to the sender (no seq):
+
+```json
+{
+  "type": "poll_create_ok",
+  "id": "550e8400-e29b-41d4-a716-446655440002",
+  "payload": {
+    "message_id": 1104,
+    "channel_id": 9,
+    "client_message_id": "1773484200000:3f2b8a52-6d1c-4a0e-9f4b-0c7d5e1a2b35",
+    "deduplicated": false
+  }
+}
+```
+
+`deduplicated: true` marks an acknowledgement answered from a receipt (a retry);
+nothing was stored or broadcast for it.
+
 ### chat_forward_ok (Server -> Client)
 
 Direct response to the sender (no seq):
@@ -903,6 +964,31 @@ original, not the intermediate forward. A forward cannot be edited. Readers of t
 target see the text and files the sender chose to share even when they cannot read
 the source; the ids in the block are only numbers, and jumping to the source is
 permission-checked as any jump is.
+
+A poll message (WP 6.9b, `poll_create`) is an ordinary message with one more
+payload field, `poll`, omitted for every other message and for a deleted one:
+
+```json
+"poll": {
+  "question": "Lunch?",
+  "answers": [{ "answer_id": 1, "text": "Pizza", "emoji": null }, { "answer_id": 2, "text": "Sushi", "emoji": "🍣" }],
+  "allow_multiselect": false,
+  "expires_at": "2026-10-22T12:00:00Z",
+  "ended": false,
+  "ended_at": null,
+  "results": { "version": 0, "total_voters": 0, "counts": [{ "answer_id": 1, "count": 0 }, { "answer_id": 2, "count": 0 }], "me": [] }
+}
+```
+
+`results` are computed when the frame is built and never stored. The live frame is
+shared by every reader and is sent at creation, so `counts` are zero and `me` is
+`[]`. History fills the block per reader: `me` is the reader's own answer ids, and
+`ended` is true when `ended_at` is set or `expires_at` has passed, so a read is
+correct before anything marks the poll ended. `results.version` counts vote changes
+and the end, so a client that holds a higher version must not replace it with a
+lower one, such as a replayed creation frame. The block is the same shape on every
+message of `GET /channels/{id}/messages`. Voting, ending and expiry follow in a
+later release. A server does not advertise a `polls` capability until they do.
 
 A group DM can also hold group event rows (WP 3B-10): `kind` is one of
 `group_add`, `group_remove`, `group_leave`, `group_rename` and `group_icon`, and
@@ -3008,6 +3094,7 @@ All rate limits are enforced server-side using a token bucket rate limiter.
 | Call ring                                | 1     | 3 seconds                                  | `RATE_LIMITED` error |
 | Call decline                             | 1     | 3 seconds                                  | `RATE_LIMITED` error |
 | Forward (`chat_forward`)                 | 5     | 10 seconds                                 | `RATE_LIMITED` error |
+| Poll create (`poll_create`)              | 5     | 10 minutes                                 | `RATE_LIMITED` error |
 | Plugin command (`chat_command`)          | 5     | 1 second                                   | `RATE_LIMITED` error |
 | Channel focus                            | 5     | 1 second                                   | Deferred             |
 | Mark read                                | 5     | 1 second (own budget, separate from focus) | Silently dropped     |
@@ -3043,6 +3130,7 @@ tables below add per-type behavioral notes.
 | `auth`                | N/A (first message)                  | Token + optional last_seq                                       |
 | `chat_send`           | 10/sec                               | + slow mode per channel                                         |
 | `chat_forward`        | 10/sec, then 5/10sec                 | One target per frame; `client_message_id` required; no pings    |
+| `poll_create`         | 10/sec, then 5/10min                 | `client_message_id` required; no pings                          |
 | `chat_edit`           | 10/sec                               | Own messages only                                               |
 | `chat_delete`         | 10/sec                               | Own or mod (non-DM)                                             |
 | `reaction_add`        | 5/sec                                |                                                                 |
@@ -3081,6 +3169,7 @@ tables below add per-type behavioral notes.
 | `chat_message`        | Yes      | Channel or DM participants                                                                             |
 | `chat_send_ok`        | No       | Direct to sender                                                                                       |
 | `chat_forward_ok`     | No       | Direct to sender                                                                                       |
+| `poll_create_ok`      | No       | Direct to sender                                                                                       |
 | `chat_edited`         | Yes      | Channel or DM participants                                                                             |
 | `chat_deleted`        | Yes      | Channel or DM participants                                                                             |
 | `chat_bulk_deleted`   | Yes      | Channel                                                                                                |

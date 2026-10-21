@@ -182,6 +182,8 @@ type MessageService struct {
 	mentionNotifier MentionCountNotifier
 	// forward backs ForwardMessage (WP 6.9a); see message_forward.go.
 	forward forwardDeps
+	// poll backs CreatePoll (WP 6.9b); see message_poll.go.
+	poll pollDeps
 }
 
 // SetMessageRequests wires the first-contact gate and delivery-audience
@@ -221,6 +223,7 @@ func NewMessageService(st Store, perms *PermissionService, limiter *auth.RateLim
 		limiter: limiter,
 	}
 	s.forward.store, _ = st.(ForwardStore)
+	s.poll.store, _ = st.(PollStore)
 	return s
 }
 

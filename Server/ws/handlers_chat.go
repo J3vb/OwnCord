@@ -13,6 +13,7 @@ import (
 func registerChatHandlers(r *HandlerRegistry, deps ChatDeps) {
 	r.RegisterV2(MsgTypeChatSend, handleChatSendV2, deps)
 	r.RegisterV2(MsgTypeChatForward, handleChatForwardV2, deps)
+	registerPollHandlers(r, deps)
 	r.RegisterV2(MsgTypeChatEdit, handleChatEditV2, deps)
 	r.RegisterV2(MsgTypeChatDelete, handleChatDeleteV2, deps)
 }
@@ -81,6 +82,7 @@ func sendResultEvents(d ChatDeps, info ClientInfo, clientMessageID string, chann
 		MentionsHere:      result.MentionsHere,
 		ReferencedMessage: result.ReferencedMessage,
 		Forward:           result.Forward,
+		Poll:              result.Poll,
 	})
 
 	if !result.IsDM {

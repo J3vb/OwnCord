@@ -21,6 +21,11 @@ type SendMessageParams struct {
 	// AttachmentIDs stay empty at hash time, so an original edited between two
 	// tries never turns the retry into a conflict.
 	ForwardOf int64
+	// Poll is the canonical JSON of the raw poll input of a poll_create (WP
+	// 6.9b), "" for every other send. Like ForwardOf it only binds a retry to
+	// its receipt: Content stays empty at hash time, so the same poll sent
+	// twice is one retry and another poll under the same id is a conflict.
+	Poll string
 }
 
 // ReferencedMessage is the reply-parent snippet a chat_message frame carries.
@@ -105,4 +110,10 @@ type SendMessageResult struct {
 	// Forward is the forward block of the broadcast, set only by
 	// ForwardMessage.
 	Forward *db.ForwardInfo
+
+	// Poll is the poll block of the broadcast, set only by CreatePoll. It is
+	// nil on a retry acknowledgment, and when the block could not be read back
+	// after the commit (the poll then shows as its fallback text until the next
+	// history read).
+	Poll *db.PollInfo
 }
