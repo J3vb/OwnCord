@@ -128,6 +128,19 @@ type BootStatus struct {
 	LastPanicAt time.Time
 }
 
+// RestoreOutcome is what the boot-time apply of a staged backup restore left
+// for this start to report (WP 5.5). Recorded is false when no restore was
+// pending, which adds no signal.
+type RestoreOutcome struct {
+	Recorded bool
+	// Status is "applied", "rolled_back" or "refused".
+	Status string
+	Backup string
+	At     time.Time
+	// Reason says why a restore did not apply; empty when it did.
+	Reason string
+}
+
 // AttentionSignal is one measurement and its current status.
 type AttentionSignal struct {
 	ID         string    `json:"id"`
@@ -186,6 +199,9 @@ type AttentionService struct {
 	// boot is the previous run's marker, set once at start-up and constant
 	// for this process (SRE-08).
 	boot BootStatus
+	// restore is the staged restore this start applied or refused, if any;
+	// like boot it is set once at start-up and constant for the process.
+	restore RestoreOutcome
 }
 
 type attentionJob struct {
@@ -267,6 +283,17 @@ func (s *AttentionService) RecordBootStatus(b BootStatus) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.boot = b
+}
+
+// RecordRestoreOutcome records the staged restore the boot-time apply handled,
+// for the attention panel. It is set once at start-up, before Run samples.
+func (s *AttentionService) RecordRestoreOutcome(r RestoreOutcome) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.restore = r
 }
 
 // Run evaluates now and then every interval until ctx ends.
@@ -374,6 +401,7 @@ func (s *AttentionService) Evaluate(ctx context.Context, now time.Time) {
 	s.evalVoice(r, now)
 	s.evalCertificate(r, now)
 	s.evalBootStatus(now)
+	s.evalRestoreOutcome(now)
 	s.evalJobs(now)
 	for id, w := range s.warnings {
 		if w.RecoveredAt != nil && now.Sub(*w.RecoveredAt) > attentionRecoveredKeep {

@@ -1716,6 +1716,43 @@ ul.md-list-nested {
   margin-left: auto;
 }
 
+/* Pinned-a-message row (WP 6.12): the same one-line record as a group row */
+.message.pin-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 0;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.pin-row .pr-icon {
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+}
+.pin-row .pr-text {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.pin-row .pr-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text-normal);
+  cursor: pointer;
+}
+.pin-row .pr-link:hover {
+  text-decoration: underline;
+}
+.pin-row .pr-time {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
 /* Message hover actions */
 .msg-actions-bar {
   position: absolute;

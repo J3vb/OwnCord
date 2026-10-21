@@ -289,7 +289,7 @@ func (s *MessageService) sendMessageDMSideEffects(ctx context.Context, p SendMes
 			continue
 		}
 		if !isGroup && s.messageRequests != nil && s.dmFirstContactGate(bgCtx, p, t, result) {
-			// Staged as a request (or refused outright — banned recipient):
+			// Staged as a request (or refused outright — recipient not reachable):
 			// never OpenDM an untrusted recipient. dmFirstContactGate has
 			// already done everything this send owes them.
 			continue
@@ -337,7 +337,7 @@ func (s *MessageService) sendMessageDMSideEffects(ctx context.Context, p SendMes
 // (recipient, read with its trust of the sender by GetDMDeliveryTargets) of
 // a one-to-one DM p.UserID just sent into. It reports true when the send
 // effect for this recipient is already fully handled (a request was staged,
-// or the recipient is banned and gets nothing) — the caller's cue to skip
+// or the recipient is not reachable and gets nothing) — the caller's cue to skip
 // OpenDM entirely for them. False means the recipient already trusts the
 // sender and today's OpenDM path applies.
 func (s *MessageService) dmFirstContactGate(ctx context.Context, p SendMessageParams, target db.DMDeliveryTarget, result *SendMessageResult) bool {
@@ -348,11 +348,10 @@ func (s *MessageService) dmFirstContactGate(ctx context.Context, p SendMessagePa
 			"err", rErr, "recipient_id", recipientID)
 		return true // nothing more can be decided for them; do not OpenDM
 	}
-	// "Cannot receive DMs" (community-services.md S1): no finer predicate
-	// exists today than the ban state, so a banned recipient gets no request
-	// row and no frame. The send itself still succeeds for the sender
-	// (decision 5).
-	if recipient == nil || auth.IsEffectivelyBanned(recipient) {
+	// "Cannot receive DMs" (community-services.md S1): a recipient that is not
+	// dmReachableUser gets no request row and no frame. The send itself still
+	// succeeds for the sender (decision 5).
+	if !dmReachableUser(recipient) {
 		return true
 	}
 	if target.TrustsSender {

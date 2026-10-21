@@ -405,6 +405,7 @@ func routerMiddleware(r chi.Router, cfg *config.Config) {
 	r.Use(requestLogger(proxyNets)) // structured request/response logging
 	r.Use(SecurityHeadersWithTLS(cfg.TLS.Mode))
 	r.Use(MaxBodySizeUnless(defaultMaxBodySize, bodyCapExemptPattern, bodyCapExemptPrefixes...))
+	r.Use(requestDeadlineMiddleware()) // WP 4.1c: 15 s deadline on non-streaming routes
 
 	// Coraza WAF — opt-in via config.
 	if cfg.Server.WAFEnabled {
@@ -827,15 +828,6 @@ func validRequestID(id string) bool {
 		}
 	}
 	return true
-}
-
-// truncateForLog bounds a client-controlled string before it becomes a log
-// attribute, so it cannot inflate the retained ring-buffer entries.
-func truncateForLog(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "...(truncated)"
 }
 
 // setRequestIDHeader copies the request ID from context into the response header.

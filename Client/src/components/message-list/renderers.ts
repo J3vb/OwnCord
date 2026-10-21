@@ -7,8 +7,9 @@
 
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { isServerRowKind } from "@lib/messageKind";
+import { isPinRowKind, isServerRowKind } from "@lib/messageKind";
 import { groupRowIcon, groupRowText } from "./groupRows";
+import { renderPinRowText } from "./pinRows";
 import { connectionLockReason, messageActionGates } from "./message-actions";
 import { QUICK_REACTIONS, emojiNode, quickReactionEmojiForPass } from "./quick-reactions";
 import { messagesStore, type Message } from "@stores/messages.store";
@@ -419,6 +420,26 @@ function renderGroupRow(msg: Message, text: string): HTMLDivElement {
   return el;
 }
 
+/**
+ * A "pinned a message" row (WP 6.12): the same one-line record as a group row,
+ * with two links in its sentence. See pinRows.ts.
+ */
+function renderPinRow(msg: Message, opts: MessageListOptions, signal: AbortSignal): HTMLDivElement {
+  const el = createElement("div", {
+    class: "message pin-row",
+    "data-testid": `message-${msg.id}`,
+  });
+  const icon = createElement("span", { class: "pr-icon" });
+  icon.appendChild(createIcon("pin", 16));
+  const time = createElement(
+    "span",
+    { class: "pr-time", title: fullDateTimeTitle(msg.timestamp) },
+    formatMessageTimestamp(msg.timestamp),
+  );
+  appendChildren(el, icon, renderPinRowText(msg, opts, signal), time);
+  return el;
+}
+
 /** Map a send-failure error code to a short, user-facing reason. */
 function sendErrorReason(code: string | null): string {
   switch (code) {
@@ -530,6 +551,7 @@ export function renderMessage(
     if (msg.kind === "call" && msg.call !== undefined) {
       return renderCallRow(msg, msg.call, opts, signal);
     }
+    if (isPinRowKind(msg.kind)) return renderPinRow(msg, opts, signal);
     const groupText = groupRowText(msg, opts.currentUserId);
     if (groupText !== null) return renderGroupRow(msg, groupText);
     const fallback = renderSystemMessage(msg);

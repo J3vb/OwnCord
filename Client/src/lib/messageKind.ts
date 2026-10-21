@@ -7,3 +7,8 @@
 export function isServerRowKind(kind: string | undefined): boolean {
   return kind !== undefined && kind !== "";
 }
+
+/** True for the "X pinned a message" row, the one server row a member may delete. */
+export function isPinRowKind(kind: string | undefined): boolean {
+  return kind === "pin_add";
+}

@@ -379,7 +379,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		ownerOnly(r, http.MethodPost, "/backup", handleBackup(database))
 		ownerOnly(r, http.MethodGet, "/backups", handleListBackups())
 		ownerOnly(r, http.MethodDelete, "/backups/{name}", handleDeleteBackup(database))
-		ownerOnly(r, http.MethodPost, "/backups/{name}/restore", handleRestoreBackup(database, hub))
+		ownerOnly(r, http.MethodPost, "/backups/{name}/restore", handleRestoreBackup(database))
 		ownerOnly(r, http.MethodPost, "/backups/{name}/link", handleBackupLink())
 		ownerOnly(r, http.MethodGet, "/archive", handleArchive(database, setupOpts))
 		ownerOnly(r, http.MethodPost, "/archive/link", handleArchiveLink())

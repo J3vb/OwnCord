@@ -376,6 +376,30 @@ func (s *AttentionService) evalBootStatus(now time.Time) {
 	s.settle(sig, title, action)
 }
 
+// evalRestoreOutcome reports the staged backup restore this start handled
+// (WP 5.5): ok when it was applied, a warning when it was rolled back or
+// refused and the previous database is still in use. Without a restore there
+// is no signal.
+func (s *AttentionService) evalRestoreOutcome(now time.Time) {
+	r := s.restore
+	if !r.Recorded {
+		return
+	}
+	at := r.At.UTC().Format("2006-01-02 15:04 UTC")
+	sig := AttentionSignal{ID: "last_restore", Label: "Last backup restore", ObservedAt: now}
+	title := "The last backup restore did not apply"
+	action := "The server kept running on the database it had before. Check that the backup file is intact, then restore it again; the pre-restore safety copy in the backups folder holds the previous data."
+	if r.Status == "applied" {
+		sig.Status = AttentionStatusOK
+		sig.Value = fmt.Sprintf("restored %s at %s", r.Backup, at)
+	} else {
+		sig.Status = AttentionStatusWarning
+		sig.Value = fmt.Sprintf("restore of %s failed at %s, previous database kept", r.Backup, at)
+		sig.Detail = r.Reason
+	}
+	s.settle(sig, title, action)
+}
+
 func (s *AttentionService) evalJobs(now time.Time) {
 	for _, j := range s.jobs {
 		sig := AttentionSignal{ID: "job:" + j.label, Label: "Maintenance: " + j.label, ObservedAt: now}
