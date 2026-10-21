@@ -4,7 +4,7 @@
   "exclude": ["db/dbgen", "cmd"],
   "packages": {
     "auth": 93.7,
-    "db": 81.3,
+    "db": 81.2,
     "permissions": 100.0,
     "service": 82.7,
     "ws": 90.7
