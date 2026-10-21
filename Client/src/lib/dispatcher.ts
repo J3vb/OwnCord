@@ -73,12 +73,12 @@ import {
   handleDmChannelOpen,
 } from "../features/direct-messages/wsHandlers";
 import { applyReadyDmRequests, handleDmRequest } from "../features/message-requests/wsHandlers";
-import { takeWatchRefusal } from "./watchRequest";
 import {
   handleVoiceConfig,
   handleVoiceDisconnected,
   handleVoiceE2eeAnnounce,
   handleVoiceWatching,
+  handleVoiceWatchError,
   handleVoiceE2eeOffer,
   handleVoiceError,
   handleVoiceJoinRollback,
@@ -369,7 +369,7 @@ export function wireDispatcher(
       // refusals -> the generic toast -> the video rollback.
       if (handleConnectionError(ws, payload)) return;
       // A server that does not know voice_watch answers with an error: ignore it.
-      if (takeWatchRefusal(id)) return;
+      if (handleVoiceWatchError(payload, id)) return;
       // A timeout refuses a custom status without writing or broadcasting
       // anything, so the PresenceSender's optimistic apply would leave the
       // user seeing and saving a status nobody else has. This is the one

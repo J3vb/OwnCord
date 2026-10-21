@@ -227,6 +227,7 @@ export function getVoiceRosterRevision(): number {
 
 /** Reset voice store to initial state (e.g. on logout). */
 export function resetVoiceStore(): void {
+  watchingResyncAt = Number.NEGATIVE_INFINITY;
   setVoiceDeafened(false);
   setVoiceInSession(false);
   voiceStore.setState(() => ({
@@ -442,6 +443,8 @@ export function joinVoiceChannel(channelId: number): void {
     if (prev.currentChannelId === channelId) return prev;
     return {
       ...prev,
+      // A direct switch: the old channel's watch sets are not this one's.
+      peerWatching: new Map<number, readonly number[]>(),
       voiceUsers: withoutRings(prev.voiceUsers, prev.currentChannelId),
       currentChannelId: channelId,
       joinedAt: Date.now(),
@@ -794,6 +797,15 @@ let watchingResyncAt = Number.NEGATIVE_INFINITY;
  *  the instant so the streamer's viewer sounds skip that re-sync. */
 export function noteWatchingResync(): void {
   watchingResyncAt = Date.now();
+}
+
+/** Forget every member's watch set, ahead of the server re-sending them (a
+ *  resume or full resync): a member who stopped while we were away sends no
+ *  frame, so the old entry must not outlive the re-sync. */
+export function clearPeerWatching(): void {
+  voiceStore.setState((prev) =>
+    (prev.peerWatching?.size ?? 0) === 0 ? prev : { ...prev, peerWatching: new Map() },
+  );
 }
 
 /** True for a short while after `noteWatchingResync`. */

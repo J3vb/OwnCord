@@ -7,6 +7,7 @@ import {
   handleVoiceMoved,
   handleVoiceState,
   handleVoiceWatching,
+  handleVoiceWatchError,
   snapshotReadyVoice,
 } from "./wsHandlers";
 import {
@@ -19,9 +20,11 @@ import {
   clearPeerVerifications,
   streamViewers,
   isWatchingResync,
+  clearPeerWatching,
 } from "../../stores/voice.store";
 import { authStore } from "../../stores/auth.store";
 import { channelsStore } from "../../stores/channels.store";
+import { noteWatchSent, resetWatchRequest } from "../../lib/watchRequest";
 import { clearAfkMove } from "./moveHint";
 import { joinRetryInMs, noteJoinSucceeded } from "./joinBackoff";
 import { noteJoinSent, resetJoinRequest } from "./joinRequest";
@@ -39,6 +42,7 @@ vi.mock("../../lib/livekitSession", () => ({
   failPendingRejoin: vi.fn(),
   reconcileVideoFlags: vi.fn(),
   resendWatching: vi.fn(),
+  retryWatching: vi.fn(),
 }));
 vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
 import {
@@ -47,6 +51,7 @@ import {
   handleParticipantLeft,
   handleE2EEAnnounce,
   resendWatching,
+  retryWatching,
 } from "../../lib/livekitSession";
 import { showToast } from "../../lib/toast";
 
@@ -472,6 +477,8 @@ const member = (userId: number, screenshare = false) => ({
 const frame = (user_id: number, user_ids: number[]) =>
   ({ user_id, user_ids }) as Payload<"voice_watching">;
 
+const err = (code: string) => ({ code, message: "m" }) as Payload<"error">;
+
 describe("handleVoiceWatching (6.6b)", () => {
   const clock = { voiceRejoinChannelId: null } as ReconnectClock;
 
@@ -534,6 +541,45 @@ describe("handleVoiceWatching (6.6b)", () => {
     handleVoiceWatching(frame(5, [2]));
     resetVoiceStore();
     expect(voiceStore.getState().peerWatching?.size).toBe(0);
+  });
+
+  it("a resync forgets entries the server does not re-send", () => {
+    handleVoiceWatching(frame(5, [2]));
+    clearPeerWatching();
+    expect(voiceStore.getState().peerWatching?.size).toBe(0);
+    handleVoiceWatching(frame(5, [2]));
+    expect(voiceStore.getState().peerWatching?.get(5)).toEqual([2]);
+  });
+
+  it("a direct channel switch drops the old channel's entries", () => {
+    handleVoiceWatching(frame(5, [2]));
+    joinVoiceChannel(6);
+    expect(voiceStore.getState().peerWatching?.size).toBe(0);
+  });
+
+  describe("handleVoiceWatchError", () => {
+    beforeEach(() => {
+      resetWatchRequest();
+      vi.mocked(retryWatching).mockClear();
+    });
+
+    it("ignores other frames", () => {
+      expect(handleVoiceWatchError(err("RATE_LIMITED"), "x")).toBe(false);
+      expect(retryWatching).not.toHaveBeenCalled();
+    });
+
+    it("swallows an error to our voice_watch without a retry", async () => {
+      noteWatchSent("w1");
+      expect(handleVoiceWatchError(err("BAD_REQUEST"), "w1")).toBe(true);
+      await Promise.resolve();
+      expect(retryWatching).not.toHaveBeenCalled();
+    });
+
+    it("retries once for RATE_LIMITED", async () => {
+      noteWatchSent("w2");
+      expect(handleVoiceWatchError(err("RATE_LIMITED"), "w2")).toBe(true);
+      await vi.waitFor(() => expect(retryWatching).toHaveBeenCalledTimes(1));
+    });
   });
 
   describe("streamViewers", () => {

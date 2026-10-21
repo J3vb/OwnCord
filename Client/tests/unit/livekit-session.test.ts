@@ -859,15 +859,31 @@ describe("LiveKitSession", () => {
       expect(ws.send).toHaveBeenCalledWith({ type: "voice_leave", payload: {} });
     });
 
-    it("re-sends the current set on a resume, and nothing when it is empty", () => {
+    it("re-sends the current set on a resume, an empty one included", () => {
       const ws = { send: vi.fn(), getState: () => "connected" } as any;
       session.setWsClient(ws);
+      // The server keeps the old set across a resume, so empty must be said.
       session.resendWatching();
-      expect(watchFrames(ws)).toEqual([]);
+      expect(watchFrames(ws)).toEqual([[]]);
       (session as any)._remoteTracks.watch(9, "screenshare", true);
       ws.send.mockClear();
       session.resendWatching();
       expect(watchFrames(ws)).toEqual([[9]]);
+    });
+
+    it("retries once after a second when rate limited, and leaving cancels it", () => {
+      vi.useFakeTimers();
+      const ws = { send: vi.fn(), getState: () => "connected" } as any;
+      session.setWsClient(ws);
+      session.retryWatching();
+      session.retryWatching();
+      expect(watchFrames(ws)).toEqual([]);
+      vi.advanceTimersByTime(1000);
+      expect(watchFrames(ws)).toEqual([[]]);
+      session.retryWatching();
+      session.leaveVoice(false);
+      vi.advanceTimersByTime(2000);
+      expect(watchFrames(ws)).toEqual([[]]);
     });
 
     it("an error reply to a voice_watch is recognised and dropped", () => {

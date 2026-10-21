@@ -11,6 +11,7 @@ import {
   joinVoiceChannel,
   setVoiceStatus,
   isWatchingResync,
+  setPeerWatching,
 } from "../../stores/voice.store";
 import { expectConsole } from "../../../tests/helpers/console";
 
@@ -78,6 +79,19 @@ describe("handleAuthOk", () => {
 
       expect(isWatchingResync()).toBe(true);
       await vi.waitFor(() => expect(resendWatching).toHaveBeenCalledTimes(1));
+    });
+
+    it("drops a peer's watch set the resumed server does not re-send", () => {
+      voiceStore.setState((prev) => ({
+        ...prev,
+        voiceUsers: new Map([[4, new Map([[5, { userId: 5 } as never]])]]),
+      }));
+      setPeerWatching(5, [2]);
+      expect(voiceStore.getState().peerWatching?.get(5)).toEqual([2]);
+
+      handleAuthOk(socketStub(), createReconnectClock(), resumed);
+
+      expect(voiceStore.getState().peerWatching?.has(5)).toBe(false);
     });
 
     it("does not re-send the watch set on a fresh flow or with no session", async () => {

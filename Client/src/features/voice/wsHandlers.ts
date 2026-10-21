@@ -16,10 +16,12 @@ import {
   setPeerVideoDecode,
   setPeerWatching,
   noteWatchingResync,
+  clearPeerWatching,
 } from "../../stores/voice.store";
 import { ensureIdentityKeyPublished } from "../../lib/identity";
 import { showToast } from "../../lib/toast";
 import { noteJoinFailed } from "./joinBackoff";
+import { takeWatchRefusal } from "../../lib/watchRequest";
 import { noteJoinSent, takeJoinRefusal } from "./joinRequest";
 import { noteVoiceMoved, noteAfkMove, takeAfkMove, clearAfkMove } from "./moveHint";
 import { channelsStore } from "../../stores/channels.store";
@@ -176,6 +178,7 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
       // The server does not re-relay a resumed member's own watch set to
       // peers: send ours again, and keep the viewer sounds out of the re-sync.
       noteWatchingResync();
+      clearPeerWatching();
 
       // OC-0201: same gap, for E2EE. A full resync never replays the
       // voice_leave for anyone who departed our voice channel during the
@@ -454,6 +457,19 @@ export function handleVoiceWatching(payload: Payload<"voice_watching">): void {
       )
     : [];
   setPeerWatching(payload.user_id, ids);
+}
+
+/** An error answering our voice_watch is swallowed (an old server does not
+ *  know the type); a rate-limited one re-sends the set once after a second.
+ *  True when the frame was ours. */
+export function handleVoiceWatchError(payload: Payload<"error">, id: string | undefined): boolean {
+  if (!takeWatchRefusal(id)) return false;
+  if (payload.code === "RATE_LIMITED") {
+    void livekitSession()
+      .then(({ retryWatching }) => retryWatching())
+      .catch((err: unknown) => log.debug("voice_watch retry failed", err));
+  }
+  return true;
 }
 
 export function handleVoiceE2eeOffer(payload: Payload<"voice_e2ee_offer">): void {
