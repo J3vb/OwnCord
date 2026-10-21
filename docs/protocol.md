@@ -1150,6 +1150,10 @@ is not blocked and not timed out may pin.
 ```
 
 Rate limited at 5/sec. Requires `ADD_REACTIONS` permission (or DM participant).
+The caller must also be able to read the channel, including any age-restriction
+acknowledgement. A message that does not exist, is deleted, or is in a channel
+the caller cannot read is answered `NOT_FOUND` with the same message in every
+case.
 
 A message holds at most **20 different emoji**. A `reaction_add` with a new
 emoji on a message that already has 20 is refused with `REACTION_LIMIT` and no
@@ -1607,7 +1611,8 @@ position), so clients only sort by it and never treat it as an index.
 `nsfw` is shipped so clients can gate or label a channel, and **the server now
 enforces it** (migration `047`, B5-7): a member with no acknowledgement row
 for a labelled channel gets no content from it — no message history, around
-window, pins, reaction users, search hits, or live/replayed `chat_message` /
+window, pins, reaction users, reacting (`reaction_add`/`reaction_remove` answer
+`NOT_FOUND`), search hits, or live/replayed `chat_message` /
 `chat_edited` / `reaction_update` — and no attachment bytes from it either,
 regardless of client. `channel_create`/`channel_update` themselves still reach
 every viewer including the one that just turned the label on, since those

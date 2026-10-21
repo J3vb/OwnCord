@@ -122,8 +122,11 @@ func TestReaction_CallRowNonMemberSameAsMissing(t *testing.T) {
 	ctx := context.Background()
 	_, callErr := f.messages.AddReaction(ctx, fixtureOwner, msgID, "👍")
 	_, missingErr := f.messages.AddReaction(ctx, fixtureOwner, 999999, "👍")
-	if !errors.Is(callErr, ErrBadRequest) || !errors.Is(missingErr, ErrBadRequest) {
-		t.Fatalf("call row err = %v, missing id err = %v, want both ErrBadRequest", callErr, missingErr)
+	if !errors.Is(callErr, ErrNotFound) || !errors.Is(missingErr, ErrNotFound) {
+		t.Fatalf("call row err = %v, missing id err = %v, want both ErrNotFound", callErr, missingErr)
+	}
+	if callErr.Error() != missingErr.Error() {
+		t.Fatalf("call row err = %q, missing id err = %q, want identical text", callErr, missingErr)
 	}
 	if strings.Contains(callErr.Error(), "call") {
 		t.Errorf("non-member learns the id is a call: %v", callErr)
