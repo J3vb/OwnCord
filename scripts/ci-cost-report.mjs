@@ -16,12 +16,30 @@
 // pressure on the plan's concurrent-job cap, not money.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const API = "https://api.github.com";
 const DAY_MS = 86_400_000;
 // Billing multipliers GitHub applies to private-repository minutes.
 export const OS_MULTIPLIER = { linux: 1, windows: 2, macos: 10 };
+
+export const CI_WORKFLOW = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  ".github",
+  "workflows",
+  "ci.yml",
+);
+
+// nativeTimeoutFromWorkflow reads the client-native job's timeout-minutes, so
+// the report judges timeouts against the limit CI actually enforces.
+export function nativeTimeoutFromWorkflow(yaml) {
+  const job = yaml.split(/\r?\n  client-native:\r?\n/)[1];
+  const match = job?.split(/\r?\n  [\w-]+:\r?\n/)[0].match(/^ {4}timeout-minutes: (\d+)$/m);
+  if (!match) throw new Error("ci.yml: no timeout-minutes on the client-native job");
+  return Number(match[1]);
+}
 
 export function runnerOS(labels) {
   const joined = (labels ?? []).join(" ").toLowerCase();
@@ -308,7 +326,9 @@ async function main() {
   const runs = await fetchRuns(args.repo, since, until, token);
   if (args.cache) mkdirSync(args.cache, { recursive: true });
   const jobsByRun = await fetchJobs(args.repo, runs, token, args.cache);
-  const report = summarize(runs, jobsByRun);
+  const report = summarize(runs, jobsByRun, {
+    nativeTimeout: nativeTimeoutFromWorkflow(readFileSync(CI_WORKFLOW, "utf8")),
+  });
   if (args.json) {
     writeFileSync(args.json, JSON.stringify(report, null, 2));
   }
@@ -321,7 +341,7 @@ async function main() {
   );
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((err) => {
     console.error(err.message);
     process.exit(1);

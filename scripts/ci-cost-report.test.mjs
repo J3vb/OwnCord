@@ -1,7 +1,10 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
 import {
+  CI_WORKFLOW,
   minutesBetween,
+  nativeTimeoutFromWorkflow,
   percentile,
   renderMarkdown,
   runnerOS,
@@ -159,4 +162,23 @@ test("renderMarkdown names the window and the native job", () => {
   });
   assert.match(md, /^# CI cost, o\/r, 2026-09-01 to 2026-10-01/);
   assert.match(md, /## Windows native E2E\n\n1 runs, 0 failed, 0 hit the 100-minute timeout/);
+});
+
+test("nativeTimeoutFromWorkflow reads the client-native job, not a neighbour", () => {
+  const yaml = [
+    "jobs:",
+    "  client-e2e:",
+    "    timeout-minutes: 40",
+    "  client-native:",
+    "    name: Client E2E (Windows native)",
+    "    timeout-minutes: 70",
+    "    steps:",
+    "      - run: x",
+    "        timeout-minutes: 25",
+    "  other:",
+    "    timeout-minutes: 5",
+  ].join("\n");
+  assert.equal(nativeTimeoutFromWorkflow(yaml), 70);
+  assert.throws(() => nativeTimeoutFromWorkflow("jobs:\n  other:\n    timeout-minutes: 5\n"));
+  assert.ok(nativeTimeoutFromWorkflow(readFileSync(CI_WORKFLOW, "utf8")) > 0);
 });
