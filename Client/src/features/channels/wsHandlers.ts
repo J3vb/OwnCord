@@ -63,6 +63,39 @@ export function applyReadyChannels(payload: Payload<"ready">): void {
   setMembers(payload.members);
 }
 
+/** The first text-like channel in sidebar order (D7): uncategorized rows
+ *  first, then categories by (category_position, category_id), each by
+ *  (position, id). An older server without category ids sorts by position. */
+function firstTextInSidebarOrder(
+  channels: Payload<"ready">["channels"],
+): Payload<"ready">["channels"][number] | undefined {
+  const sortKey = (ch: Payload<"ready">["channels"][number]): number[] => {
+    const cat = ch.category_id ?? 0;
+    return cat === 0
+      ? [0, 0, 0, ch.position, ch.id]
+      : [1, ch.category_position ?? 0, cat, ch.position, ch.id];
+  };
+  const before = (a: number[], b: number[]): boolean => {
+    for (let i = 0; i < a.length; i++) {
+      const x = a[i] ?? 0;
+      const y = b[i] ?? 0;
+      if (x !== y) return x < y;
+    }
+    return false;
+  };
+  let best: Payload<"ready">["channels"][number] | undefined;
+  let bestKey: number[] = [];
+  for (const ch of channels) {
+    if (!isTextLikeChannel(ch)) continue;
+    const k = sortKey(ch);
+    if (best === undefined || before(k, bestKey)) {
+      best = ch;
+      bestKey = k;
+    }
+  }
+  return best;
+}
+
 /**
  * The active-channel slice of `ready`: auto-select, or clear a channel that is
  * gone. Returns the channel markReadyActiveChannelRead should mark read.
@@ -97,7 +130,7 @@ export function applyReadyActiveChannel(payload: Payload<"ready">): number | nul
     if (rememberedVisible) {
       setActiveChannel(remembered, { clearUnread: false });
     } else {
-      const firstText = payload.channels.find((ch) => isTextLikeChannel(ch));
+      const firstText = firstTextInSidebarOrder(payload.channels);
       if (firstText !== undefined) {
         setActiveChannel(firstText.id, { clearUnread: false });
       }

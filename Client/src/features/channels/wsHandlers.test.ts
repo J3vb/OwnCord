@@ -112,6 +112,24 @@ describe("applyReadyActiveChannel", () => {
     expect(seen).toBeNull();
   });
 
+  it("auto-selects the first text channel in sidebar order, not payload order (6.5)", () => {
+    const inCategory = (id: number, catId: number, catPos: number, pos: number): ReadyChannel => ({
+      ...channel(id, "text", pos),
+      category_id: catId,
+      category_position: catPos,
+    });
+    // Payload order is by position; the sidebar puts uncategorized rows first,
+    // then categories by category position.
+    applyReadyActiveChannel(
+      ready([inCategory(1, 7, 1, 0), inCategory(2, 8, 0, 1), channel(3, "text", 2)]),
+    );
+    expect(channelsStore.getState().activeChannelId).toBe(3);
+
+    resetChannelsStore();
+    applyReadyActiveChannel(ready([inCategory(1, 7, 1, 0), inCategory(2, 8, 0, 1)]));
+    expect(channelsStore.getState().activeChannelId).toBe(2);
+  });
+
   it("clears an active channel the snapshot no longer has, and marks nothing read", () => {
     setChannels([channel(3, "text", 0)]);
     setActiveChannel(3);

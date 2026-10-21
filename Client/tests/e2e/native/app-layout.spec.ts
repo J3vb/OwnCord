@@ -111,9 +111,11 @@ test.describe("App Layout (Logged In)", () => {
     expect(count).toBeGreaterThan(0);
   });
 
-  test("first channel is active by default", async ({ nativePage }) => {
-    const firstChannel = nativePage.locator(".channel-item").first();
-    await expect(firstChannel).toHaveClass(/active/);
+  test("first text channel is active by default", async ({ nativePage }) => {
+    // Uncategorized voice channels can sit above the first text row, and voice
+    // rows are never auto-selected.
+    const firstText = nativePage.locator(".channel-item:not(.voice)").first();
+    await expect(firstText).toHaveClass(/active/);
   });
 
   test("messages container loads for active channel", async ({ nativePage }) => {
