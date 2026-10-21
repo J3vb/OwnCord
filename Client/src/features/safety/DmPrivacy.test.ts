@@ -119,13 +119,16 @@ describe("DmPrivacy section", () => {
     expect(hintOf(section).hidden).toBe(true);
   });
 
-  it("returns the switch to the server value and says so when the PUT fails", async () => {
+  it("returns the switch to the re-read server value and says so when the PUT fails", async () => {
     const section = await loaded();
     allowSw(section).click();
     expect(checked(allowSw(section))).toBe("false");
     puts[0]!.reject(new TypeError("offline"));
     await flush();
     expectConsole("warn", /Failed to save direct message settings/);
+    expect(gets).toHaveLength(2);
+    gets[1]!.resolve(both);
+    await flush();
     expect(checked(allowSw(section))).toBe("true");
     expect(errorLine(section)).toBe("Couldn't save that change. Your settings are unchanged.");
     // The next try starts from the server value.
@@ -134,32 +137,66 @@ describe("DmPrivacy section", () => {
     expect(errorLine(section)).toBe("");
   });
 
-  it("rapid double toggle: the last click wins and a late earlier reply is ignored", async () => {
+  it("falls back to the last reply when the re-read fails too", async () => {
     const section = await loaded();
-    allowSw(section).click(); // off
-    reqSw(section).click(); // disabled now: ignored
-    allowSw(section).click(); // back on
+    allowSw(section).click();
+    puts[0]!.reject(new TypeError("offline"));
+    await flush();
+    expectConsole("warn", /Failed to save direct message settings/);
+    gets[1]!.reject(new TypeError("offline"));
+    await flush();
+    expect(checked(allowSw(section))).toBe("true");
+    expect(errorLine(section)).toBe("Couldn't save that change. Your settings are unchanged.");
+  });
+
+  it("rapid double toggle: one PUT at a time, the latest object goes last and wins", async () => {
+    const section = await loaded();
+    allowSw(section).click(); // off: sent
+    allowSw(section).click(); // back on, while the first is in flight
+    expect(puts).toHaveLength(1);
+    expect(puts[0]!.body).toEqual({ allow_member_dms: false, message_requests: true });
+    puts[0]!.resolve({ allow_member_dms: false, message_requests: true });
+    await flush();
+    // The first reply must not overwrite the newer click.
+    expect(checked(allowSw(section))).toBe("true");
     expect(puts).toHaveLength(2);
     expect(puts[1]!.body).toEqual(both);
     puts[1]!.resolve(both);
-    await flush();
-    // The first request answers late, from a server that did not honour the abort.
-    puts[0]!.resolve({ allow_member_dms: false, message_requests: true });
     await flush();
     expect(checked(allowSw(section))).toBe("true");
     expect(errorLine(section)).toBe("");
   });
 
-  it("a late failure of an earlier request does not roll back the later click", async () => {
+  it("an earlier PUT that fails does not roll back a newer click, which is then sent", async () => {
     const section = await loaded();
     allowSw(section).click();
-    reqSw(section).click(); // ignored, DMs off
     allowSw(section).click();
-    puts[1]!.resolve(both);
     puts[0]!.reject(new Error("late"));
+    await flush();
+    expect(puts).toHaveLength(2);
+    expect(puts[1]!.body).toEqual(both);
+    puts[1]!.resolve(both);
     await flush();
     expect(checked(allowSw(section))).toBe("true");
     expect(errorLine(section)).toBe("");
+    expect(gets).toHaveLength(1);
+  });
+
+  it("an earlier PUT succeeds late and the later one fails: the UI shows the server value", async () => {
+    const section = await loaded();
+    allowSw(section).click(); // off: PUT 1
+    allowSw(section).click(); // on: queued
+    puts[0]!.resolve({ allow_member_dms: false, message_requests: true });
+    await flush();
+    puts[1]!.reject(new TypeError("offline")); // the latest fails
+    await flush();
+    expectConsole("warn", /Failed to save direct message settings/);
+    // The server holds PUT 1's values; the re-read says so.
+    gets[1]!.resolve({ allow_member_dms: false, message_requests: true });
+    await flush();
+    expect(checked(allowSw(section))).toBe("false");
+    expect(reqSw(section).getAttribute("aria-disabled")).toBe("true");
+    expect(errorLine(section)).toBe("Couldn't save that change. Your settings are unchanged.");
   });
 
   it("offers Retry when the GET fails", async () => {

@@ -7,9 +7,10 @@
  * The server owns the values: there is no store and no localStorage. A GET
  * fills the section, and every change sends a PUT with both values. A switch
  * flips at once, but the flip is only a preview: a failed PUT puts the switch
- * back to the last value the server confirmed and says so. Each change takes a
- * generation number, so rapid clicks end with the last click's value and an
- * earlier reply that arrives late is ignored. The tab's
+ * back to the server's value (re-read, else the last reply) and says so. Only
+ * one PUT is in flight: clicks meanwhile just update the switches, and when
+ * the request settles the latest full object is sent, so the last click wins
+ * and no reply can overwrite a newer click. The tab's
  * signal tears everything down, and no DOM is touched afterwards.
  */
 
@@ -58,8 +59,10 @@ export function buildDmPrivacySection(signal: AbortSignal, api: DmPrivacyApi): H
   let confirmed: DmPrivacy | null = null;
   /** What the switches show: `confirmed` plus a change still in flight. */
   let shown: DmPrivacy | null = null;
-  /** Which click's PUT may still answer: a newer click replaces it. */
-  let saveGen = 0;
+  /** One PUT (or the re-GET after a failed one) at a time. */
+  let busy = false;
+  /** A click landed after the last PUT was sent: `shown` is newer than it. */
+  let dirty = false;
 
   function makeRow(
     key: keyof DmPrivacy,
@@ -145,25 +148,70 @@ export function buildDmPrivacySection(signal: AbortSignal, api: DmPrivacyApi): H
   function change(next: DmPrivacy): void {
     setText(failure, "");
     shown = next;
+    dirty = true;
     render();
-    // Last click wins: a reply of an earlier click's PUT finds `saveGen` moved
-    // on and does nothing. (A generation, not an AbortController: the ownership
-    // inventory's cancellation-token list only shrinks.)
-    const mine = ++saveGen;
-    api.putDmPrivacy(next, signal).then(
+    // Last click wins without overlapping requests: while one is in flight the
+    // click only updates `shown`, and the settle step sends the latest object.
+    if (!busy) send();
+  }
+
+  /** Send `shown` whole; on settle send again if the user changed it meanwhile. */
+  function send(): void {
+    if (shown === null) return;
+    busy = true;
+    dirty = false;
+    api.putDmPrivacy(shown, signal).then(
       (stored) => {
-        if (mine !== saveGen || signal.aborted) return;
+        busy = false;
+        if (signal.aborted) return;
         confirmed = stored;
-        shown = stored;
-        render();
+        if (dirty) send();
+        else {
+          shown = stored;
+          render();
+        }
       },
       (err: unknown) => {
-        if (mine !== saveGen || signal.aborted) return;
+        if (signal.aborted) {
+          busy = false;
+          return;
+        }
+        if (dirty) {
+          // An earlier PUT failed but a newer object is waiting: it is the one
+          // the user wants, so it gets its turn.
+          busy = false;
+          send();
+          return;
+        }
         log.warn("Failed to save direct message settings", { error: String(err) });
-        // No optimistic state is kept: back to what the server last confirmed.
-        shown = confirmed;
-        render();
         setText(failure, t("dmPrivacy.saveFailed"));
+        resync();
+      },
+    );
+  }
+
+  /** After a failed save: ask the server what it holds (an earlier PUT may have landed). */
+  function resync(): void {
+    api.getDmPrivacy(signal).then(
+      (r) => {
+        busy = false;
+        if (signal.aborted) return;
+        confirmed = r;
+        if (dirty) send();
+        else {
+          shown = r;
+          render();
+        }
+      },
+      () => {
+        busy = false;
+        if (signal.aborted) return;
+        // No optimistic state is kept: back to what the server last confirmed.
+        if (dirty) send();
+        else {
+          shown = confirmed;
+          render();
+        }
       },
     );
   }

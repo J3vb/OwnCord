@@ -393,7 +393,25 @@ describe("SidebarDmHelpers", () => {
       expect(mockShow).toHaveBeenCalledWith("You can't message this user right now.", "error");
     });
 
-    it("still shows the server's text for a 404", async () => {
+    it("keeps the server's own text for a 403 that is not FORBIDDEN", async () => {
+      const mockShow = vi.fn();
+      const mockApi = {
+        createDm: vi
+          .fn()
+          .mockRejectedValue(new ApiClientError(403, "TIMED_OUT", "You are timed out")),
+      };
+      const deps = makeDeps({
+        api: mockApi as unknown as DmHelperDeps["api"],
+        getToast: vi.fn().mockReturnValue({ show: mockShow }),
+      });
+
+      await handleCreateDm(20, deps);
+
+      expect(mockShow).toHaveBeenCalledTimes(1);
+      expect(mockShow.mock.calls[0]![0]).toBe("You are timed out");
+    });
+
+    it("keeps the normal error copy for a 404", async () => {
       const mockShow = vi.fn();
       const mockApi = {
         createDm: vi.fn().mockRejectedValue(new ApiClientError(404, "NOT_FOUND", "user not found")),
@@ -406,7 +424,7 @@ describe("SidebarDmHelpers", () => {
       await handleCreateDm(20, deps);
 
       expect(mockShow).toHaveBeenCalledTimes(1);
-      expect(mockShow.mock.calls[0]![0]).not.toBe("You can't message this user right now.");
+      expect(mockShow.mock.calls[0]![0]).toBe("That item no longer exists.");
     });
 
     it("shows generic error toast for non-Error exceptions", async () => {

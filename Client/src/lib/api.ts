@@ -328,14 +328,14 @@ export interface SessionInfo {
   readonly unseen: boolean;
 }
 
-/** GET and PUT /users/me/notes/{userId}: the caller's private note about one
- *  member. `note` is "" when there is none (a PUT of "" deletes it). */
 /** The caller's direct message privacy settings (WP 6.8b). Both are always sent. */
 export interface DmPrivacy {
   readonly allow_member_dms: boolean;
   readonly message_requests: boolean;
 }
 
+/** GET and PUT /users/me/notes/{userId}: the caller's private note about one
+ *  member. `note` is "" when there is none (a PUT of "" deletes it). */
 export interface UserNote {
   readonly user_id: number;
   readonly note: string;

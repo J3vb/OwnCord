@@ -27,6 +27,7 @@ export function buildSafetyPane(
     if (below === null) pane.prepend(section);
     else below.after(section);
   };
+  // The capability is read once, when the pane opens.
   if (dmPrivacyEnabled()) {
     import("../safety/DmPrivacy").then(
       ({ buildDmPrivacySection }) => {

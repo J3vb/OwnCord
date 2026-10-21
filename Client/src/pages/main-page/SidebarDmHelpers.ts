@@ -116,10 +116,10 @@ export async function handleCreateDm(
     selectDmConversation(storedDm(dmChannel), deps);
     onReady?.(dmChannel);
   } catch (err) {
-    // A 403 is a block or the other member's DM setting; both read the same,
+    // A FORBIDDEN 403 is a block or the other member's DM setting; both read the same,
     // in the app's own words, so the toast never says which.
     const msg =
-      err instanceof ApiClientError && err.status === 403
+      err instanceof ApiClientError && err.status === 403 && err.code === "FORBIDDEN"
         ? connectText("blocks.blockedByThem")
         : errorText(err, connectText("app.dmCreateFailed"));
     deps.getToast()?.show(msg, "error");
