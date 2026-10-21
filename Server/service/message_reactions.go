@@ -158,7 +158,7 @@ func (s *MessageService) reactionAudience(ctx context.Context, userID, channelID
 	// lookup failure must not fall through to the non-DM permission branch
 	// below. That branch passes on the base role mask alone
 	// (READ_MESSAGES|ADD_REACTIONS, no per-channel override exists for a DM),
-	// skipping both IsDMParticipant and RequireDMNotBlocked entirely.
+	// skipping both IsDMParticipant and RequireDMReachable entirely.
 	ch, chErr := s.st.GetChannel(ctx, channelID)
 	if chErr != nil || ch == nil {
 		return nil, false, fmt.Errorf("%w: cannot react to this message", ErrForbidden)

@@ -241,6 +241,14 @@ CREATE TABLE IF NOT EXISTS trusted_senders (
     PRIMARY KEY (recipient_id, sender_id)
 );
 
+-- Per-user DM privacy (migration 070, WP 6.8b): read on every 1:1 DM sink.
+CREATE TABLE IF NOT EXISTS user_privacy (
+    user_id           INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    allow_member_dms  INTEGER NOT NULL DEFAULT 1 CHECK (allow_member_dms IN (0, 1)),
+    message_requests  INTEGER NOT NULL DEFAULT 1 CHECK (message_requests IN (0, 1)),
+    updated_at        TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
 CREATE TABLE IF NOT EXISTS message_requests (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     sender_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

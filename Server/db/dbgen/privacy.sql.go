@@ -9,6 +9,32 @@ import (
 	"context"
 )
 
+const dMRefusesSender = `-- name: DMRefusesSender :one
+SELECT CAST(COUNT(*) AS INTEGER) AS refuses
+FROM user_privacy AS up
+LEFT JOIN trusted_senders AS ts
+  ON ts.recipient_id = up.user_id AND ts.sender_id = ?1
+WHERE up.user_id = ?2
+  AND up.allow_member_dms = 0
+  AND ts.recipient_id IS NULL
+`
+
+type DMRefusesSenderParams struct {
+	SenderID    int64 `json:"senderId"`
+	RecipientID int64 `json:"recipientId"`
+}
+
+// 1 when the recipient has turned direct messages from members off and has no
+// trust row for the sender, else 0. A missing user_privacy row is "on". The
+// trust check is an anti-join because sqlc does not bind parameters that sit
+// inside an EXISTS subquery.
+func (q *Queries) DMRefusesSender(ctx context.Context, arg DMRefusesSenderParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, dMRefusesSender, arg.SenderID, arg.RecipientID)
+	var refuses int64
+	err := row.Scan(&refuses)
+	return refuses, err
+}
+
 const getUserPrivacy = `-- name: GetUserPrivacy :one
 
 SELECT allow_member_dms, message_requests FROM user_privacy WHERE user_id = ?1

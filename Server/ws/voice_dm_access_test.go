@@ -259,7 +259,7 @@ func TestVoiceJoin_DMCall_VoiceStateNotLeakedToUntrustedRecipient(t *testing.T) 
 
 // OC-0018: voice_join into a 1:1 DM had no block gate. Every other 1:1-DM
 // interaction sink (send, edit, react, pin, typing, call_ring) routes through
-// service.requireDMNotBlocked; voice was the one gap. Blocking never touches
+// service.RequireDMReachable; voice was the one gap. Blocking never touches
 // dm_participants (service/block.go), so IsDMParticipant still passes a
 // blocked user straight through into the blocker's DM voice room.
 func TestVoiceJoin_DMBlocked_Refused(t *testing.T) {

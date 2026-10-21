@@ -91,10 +91,11 @@ type DispatchReader interface {
 	// GetAFKChannel backs the AFK sweep (voice_afk.go): the one channel
 	// flagged AFK, nil when there is none.
 	GetAFKChannel(ctx context.Context) (*db.Channel, error)
-	// The three reads service.RequireDMNotBlocked makes through this seam.
+	// The four reads service.RequireDMReachable makes through this seam.
 	IsGroupDM(ctx context.Context, channelID int64) (bool, error)
 	GetDMRecipient(ctx context.Context, channelID, userID int64) (*db.User, error)
 	IsEitherBlocked(ctx context.Context, a, b int64) (bool, error)
+	DMRefusesSender(ctx context.Context, recipientID, senderID int64) (bool, error)
 	// GetReport and GetAppeal back the mod_queue and appeal_mod_queue
 	// broadcasts (moderation_queue.go), which resolve the frame's audience:
 	// audience resolution for queue broadcasts: no actor, so the
