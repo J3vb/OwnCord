@@ -18,7 +18,7 @@ func systemdUnit(t *testing.T) map[string][]string {
 	t.Helper()
 	unit := map[string][]string{}
 	section := ""
-	for _, raw := range strings.Split(readFile(t, "../deploy/owncord.service"), "\n") {
+	for raw := range strings.SplitSeq(readFile(t, "../deploy/owncord.service"), "\n") {
 		line := strings.TrimSpace(raw)
 		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
 			continue
@@ -63,7 +63,7 @@ func TestSystemdUnit_BinaryOutsideWritablePaths(t *testing.T) {
 		writable = append(writable, strings.Fields(v)...)
 	}
 	for _, v := range unit["Service/StateDirectory"] {
-		for _, name := range strings.Fields(v) {
+		for name := range strings.FieldsSeq(v) {
 			writable = append(writable, "/var/lib/"+name)
 		}
 	}
