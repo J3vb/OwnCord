@@ -26,7 +26,7 @@ type DiagnosticSnapshot struct {
 }
 
 var diagnosticTables = []string{
-	"api_tokens", "appeals", "attachments", "audit_log", "channel_overrides",
+	"api_tokens", "appeals", "attachments", "audit_log", "category_overrides", "category_user_overrides", "channel_overrides",
 	"channel_retention", "channel_user_overrides", "channels", "dm_open_state",
 	"dm_participants", "emoji", "erasure_jobs", "events", "gif_favorites", "invites",
 	"login_attempts", "mention_receipts", "message_call_participants", "message_calls", "message_delivery_receipts", "message_group_events", "message_mentions", "message_requests",

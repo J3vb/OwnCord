@@ -23,12 +23,42 @@ CREATE TABLE IF NOT EXISTS channel_categories (
     created_at TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_categories_name ON channel_categories(name COLLATE NOCASE);
+CREATE TABLE IF NOT EXISTS channel_overrides (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    role_id    INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    allow      INTEGER NOT NULL DEFAULT 0,
+    deny       INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(channel_id, role_id)
+);
+CREATE TABLE IF NOT EXISTS channel_user_overrides (
+    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    allow      INTEGER NOT NULL DEFAULT 0,
+    deny       INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (channel_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS category_overrides (
+    category_id INTEGER NOT NULL REFERENCES channel_categories(id) ON DELETE CASCADE,
+    role_id     INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    allow       INTEGER NOT NULL DEFAULT 0,
+    deny        INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(category_id, role_id)
+);
+CREATE TABLE IF NOT EXISTS category_user_overrides (
+    category_id INTEGER NOT NULL REFERENCES channel_categories(id) ON DELETE CASCADE,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    allow       INTEGER NOT NULL DEFAULT 0,
+    deny        INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(category_id, user_id)
+);
 
 CREATE TABLE IF NOT EXISTS channels (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     name             TEXT    NOT NULL,
     type             TEXT    NOT NULL DEFAULT 'text',
     category_id INTEGER REFERENCES channel_categories(id) ON DELETE SET NULL,
+    permissions_synced INTEGER NOT NULL DEFAULT 0,
     topic            TEXT,
     position         INTEGER NOT NULL DEFAULT 0,
     slow_mode        INTEGER NOT NULL DEFAULT 0,

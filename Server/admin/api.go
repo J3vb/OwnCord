@@ -241,6 +241,21 @@ func adminRequiredServices(database *db.DB, svc *service.Services) *service.Serv
 	return &filled
 }
 
+// mountCategoryPermRoutes registers the category permission template routes
+// and the per-channel re-sync (WP 6.5d). They are admin API only: the member
+// API never mounts them.
+func mountCategoryPermRoutes(r chi.Router, channels *service.ChannelService) {
+	// Re-sync one channel to its category's template (WP 6.5d).
+	r.Post("/channels/{id}/permissions/sync", handleSyncChannelPermissions(channels))
+	// Category permission templates (WP 6.5d): the same row is written
+	// to every synced channel in the category, in one transaction.
+	r.Get("/channels/categories/{id}/permissions", handleGetCategoryPermissions(channels))
+	r.Put("/channels/categories/{id}/permissions/{roleId}", handlePutCategoryPermission(channels))
+	r.Delete("/channels/categories/{id}/permissions/{roleId}", handleDeleteCategoryPermission(channels))
+	r.Put("/channels/categories/{id}/user-permissions/{userId}", handlePutCategoryUserPermission(channels))
+	r.Delete("/channels/categories/{id}/user-permissions/{userId}", handleDeleteCategoryUserPermission(channels))
+}
+
 func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer, allowedOrigins []string, _ PermissionInvalidator, svc *service.Services, opts ...SetupOptions) http.Handler {
 	r := chi.NewRouter()
 	// Fresh per call: ownerOnly (below) rebuilds this from scratch for the
@@ -348,6 +363,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 			// gated on the same MANAGE_CHANNELS bit as the role layer.
 			r.Put("/channels/{id}/user-permissions/{userId}", handlePutChannelUserPermission(channels))
 			r.Delete("/channels/{id}/user-permissions/{userId}", handleDeleteChannelUserPermission(channels))
+			mountCategoryPermRoutes(r, channels)
 			// RI-06: explain a member's effective access and preview a
 			// proposed override — read-only, same bit as editing overrides.
 			r.Get("/channels/{id}/access/explain", handleExplainAccess(channels))

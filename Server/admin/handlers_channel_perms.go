@@ -47,6 +47,9 @@ type channelPermissionsResponse struct {
 	ChannelID int64                    `json:"channel_id"`
 	Roles     []db.ChannelRoleOverride `json:"roles"`
 	Users     []db.ChannelUserOverride `json:"users"`
+	// PermissionsSynced: the channel's overrides follow its category's
+	// template (WP 6.5d). Admin-only; not on the websocket channel payload.
+	PermissionsSynced bool `json:"permissions_synced"`
 }
 
 func handleGetChannelPermissions(channels *service.ChannelService) http.HandlerFunc {
@@ -60,10 +63,16 @@ func handleGetChannelPermissions(channels *service.ChannelService) http.HandlerF
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list channel permissions")
 			return
 		}
+		synced, err := channels.ChannelPermissionsSynced(r.Context(), ch.ID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list channel permissions")
+			return
+		}
 		writeJSON(w, http.StatusOK, channelPermissionsResponse{
-			ChannelID: ch.ID,
-			Roles:     overrides,
-			Users:     userOverrides,
+			ChannelID:         ch.ID,
+			Roles:             overrides,
+			Users:             userOverrides,
+			PermissionsSynced: synced,
 		})
 	}
 }

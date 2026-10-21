@@ -18,6 +18,7 @@ type ChannelService struct {
 	st    Store
 	afk   AFKStore
 	cats  CategoryStore
+	cperm CategoryPermStore
 	perms *PermissionService
 	batch *ConnWrites
 	// notifier re-derives channel audiences after an override change (WP
@@ -36,10 +37,12 @@ func NewChannelService(st Store, perms *PermissionService) *ChannelService {
 	// that does not leaves SetAFKChannel answering ErrInternal.
 	afk, _ := st.(AFKStore)
 	cats, _ := st.(CategoryStore)
+	cperm, _ := st.(CategoryPermStore)
 	return &ChannelService{
 		st:    st,
 		afk:   afk,
 		cats:  cats,
+		cperm: cperm,
 		perms: perms,
 		now:   time.Now,
 	}

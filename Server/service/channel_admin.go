@@ -195,6 +195,10 @@ func (s *ChannelService) AdminCreateChannel(ctx context.Context, actorID int64, 
 	if err != nil || ch == nil {
 		return nil, nil, fmt.Errorf("%w: failed to fetch created channel: %w", ErrInternal, err)
 	}
+	// A channel created in a category starts as a copy of its template: drop
+	// the affected members' cached permissions before the caller broadcasts
+	// the new channel, so that broadcast resolves who may see it afresh.
+	s.invalidatePermEffect(s.templateEffect(tail, ch.CategoryID))
 	slog.Info("channel created", "actor_id", actorID, "channel", meta.Name, "type", req.Type)
 	db.WriteAudit(tail, s.st, actorID, "channel_create", "channel", id,
 		fmt.Sprintf("created #%s (%s)", meta.Name, req.Type))
@@ -284,16 +288,15 @@ type AdminChannelUpdate struct {
 	NSFW          bool
 	VoiceMaxUsers int
 	VoiceMaxVideo int
+	// SyncPermissions replaces the channel's role and member overrides with the
+	// template of the category it ends up in and marks it synced, in the same
+	// transaction as the update (WP 6.5d). It needs an existing category
+	// (ErrBadRequest otherwise) and ActorRole, and is refused (ErrForbidden)
+	// when the actor could not have written the rows it removes or writes.
+	// Without it a move keeps the channel's overrides and unsyncs it.
+	SyncPermissions bool
+	ActorRole       *db.Role
 }
-
-// Bounds for the numeric channel settings an update may set: SQLite would
-// happily store a slow mode of six years or a user limit of -3, and the only
-// place that would surface is a client rendering nonsense. The values match
-// what the clients offer (0 = unlimited in both voice cases).
-const (
-	maxSlowModeSeconds = 21600
-	maxVoiceLimit      = 99
-)
 
 // AdminUpdateChannel validates (S-03 text contract + numeric bounds),
 // persists, audits, and returns the committed row read on the uncancellable
@@ -326,6 +329,8 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 	}
 
 	var createdCat int64
+	var refused error
+	var syncPlan db.ChannelSyncPlan
 	update := db.ChannelUpdate{
 		Name:         meta.Name,
 		Topic:        meta.Topic,
@@ -341,6 +346,10 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 		NSFW:             req.NSFW,
 		VoiceMaxUsers:    req.VoiceMaxUsers,
 		VoiceMaxVideo:    req.VoiceMaxVideo,
+		SyncPlan:         &syncPlan,
+	}
+	if err := s.prepareUpdateSync(ctx, req, existing.ID, target.id, &update, &refused); err != nil {
+		return nil, nil, err
 	}
 	// B5-7 decision 13: clearing the flag deletes the channel's standing
 	// acknowledgements in the SAME transaction as the flag write, so a later
@@ -362,6 +371,9 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 	} else {
 		writeErr = s.st.AdminUpdateChannel(ctx, existing.ID, update)
 	}
+	if refused != nil && writeErr != nil {
+		return nil, nil, refused
+	}
 	if errors.Is(writeErr, db.ErrNotFound) {
 		// The category was deleted between the check above and the write.
 		return nil, nil, fmt.Errorf("category_id does not exist%.0w", ErrBadRequest)
@@ -374,6 +386,7 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 	if postCommitHook != nil {
 		postCommitHook()
 	}
+	syncEffect := s.afterUpdateSync(tail, actorID, existing, req, syncPlan)
 	slog.Info("channel updated", "actor_id", actorID, "channel_id", existing.ID, "name", meta.Name, "nsfw", req.NSFW)
 	db.WriteAudit(tail, s.st, actorID, "channel_update", "channel", existing.ID,
 		fmt.Sprintf("updated #%s%s", meta.Name, nsfwAuditSuffix(existing.NSFW, req.NSFW)))
@@ -382,20 +395,10 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 	if err != nil || updated == nil {
 		return nil, nil, fmt.Errorf("%w: failed to fetch updated channel: %w", ErrInternal, err)
 	}
+	// A sync replaced override rows: the cache is already dropped, so the
+	// audience is re-derived from the post-sync rows.
+	s.notifyAudienceIf(syncEffect.Applied, updated)
 	return updated, s.auditCreatedCategory(tail, actorID, createdCat), nil
-}
-
-// nsfwAuditSuffix names an NSFW transition in the audit detail, or returns ""
-// when the flag did not move — the one part of a channel edit an operator may
-// need to answer for later.
-func nsfwAuditSuffix(before, after bool) string {
-	if before == after {
-		return ""
-	}
-	if after {
-		return " (marked NSFW)"
-	}
-	return " (unmarked NSFW)"
 }
 
 // AdminDeleteChannel owns the delete ordering: archive first, then the
@@ -457,15 +460,33 @@ func (s *ChannelService) AdminDeleteChannel(ctx context.Context, actorID int64, 
 	return nil, nil
 }
 
-// validateChannelBounds checks the numeric settings of an update.
-func validateChannelBounds(req AdminChannelUpdate) error {
-	switch {
-	case req.SlowMode < 0 || req.SlowMode > maxSlowModeSeconds:
-		return fmt.Errorf("slow_mode must be between 0 and %d seconds%.0w", maxSlowModeSeconds, ErrBadRequest)
-	case req.VoiceMaxUsers < 0 || req.VoiceMaxUsers > maxVoiceLimit:
-		return fmt.Errorf("voice_max_users must be between 0 and %d%.0w", maxVoiceLimit, ErrBadRequest)
-	case req.VoiceMaxVideo < 0 || req.VoiceMaxVideo > maxVoiceLimit:
-		return fmt.Errorf("voice_max_video must be between 0 and %d%.0w", maxVoiceLimit, ErrBadRequest)
+// prepareUpdateSync arms the update's sync guard when the request asked for a
+// permission sync. It is a no-op otherwise.
+func (s *ChannelService) prepareUpdateSync(ctx context.Context, req AdminChannelUpdate, channelID, categoryID int64, update *db.ChannelUpdate, refused *error) error {
+	if !req.SyncPermissions {
+		return nil
 	}
+	if categoryID == 0 {
+		return fmt.Errorf("sync_permissions needs an existing category%.0w", ErrBadRequest)
+	}
+	guard, err := s.prepareSync(ctx, req.ActorRole, channelID, categoryID, refused)
+	if err != nil {
+		return err
+	}
+	update.SyncGuard = guard
 	return nil
+}
+
+// afterUpdateSync audits a committed sync and drops the cached permissions of
+// everyone its replaced rows name. The returned effect says whether any row
+// changed, so the caller refreshes the channel's audience once it has re-read
+// the row.
+func (s *ChannelService) afterUpdateSync(ctx context.Context, actorID int64, ch *db.Channel, req AdminChannelUpdate, plan db.ChannelSyncPlan) PermEffect {
+	if !req.SyncPermissions {
+		return PermEffect{}
+	}
+	s.auditSync(ctx, actorID, ch, plan)
+	effect := s.effectOfPlan(ctx, plan)
+	s.invalidatePermEffect(effect)
+	return effect
 }

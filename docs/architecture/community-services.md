@@ -88,6 +88,12 @@ a position an administrator writes, holds no user content and no personal data, 
 is shared by every member who can see a channel in it, so it adds no data class. A
 channel outlives its category (`ON DELETE SET NULL`). Other historical
 status statements retain their `cbebd37c` baseline.
+**Amended 2026-10-21 (category permissions):** `073_category_permissions.sql` adds
+`category_overrides`, `category_user_overrides` and `channels.permissions_synced`
+(WP 6.5d), a template of permission overrides that a category's synced channels
+follow. The per-member rows are keyed by user exactly like `channel_user_overrides`,
+so they join the account-erasure inventory (class 18c) and are deleted with the
+account; the per-role rows hold no personal data. No new data class beyond that.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each
 service are documented"). **Input to:** HP-5, and to the retention and
 erasure obligations every B5 step carries.

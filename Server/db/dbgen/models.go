@@ -59,26 +59,41 @@ type AuditLog struct {
 	ActorToken   *string `json:"actorToken"`
 }
 
+type CategoryOverride struct {
+	CategoryID int64 `json:"categoryId"`
+	RoleID     int64 `json:"roleId"`
+	Allow      int64 `json:"allow"`
+	Deny       int64 `json:"deny"`
+}
+
+type CategoryUserOverride struct {
+	CategoryID int64 `json:"categoryId"`
+	UserID     int64 `json:"userId"`
+	Allow      int64 `json:"allow"`
+	Deny       int64 `json:"deny"`
+}
+
 type Channel struct {
-	ID              int64   `json:"id"`
-	Name            string  `json:"name"`
-	Type            string  `json:"type"`
-	Category        *string `json:"category"`
-	Topic           *string `json:"topic"`
-	Position        int64   `json:"position"`
-	SlowMode        int64   `json:"slowMode"`
-	Archived        int64   `json:"archived"`
-	CreatedAt       string  `json:"createdAt"`
-	VoiceMaxUsers   int64   `json:"voiceMaxUsers"`
-	VoiceQuality    *string `json:"voiceQuality"`
-	MixingThreshold *int64  `json:"mixingThreshold"`
-	VoiceMaxVideo   int64   `json:"voiceMaxVideo"`
-	Nsfw            int64   `json:"nsfw"`
-	IsGroup         int64   `json:"isGroup"`
-	DmOwnerID       *int64  `json:"dmOwnerId"`
-	DmIcon          *string `json:"dmIcon"`
-	Afk             int64   `json:"afk"`
-	CategoryID      *int64  `json:"categoryId"`
+	ID                int64   `json:"id"`
+	Name              string  `json:"name"`
+	Type              string  `json:"type"`
+	Category          *string `json:"category"`
+	Topic             *string `json:"topic"`
+	Position          int64   `json:"position"`
+	SlowMode          int64   `json:"slowMode"`
+	Archived          int64   `json:"archived"`
+	CreatedAt         string  `json:"createdAt"`
+	VoiceMaxUsers     int64   `json:"voiceMaxUsers"`
+	VoiceQuality      *string `json:"voiceQuality"`
+	MixingThreshold   *int64  `json:"mixingThreshold"`
+	VoiceMaxVideo     int64   `json:"voiceMaxVideo"`
+	Nsfw              int64   `json:"nsfw"`
+	IsGroup           int64   `json:"isGroup"`
+	DmOwnerID         *int64  `json:"dmOwnerId"`
+	DmIcon            *string `json:"dmIcon"`
+	Afk               int64   `json:"afk"`
+	CategoryID        *int64  `json:"categoryId"`
+	PermissionsSynced int64   `json:"permissionsSynced"`
 }
 
 type ChannelCategory struct {

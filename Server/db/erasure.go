@@ -185,6 +185,10 @@ var erasureStatements = []struct {
 	{"user_privacy", `DELETE FROM user_privacy WHERE user_id = ?1`},
 	{"user_blocks", `DELETE FROM user_blocks WHERE blocker_id = ?1 OR blocked_id = ?1`},
 	{"channel_user_overrides", `DELETE FROM channel_user_overrides WHERE user_id = ?`},
+	// Category permission templates (migration 073, class 18c): the per-member
+	// rows of a category's template. The users delete below would cascade them,
+	// but this is the explicit statement the inventory's zero is proved against.
+	{"category_user_overrides", `DELETE FROM category_user_overrides WHERE user_id = ?`},
 	// Message requests and trusted senders (migration 046, B5-6, classes 14c
 	// and 14d): both tables name a sender and a recipient, so an erasure of
 	// either party needs both columns — the users delete below would cascade

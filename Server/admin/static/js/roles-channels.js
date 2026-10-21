@@ -11,6 +11,11 @@ function rcHead(title,desc,action){
 async function renderChannels(){
   let channels;
   try{channels=await api('GET','/channels')}catch(e){return'<div class="page-title">Channels</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
+  /* Every category, empty ones too: a category with no channel has no header
+     row below but still carries a permission template. */
+  let cats=[];
+  try{cats=await api('GET','/channels/categories')}catch(e){cats=[]}
+  state.categoryList=Array.isArray(cats)?cats:[];
   const chIcon=t=>t==='voice'?I.voice:t==='announcement'?I.megaphone:I.channels;
   /* Categories are free text — a channel of any type may live under any one of
      them. Collect the ones already in use so the create/edit forms can offer
@@ -23,21 +28,39 @@ async function renderChannels(){
      channel does. The type is the row's icon (named for screen readers), and
      Archived shows only on a channel that is. */
   const groups=new Map();
+  const catIds=new Map();
   channels.forEach(ch=>{
     const cat=ch.category||ch.Category||((ch.type||ch.Type)==='voice'?'Voice':'');
     if(!groups.has(cat))groups.set(cat,[]);
     groups.get(cat).push(ch);
+    if(ch.category_id)catIds.set(cat,ch.category_id);
   });
+  if(state.categoryList.length){
+    /* The permission template of a category, edited in the same matrix a
+       channel uses. Saving writes the same rows to every channel that is
+       synced with the category. */
+    html+='<div class="section-card"><div class="section-card-body"><div class="form-group" style="margin-bottom:0"><label class="form-label" for="catPermPick">Category permissions</label>'
+      +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><select class="form-input" id="catPermPick" style="appearance:auto;max-width:280px">'
+      +state.categoryList.map(c=>'<option value="'+esc(c.id)+'">'+esc(c.name)+'</option>').join('')
+      +'</select><button class="btn btn-outline" data-action="openCategoryPermsPicker">Edit permissions</button></div>'
+      +'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">A category\'s permissions are a template. Channels marked &ldquo;Synced with category&rdquo; follow it; editing a channel\'s own permissions stops that.</div></div></div></div>';
+  }
   html+='<div class="section-card"><div class="section-card-body no-pad"><table class="tbl ch-tbl"><thead><tr><th>Channel</th><th style="text-align:right">Actions</th></tr></thead>';
   if(!channels.length)html+='<tbody><tr><td colspan="2" class="tbl-empty">No channels yet. Create one to get started.</td></tr></tbody>';
   groups.forEach((chs,cat)=>{
     html+='<tbody>';
-    if(groups.size>1||cat)html+='<tr class="ch-cat"><th colspan="2" scope="rowgroup">'+esc(cat||'No category')+'</th></tr>';
+    if(groups.size>1||cat){
+      const cid=catIds.get(cat);
+      html+='<tr class="ch-cat"><th colspan="2" scope="rowgroup">'+esc(cat||'No category')
+        +(cid?' <button class="act-btn" title="Category permissions" aria-label="Permissions for category '+esc(cat)+'" data-action="openCategoryPermsModal" data-args="'+actArgs(cid,cat)+'">'+I.lock+'</button>':'')+'</th></tr>';
+    }
     chs.forEach(ch=>{
       const id=ch.id||ch.ID;const name=ch.name||ch.Name||'';const type=ch.type||ch.Type||'text';
       const archived=ch.archived||ch.Archived||false;
       html+='<tr data-channel="'+esc(id)+'"><td><div class="ch-name"><span class="ch-type" title="'+esc(CH_TYPE_NAME[type]||type)+'">'+chIcon(type)+'<span class="sr-only">'+esc(CH_TYPE_NAME[type]||type)+'</span></span><strong>'+esc(name)+'</strong>'
-        +(archived?'<span class="badge badge-muted">Archived</span>':'')+(ch.afk?'<span class="badge badge-accent">AFK</span>':'')+'</div></td>';
+        +(archived?'<span class="badge badge-muted">Archived</span>':'')+(ch.afk?'<span class="badge badge-accent">AFK</span>':'')
+        +(ch.permissions_synced?'<span class="badge badge-green">Synced with category</span>':'')
+        +(ch.category_id&&!ch.permissions_synced?'<button class="btn btn-ghost btn-sm" aria-label="Sync #'+esc(name)+' with its category" data-action="syncChannelPerms" data-args="'+actArgs(id,name)+'">Sync now</button>':'')+'</div></td>';
       const lockBtn=type==='dm'?'':'<button class="act-btn" title="Who can see this" aria-label="Who can see #'+esc(name)+'" data-action="openChannelPermsModal" data-args="'+actArgs(id,name)+'">'+I.lock+'</button>';
       state.channelCache[id]=ch;
       if(ch.category||ch.Category)catSet.add(ch.category||ch.Category);
@@ -215,7 +238,7 @@ async function openChannelPermsModal(id,name){
     ]);
   }catch(e){showToast(e.message,'error');return}
   if(Array.isArray(roles))state.roleList=roles;
-  state.permChannel={id:id,name:name,roles:data.roles||[],users:data.users||[],allUsers:users||[],tab:'access'};
+  state.permChannel={id:id,name:name,roles:data.roles||[],users:data.users||[],allUsers:users||[],tab:'access',synced:!!data.permissions_synced,categoryId:(state.channelCache[id]||{}).category_id||0};
   renderChannelPermsModal();
 }
 
@@ -274,7 +297,8 @@ function renderChannelPermsModal(){
     +tabs
     +'<div class="modal-body drawer-body">'
     +panel('access',
-      '<p class="drawer-intro">Uncheck a role to hide this channel from it (a private channel). Changes apply to connected users immediately; users already in the voice channel are not disconnected.</p>'
+      (pc.synced?'<p class="drawer-intro" id="chSyncedNote"><span class="badge badge-green">Synced with category</span> This channel follows its category\'s permissions. Saving a change here stops that until you sync it again.</p>':'')
+      +'<p class="drawer-intro">Uncheck a role to hide this channel from it (a private channel). Changes apply to connected users immediately; users already in the voice channel are not disconnected.</p>'
       +quick)
     +panel('overrides',
       '<p class="drawer-intro">Set single permissions for one role or member in this channel. Resolution order: base role permissions → role override → member override. A member deny beats a role allow; Administrator bypasses everything.</p>'
@@ -355,7 +379,7 @@ function renderPermMatrix(){
     html+='</tr>';
   });
   html+='</tbody></table>';
-  html+='<div class="drawer-actions"><button class="btn btn-ghost" data-action="previewPermChange">Preview change</button><button class="btn btn-outline" data-action="clearPermOverride">Clear override</button></div>';
+  html+='<div class="drawer-actions">'+(pc.kind==='category'?'':'<button class="btn btn-ghost" data-action="previewPermChange">Preview change</button>')+'<button class="btn btn-outline" data-action="clearPermOverride">Clear override</button></div>';
   box.innerHTML=html;
 }
 
@@ -376,7 +400,10 @@ function permTargetPath(){
   const val=sel?sel.value:'';
   if(!pc||!val)return null;
   const kind=val.charAt(0),tid=parseInt(val.slice(2),10);
-  return '/channels/'+pc.id+(kind==='r'?'/permissions/':'/user-permissions/')+tid;
+  /* A category edits its template; the same rows are then written to every
+     synced channel by the server. */
+  const base=pc.kind==='category'?'/channels/categories/':'/channels/';
+  return base+pc.id+(kind==='r'?'/permissions/':'/user-permissions/')+tid;
 }
 
 /* The masks a target carried in the snapshot — what renderPermMatrix painted
@@ -420,7 +447,77 @@ function onPermTargetChange(){
   state.modalDirty=accessTabHasEdits();
 }
 
-/* ═══ Access explanation and change preview (RI-06) ═══ */
+/* ═══ Category permission templates ═══ */
+function openCategoryPermsPicker(){
+  const sel=document.getElementById('catPermPick');
+  if(!(sel instanceof HTMLSelectElement)||!sel.value)return;
+  const id=parseInt(sel.value,10);
+  const c=(state.categoryList||[]).find(x=>x.id===id);
+  openCategoryPermsModal(id,c?c.name:'');
+}
+
+/* The same override matrix a channel uses, over the category's template. */
+async function openCategoryPermsModal(id,name){
+  let data,users,roles;
+  try{
+    [data,users,roles]=await Promise.all([
+      api('GET','/channels/categories/'+id+'/permissions'),
+      api('GET','/users?limit=500&offset=0'),
+      api('GET','/roles').catch(()=>null),
+    ]);
+  }catch(e){showToast(e.message,'error');return}
+  if(Array.isArray(roles))state.roleList=roles;
+  const synced=Object.values(state.channelCache||{}).filter(c=>c.category_id===id&&c.permissions_synced).length;
+  state.permChannel={kind:'category',id:id,name:name,roles:data.roles||[],users:data.users||[],allUsers:users||[],tab:'overrides',syncedCount:synced};
+  renderCategoryPermsModal();
+}
+
+function renderCategoryPermsModal(){
+  const pc=state.permChannel;if(!pc||pc.kind!=='category')return;
+  let opts='<option value="">— pick a role or member —</option><optgroup label="Roles">';
+  pc.roles.forEach(r=>{opts+='<option value="r:'+r.role_id+'">'+esc(r.role_name)+'</option>'});
+  opts+='</optgroup><optgroup label="Members">';
+  const picked=[];const seen={};
+  pc.users.forEach(o=>{seen[o.user_id]=true;picked.push({id:o.user_id,username:o.username,has:true})});
+  pc.allUsers.forEach(u=>{if(!seen[u.id])picked.push({id:u.id,username:u.username,has:false})});
+  picked.sort((a,b)=>String(a.username).localeCompare(String(b.username)));
+  picked.forEach(u=>{opts+='<option value="u:'+u.id+'">'+esc(u.username)+(u.has?' (override)':'')+'</option>'});
+  opts+='</optgroup>';
+  openModal('<div class="drawer">'
+    +'<div class="modal-header"><h3>Category permissions — '+esc(pc.name)+'</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div>'
+    +'<div class="modal-body drawer-body">'
+    +'<p class="drawer-intro">These permissions are a template. Saving writes the same override to the '+pc.syncedCount+' channel'+(pc.syncedCount===1?'':'s')+' synced with this category; channels that are not synced keep their own. You can only set a permission your own role holds, and the same applies to every synced channel it replaces.</p>'
+    +'<div class="form-group"><label class="form-label" for="permTarget">Role or member</label>'
+    +'<select class="form-input" id="permTarget" style="appearance:auto" data-change-action="onPermTargetChange">'+opts+'</select></div>'
+    +'<div id="permMatrix"></div>'
+    +'</div>'
+    +'<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-accent" data-action="saveCategoryPerms">Save changes</button></div>'
+    +'</div>');
+  renderPermMatrix();
+}
+
+async function saveCategoryPerms(){
+  const pc=state.permChannel;if(!pc||pc.kind!=='category')return;
+  const path=permTargetPath();
+  if(!path){showToast('Pick a role or member first','error');return}
+  const masks=collectOverrideMasks();
+  try{
+    /* An all-inherit row is the same as no row, so it is a delete. */
+    if(masks.allow===0&&masks.deny===0)await api('DELETE',path);
+    else await api('PUT',path,masks);
+    closeModal();showToast('Category permissions updated');renderContent();
+  }catch(e){showToast(e.message,'error')}
+}
+
+/* Re-sync one channel to its category's template. */
+async function syncChannelPerms(id,name){
+  try{
+    await api('POST','/channels/'+id+'/permissions/sync');
+    showToast('#'+name+' is synced with its category');renderContent();
+  }catch(e){showToast(e.message,'error')}
+}
+
+/* ═══ Access explanation and change preview (RI-06) ═══
 /* Both ask the server, which runs the canonical authorization predicates over
    the member's live state — this panel never decides access itself, and
    neither request acts as the member. Both reads are audited. */
@@ -987,7 +1084,7 @@ async function deleteEmoji(id){
   }catch(e){showToast(e.message,'error')}
 }
 
-Object.assign(ACTIONS,{clearPermOverride,confirmDeleteChannel,confirmDeleteEmoji,confirmDeleteRole,createChannel,
+Object.assign(ACTIONS,{openCategoryPermsModal,openCategoryPermsPicker,saveCategoryPerms,syncChannelPerms,clearPermOverride,confirmDeleteChannel,confirmDeleteEmoji,confirmDeleteRole,createChannel,
   deleteEmoji,explainAccess,moveRole,onPermTargetChange,openChannelEditModal,openChannelModal,openChannelPermsModal,openDeleteChannel,
   openDeleteRole,openRoleModal,placeRoleAboveDefault,previewPermChange,renderRolePlacement,
   saveChannelEdit,saveChannelPerms,saveRole,selectChannelTab,syncTypedConfirm,uploadEmoji});
