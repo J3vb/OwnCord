@@ -103,6 +103,38 @@ describe("messageActionGates", () => {
     expect(g.disabled).toBe(true);
   });
 
+  it("forward needs the callback and an ordinary sent message", () => {
+    expect(messageActionGates(other(), makeOpts()).forward.shown).toBe(false);
+    const opts = makeOpts({ onForwardClick: () => undefined });
+    expect(messageActionGates(other(), opts).forward).toEqual({
+      shown: true,
+      disabled: false,
+      reason: null,
+    });
+    expect(messageActionGates(makeMessage({ kind: "call" }), opts).forward.shown).toBe(false);
+  });
+
+  it("forward is locked while the socket is down", () => {
+    const opts = makeOpts({ onForwardClick: () => undefined });
+    setConnectionStatus("reconnecting");
+    const g = messageActionGates(other(), opts).forward;
+    expect(g.shown).toBe(true);
+    expect(g.disabled).toBe(true);
+    expect(g.reason).not.toBeNull();
+    setConnectionStatus("connected");
+  });
+
+  it("a forwarded message of mine cannot be edited, though I can delete it", () => {
+    const forward = {
+      source_channel_id: 5,
+      source_message_id: 9,
+      source_timestamp: "2025-01-10T09:00:00Z",
+    };
+    const g = messageActionGates({ ...own(), forward }, makeOpts());
+    expect(g.edit.shown).toBe(false);
+    expect(g.delete.shown).toBe(true);
+  });
+
   it("copy ID follows the developer-mode preference", () => {
     expect(messageActionGates(other(), makeOpts()).copyId.shown).toBe(false);
     setDeveloperMode(true);

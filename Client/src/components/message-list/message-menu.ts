@@ -1,5 +1,5 @@
 /**
- * The message right-click menu: quick reactions, Add Reaction, Edit, Reply,
+ * The message right-click menu: quick reactions, Add Reaction, Edit, Reply, Forward,
  * Copy / Copy Text, Pin, Copy Message Link, Delete, Report and (in developer
  * mode) Copy Message ID, with Copy Link / Open Link first on a link.
  *
@@ -217,6 +217,19 @@ function buildItems(
     testId: "msg-menu-reply",
     onClick: act((m) => opts.onReplyClick(m.id)),
   });
+  const onForward = opts.onForwardClick;
+  if (gates.forward.shown && onForward !== undefined) {
+    items.push({
+      label: messageMenuText("forward"),
+      testId: "msg-menu-forward",
+      disabled: gates.forward.disabled,
+      ...(gates.forward.reason !== null ? { title: gates.forward.reason } : {}),
+      onClick: act((m) => {
+        // The socket may have dropped since the menu opened.
+        if (deleteLockReason() === null) onForward(m.id);
+      }),
+    });
+  }
   const selected = selectionIn(row);
   if (selected !== "") {
     items.push({

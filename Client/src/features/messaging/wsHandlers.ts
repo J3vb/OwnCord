@@ -41,6 +41,7 @@ import { mentionsCurrentUser } from "../../lib/mentions";
 import { showToast } from "../../lib/toast";
 import { connectText } from "../../i18n/connect";
 import { readingAnchor } from "./readingAnchor";
+import { isForwardRequest } from "./forwardRequests";
 import { isChannelAway, noteAwayUnread } from "@lib/read-state";
 import {
   activatePendingMessages,
@@ -483,6 +484,8 @@ function hasSendRow(correlationId: string): boolean {
  * the frame answered one of them and the error chain must stop.
  */
 export function handleMessagingError(payload: Payload<"error">, id: string | undefined): boolean {
+  // A refused Forward is shown on its picker row; no toast on top.
+  if (isForwardRequest(id)) return true;
   // 2A-3: a files-only send none of whose files could be attached stored
   // nothing, and a Retry with the same ids fails the same way. Its row goes,
   // even one already failed as unconfirmed; the channel controller puts its

@@ -8,6 +8,7 @@ export const messageMenuText = defineCatalog("messageMenu", {
   label: "Message actions",
   addReaction: "Add Reaction",
   edit: "Edit Message",
+  forward: "Forward",
   copy: "Copy",
   copyText: "Copy Text",
   markUnread: "Mark Unread",

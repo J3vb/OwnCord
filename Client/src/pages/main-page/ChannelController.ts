@@ -1500,6 +1500,22 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           () => showToast(reportEntryText("reportLoadFailed"), "error"),
         );
       },
+      onForwardClick: (msgId: number) => {
+        import("../../components/ForwardPicker").then(
+          ({ openForwardPicker }) => {
+            if (signal.aborted) return;
+            // Focus goes back to the composer: the menu that opened it is gone.
+            openForwardPicker({
+              ws,
+              channelId,
+              messageId: msgId,
+              signal,
+              fallbackFocus: () => slots.inputSlot.querySelector<HTMLElement>("textarea"),
+            });
+          },
+          () => showToast(messagingText("forward.loadFailed"), "error"),
+        );
+      },
       onRetry: (correlationId: string) => retrySend(correlationId),
       onDeleteDraft: (correlationId: string) => deleteDraft(correlationId),
       renderUploadStrip: (correlationId, stripSignal) => {

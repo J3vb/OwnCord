@@ -522,6 +522,42 @@ describe("message right-click menu", () => {
     expect(document.activeElement).toBe(b);
   });
 
+  it("Forward follows Reply and calls the forward callback with the message id", async () => {
+    mount([makeMessage()], { onForwardClick: vi.fn() });
+    await open(text());
+    const ids = items().map((el) => el.getAttribute("data-testid"));
+    expect(ids.indexOf("msg-menu-forward")).toBe(ids.indexOf("msg-menu-reply") + 1);
+    expect(item("msg-menu-forward")?.textContent).toBe("Forward");
+    item("msg-menu-forward")!.click();
+    expect(opts.onForwardClick).toHaveBeenCalledWith(1);
+  });
+
+  it("no Forward without the callback", async () => {
+    mount([makeMessage()]);
+    await open(text());
+    expect(item("msg-menu-forward")).toBeNull();
+  });
+
+  it("connection drops while open: Forward does nothing", async () => {
+    mount([makeMessage()], { onForwardClick: vi.fn() });
+    await open(text());
+    setConnectionStatus("disconnected");
+    item("msg-menu-forward")!.click();
+    expect(opts.onForwardClick).not.toHaveBeenCalled();
+  });
+
+  it("no Edit on my own forwarded message", async () => {
+    const forward = {
+      source_channel_id: 5,
+      source_message_id: 9,
+      source_timestamp: "2025-01-10T09:00:00Z",
+    };
+    mount([mine({ forward })]);
+    await open(text());
+    expect(item("msg-menu-edit")).toBeNull();
+    expect(item("msg-menu-reply")).not.toBeNull();
+  });
+
   it("row rebuilt while open: an action still reaches the callback", async () => {
     mount([makeMessage({ content: "before" })]);
     await open(text());

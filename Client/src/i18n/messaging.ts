@@ -200,6 +200,8 @@ export const messagingText = defineCatalog("messaging", {
   "channel.goTo": "Go to #{channel}",
   "message.jumpIn": "Jump to message in {channel}",
   "message.jump": "Jump",
+  "forward.label": "Forwarded",
+  "forward.loadFailed": "Couldn't open Forward",
   "invite.join": "Join",
   "invite.joinTitle": "Join {server}",
   "invite.thisServer": "this server",
