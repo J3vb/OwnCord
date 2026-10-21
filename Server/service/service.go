@@ -128,6 +128,7 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 	messageRequests := NewMessageRequestService(st, blocks)
 	messages.SetMessageRequests(messageRequests)
 	uploads := NewUploadService(st, permSvc)
+	messages.SetUploads(uploads)
 	if bs, ok := st.(BannerFileStore); ok {
 		uploads.banners = bs
 	}

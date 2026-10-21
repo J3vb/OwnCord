@@ -74,7 +74,14 @@ avatar, unused until the banner endpoints land. They add no community service.
 row per user holding the two direct message settings (WP 6.8b). The row is read and
 written only through the owner's session and is removed with the account (lifecycle
 row 16b in `data-lifecycle.md`). It adds no community service.
-Other historical
+**Amended 2026-10-21 (message forwarding):** `071_message_forwards.sql` adds
+`message_forwards`, the side row that marks a message as a forward (WP 6.9a). It
+stores the source message, channel and time, never an author, and goes with the
+forward by cascade. A forward is an ordinary message of the forwarder, carrying a
+snapshot of text and its own copies of the files (class 12, charged to the
+forwarder's quota), so it adds no data class and follows the message and
+attachment rows. Forwards of an erased user's message stay without any author
+(`data-lifecycle.md`, O1). Other historical
 status statements retain their `cbebd37c` baseline.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each
 service are documented"). **Input to:** HP-5, and to the retention and

@@ -12,6 +12,7 @@ import (
 // registerChatHandlers registers all chat-related V2 message handlers.
 func registerChatHandlers(r *HandlerRegistry, deps ChatDeps) {
 	r.RegisterV2(MsgTypeChatSend, handleChatSendV2, deps)
+	r.RegisterV2(MsgTypeChatForward, handleChatForwardV2, deps)
 	r.RegisterV2(MsgTypeChatEdit, handleChatEditV2, deps)
 	r.RegisterV2(MsgTypeChatDelete, handleChatDeleteV2, deps)
 }
@@ -41,8 +42,17 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 		return Result{Reply: reply}
 	}
 
+	return sendResultEvents(d, info, sendCmd.ClientMessageID, sendCmd.ChannelID, sendCmd.ReplyTo, reply, result)
+}
+
+// sendResultEvents turns a committed SendMessageResult into the ws Result both
+// chat_send and chat_forward return: the reply, then the sequenced chat_message
+// for the channel or, for a DM, the dm_channel_open and dm_request events and
+// the participant-addressed chat_message. Sharing it is what makes a forward's
+// fan-out literally the send path's.
+func sendResultEvents(d ChatDeps, info ClientInfo, clientMessageID string, channelID int64, replyTo *int64, reply []byte, result *service.SendMessageResult) Result {
 	// Build attachment data for broadcast.
-	var attData []map[string]any
+	attData := make([]map[string]any, 0, len(result.Attachments))
 	for _, ai := range result.Attachments {
 		attData = append(attData, map[string]any{
 			"id":       ai.ID,
@@ -54,9 +64,9 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	}
 
 	broadcast := buildChatMessage(chatMessageArgs{
-		ClientMessageID:   sendCmd.ClientMessageID,
+		ClientMessageID:   clientMessageID,
 		MsgID:             result.MessageID,
-		ChannelID:         sendCmd.ChannelID,
+		ChannelID:         channelID,
 		UserID:            info.UserID,
 		Username:          info.Username,
 		Avatar:            info.Avatar,
@@ -64,16 +74,17 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 		RoleName:          info.RoleName,
 		Content:           result.Content,
 		Timestamp:         result.Timestamp,
-		ReplyTo:           sendCmd.ReplyTo,
+		ReplyTo:           replyTo,
 		Attachments:       attData,
 		Mentions:          result.Mentions,
 		MentionsEveryone:  result.MentionsEveryone,
 		MentionsHere:      result.MentionsHere,
 		ReferencedMessage: result.ReferencedMessage,
+		Forward:           result.Forward,
 	})
 
 	if !result.IsDM {
-		return channelSendResult(reply, broadcast, sendCmd.ChannelID, info.UserID, result)
+		return channelSendResult(reply, broadcast, channelID, info.UserID, result)
 	}
 
 	// DM path: build dm_channel_open events + sequenced message.
@@ -90,9 +101,9 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 			var openPayload []byte
 			if len(result.DMParticipants) > 0 {
 				openPayload = buildDMChannelOpen(
-					db.NewDMChannelInfo(sendCmd.ChannelID, chName, result.DMIsGroup, result.DMOwnerID, result.DMIconID, result.DMParticipants, pid), pid, d.LiveStatus)
+					db.NewDMChannelInfo(channelID, chName, result.DMIsGroup, result.DMOwnerID, result.DMIconID, result.DMParticipants, pid), pid, d.LiveStatus)
 			} else {
-				openPayload = buildDMChannelOpenFor(sendCmd.ChannelID, result.SenderUser, pid, d.LiveStatus)
+				openPayload = buildDMChannelOpenFor(channelID, result.SenderUser, pid, d.LiveStatus)
 			}
 			if openPayload == nil {
 				continue
@@ -118,11 +129,34 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	}
 
 	events = append(events, dmEventOrFallback(
-		dmEvt{evType: MsgTypeChatMessage, channelID: sendCmd.ChannelID, participantIDs: result.ParticipantIDs, payload: broadcast},
-		channelEvt{evType: MsgTypeChatMessage, channelID: sendCmd.ChannelID, payload: broadcast},
+		dmEvt{evType: MsgTypeChatMessage, channelID: channelID, participantIDs: result.ParticipantIDs, payload: broadcast},
+		channelEvt{evType: MsgTypeChatMessage, channelID: channelID, payload: broadcast},
 		result.ParticipantIDs))
 
 	return Result{Reply: reply, Events: events}
+}
+
+// handleChatForwardV2 processes a chat_forward command (WP 6.9a) via the
+// MessageService. The reply is chat_forward_ok; the events are the send path's.
+func handleChatForwardV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
+	d := deps.(ChatDeps)
+	fwd := cmd.(ChatForwardCmd)
+
+	result, err := d.MessageSvc.ForwardMessage(ctx, service.ForwardParams{
+		ClientMessageID: fwd.ClientMessageID,
+		UserID:          info.UserID,
+		Username:        info.Username,
+		TargetChannelID: fwd.ChannelID,
+		SourceMessageID: fwd.MessageID,
+	})
+	if err != nil {
+		return serviceErrorToResult(err)
+	}
+	reply := buildChatForwardOK(info.ReqID, result.MessageID, fwd.ChannelID, fwd.ClientMessageID, result.Duplicate)
+	if result.Duplicate {
+		return Result{Reply: reply}
+	}
+	return sendResultEvents(d, info, fwd.ClientMessageID, fwd.ChannelID, nil, reply, result)
 }
 
 // channelSendResult is a committed non-DM send: the sequenced chat_message,

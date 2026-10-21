@@ -121,6 +121,7 @@ func TestHandlerRegistry_AllExpectedTypesRegistered(t *testing.T) {
 		"reaction_add",
 		"reaction_remove",
 		"chat_send",
+		"chat_forward",
 		"chat_edit",
 		"chat_delete",
 		"chat_command",
@@ -202,6 +203,7 @@ func TestAllV2Types_SmokeDispatch(t *testing.T) {
 	cmds := map[string]Command{
 		MsgTypePing:              PingCmd{userID: 1},
 		MsgTypeChatSend:          ChatSendCmd{userID: 1, ChannelID: 1},
+		MsgTypeChatForward:       ChatForwardCmd{userID: 1, ChannelID: 1, MessageID: 1},
 		MsgTypeChatEdit:          ChatEditCmd{userID: 1, MessageID: 1},
 		MsgTypeChatDelete:        ChatDeleteCmd{userID: 1, MessageID: 1},
 		MsgTypeChatCommand:       ChatCommandCmd{userID: 1, ChannelID: 1, Command: "/x"},

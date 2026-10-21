@@ -195,6 +195,17 @@ the same account.
     `state = db_done` with `files` the union of those and the names from steps
     3 and 7 — the only surviving handle on the blobs.
 
+**Forwards (WP 6.9a, migration 071).** A forward is another user's message
+holding a snapshot of the erased user's text and its own copies of their files, so
+it stays, like a manual copy. It carries no author (`message_forwards` stores
+the source message, channel and time only), the erased user's name is not in it,
+and its `source_message_id` goes `NULL` when the erased message is deleted, so no
+jump link is left. The erased user's own forwards go with the rest of their
+`messages` (the `message_forwards` row cascades), and the copies of files they
+forwarded belong to them and are unlinked and swept with their other attachments.
+There is no owner decision behind this; it matches Discord and the report-evidence
+precedent (migration 048).
+
 After commit the runner broadcasts `member_ban` (every client drops the
 user; the subject's socket is closed) and then purges the replay pipeline
 behind it (`Hub.PurgeUserFromReplay`, the job's first journaled step —

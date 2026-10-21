@@ -305,6 +305,8 @@ type MessageAPIResponse struct {
 	// GroupEvent is set only on a group event row (kinds group_add to
 	// group_icon). See GroupEventInfo.
 	GroupEvent *GroupEventInfo `json:"group_event,omitempty"`
+	// Forward is set only on a forwarded message (WP 6.9a). See ForwardInfo.
+	Forward *ForwardInfo `json:"forward,omitempty"`
 }
 
 // GroupEventInfo is the group_event block of a group DM row. Which fields are

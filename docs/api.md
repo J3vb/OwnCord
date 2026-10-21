@@ -1237,6 +1237,13 @@ know the field. A call row is read-only: editing, deleting, pinning, reacting to
 or replying to it is refused, and search does not return it. A client treats an
 unknown `kind` as an ordinary message and shows `content`.
 
+A forwarded message (`chat_forward`, see `docs/protocol.md`) carries a `forward`
+block, omitted for every other message: `{"source_channel_id", "source_message_id",
+"source_timestamp"}`. `source_message_id` is `null` when the original is deleted or
+purged. The block has no author and no channel name, and a deleted forward carries
+none. The forward's `content` and `attachments` are its own snapshot and copies,
+and it cannot be edited.
+
 A group DM can also hold group event rows: `kind` is `group_add`, `group_remove`,
 `group_leave`, `group_rename` or `group_icon`, with a `group_event` block
 (`{"target_user_id"}` for add and remove, `{}` for leave, `{"name"}` for rename,

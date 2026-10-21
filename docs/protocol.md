@@ -103,7 +103,7 @@ The sequence number system enables reconnection with state recovery.
 | DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                                                 |
 | DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                                                              |
 | Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                                                        |
-| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                                                                                 |
+| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `chat_forward_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                                                              |
 
 **Presence is sequenced, but droppable.** Connect and disconnect presence
 arrives as `presence_batch` (one frame per coalescing window), a status change
@@ -749,6 +749,97 @@ attachments. When every requested id is skipped and the send has no text, no
 message is stored and the server answers with the `ATTACHMENTS_UNAVAILABLE`
 error instead (see Error Codes). Clients that do not know the field ignore it.
 
+### chat_forward (Client -> Server)
+
+Copy one message into one channel or DM (WP 6.9a). The sender must be able to
+read the source and post in the target:
+
+```json
+{
+  "type": "chat_forward",
+  "id": "550e8400-e29b-41d4-a716-446655440001",
+  "payload": {
+    "client_message_id": "1773484200000:3f2b8a52-6d1c-4a0e-9f4b-0c7d5e1a2b35",
+    "channel_id": 9,
+    "message_id": 1042
+  }
+}
+```
+
+`channel_id` is the target and `message_id` the message to forward; both must be
+positive integers. `client_message_id` is **required**, with the same shape and
+24-hour retry window as `chat_send`. One frame is one target: a client that
+forwards to several targets sends one frame per target, one after another, each
+with its own `client_message_id`, so each forward commits whole or not at all.
+Resending the same frame (same `client_message_id`, same `message_id` and
+`channel_id`) after a lost acknowledgement is answered from the receipt before
+any gate runs: one message, no second copy of the files. The same id with
+another source or target is `CONFLICT`.
+
+The result is an ordinary message (`kind` 0) **by the sender** in the target,
+sent as a sequenced `chat_message` exactly as a `chat_send` would be, with the
+`forward` block described under `chat_message`. Its `content` is a snapshot of
+the source's text and its `attachments` are the sender's own copies of the
+source's files, so later edits or deletes of the original change nothing and
+clients that do not know `forward` draw a plain message. Because it is a message
+of the sender, it can be replied to, reacted to, pinned and deleted; it cannot
+be edited (`FORBIDDEN`). The optional text a user types with a forward is sent
+by the client as a separate `chat_send` after the acknowledgement.
+
+A forward never pings: `mentions` is `[]`, `mentions_everyone` and
+`mentions_here` are false, no mention row or badge is written, and a channel
+target sends no push. A DM target behaves as a DM message does, including push
+and the first-contact rule: a one-to-one DM whose recipient has not accepted
+the sender stages a message request instead of delivering.
+
+The server checks, in this order, and a refusal stores nothing:
+
+1. **Source readable.** The message must exist, be an ordinary (`kind` 0) live
+   message, and be in a channel or DM the sender can read, including the NSFW
+   acknowledgement. Every refusal here is `NOT_FOUND`, the answer for an unknown
+   id, so nothing is learned about a message the sender cannot read.
+2. **Target postable.** The same rule as `chat_send`: `NOT_FOUND` for an unknown
+   channel; `FORBIDDEN` without READ_MESSAGES and SEND_MESSAGES (and
+   MANAGE_MESSAGES in an announcement channel), in an archived channel, in a DM
+   the sender is not in, or in a one-to-one DM where either side has blocked the
+   other; `TIMED_OUT` under a moderator timeout.
+3. **ATTACH_FILES** in a channel target when the source has files.
+4. **NSFW.** A source in a labelled channel can be forwarded only to another
+   labelled channel, never to a DM or an unlabelled channel (`FORBIDDEN`).
+
+Then `RATE_LIMITED` applies (see Rate limits: 5 per 10 seconds per user, after
+the receipt check so retries are free), slow mode is charged in the target as
+for a send, and the files are cloned. The clones are charged to the sender's
+storage quota at their full size, even where a hard link uses no extra disk; a
+full quota or a full disk is `FORBIDDEN` with the reason in `message`. A file
+whose bytes are already gone is skipped, and a source with no text whose files
+are all gone is `ATTACHMENTS_UNAVAILABLE`. Read access to the source channel is
+checked again just before the transaction that stores the forward, and the
+source row is read again inside it, so a source deleted (or whose channel was
+made unreadable) in the meantime is refused with `NOT_FOUND`, nothing is stored
+and the quota is released.
+
+### chat_forward_ok (Server -> Client)
+
+Direct response to the sender (no seq):
+
+```json
+{
+  "type": "chat_forward_ok",
+  "id": "550e8400-e29b-41d4-a716-446655440001",
+  "payload": {
+    "message_id": 1103,
+    "channel_id": 9,
+    "client_message_id": "1773484200000:3f2b8a52-6d1c-4a0e-9f4b-0c7d5e1a2b35",
+    "deduplicated": false
+  }
+}
+```
+
+`message_id` is the new message in `channel_id` (the target). `deduplicated:
+true` marks an acknowledgement answered from a receipt (a retry); nothing was
+stored or broadcast for it.
+
 ### chat_message (Server -> Client, broadcast)
 
 ```json
@@ -796,6 +887,19 @@ The same fields ride on each message in `GET /channels/{id}/messages`
 including members who join a group DM later, the same audience that sees the
 channel's `voice_state` and its history. Clients treat an unknown `kind` as an
 ordinary message.
+
+A forwarded message (WP 6.9a, `chat_forward`) is an ordinary message with one
+more payload field, `forward`, omitted for every other message:
+`{"source_channel_id": 5, "source_message_id": 1042, "source_timestamp":
+"2026-03-14T10:30:00Z"}`. `source_message_id` is the original message, or `null`
+when the original is deleted or purged, so a client shows the jump link only when
+it is set and it knows the channel. The block carries no author and no channel
+name. It is static, so it replays unchanged, and it rides on each message in
+`GET /channels/{id}/messages`. For a forward of a forward the block names the
+original, not the intermediate forward. A forward cannot be edited. Readers of the
+target see the text and files the sender chose to share even when they cannot read
+the source; the ids in the block are only numbers, and jumping to the source is
+permission-checked as any jump is.
 
 A group DM can also hold group event rows (WP 3B-10): `kind` is one of
 `group_add`, `group_remove`, `group_leave`, `group_rename` and `group_icon`, and
@@ -2800,7 +2904,7 @@ command's `id`, and its effects are not applied: a transaction whose context
 ends before commit is rolled back. Work after a commit (mention badges, push,
 audit rows) is detached from the frame's context, so a deadline that expires
 after the commit still yields the normal success reply and broadcast. A retry
-is safe: `chat_send` dedupes on `client_message_id`, an edit is idempotent, a
+is safe: `chat_send` and `chat_forward` dedupe on `client_message_id`, an edit is idempotent, a
 delete answers `ALREADY_DELETED`, a reaction answers `CONFLICT` and `mark_read`
 is idempotent. `voice_mod_mute`, `voice_mod_deafen`, `voice_mod_move`,
 `voice_mod_kick` and `chat_command` are exempt: they pair a database write with
@@ -2850,6 +2954,7 @@ All rate limits are enforced server-side using a token bucket rate limiter.
 | Voice moderation (mute/deafen/move/kick) | 5     | 1 second                                   | `RATE_LIMITED` error |
 | Call ring                                | 1     | 3 seconds                                  | `RATE_LIMITED` error |
 | Call decline                             | 1     | 3 seconds                                  | `RATE_LIMITED` error |
+| Forward (`chat_forward`)                 | 5     | 10 seconds                                 | `RATE_LIMITED` error |
 | Plugin command (`chat_command`)          | 5     | 1 second                                   | `RATE_LIMITED` error |
 | Channel focus                            | 5     | 1 second                                   | Deferred             |
 | Mark read                                | 5     | 1 second (own budget, separate from focus) | Silently dropped     |
@@ -2878,12 +2983,13 @@ from which the Go and TypeScript constant files are generated
 (`make protocol-generate` / verified in CI by `make protocol-verify`). The
 tables below add per-type behavioral notes.
 
-### Client -> Server (27 types)
+### Client -> Server (28 types)
 
 | Type                  | Rate Limit                           | Notes                                                           |
 | --------------------- | ------------------------------------ | --------------------------------------------------------------- |
 | `auth`                | N/A (first message)                  | Token + optional last_seq                                       |
 | `chat_send`           | 10/sec                               | + slow mode per channel                                         |
+| `chat_forward`        | 10/sec, then 5/10sec                 | One target per frame; `client_message_id` required; no pings    |
 | `chat_edit`           | 10/sec                               | Own messages only                                               |
 | `chat_delete`         | 10/sec                               | Own or mod (non-DM)                                             |
 | `reaction_add`        | 5/sec                                |                                                                 |
@@ -2912,7 +3018,7 @@ tables below add per-type behavioral notes.
 | `chat_command`        | 5/sec                                | Plugin slash command; max 64 args; broadcast gated by `CanPost` |
 | `ping`                | 2/sec (silently dropped)             | Heartbeat                                                       |
 
-### Server -> Client (45 types)
+### Server -> Client (46 types)
 
 | Type                  | Has seq? | Delivery                                                                                               |
 | --------------------- | -------- | ------------------------------------------------------------------------------------------------------ |
@@ -2921,6 +3027,7 @@ tables below add per-type behavioral notes.
 | `ready`               | No       | Direct                                                                                                 |
 | `chat_message`        | Yes      | Channel or DM participants                                                                             |
 | `chat_send_ok`        | No       | Direct to sender                                                                                       |
+| `chat_forward_ok`     | No       | Direct to sender                                                                                       |
 | `chat_edited`         | Yes      | Channel or DM participants                                                                             |
 | `chat_deleted`        | Yes      | Channel or DM participants                                                                             |
 | `chat_bulk_deleted`   | Yes      | Channel                                                                                                |

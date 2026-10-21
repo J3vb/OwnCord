@@ -30,6 +30,9 @@ type UploadService struct {
 	// quota is the per-user byte counter's in-process half (B5-2); see
 	// storage_quota.go.
 	quota storageQuota
+	// cloner is the storage a forward clones files in (WP 6.9a); guarded by
+	// quota.mu. nil until the composition root installs it.
+	cloner FileCloner
 }
 
 var _ BannerFileStore = (*db.DB)(nil)
