@@ -328,6 +328,13 @@ export interface SessionInfo {
   readonly unseen: boolean;
 }
 
+/** GET and PUT /users/me/notes/{userId}: the caller's private note about one
+ *  member. `note` is "" when there is none (a PUT of "" deletes it). */
+export interface UserNote {
+  readonly user_id: number;
+  readonly note: string;
+}
+
 /** DELETE /users/me/sessions: every session is revoked, the caller's included. */
 export interface RevokeAllSessionsResponse {
   readonly sessions_revoked: number;
@@ -1002,6 +1009,17 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
     getRecoveryKitStatus(signal?: AbortSignal): Promise<RecoveryKitStatus> {
       return request<RecoveryKitStatus>("GET", "/users/me/recovery-kit", undefined, signal);
+    },
+
+    /** The caller's private note about `userId` ("" when none). Callers wrap in try/catch. */
+    getUserNote(userId: number, signal?: AbortSignal): Promise<UserNote> {
+      return request<UserNote>("GET", `/users/me/notes/${userId}`, undefined, signal);
+    },
+
+    /** Store (or, when empty after trimming, delete) the caller's note about
+     *  `userId`; resolves to the stored value. Callers wrap in try/catch. */
+    putUserNote(userId: number, note: string, signal?: AbortSignal): Promise<UserNote> {
+      return request<UserNote>("PUT", `/users/me/notes/${userId}`, { note }, signal);
     },
 
     getOwnModeration(signal?: AbortSignal): Promise<OwnModerationAction[]> {

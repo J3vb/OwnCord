@@ -607,4 +607,28 @@ describe("DmProfileSidebar", () => {
       sidebar.destroy?.();
     });
   });
+
+  describe("server-synced note (6.11c)", () => {
+    it("server note shown when capable", async () => {
+      localStorage.clear();
+      const getUserNote = vi.fn(() => Promise.resolve({ user_id: 7, note: "from the server" }));
+      const putUserNote = vi.fn();
+      const sidebar = createDmProfileSidebar(
+        makeOptions({
+          user: makeUser({ id: 7 }),
+          host: "a.example.com",
+          notes: {
+            api: { getUserNote, putUserNote } as never,
+            host: "a.example.com",
+            sessionSignal: new AbortController().signal,
+          },
+        }),
+      );
+      sidebar.mount(container);
+      const noteEl = container.querySelector('[data-testid="dps-note"]') as HTMLTextAreaElement;
+      await vi.waitFor(() => expect(noteEl.value).toBe("from the server"));
+      expect(getUserNote).toHaveBeenCalledWith(7, expect.any(AbortSignal));
+      sidebar.destroy?.();
+    });
+  });
 });

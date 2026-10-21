@@ -402,6 +402,11 @@ export interface ReadyPayload {
      * exist (WP 3D-5). Absent means an older server.
      */
     readonly read_pointer?: boolean;
+    /**
+     * The server keeps private per-member profile notes (WP 6.11a), read and
+     * written over `/users/me/notes/{userId}`. Absent means an older server.
+     */
+    readonly user_notes?: boolean;
   };
   readonly channels: readonly ReadyChannel[];
   readonly members: readonly ReadyMember[];

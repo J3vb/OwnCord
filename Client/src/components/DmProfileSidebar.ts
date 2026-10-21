@@ -4,7 +4,8 @@
  * 340px wide, slides in from the right with a 170ms animation.
  *
  * Content: 80px avatar, username, status dot + label, about section,
- * "Member Since" date, and a local-only editable Note field.
+ * "Member Since" date, and an editable private Note field (kept on the
+ * server with the `user_notes` capability, else in localStorage).
  *
  * A11y: role="complementary", aria-label="User profile", Esc to close,
  * focus first focusable on open.
@@ -22,10 +23,14 @@ import {
   recoverEvictedImage,
   resolveServerUrl,
 } from "./message-list/attachments";
-import { migrateLegacyValue } from "@lib/legacyKeyMigration";
 import { blocksStore } from "@stores/blocks.store";
 import { shellText, statusLabel } from "../i18n/shell";
 import { requestsText } from "../i18n/requests";
+import {
+  NOTE_MAX_LENGTH,
+  createNoteBinding,
+  type NotesContext,
+} from "../features/profiles/userNotes";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -61,6 +66,12 @@ export interface DmProfileSidebarOptions {
    */
   readonly host?: string;
   /**
+   * Where the note is kept: the session that opened the panel, captured at open
+   * so a flush on close or on a DM switch uses its API client. Omitted: the note
+   * stays in localStorage under `host`, as before the server kept notes.
+   */
+  readonly notes?: NotesContext;
+  /**
    * Move focus to the panel on mount. True (the default) when the user opened
    * it; false when it opened by itself with the conversation, so it never takes
    * focus from the composer or whatever the user was typing in.
@@ -89,7 +100,6 @@ export type DmProfileSidebarComponent = MountableComponent & {
 // ---------------------------------------------------------------------------
 
 const SIDEBAR_WIDTH = 340;
-const NOTE_STORAGE_PREFIX = "owncord:dm-note:";
 
 const STATUS_COLORS: Readonly<Record<UserStatus, string>> = {
   online: "var(--green)",
@@ -104,44 +114,6 @@ const STATUS_COLORS: Readonly<Record<UserStatus, string>> = {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** The legacy unscoped key, from before per-server notes (or when the caller
- *  has not yet been updated to pass a host). */
-function legacyNoteKey(userId: number): string {
-  return NOTE_STORAGE_PREFIX + String(userId);
-}
-
-function scopedNoteKey(userId: number, host: string): string {
-  return `${NOTE_STORAGE_PREFIX}${host}:${userId}`;
-}
-
-function loadNote(userId: number, host: string): string {
-  try {
-    if (host === "") return localStorage.getItem(legacyNoteKey(userId)) ?? "";
-
-    const scoped = localStorage.getItem(scopedNoteKey(userId, host));
-    if (scoped !== null) return scoped;
-
-    // Miss at the scoped key: migrate the pre-scoping legacy note through
-    // `migrateLegacyValue`, which moves it under the key of the FIRST host
-    // opened post-upgrade and no other. User ids are per-server autoincrement
-    // integers, so a legacy note left readable would show server A's private
-    // note about user N for the unrelated user N on every other server
-    // (OC-0329) — the same shape channel-mutes.ts fixed for OC-0288.
-    return migrateLegacyValue(legacyNoteKey(userId), scopedNoteKey(userId, host)) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-function saveNote(userId: number, host: string, text: string): void {
-  try {
-    const key = host !== "" ? scopedNoteKey(userId, host) : legacyNoteKey(userId);
-    localStorage.setItem(key, text);
-  } catch {
-    // localStorage may be unavailable or full -- silently ignore
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Component factory
@@ -306,7 +278,7 @@ export function createDmProfileSidebar(
       appendChildren(content, joinTitle, joinText);
     }
 
-    // Note section (local-only, persisted to localStorage)
+    // Note section (private; on the server when it keeps notes, else localStorage)
     content.appendChild(makeDivider());
     const noteTitle = createElement(
       "div",
@@ -319,18 +291,46 @@ export function createDmProfileSidebar(
       placeholder: requestsText("profile.notePlaceholder"),
       "data-testid": "dps-note",
       rows: "3",
+      maxlength: String(NOTE_MAX_LENGTH),
     });
-    noteInput.value = loadNote(user.id, host);
+    const binding = createNoteBinding(
+      options.notes ?? { api: null, host, sessionSignal: signal },
+      user.id,
+    );
+    // Flush an edit still waiting on its debounce when the body goes away: the
+    // panel closing, or a switch to another DM.
+    contentSignal.addEventListener("abort", () => binding.destroy(), { once: true });
+    let noteDirty = false;
+    if (binding.remote) {
+      void binding.load(contentSignal).then(
+        (text) => {
+          if (!noteDirty && !contentSignal.aborted) noteInput.value = text;
+        },
+        () => undefined,
+      );
+    } else {
+      noteInput.value = binding.readLocal();
+    }
+    const noteError = createElement("div", {
+      class: "dps-note-error",
+      role: "status",
+      "data-testid": "dps-note-error",
+    });
+    binding.onFailedChange((failed) => {
+      setText(noteError, failed ? requestsText("profile.noteNotSaved") : "");
+    });
 
     noteInput.addEventListener(
       "input",
       () => {
-        saveNote(user.id, host, noteInput.value);
+        noteDirty = true;
+        binding.change(noteInput.value);
       },
       { signal: contentSignal },
     );
+    noteInput.addEventListener("blur", () => binding.flush(), { signal: contentSignal });
 
-    appendChildren(content, noteTitle, noteInput);
+    appendChildren(content, noteTitle, noteInput, noteError);
 
     // Block / Unblock. The label follows blocksStore, so it flips when the
     // owner's request lands and stays put when it fails.
