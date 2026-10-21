@@ -80,10 +80,11 @@ func (s *RoleService) actorRole(ctx context.Context, actorID int64) (*db.Role, e
 	if err != nil || role == nil {
 		return nil, fmt.Errorf("%w: failed to load actor role", ErrForbidden)
 	}
-	if !permissions.HasServerPerm(role.Permissions, permissions.ManageRoles) {
+	if !permissions.HasServerPerm(role.Perms, permissions.ManageRoles) {
 		return nil, fmt.Errorf("%w: missing %s permission", ErrForbidden, permissions.Name(permissions.ManageRoles))
 	}
-	return role, nil
+	// Top role identity (rank) with the OR of every held mask.
+	return role.Effective(), nil
 }
 
 // requireBelowActor enforces the hierarchy rule shared by edit, delete and

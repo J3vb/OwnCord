@@ -391,20 +391,6 @@ func (q *Queries) SetSetting(ctx context.Context, arg SetSettingParams) error {
 	return err
 }
 
-const updateUserRole = `-- name: UpdateUserRole :exec
-UPDATE users SET role_id = ? WHERE id = ?
-`
-
-type UpdateUserRoleParams struct {
-	RoleID int64 `json:"roleId"`
-	ID     int64 `json:"id"`
-}
-
-func (q *Queries) UpdateUserRole(ctx context.Context, arg UpdateUserRoleParams) error {
-	_, err := q.db.ExecContext(ctx, updateUserRole, arg.RoleID, arg.ID)
-	return err
-}
-
 const userCount = `-- name: UserCount :one
 SELECT COUNT(*) FROM users
 `

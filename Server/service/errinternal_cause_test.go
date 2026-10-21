@@ -45,11 +45,11 @@ func (f *faultStore) GetMessageRequest(ctx context.Context, id, recipientID int6
 	return f.DB.GetMessageRequest(ctx, id, recipientID)
 }
 
-func (f *faultStore) GetRoleForUser(ctx context.Context, userID int64) (*db.Role, error) {
-	if err := f.fail["GetRoleForUser"]; err != nil {
+func (f *faultStore) GetMemberRoles(ctx context.Context, userID int64) (*db.MemberRoles, error) {
+	if err := f.fail["GetMemberRoles"]; err != nil {
 		return nil, err
 	}
-	return f.DB.GetRoleForUser(ctx, userID)
+	return f.DB.GetMemberRoles(ctx, userID)
 }
 
 func (f *faultStore) AcknowledgeNSFW(ctx context.Context, userID, channelID int64) (bool, error) {
@@ -116,7 +116,7 @@ func TestErrInternal_KeepsStoreCause(t *testing.T) {
 			_, err := NewMessageRequestService(st, NewBlockService(st)).Ignore(ctx, 2, 1)
 			return err
 		}},
-		{"nsfw_visibility", "GetRoleForUser", func(t *testing.T, ctx context.Context, st *faultStore) error {
+		{"nsfw_visibility", "GetMemberRoles", func(t *testing.T, ctx context.Context, st *faultStore) error {
 			return newFaultNSFW(t, st).Acknowledge(ctx, 1, 10)
 		}},
 		{"nsfw_acknowledge", "AcknowledgeNSFW", func(t *testing.T, ctx context.Context, st *faultStore) error {

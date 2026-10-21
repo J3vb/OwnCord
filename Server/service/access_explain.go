@@ -43,7 +43,9 @@ type AccessExplanation struct {
 // accessMember is one member's live authorization state in a channel.
 type accessMember struct {
 	user     *db.User
-	role     *db.Role
+	role     *db.Role // the member's top role (rank and display)
+	held     []int64  // every held role id, top first
+	masks    map[int64]int64
 	subject  permissions.Subject
 	blockMsg string // account admission refusal, "" when admitted
 }
@@ -60,9 +62,9 @@ func accountBlock(u *db.User) string {
 	return ""
 }
 
-// loadAccessMember resolves userID's live Subject in ch. roles caches role
-// rows across a batch; pass nil for a single lookup.
-func (s *ChannelService) loadAccessMember(ctx context.Context, userID int64, ch *db.Channel, roles map[int64]*db.Role) (*accessMember, error) {
+// loadAccessMember resolves userID's live Subject in ch, composing every role
+// they hold.
+func (s *ChannelService) loadAccessMember(ctx context.Context, userID int64, ch *db.Channel) (*accessMember, error) {
 	user, err := s.st.GetUserByID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to fetch user: %w", ErrInternal, err)
@@ -70,20 +72,25 @@ func (s *ChannelService) loadAccessMember(ctx context.Context, userID int64, ch 
 	if user == nil {
 		return nil, fmt.Errorf("user not found%.0w", ErrNotFound)
 	}
-	role := roles[user.RoleID]
-	if role == nil {
-		if role, err = s.st.GetRoleByID(ctx, user.RoleID); err != nil {
-			return nil, fmt.Errorf("%w: failed to fetch role: %w", ErrInternal, err)
-		}
-		if role == nil {
-			// A member with no role holds no bits; the zero role says so.
-			role = &db.Role{ID: user.RoleID}
-		}
-		if roles != nil {
-			roles[user.RoleID] = role
-		}
+	held, err := s.st.GetMemberRoles(ctx, user.ID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to fetch role: %w", ErrInternal, err)
 	}
-	sub, err := permissions.NewChecker(s.st).Subject(ctx, role.Permissions, role.ID, user.ID, ch.ID)
+	var role *db.Role
+	var ids []int64
+	var heldGrants []permissions.RoleGrant
+	var masks map[int64]int64
+	if held != nil {
+		role, ids, heldGrants = &held.Top, held.IDs, held.Held()
+		masks = make(map[int64]int64, len(ids))
+		for i, id := range ids {
+			masks[id] = held.Masks[i]
+		}
+	} else {
+		// A member with no role holds no bits; the zero role says so.
+		role = &db.Role{ID: user.RoleID}
+	}
+	sub, err := permissions.NewChecker(s.st).Subject(ctx, heldGrants, user.ID, ch.ID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to resolve permissions: %w", ErrInternal, err)
 	}
@@ -93,13 +100,40 @@ func (s *ChannelService) loadAccessMember(ctx context.Context, userID int64, ch 
 			return nil, fmt.Errorf("%w: failed to read NSFW acknowledgement: %w", ErrInternal, err)
 		}
 	}
-	return &accessMember{user: user, role: role, subject: sub, blockMsg: accountBlock(user)}, nil
+	return &accessMember{user: user, role: role, held: ids, masks: masks, subject: sub, blockMsg: accountBlock(user)}, nil
 }
 
-// decisions evaluates every action's predicate for m under the override o.
-func (m *accessMember) decisions(o permissions.ChannelOverride) []permissions.Decision {
+// withRoleOverride returns the member's subject with roleID's channel
+// override replaced by allow/deny. A member holding several roles is resolved
+// per role (every held role gets a layer, only roleID's override changes), so
+// the proposal composes exactly as a saved override would.
+func (m *accessMember) withRoleOverride(roleID, allow, deny int64) permissions.Subject {
 	sub := m.subject
-	sub.Override = o
+	if len(m.held) <= 1 {
+		sub.Override.Allow, sub.Override.Deny = allow, deny
+		return sub
+	}
+	layers := make([]permissions.RoleGrant, 0, len(m.held))
+	for _, id := range m.held {
+		g := permissions.RoleGrant{RoleID: id, Perms: m.masks[id]}
+		for _, cur := range m.subject.Layers {
+			if cur.RoleID == id {
+				g.Allow, g.Deny = cur.Allow, cur.Deny
+			}
+		}
+		if id == roleID {
+			g.Allow, g.Deny = allow, deny
+		}
+		layers = append(layers, g)
+	}
+	sub.Layers = layers
+	sub.Override.Allow, sub.Override.Deny = 0, 0
+	return sub
+}
+
+// decisions evaluates every action's predicate for m under the subject sub
+// (m.subject, or a proposal derived from it).
+func (m *accessMember) decisions(sub permissions.Subject) []permissions.Decision {
 	out := make([]permissions.Decision, 0, len(permissions.Actions))
 	for _, a := range permissions.Actions {
 		d, _ := permissions.Explain(a, sub) // a is always a known action
@@ -119,7 +153,7 @@ func (s *ChannelService) ExplainAccess(ctx context.Context, actorID int64, actor
 	if _, err := permissions.Explain(permissions.Action(action), permissions.Subject{}); err != nil {
 		return AccessExplanation{}, fmt.Errorf("%w%.0w", err, ErrBadRequest)
 	}
-	m, err := s.loadAccessMember(ctx, userID, ch, nil)
+	m, err := s.loadAccessMember(ctx, userID, ch)
 	if err != nil {
 		return AccessExplanation{}, err
 	}
@@ -127,7 +161,7 @@ func (s *ChannelService) ExplainAccess(ctx context.Context, actorID int64, actor
 		return AccessExplanation{}, err
 	}
 	var ds []permissions.Decision
-	for _, d := range m.decisions(m.subject.Override) {
+	for _, d := range m.decisions(m.subject) {
 		if string(d.Action) == action {
 			ds = append(ds, d)
 		}
@@ -208,10 +242,9 @@ func (s *ChannelService) PreviewOverride(ctx context.Context, actorID int64, act
 		target = "role " + role.Name
 	}
 
-	roles := map[int64]*db.Role{}
 	out := AccessPreview{ChannelID: ch.ID, Allow: allow, Deny: deny, Members: []MemberAccessChange{}}
 	for _, id := range ids {
-		m, err := s.loadAccessMember(ctx, id, ch, roles)
+		m, err := s.loadAccessMember(ctx, id, ch)
 		if err != nil {
 			return AccessPreview{}, err
 		}
@@ -221,13 +254,13 @@ func (s *ChannelService) PreviewOverride(ctx context.Context, actorID int64, act
 			}
 			target = "user " + m.user.Username
 		}
-		proposed := m.subject.Override
+		proposed := m.subject
 		if roleID != 0 {
-			proposed.Allow, proposed.Deny = allow, deny
+			proposed = m.withRoleOverride(roleID, allow, deny)
 		} else {
-			proposed.UserAllow, proposed.UserDeny = allow, deny
+			proposed.Override.UserAllow, proposed.Override.UserDeny = allow, deny
 		}
-		before, after := m.decisions(m.subject.Override), m.decisions(proposed)
+		before, after := m.decisions(m.subject), m.decisions(proposed)
 		var changes []AccessChange
 		for i := range before {
 			if before[i].Allowed != after[i].Allowed {

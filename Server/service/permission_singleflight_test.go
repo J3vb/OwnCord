@@ -13,23 +13,23 @@ import (
 )
 
 // gateStore counts the permission-load reads and can hold the first
-// GetRoleForUser call open until released, so a test controls exactly which
+// GetMemberRoles call open until released, so a test controls exactly which
 // callers are in flight while a load runs.
 type gateStore struct {
 	*db.DB
 	roleCalls     atomic.Int64
 	overrideCalls atomic.Int64
 	roleByIDCalls atomic.Int64
-	// gate, when non-nil, blocks GetRoleForUser (after counting it) and, when
+	// gate, when non-nil, blocks GetMemberRoles (after counting it) and, when
 	// set, signals on entered once.
 	gate    chan struct{}
 	entered chan struct{}
 	once    sync.Once
 }
 
-func (g *gateStore) GetRoleForUser(ctx context.Context, userID int64) (*db.Role, error) {
+func (g *gateStore) GetMemberRoles(ctx context.Context, userID int64) (*db.MemberRoles, error) {
 	g.roleCalls.Add(1)
-	role, err := g.DB.GetRoleForUser(ctx, userID)
+	role, err := g.DB.GetMemberRoles(ctx, userID)
 	if g.entered != nil {
 		g.once.Do(func() { close(g.entered) })
 	}
@@ -43,9 +43,9 @@ func (g *gateStore) GetRoleForUser(ctx context.Context, userID int64) (*db.Role,
 	return role, err
 }
 
-func (g *gateStore) GetChannelOverridesFor(ctx context.Context, roleID, userID int64) (map[int64]db.ChannelOverride, error) {
+func (g *gateStore) GetMemberGrants(ctx context.Context, userID int64) (permissions.MemberGrants, error) {
 	g.overrideCalls.Add(1)
-	return g.DB.GetChannelOverridesFor(ctx, roleID, userID)
+	return g.DB.GetMemberGrants(ctx, userID)
 }
 
 func (g *gateStore) GetRoleByID(ctx context.Context, id int64) (*db.Role, error) {
@@ -117,10 +117,10 @@ func TestPermissionColdCacheCoalescesLoads(t *testing.T) {
 		t.Fatalf("%d callers got a wrong answer", denied.Load())
 	}
 	if got := g.roleCalls.Load(); got != 1 {
-		t.Fatalf("GetRoleForUser calls = %d, want 1", got)
+		t.Fatalf("GetMemberRoles calls = %d, want 1", got)
 	}
 	if got := g.overrideCalls.Load(); got != 1 {
-		t.Fatalf("GetChannelOverridesFor calls = %d, want 1", got)
+		t.Fatalf("GetMemberGrants calls = %d, want 1", got)
 	}
 }
 
@@ -148,7 +148,7 @@ func TestPermissionInvalidationDuringLoadIsNotShared(t *testing.T) {
 		t.Fatal("both callers should see the member's SendMessages bit")
 	}
 	if got := g.roleCalls.Load(); got != 2 {
-		t.Fatalf("GetRoleForUser calls = %d, want 2 (post-invalidation caller must not share the stale load)", got)
+		t.Fatalf("GetMemberRoles calls = %d, want 2 (post-invalidation caller must not share the stale load)", got)
 	}
 
 	// The pre-invalidation load must not have been cached; the second one is.
@@ -228,7 +228,7 @@ func TestPermissionCancelledWaiterDoesNotFailOthers(t *testing.T) {
 		}
 	}
 	if got := g.roleCalls.Load(); got != 1 {
-		t.Fatalf("GetRoleForUser calls = %d, want 1", got)
+		t.Fatalf("GetMemberRoles calls = %d, want 1", got)
 	}
 }
 
@@ -244,24 +244,28 @@ func TestGetRoleForUserWarmCacheNoStoreRead(t *testing.T) {
 	if err != nil || r1 == nil {
 		t.Fatalf("GetRoleForUser: %v, %v", r1, err)
 	}
-	if r1.ID != permissions.MemberRoleID || r1.Name != "member" || r1.Color == nil || *r1.Color != "#112233" {
+	if r1.Top.ID != permissions.MemberRoleID || r1.Top.Name != "member" || r1.Top.Color == nil || *r1.Top.Color != "#112233" {
 		t.Fatalf("unexpected role %+v", r1)
+	}
+	if r1.Perms != permissions.SendMessages|permissions.ReadMessages || len(r1.IDs) != 1 || r1.IDs[0] != permissions.MemberRoleID {
+		t.Fatalf("unexpected held-role summary %+v", r1)
 	}
 	if g.roleCalls.Load() != reads || g.roleByIDCalls.Load() != 0 {
 		t.Fatal("warm GetRoleForUser must not read the store")
 	}
 
 	// Mutating the returned copy must not leak into the cache.
-	*r1.Color = "#ffffff"
-	r1.Name = "mutated"
+	*r1.Top.Color = "#ffffff"
+	r1.Top.Name = "mutated"
+	r1.IDs[0] = 999
 	r2, err := svc.GetRoleForUser(ctx, 1)
 	if err != nil {
 		t.Fatalf("GetRoleForUser: %v", err)
 	}
-	if r2.Name != "member" || *r2.Color != "#112233" {
+	if r2.Top.Name != "member" || *r2.Top.Color != "#112233" || r2.IDs[0] != permissions.MemberRoleID {
 		t.Fatalf("cached role was aliased: %+v", r2)
 	}
-	if r1.Color == r2.Color {
+	if r1.Top.Color == r2.Top.Color {
 		t.Fatal("Color pointer is shared between calls")
 	}
 }
@@ -269,7 +273,7 @@ func TestGetRoleForUserWarmCacheNoStoreRead(t *testing.T) {
 // panicStore panics inside the shared load.
 type panicStore struct{ *gateStore }
 
-func (p *panicStore) GetRoleForUser(context.Context, int64) (*db.Role, error) {
+func (p *panicStore) GetMemberRoles(context.Context, int64) (*db.MemberRoles, error) {
 	panic("store exploded")
 }
 

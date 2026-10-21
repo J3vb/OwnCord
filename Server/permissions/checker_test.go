@@ -138,7 +138,7 @@ func TestHasChannelPerm(t *testing.T) {
 			maps.Copy(db.channelPerms, tt.overrides)
 			ck := NewChecker(db)
 
-			got := ck.HasChannelPerm(context.Background(), tt.rolePerms, tt.roleID, 0, tt.channelID, tt.perm)
+			got := ck.HasChannelPerm(context.Background(), []RoleGrant{{RoleID: tt.roleID, Perms: tt.rolePerms}}, 0, tt.channelID, tt.perm)
 			if got != tt.want {
 				t.Errorf("HasChannelPerm() = %v, want %v", got, tt.want)
 			}
@@ -156,7 +156,7 @@ func TestChecker_Subject_TimedOut(t *testing.T) {
 	db.timedOutUsers = map[int64]bool{7: true}
 	ck := NewChecker(db)
 
-	sub, err := ck.Subject(context.Background(), ReadMessages, 4, 7, 10)
+	sub, err := ck.Subject(context.Background(), []RoleGrant{{RoleID: 4, Perms: ReadMessages}}, 7, 10)
 	if err != nil {
 		t.Fatalf("Subject: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestChecker_Subject_TimedOut(t *testing.T) {
 		t.Fatal("TimedOut = false, want true for a user with an active timeout")
 	}
 
-	sub, err = ck.Subject(context.Background(), ReadMessages, 4, 8, 10)
+	sub, err = ck.Subject(context.Background(), []RoleGrant{{RoleID: 4, Perms: ReadMessages}}, 8, 10)
 	if err != nil {
 		t.Fatalf("Subject: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestChecker_Subject_TimedOut(t *testing.T) {
 	}
 
 	// userID == 0 (role-only, no member in hand): skipped entirely.
-	sub, err = ck.Subject(context.Background(), ReadMessages, 4, 0, 10)
+	sub, err = ck.Subject(context.Background(), []RoleGrant{{RoleID: 4, Perms: ReadMessages}}, 0, 10)
 	if err != nil {
 		t.Fatalf("Subject(userID=0): %v", err)
 	}
@@ -183,7 +183,7 @@ func TestChecker_Subject_TimedOut(t *testing.T) {
 
 	// Administrator short-circuits before the lookup, mirroring HasAdmin.
 	db.timedOutUsers[7] = true
-	sub, err = ck.Subject(context.Background(), Administrator, 1, 7, 10)
+	sub, err = ck.Subject(context.Background(), []RoleGrant{{RoleID: 1, Perms: Administrator}}, 7, 10)
 	if err != nil {
 		t.Fatalf("Subject(admin): %v", err)
 	}
@@ -193,7 +193,7 @@ func TestChecker_Subject_TimedOut(t *testing.T) {
 
 	// A lookup failure is returned, not collapsed to false.
 	db.timedOutErr = errors.New("db error")
-	if _, err := ck.Subject(context.Background(), ReadMessages, 4, 7, 10); err == nil {
+	if _, err := ck.Subject(context.Background(), []RoleGrant{{RoleID: 4, Perms: ReadMessages}}, 7, 10); err == nil {
 		t.Fatal("Subject: want an error when HasActiveTimeout fails")
 	}
 }
@@ -250,7 +250,7 @@ func TestHasChannelPermBatch(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ck := NewChecker(newMockDB())
-			got := ck.HasChannelPermBatch(tt.rolePerms, tt.overrides, tt.channelID, tt.perm)
+			got := ck.HasChannelPermBatch(MemberGrants{Perms: tt.rolePerms, Overrides: tt.overrides}, tt.channelID, tt.perm)
 			if got != tt.want {
 				t.Errorf("HasChannelPermBatch() = %v, want %v", got, tt.want)
 			}
@@ -310,7 +310,7 @@ func TestVisibleChannelIDs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ck := NewChecker(newMockDB())
-			got := ck.VisibleChannelIDs(tt.rolePerms, channels, tt.overrides)
+			got := ck.VisibleChannelIDs(MemberGrants{Perms: tt.rolePerms, Overrides: tt.overrides}, channels)
 			if got[4] {
 				t.Errorf("dm channel 4 must never be visible, got %v", got)
 			}

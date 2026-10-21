@@ -45,9 +45,19 @@ var ErrTimedOut = errors.New("user is timed out")
 // zero value is a subject with no role and no membership, which every
 // predicate refuses.
 type Subject struct {
+	// RolePerms is the OR of every held role's mask. It decides the
+	// Administrator bypass and, when Layers is nil, is the base the single
+	// role-layer formula runs over.
 	RolePerms int64
 	Override  ChannelOverride
-	Channel   ChannelRef // Type and Archived; ID is not consulted
+	// Layers is the per-held-role breakdown for this one channel, set only
+	// when the member holds two or more roles and at least one has an
+	// override here. Nil means today's formula over RolePerms and
+	// Override.Allow/Deny (every single-role member). When non-nil the role
+	// layer is the OR over Layers and Override.Allow/Deny must be zero;
+	// Override.UserAllow/UserDeny still apply after it.
+	Layers  []RoleGrant
+	Channel ChannelRef // Type and Archived; ID is not consulted
 	// DMParticipant and DMBlocked are consulted only when Channel.Type is
 	// "dm". DMBlocked means the 1:1 counterpart cannot be reached by this
 	// actor (service.RequireDMReachable). Group DMs pass DMBlocked=false.
@@ -75,7 +85,17 @@ type Subject struct {
 // perm is never held, administrator included. This is the single value-taking
 // bit predicate — Checker and PermissionService resolve a Subject and ask it.
 func (s Subject) Has(perm int64) bool {
-	return perm != 0 && (HasAdmin(s.RolePerms) || HasPerm(EffectiveChannelPerms(s.RolePerms, s.Override), perm))
+	return perm != 0 && (HasAdmin(s.RolePerms) || HasPerm(s.EffectivePerms(), perm))
+}
+
+// EffectivePerms is the subject's resolved permission set in the channel,
+// before the Administrator bypass: the single role layer (Layers nil) or the
+// OR over every held role's own layer, then the member override.
+func (s Subject) EffectivePerms() int64 {
+	if s.Layers != nil {
+		return MemberChannelPerms(s.Layers, s.Override.UserAllow, s.Override.UserDeny)
+	}
+	return EffectiveChannelPerms(s.RolePerms, s.Override)
 }
 
 // missing wraps ErrPermissionDenied with the bit a caller would name in its

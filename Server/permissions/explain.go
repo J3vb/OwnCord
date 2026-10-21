@@ -52,11 +52,27 @@ func actionPredicate(a Action, s Subject) (func(Subject) error, int64, bool) {
 // BitRule is how one permission bit resolved through the layers:
 // the base role, the channel's role override, then its member override.
 // A layer is "allow", "deny" or "" (no opinion); within a layer allow wins.
+//
+// A member holding several roles with an override in the channel gets one
+// RoleBitRule per held role in Decision.RoleBits (each role resolved with its
+// own override, then OR'd); Base is then the OR of the held masks and
+// RoleOverride is empty.
 type BitRule struct {
 	Bit          string `json:"bit"`
 	Base         bool   `json:"base"`
 	RoleOverride string `json:"role_override"`
 	UserOverride string `json:"user_override"`
+	Effective    bool   `json:"effective"`
+}
+
+// RoleBitRule is one held role's resolution of one bit: whether the role's mask
+// has it, the role's own channel override, and the role-layer result
+// ((base & ^deny) | allow) that is OR'd with the other held roles.
+type RoleBitRule struct {
+	Bit          string `json:"bit"`
+	RoleID       int64  `json:"role_id"`
+	Base         bool   `json:"base"`
+	RoleOverride string `json:"role_override"`
 	Effective    bool   `json:"effective"`
 }
 
@@ -69,6 +85,10 @@ type Decision struct {
 	Reason              string    `json:"reason,omitempty"`
 	AdministratorBypass bool      `json:"administrator_bypass"`
 	Bits                []BitRule `json:"bits,omitempty"`
+	// RoleBits is the per-held-role breakdown of Bits, one row per (bit, held
+	// role). Present only for a member holding two or more roles with an
+	// override in the channel.
+	RoleBits []RoleBitRule `json:"role_bits,omitempty"`
 }
 
 func layerState(allow, deny, bit int64) string {
@@ -100,13 +120,26 @@ func Explain(a Action, s Subject) (Decision, error) {
 	for bits != 0 {
 		bit := bits & -bits
 		bits &^= bit
-		d.Bits = append(d.Bits, BitRule{
+		rule := BitRule{
 			Bit:          Name(bit),
 			Base:         HasPerm(s.RolePerms, bit),
-			RoleOverride: layerState(s.Override.Allow, s.Override.Deny, bit),
 			UserOverride: layerState(s.Override.UserAllow, s.Override.UserDeny, bit),
 			Effective:    s.Has(bit),
-		})
+		}
+		if s.Layers != nil {
+			for _, g := range s.Layers {
+				d.RoleBits = append(d.RoleBits, RoleBitRule{
+					Bit:          rule.Bit,
+					RoleID:       g.RoleID,
+					Base:         HasPerm(g.Perms, bit),
+					RoleOverride: layerState(g.Allow, g.Deny, bit),
+					Effective:    HasPerm(EffectivePerms(g.Perms, g.Allow, g.Deny), bit),
+				})
+			}
+		} else {
+			rule.RoleOverride = layerState(s.Override.Allow, s.Override.Deny, bit)
+		}
+		d.Bits = append(d.Bits, rule)
 	}
 	return d, nil
 }

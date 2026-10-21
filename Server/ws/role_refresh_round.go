@@ -388,13 +388,13 @@ func (h *Hub) roleNameNow(ctx context.Context, uid int64) (string, bool) {
 		role, rerr := h.perms.GetRoleForUser(ctx, uid)
 		err = rerr
 		if role != nil {
-			name, found = role.Name, true
+			name, found = role.Top.Name, true
 		}
 	case h.readers.Members != nil:
-		role, rerr := h.readers.Members.GetRoleForUser(ctx, uid)
+		role, rerr := h.readers.Members.GetMemberRoles(ctx, uid)
 		err = rerr
 		if role != nil {
-			name, found = role.Name, true
+			name, found = role.Top.Name, true
 		}
 	}
 	if err != nil || !found {

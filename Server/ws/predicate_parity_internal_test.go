@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -68,11 +69,11 @@ func setParityOverrides(t *testing.T, database *db.DB, permSvc *service.Permissi
 func paritySubject(t *testing.T, database *db.DB, userID int64, ch *db.Channel) permissions.Subject {
 	t.Helper()
 	ctx := context.Background()
-	role, err := database.GetRoleForUser(ctx, userID)
+	role, err := database.GetMemberRoles(ctx, userID)
 	if err != nil || role == nil {
-		t.Fatalf("GetRoleForUser(%d): %v", userID, err)
+		t.Fatalf("GetMemberRoles(%d): %v", userID, err)
 	}
-	sub, err := permissions.NewChecker(database).Subject(ctx, role.Permissions, role.ID, userID, ch.ID)
+	sub, err := permissions.NewChecker(database).Subject(ctx, role.Held(), userID, ch.ID)
 	if err != nil {
 		t.Fatalf("Checker.Subject: %v", err)
 	}
@@ -336,7 +337,7 @@ func TestChannelSubject_Parity(t *testing.T) {
 					if err != nil {
 						t.Fatalf("chan=%d/%s/%s: channelSubject: %v", chID, c.name, branch, err)
 					}
-					if got != want {
+					if !reflect.DeepEqual(got, want) {
 						t.Errorf("chan=%d/blocked=%v/%s/%s: channelSubject = %+v, want %+v", chID, blocked, c.name, branch, got, want)
 					}
 				})

@@ -6,6 +6,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // Store is the data-access surface the service layer depends on. It is the
@@ -110,11 +111,11 @@ type Store interface {
 	DeleteChannelOverride(ctx context.Context, channelID, roleID int64) error
 	UpsertChannelUserOverride(ctx context.Context, channelID, userID, allow, deny int64) error
 	DeleteChannelUserOverride(ctx context.Context, channelID, userID int64) error
-	// GetChannelOverridesFor merges the role and per-user override layers for
-	// one member in two batch queries — the single fetch behind every
+	// GetMemberGrants fetches every held role's override and the per-user
+	// layer for one member in batch queries — the single fetch behind every
 	// "what can this member do here" site, and the reason no site pays an N+1
-	// for the second layer.
-	GetChannelOverridesFor(ctx context.Context, roleID, userID int64) (map[int64]db.ChannelOverride, error)
+	// for the extra layers.
+	GetMemberGrants(ctx context.Context, userID int64) (permissions.MemberGrants, error)
 
 	// ── Users ──
 	GetUserByID(ctx context.Context, id int64) (*db.User, error)
@@ -216,7 +217,7 @@ type Store interface {
 
 	// ── Roles ──
 	GetRoleByID(ctx context.Context, id int64) (*db.Role, error)
-	GetRoleForUser(ctx context.Context, userID int64) (*db.Role, error)
+	GetMemberRoles(ctx context.Context, userID int64) (*db.MemberRoles, error)
 	ListRoles(ctx context.Context) ([]*db.Role, error)
 	GetRoleByName(ctx context.Context, name string) (*db.Role, error)
 	GetDefaultRole(ctx context.Context) (*db.Role, error)

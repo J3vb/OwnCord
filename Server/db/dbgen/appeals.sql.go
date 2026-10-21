@@ -65,12 +65,14 @@ func (q *Queries) AssignAppeal(ctx context.Context, arg AssignAppealParams) (int
 
 const countUsersWithPermission = `-- name: CountUsersWithPermission :one
 SELECT COUNT(*) FROM users u
-  JOIN roles r ON r.id = u.role_id
  WHERE u.id != 0
    AND u.id != ?1
    AND u.id != ?2
    AND (u.banned = 0 OR (u.ban_expires IS NOT NULL AND replace(u.ban_expires, ' ', 'T') <= strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))
-   AND ((r.permissions & ?3) != 0 OR (r.permissions & ?4) != 0)
+   AND EXISTS (
+     SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+      WHERE ur.user_id = u.id
+        AND ((r.permissions & ?3) != 0 OR (r.permissions & ?4) != 0))
 `
 
 type CountUsersWithPermissionParams struct {
@@ -87,7 +89,7 @@ type CountUsersWithPermissionParams struct {
 // (F2/F3 review: an appellant who happens to also hold the bit must never
 // count as their own alternative reviewer), id 0 (the system actor is never
 // a reviewer), and anyone effectively banned, who holds perm_bit or the
-// Administrator bit. The ban comparison is normalised the same way
+// Administrator bit in ANY role they hold (user_roles). The ban comparison is normalised the same way
 // mention_queries.go's notBannedClause is (P2 review, uniformity): BanUser
 // writes ISO-8601 'Z' ("2006-01-02T15:04:05Z"), and a raw lexical
 // "ban_expires <= datetime('now')" compares that against SQLite's space-form
@@ -152,12 +154,14 @@ func (q *Queries) DecideAppeal(ctx context.Context, arg DecideAppealParams) (int
 const eligibleModeratorExists = `-- name: EligibleModeratorExists :one
 SELECT EXISTS (
   SELECT 1 FROM users u
-    JOIN roles r ON r.id = u.role_id
    WHERE u.id != 0
      AND u.id != ?1
      AND u.id != ?2
      AND (u.banned = 0 OR (u.ban_expires IS NOT NULL AND replace(u.ban_expires, ' ', 'T') <= strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))
-     AND ((r.permissions & ?3) != 0 OR (r.permissions & ?4) != 0)
+     AND EXISTS (
+       SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+        WHERE ur.user_id = u.id
+          AND ((r.permissions & ?3) != 0 OR (r.permissions & ?4) != 0))
 )
 `
 

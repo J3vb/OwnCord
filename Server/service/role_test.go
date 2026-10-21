@@ -547,8 +547,8 @@ func TestDeleteRole_InvalidatesReassignedMembers(t *testing.T) {
 	if err != nil || cached == nil {
 		t.Fatalf("GetRoleForUser: %v", err)
 	}
-	if cached.ID != role.ID {
-		t.Fatalf("cached role = %d, want %d", cached.ID, role.ID)
+	if cached.Top.ID != role.ID {
+		t.Fatalf("cached role = %d, want %d", cached.Top.ID, role.ID)
 	}
 
 	if _, _, _, err := svc.DeleteRole(ctx, 1, role.ID); err != nil {
@@ -560,8 +560,8 @@ func TestDeleteRole_InvalidatesReassignedMembers(t *testing.T) {
 	if err != nil || after == nil {
 		t.Fatalf("GetRoleForUser after delete: %v", err)
 	}
-	if after.ID != permissions.MemberRoleID {
-		t.Errorf("cached role after delete = %d, want the default %d", after.ID, permissions.MemberRoleID)
+	if after.Top.ID != permissions.MemberRoleID {
+		t.Errorf("cached role after delete = %d, want the default %d", after.Top.ID, permissions.MemberRoleID)
 	}
 }
 

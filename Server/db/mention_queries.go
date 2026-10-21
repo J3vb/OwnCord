@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -42,13 +43,15 @@ const maxMentionsPerMessage = 20
 const notBannedClause = `(banned = 0 OR (ban_expires IS NOT NULL AND replace(ban_expires, ' ', 'T') <= strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))`
 
 // MentionTarget is a candidate recipient of a mention fan-out: the user id, the
-// presence status @here filters on, and the role the user holds (so the caller
+// presence status @here filters on, and the roles the user holds (so the caller
 // can apply the ADMINISTRATOR bypass when a per-user channel override would
-// otherwise drop them).
+// otherwise drop them). RoleID is the top role (the users.role_id mirror),
+// RoleIDs every held role: the bypass applies when ANY held role has it.
 type MentionTarget struct {
-	UserID int64
-	Status string
-	RoleID int64
+	UserID  int64
+	Status  string
+	RoleID  int64
+	RoleIDs []int64
 }
 
 // CreateMessageWithMentions inserts a message and its resolved mentions in one
@@ -391,6 +394,16 @@ const (
 	mentionTargetsByUser mentionTargetColumn = "id"
 )
 
+// mentionTargetFilter is the WHERE predicate for a column, over users aliased u.
+// Matching a role walks user_roles, so a member holding several roles is
+// listed once and counted for any of them.
+func mentionTargetFilter(column mentionTargetColumn, placeholders string) string {
+	if column == mentionTargetsByRole {
+		return `EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = u.id AND ur.role_id IN (` + placeholders + `))`
+	}
+	return `u.id IN (` + placeholders + `)`
+}
+
 // listMentionTargets returns non-banned users whose column is in ids, with the
 // presence status @here filters on. It is the shared body of
 // ListMentionTargetsByRoles and ListMentionTargetsByUserIDs, which differ only
@@ -408,9 +421,11 @@ func (d *DB) listMentionTargets(ctx context.Context, column mentionTargetColumn,
 	}
 
 	rows, err := d.reader.QueryContext(ctx,
-		fmt.Sprintf( //nolint:gosec // G201: placeholders plus a named-type column constant, not user input
-			`SELECT id, status, role_id FROM users WHERE %s AND %s IN (%s)`,
-			notBannedClause, string(column), strings.Join(placeholders, ",")),
+		fmt.Sprintf( //nolint:gosec // G201: placeholders plus a closed filter chosen by a named-type constant, not user input
+			`SELECT u.id, u.status, u.role_id,
+			        COALESCE((SELECT group_concat(ur2.role_id) FROM user_roles ur2 WHERE ur2.user_id = u.id), '')
+			 FROM users u WHERE %s AND %s`,
+			notBannedClause, mentionTargetFilter(column, strings.Join(placeholders, ","))),
 		args...,
 	)
 	if err != nil {
@@ -421,8 +436,14 @@ func (d *DB) listMentionTargets(ctx context.Context, column mentionTargetColumn,
 	targets := []MentionTarget{}
 	for rows.Next() {
 		var t MentionTarget
-		if scanErr := rows.Scan(&t.UserID, &t.Status, &t.RoleID); scanErr != nil {
+		var held string
+		if scanErr := rows.Scan(&t.UserID, &t.Status, &t.RoleID, &held); scanErr != nil {
 			return nil, fmt.Errorf("%s scan: %w", caller, scanErr)
+		}
+		for f := range strings.SplitSeq(held, ",") {
+			if id, perr := strconv.ParseInt(f, 10, 64); perr == nil {
+				t.RoleIDs = append(t.RoleIDs, id)
+			}
 		}
 		targets = append(targets, t)
 	}

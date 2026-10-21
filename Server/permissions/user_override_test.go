@@ -118,12 +118,12 @@ func TestHasChannelPerm_AdminBypassesUserOverride(t *testing.T) {
 	mock.userPerms[chanUserKey{10, 7}] = chanPerm{deny: ReadMessages | SendMessages}
 	ck := NewChecker(mock)
 
-	if !ck.HasChannelPerm(context.Background(), Administrator, 1, 7, 10, ReadMessages|SendMessages) {
+	if !ck.HasChannelPerm(context.Background(), []RoleGrant{{RoleID: 1, Perms: Administrator}}, 7, 10, ReadMessages|SendMessages) {
 		t.Error("ADMINISTRATOR must bypass a per-user deny")
 	}
-	if !ck.HasChannelPermBatch(Administrator, map[int64]ChannelOverride{
+	if !ck.HasChannelPermBatch(MemberGrants{Perms: Administrator, Overrides: map[int64]ChannelOverride{
 		10: {UserDeny: ReadMessages},
-	}, 10, ReadMessages) {
+	}}, 10, ReadMessages) {
 		t.Error("ADMINISTRATOR must bypass a per-user deny in the batch path too")
 	}
 }
@@ -146,17 +146,17 @@ func TestHasChannelPerm_AppliesUserLayer(t *testing.T) {
 	base := ReadMessages | SendMessages
 	ctx := context.Background()
 
-	if !ck.HasChannelPerm(ctx, base, roleID, aliceI, chID, SendMessages) {
+	if !ck.HasChannelPerm(ctx, []RoleGrant{{RoleID: roleID, Perms: base}}, aliceI, chID, SendMessages) {
 		t.Error("alice: user allow must beat the role deny")
 	}
-	if ck.HasChannelPerm(ctx, base, roleID, bobID, chID, ReadMessages) {
+	if ck.HasChannelPerm(ctx, []RoleGrant{{RoleID: roleID, Perms: base}}, bobID, chID, ReadMessages) {
 		t.Error("bob: user deny must beat the base READ grant")
 	}
 	// A third member with no user override falls back to the role verdict.
-	if ck.HasChannelPerm(ctx, base, roleID, 99, chID, SendMessages) {
+	if ck.HasChannelPerm(ctx, []RoleGrant{{RoleID: roleID, Perms: base}}, 99, chID, SendMessages) {
 		t.Error("carol: role deny still applies without a user override")
 	}
-	if !ck.HasChannelPerm(ctx, base, roleID, 99, chID, ReadMessages) {
+	if !ck.HasChannelPerm(ctx, []RoleGrant{{RoleID: roleID, Perms: base}}, 99, chID, ReadMessages) {
 		t.Error("carol: base READ still applies without a user override")
 	}
 }
@@ -168,7 +168,7 @@ func TestHasChannelPerm_ZeroUserSkipsUserLayer(t *testing.T) {
 	mock.userPerms[chanUserKey{10, 0}] = chanPerm{deny: ReadMessages}
 	ck := NewChecker(mock)
 
-	if !ck.HasChannelPerm(context.Background(), ReadMessages, 4, 0, 10, ReadMessages) {
+	if !ck.HasChannelPerm(context.Background(), []RoleGrant{{RoleID: 4, Perms: ReadMessages}}, 0, 10, ReadMessages) {
 		t.Error("userID 0 must not consult channel_user_overrides")
 	}
 }
@@ -180,7 +180,7 @@ func TestHasChannelPerm_UserLookupErrorDenies(t *testing.T) {
 	mock.userErr = errors.New("boom")
 	ck := NewChecker(mock)
 
-	if ck.HasChannelPerm(context.Background(), ReadMessages, 4, 7, 10, ReadMessages) {
+	if ck.HasChannelPerm(context.Background(), []RoleGrant{{RoleID: 4, Perms: ReadMessages}}, 7, 10, ReadMessages) {
 		t.Error("a per-user override lookup failure must fail closed")
 	}
 }
@@ -199,7 +199,7 @@ func TestVisibleChannelIDs_UserOverrideLayer(t *testing.T) {
 		3: {Deny: ReadMessages, UserAllow: ReadMessages},
 	}
 
-	got := ck.VisibleChannelIDs(ReadMessages, channels, overrides)
+	got := ck.VisibleChannelIDs(MemberGrants{Perms: ReadMessages, Overrides: overrides}, channels)
 	if !got[1] {
 		t.Error("channel 1 (no override) must be visible")
 	}

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -17,7 +18,7 @@ func TestChannelPayload_CarriesAFK(t *testing.T) {
 		{ID: 2, Name: "general", Type: "voice"},
 	}
 
-	ready := readyChannelPayloads(channels, nil, nil, &db.Role{}, nil, false, service.ChannelPrivacySnapshot{})
+	ready := readyChannelPayloads(channels, permissions.MemberGrants{}, nil, nil, false, service.ChannelPrivacySnapshot{})
 	for i, want := range []bool{true, false} {
 		got, present := ready[i]["afk"]
 		if !present {

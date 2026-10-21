@@ -15,19 +15,15 @@ SELECT id, name, color, permissions, position, is_default, hoist, mentionable
 FROM roles ORDER BY position DESC, id ASC;
 
 -- name: GetRoleForUser :one
+-- The member's TOP role (highest position, lowest id on a tie), which is the
+-- role users.role_id mirrors. Never a source of permission bits: those are the
+-- OR over every held role (ListUserRoles).
 SELECT r.id, r.name, r.color, r.permissions, r.position, r.is_default, r.hoist, r.mentionable
-FROM users u
-JOIN roles r ON u.role_id = r.id
-WHERE u.id = ?;
-
--- name: GetUserWithRole :one
-SELECT u.id, u.username, u.password, u.avatar, u.role_id,
-       u.totp_secret, u.status, u.created_at, u.last_seen,
-       u.banned, u.ban_reason, u.ban_expires,
-       r.id, r.name, r.color, r.permissions, r.position, r.is_default
-FROM users u
-JOIN roles r ON r.id = u.role_id
-WHERE u.id = ?;
+FROM user_roles ur
+JOIN roles r ON r.id = ur.role_id
+WHERE ur.user_id = ?
+ORDER BY r.position DESC, r.id ASC
+LIMIT 1;
 
 -- name: GetRoleByName :one
 -- Case-insensitive by design: migration 023 enforces uniqueness under the same
@@ -56,10 +52,11 @@ UPDATE roles SET position = ? WHERE id = ?;
 DELETE FROM roles WHERE id = ?;
 
 -- name: CountRoleMembers :many
-SELECT role_id, COUNT(*) AS member_count FROM users GROUP BY role_id;
+SELECT role_id, COUNT(*) AS member_count FROM user_roles GROUP BY role_id;
 
 -- name: ListUserIDsByRole :many
-SELECT id FROM users WHERE role_id = ?;
+-- Every holder of the role, not only the members whose top role it is.
+SELECT user_id FROM user_roles WHERE role_id = ? ORDER BY user_id ASC;
 
 
 -- name: ListUserRoles :many
@@ -100,3 +97,13 @@ SET role_id = (
 )
 WHERE users.id = sqlc.arg(user_id)
   AND EXISTS (SELECT 1 FROM user_roles WHERE user_id = sqlc.arg(user_id));
+
+
+-- name: ClearUserRoles :exec
+DELETE FROM user_roles WHERE user_id = ?;
+
+-- name: AddUserRoleForExistingUser :exec
+-- Grants the role only when the user row exists, so replacing the roles of an
+-- unknown user is a no-op instead of a foreign key error.
+INSERT OR IGNORE INTO user_roles (user_id, role_id)
+SELECT u.id, sqlc.arg(role_id) FROM users u WHERE u.id = sqlc.arg(user_id);

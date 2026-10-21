@@ -1379,6 +1379,18 @@ CREATE TABLE IF NOT EXISTS users (
 -- Second-factor state (migration 032): the auth service persists its
 -- partial-auth challenges, pending enrolments, replay window and recovery
 -- codes through the Store, so this schema carries the tables too.
+CREATE TABLE IF NOT EXISTS user_roles (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, role_id)
+) WITHOUT ROWID;
+
+CREATE TRIGGER IF NOT EXISTS user_roles_on_user_insert AFTER INSERT ON users
+BEGIN
+    INSERT OR IGNORE INTO user_roles (user_id, role_id)
+    SELECT NEW.id, r.id FROM roles r WHERE r.id = NEW.role_id;
+END;
+
 CREATE TABLE IF NOT EXISTS partial_auth_challenges (
     token_hash TEXT PRIMARY KEY,
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

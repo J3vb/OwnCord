@@ -237,8 +237,8 @@ func (h *Hub) BroadcastMemberUnban(userID int64) {
 		return
 	}
 	roleName := ""
-	if role, err := h.readers.Members.GetRoleForUser(ctx, userID); err == nil && role != nil {
-		roleName = role.Name
+	if role, err := h.readers.Members.GetMemberRoles(ctx, userID); err == nil && role != nil {
+		roleName = role.Top.Name
 	}
 	// A lapsed temporary ban lets the user reconnect while users.banned is
 	// still 1, so they can be online at unban time. Report the live status

@@ -92,7 +92,7 @@ func (s *EmojiService) RequireManage(ctx context.Context, actorID int64) error {
 	if err != nil || role == nil {
 		return fmt.Errorf("%w: failed to load actor role", ErrForbidden)
 	}
-	if !permissions.HasServerPerm(role.Permissions, permissions.ManageServer) {
+	if !permissions.HasServerPerm(role.Perms, permissions.ManageServer) {
 		return fmt.Errorf("%w: missing %s permission", ErrForbidden, permissions.Name(permissions.ManageServer))
 	}
 	return nil

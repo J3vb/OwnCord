@@ -116,13 +116,28 @@ func (d *DB) ListAllUsers(ctx context.Context, f UserListFilter, limit, offset i
 	return result, nil
 }
 
-// UpdateUserRole changes the role_id of a user.
+// UpdateUserRole replaces every role userID holds with roleID: it clears the
+// member's user_roles rows, grants roleID and re-mirrors users.role_id, in one
+// writer transaction, so the two never disagree. Unknown users are a no-op.
 func (d *DB) UpdateUserRole(ctx context.Context, userID, roleID int64) error {
-	if err := d.q.UpdateUserRole(ctx, dbgen.UpdateUserRoleParams{
-		RoleID: roleID,
-		ID:     userID,
-	}); err != nil {
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("UpdateUserRole begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	q := d.q.WithTx(tx)
+	if err := q.ClearUserRoles(ctx, userID); err != nil {
+		return fmt.Errorf("UpdateUserRole clear: %w", err)
+	}
+	if err := q.AddUserRoleForExistingUser(ctx, dbgen.AddUserRoleForExistingUserParams{UserID: userID, RoleID: roleID}); err != nil {
+		return fmt.Errorf("UpdateUserRole grant: %w", err)
+	}
+	if err := syncTopRoleTx(ctx, q, userID); err != nil {
 		return fmt.Errorf("UpdateUserRole: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("UpdateUserRole commit: %w", err)
 	}
 	return nil
 }

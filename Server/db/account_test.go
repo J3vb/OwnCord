@@ -533,7 +533,7 @@ func TestEraseAccount_EmptiedDMChannel_PreservesOthersAttachmentsForReclaim(t *t
 
 func setRole(t *testing.T, database *db.DB, userID, roleID int64) {
 	t.Helper()
-	if _, err := database.ExecContext(context.Background(), "UPDATE users SET role_id = ? WHERE id = ?", roleID, userID); err != nil {
+	if err := database.UpdateUserRole(context.Background(), userID, roleID); err != nil {
 		t.Fatalf("setRole(%d, %d): %v", userID, roleID, err)
 	}
 }

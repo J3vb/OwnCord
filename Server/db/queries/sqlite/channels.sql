@@ -86,6 +86,14 @@ SELECT role_id, allow, deny FROM channel_overrides WHERE channel_id = ?;
 -- name: GetRoleChannelPermissions :many
 SELECT channel_id, allow, deny FROM channel_overrides WHERE role_id = ?;
 
+-- name: ListHeldRoleChannelOverrides :many
+-- Every channel override of every role the member holds, one row per
+-- (channel, role). The per-role rows are what GetMemberGrants composes.
+SELECT co.channel_id, co.role_id, co.allow, co.deny
+FROM channel_overrides co
+JOIN user_roles ur ON ur.role_id = co.role_id
+WHERE ur.user_id = ?;
+
 -- name: DeleteChannelPermission :exec
 DELETE FROM channel_overrides WHERE channel_id = ? AND role_id = ?;
 

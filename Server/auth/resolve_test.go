@@ -39,8 +39,11 @@ func (f *fakeStore) GetUserByID(_ context.Context, _ int64) (*db.User, error) {
 	return f.user, f.userErr
 }
 
-func (f *fakeStore) GetRoleByID(_ context.Context, _ int64) (*db.Role, error) {
-	return f.role, f.roleErr
+func (f *fakeStore) GetMemberRoles(_ context.Context, _ int64) (*db.MemberRoles, error) {
+	if f.role == nil {
+		return nil, f.roleErr
+	}
+	return &db.MemberRoles{Top: *f.role, Perms: f.role.Permissions, IDs: []int64{f.role.ID}}, f.roleErr
 }
 
 func future() string { return time.Now().Add(time.Hour).UTC().Format("2006-01-02T15:04:05Z") }

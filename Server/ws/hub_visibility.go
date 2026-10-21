@@ -445,22 +445,23 @@ func (h *Hub) computeAllowedChannels(ctx context.Context, database VisibilityRea
 		return nil, fmt.Errorf("computeAllowedChannels ListChannels: %w", err)
 	}
 
-	role, err := database.GetRoleByID(ctx, user.RoleID)
+	roles, err := database.GetMemberRoles(ctx, user.ID)
 	if err != nil {
-		return nil, fmt.Errorf("computeAllowedChannels GetRoleByID: %w", err)
+		return nil, fmt.Errorf("computeAllowedChannels GetMemberRoles: %w", err)
 	}
 
-	// Nil role = zero access (fail closed). Admins skip the override fetch.
+	// No role = zero access (fail closed). Admins skip the override fetch.
 	allowed := make(map[int64]bool)
-	if role != nil {
-		var overrides map[int64]db.ChannelOverride
-		if !permissions.HasAdmin(role.Permissions) {
-			overrides, err = database.GetChannelOverridesFor(ctx, role.ID, user.ID)
+	if roles != nil {
+		grants := permissions.MemberGrants{Perms: roles.Perms}
+		if !permissions.HasAdmin(roles.Perms) {
+			grants, err = database.GetMemberGrants(ctx, user.ID)
 			if err != nil {
-				return nil, fmt.Errorf("computeAllowedChannels GetChannelOverridesFor: %w", err)
+				return nil, fmt.Errorf("computeAllowedChannels GetMemberGrants: %w", err)
 			}
+			grants.Perms = roles.Perms
 		}
-		allowed = h.permChecker.VisibleChannelIDs(role.Permissions, channelRefs(channels), permOverrides(overrides))
+		allowed = h.permChecker.VisibleChannelIDs(grants, channelRefs(channels))
 	}
 
 	// Include the user's open DM channels. Only the ID set matters here, so

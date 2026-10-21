@@ -267,8 +267,11 @@ func (s *MessageService) mentionEntries(ctx context.Context, channelID, msgID, a
 }
 
 // mentionReaders lists the users who can read the channel, with the presence
-// status @here filters on. DM participation is membership, not permissions, so
-// DMs skip the role walk entirely.
+// status @here filters on. Each role is resolved with its own channel override
+// and a member is a reader when ANY role they hold reads (the roles are OR'd,
+// as permissions.MemberChannelPerms does; ListMentionTargetsByRoles joins
+// user_roles, so a holder of several roles is listed once). DM participation is
+// membership, not permissions, so DMs skip the role walk entirely.
 func (s *MessageService) mentionReaders(ctx context.Context, channelID int64, isDM bool, participantIDs []int64) ([]db.MentionTarget, error) {
 	if isDM {
 		targets := make([]db.MentionTarget, 0, len(participantIDs))
@@ -309,6 +312,16 @@ func (s *MessageService) mentionReaders(ctx context.Context, channelID int64, is
 	return s.applyUserOverridesToReaders(ctx, channelID, targets, adminRoles)
 }
 
+// holdsAdminRole reports whether any role the target holds has ADMINISTRATOR.
+// The role-only walk never sees the top-role mirror alone: a member holding
+// Administrator in a lower-ranked role bypasses the per-user deny too.
+func holdsAdminRole(t db.MentionTarget, adminRoles map[int64]bool) bool {
+	if adminRoles[t.RoleID] {
+		return true
+	}
+	return slices.ContainsFunc(t.RoleIDs, func(id int64) bool { return adminRoles[id] })
+}
+
 // applyUserOverridesToReaders folds the per-user override layer into a reader
 // set the role walk produced. The layer is last in the resolution order, so it
 // moves members in both directions:
@@ -344,7 +357,7 @@ func (s *MessageService) applyUserOverridesToReaders(
 	kept := make([]db.MentionTarget, 0, len(targets))
 	present := make(map[int64]bool, len(targets))
 	for _, t := range targets {
-		if revoked[t.UserID] && !adminRoles[t.RoleID] {
+		if revoked[t.UserID] && !holdsAdminRole(t, adminRoles) {
 			continue
 		}
 		present[t.UserID] = true

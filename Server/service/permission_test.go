@@ -22,10 +22,10 @@ func (errOverrideStore) GetAllChannelPermissionsForRole(context.Context, int64) 
 	return nil, errors.New("boom")
 }
 
-// GetChannelOverridesFor is the merged role+user fetch every visibility site
+// GetMemberGrants is the merged held-roles+user fetch every visibility site
 // now uses. It must fail closed for exactly the same reason.
-func (errOverrideStore) GetChannelOverridesFor(context.Context, int64, int64) (map[int64]db.ChannelOverride, error) {
-	return nil, errors.New("boom")
+func (errOverrideStore) GetMemberGrants(context.Context, int64) (permissions.MemberGrants, error) {
+	return permissions.MemberGrants{}, errors.New("boom")
 }
 
 // TestHasChannelPerm_OverrideFetchErrorDenies locks the fail-closed rule: when
@@ -264,8 +264,8 @@ type raceHookStore struct {
 	onGetRole func()
 }
 
-func (s *raceHookStore) GetRoleForUser(ctx context.Context, userID int64) (*db.Role, error) {
-	r, err := s.DB.GetRoleForUser(ctx, userID)
+func (s *raceHookStore) GetMemberRoles(ctx context.Context, userID int64) (*db.MemberRoles, error) {
+	r, err := s.DB.GetMemberRoles(ctx, userID)
 	if s.onGetRole != nil {
 		s.onGetRole()
 	}
