@@ -38,6 +38,10 @@ type channelFields struct {
 	ParentChannelID int64
 	ThreadArchived  int64
 	ThreadLocked    int64
+	// ForumRequireTag and ForumDefaultAutoArchiveMinutes are the forum
+	// settings columns (migration 075), meaningful on a type 'forum' row.
+	ForumRequireTag                int64
+	ForumDefaultAutoArchiveMinutes int64
 }
 
 func channelFromFields(f channelFields) Channel {
@@ -64,6 +68,7 @@ func channelFromFields(f channelFields) Channel {
 			Archived: f.ThreadArchived != 0,
 			Locked:   f.ThreadLocked != 0,
 		},
+		Forum: forumFromFields(f),
 	}
 }
 
@@ -76,6 +81,9 @@ func (d *DB) ListChannels(ctx context.Context) ([]Channel, error) {
 	channels := make([]Channel, 0, len(rows))
 	for i := range rows {
 		channels = append(channels, channelFromFields(channelFields(rows[i])))
+	}
+	if err := d.attachForumTags(ctx, channels); err != nil {
+		return nil, err
 	}
 	return channels, nil
 }
@@ -90,6 +98,13 @@ func (d *DB) GetChannel(ctx context.Context, id int64) (*Channel, error) {
 		return nil, fmt.Errorf("GetChannel: %w", err)
 	}
 	ch := channelFromFields(channelFields(r))
+	if ch.Forum != nil {
+		one := []Channel{ch}
+		if err := d.attachForumTags(ctx, one); err != nil {
+			return nil, err
+		}
+		ch = one[0]
+	}
 	return &ch, nil
 }
 

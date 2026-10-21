@@ -147,7 +147,7 @@ func (h *Hub) BroadcastChannelCreate(ch *db.Channel) {
 	for _, uid := range h.channelReadAudience(ctx, ch.ID) {
 		fireBroadcastChannelCreateRaceHook(uid)
 		live := h.GetClient(uid)
-		if live == nil {
+		if live == nil || !live.sendsChannel(ch.Type) {
 			continue
 		}
 		live.sendMsg(buildChannelCreateFor(ch, private, h.refreshChannelVisibilityAffordances(ctx, ch, uid)))
