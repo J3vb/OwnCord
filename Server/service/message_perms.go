@@ -369,6 +369,9 @@ func (r storeDMReader) DMRefusesSender(ctx context.Context, recipientID, senderI
 // them reading different conversations under the same name. Blocks are instead
 // enforced when the group is *created* (DMService.CreateGroupDM), where the
 // question "may these two be in a room together" still has one answer.
+//
+// When the recipient lookup fails or the DM has no other participant, both the
+// block check and the privacy read are skipped.
 func RequireDMReachable(ctx context.Context, st DMBlockReader, userID, channelID int64) error {
 	isGroup, gErr := st.IsGroupDM(ctx, channelID)
 	if gErr == nil && isGroup {

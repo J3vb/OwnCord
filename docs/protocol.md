@@ -2536,8 +2536,8 @@ sent first, or grandfathered). Every cause produces the same code and message
 on a given command (`you can't message this user`; `cannot join this call` for
 `voice_join`), so the frame says nothing about which cause applies. A refused
 send writes no message and no message request, and the recipient receives no
-frame. A failed read of the setting is answered `INTERNAL`, not `FORBIDDEN`.
-Group DMs are not affected.
+frame. On `chat_send`, `call_ring` and `voice_join`, a failed read of the setting is answered `INTERNAL`, not `FORBIDDEN`.
+Group DMs are covered separately.
 
 **Blocks are a 1:1 rule.** A block refuses DM creation and gates every
 interaction sink in a two-person DM, but is _not_ consulted inside a group: a

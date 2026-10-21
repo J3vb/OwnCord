@@ -58,7 +58,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Messages & files**
 
-- A member who turns off "allow member DMs" can no longer be reached in a one-to-one DM by someone they have not accepted: that person cannot open a DM, send, edit, react, pin, ring or join the DM call, and sees the same short refusal ("you can't message this user") a block gives. Anyone you accepted, wrote to first or were already talking to still reaches you, and group DMs are not affected. The setting is read from the server; clients get a switch for it in a later release.
+- A member who turns off "allow member DMs" can no longer be reached in a one-to-one DM by someone they have not accepted: that person cannot open a DM, send, edit, react, pin, ring or join the DM call, and sees the same short refusal ("you can't message this user") a block gives. Anyone you accepted, wrote to first or were already talking to still reaches you, and group DMs are covered separately. The setting is read from the server; clients get a switch for it in a later release.
 - Pinning a message now leaves a line in the chat for everyone who can read it ("X pinned a message to this channel"), in channels, DMs and group DMs. It makes no sound and is never a mention; pinning the same message again within 10 minutes adds no second line. The pinner (or Manage Messages in a channel) can delete the line. Clients without the matching update show it as plain text.
 
 **Voice**

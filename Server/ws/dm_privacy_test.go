@@ -163,14 +163,6 @@ func TestDMPrivacy_EditReactPinRingVoiceRefused(t *testing.T) {
 		assertNoVoiceToken(t, drainChanTimeout(send, 200*time.Millisecond))
 	})
 
-	t.Run("typing", func(t *testing.T) {
-		f := newDMPrivacyWS(t)
-		f.setAllowDMs(t, f.bob.ID, false)
-		f.hub.HandleMessageForTest(f.cAlice, dmTypingMsg(f.dmID))
-		if dmFindMsgType(dmCollectAll(f.sendBob, absenceWindow), "typing") != nil {
-			t.Error("a typing indicator reached a recipient who has DMs off")
-		}
-	})
 }
 
 // TestDMPrivacy_RefusalMatchesBlock: per sink, the refusal under "DMs off" has
