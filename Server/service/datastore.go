@@ -46,7 +46,7 @@ type Store interface {
 	DeleteMessage(ctx context.Context, id, userID int64, isMod bool) error
 	SearchMessagesFiltered(ctx context.Context, q db.SearchQuery, page db.SearchPage) ([]db.MessageSearchResult, error)
 	GetPinnedMessages(ctx context.Context, channelID int64, requestingUserID int64) ([]db.MessageAPIResponse, error)
-	SetMessagePinned(ctx context.Context, id int64, pinned bool) error
+	SetMessagePinned(ctx context.Context, p db.SetPinnedParams) (*db.PinEventRow, error)
 	AddReaction(ctx context.Context, messageID, userID int64, emoji string) error
 	RemoveReaction(ctx context.Context, messageID, userID int64, emoji string) error
 	GetReactionUsers(ctx context.Context, messageID int64, emoji string, limit int) ([]db.ReactionUser, error)

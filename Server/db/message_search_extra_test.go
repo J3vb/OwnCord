@@ -148,7 +148,7 @@ func TestSearchFiltered_Pinned(t *testing.T) {
 	ch := seedChannel(t, database, "pinned")
 	pinned, _ := database.CreateMessage(ctx, ch, u, "needle one", nil)
 	loose, _ := database.CreateMessage(ctx, ch, u, "needle two", nil)
-	if err := database.SetMessagePinned(ctx, pinned, true); err != nil {
+	if _, err := database.SetMessagePinned(ctx, db.SetPinnedParams{MessageID: pinned, Pinned: true, UserID: 1}); err != nil {
 		t.Fatal(err)
 	}
 	yes, no := true, false

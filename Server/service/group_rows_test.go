@@ -94,7 +94,7 @@ func TestReaction_GroupRowRefused(t *testing.T) {
 func TestPin_GroupRowRefused(t *testing.T) {
 	for _, kind := range groupKinds {
 		f, dmID, msgID := groupRowFixture(t, kind)
-		if err := f.messages.SetMessagePinned(context.Background(), fixtureMember, dmID, msgID, true); !errors.Is(err, ErrBadRequest) {
+		if _, err := f.messages.SetMessagePinned(context.Background(), fixtureMember, dmID, msgID, true); !errors.Is(err, ErrBadRequest) {
 			t.Fatalf("kind %d: pin = %v, want ErrBadRequest", kind, err)
 		}
 		assertGroupRowUnchanged(t, f, msgID)

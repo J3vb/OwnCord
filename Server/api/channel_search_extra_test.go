@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
@@ -31,7 +32,7 @@ func TestSearch_HasMentionsPinned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.database.SetMessagePinned(ctx, plain, true); err != nil {
+	if _, err := f.database.SetMessagePinned(ctx, db.SetPinnedParams{MessageID: plain, Pinned: true, UserID: 1}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -80,7 +81,7 @@ func TestSearch_HasMentionsPinnedNeverLeakUnreadable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.database.SetMessagePinned(ctx, hit.ID, true); err != nil {
+	if _, err := f.database.SetMessagePinned(ctx, db.SetPinnedParams{MessageID: hit.ID, Pinned: true, UserID: 1}); err != nil {
 		t.Fatal(err)
 	}
 	queries := []string{"has:link", "mentions:" + f.member.Username, "pinned:true", "has:link pinned:true mentions:" + f.member.Username, "in:secret has:link"}

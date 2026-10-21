@@ -54,7 +54,7 @@ func TestTimedOutUser_RefusedOnDMAndPresenceWrites(t *testing.T) {
 	if targets, err := dms.DeclineTargets(ctx, fixtureMember, group.Channel.ID); err != nil || len(targets) != 2 {
 		t.Errorf("DeclineTargets while timed out = %v, %v; want the two other members", targets, err)
 	}
-	if err := f.messages.SetMessagePinned(ctx, fixtureMember, direct.Channel.ID, sent.MessageID, true); !errors.Is(err, ErrTimedOut) {
+	if _, err := f.messages.SetMessagePinned(ctx, fixtureMember, direct.Channel.ID, sent.MessageID, true); !errors.Is(err, ErrTimedOut) {
 		t.Errorf("DM pin while timed out = %v, want ErrTimedOut", err)
 	}
 	status := "look at me"
@@ -81,7 +81,7 @@ func TestTimedOutUser_RefusedOnDMAndPresenceWrites(t *testing.T) {
 	if _, err := dms.RingTargets(ctx, fixtureMember2, direct.Channel.ID); err != nil && !errors.Is(err, ErrCallNeedsAcceptance) {
 		t.Errorf("RingTargets by a participant who is not timed out = %v", err)
 	}
-	if err := f.messages.SetMessagePinned(ctx, fixtureMember2, direct.Channel.ID, sent.MessageID, true); err != nil {
+	if _, err := f.messages.SetMessagePinned(ctx, fixtureMember2, direct.Channel.ID, sent.MessageID, true); err != nil {
 		t.Errorf("DM pin by a participant who is not timed out = %v", err)
 	}
 }

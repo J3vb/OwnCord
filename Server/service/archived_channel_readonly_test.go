@@ -151,7 +151,7 @@ func TestSetMessagePinned_RefusedInArchivedChannel(t *testing.T) {
 		t.Fatalf("archive channel: %v", err)
 	}
 
-	if err := svc.SetMessagePinned(ctx, 2, 10, sent.MessageID, true); !errors.Is(err, ErrForbidden) {
+	if _, err := svc.SetMessagePinned(ctx, 2, 10, sent.MessageID, true); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("SetMessagePinned in an archived channel: err = %v, want ErrForbidden", err)
 	}
 

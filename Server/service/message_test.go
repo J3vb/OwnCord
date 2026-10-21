@@ -738,7 +738,7 @@ func TestSetMessagePinned_DeniedReadCannotPin(t *testing.T) {
 	}
 
 	// While the moderator can still read the channel, pinning works.
-	if err := svc.SetMessagePinned(context.Background(), 2, 10, sent.MessageID, true); err != nil {
+	if _, err := svc.SetMessagePinned(context.Background(), 2, 10, sent.MessageID, true); err != nil {
 		t.Fatalf("moderator with READ_MESSAGES must be able to pin: %v", err)
 	}
 
@@ -746,13 +746,13 @@ func TestSetMessagePinned_DeniedReadCannotPin(t *testing.T) {
 	seedChannelOverride(t, database, permissions.ModeratorRoleID, 10, 0, denyPrivate)
 	permSvc.InvalidateChannel(10)
 
-	if err := svc.SetMessagePinned(context.Background(), 2, 10, sent.MessageID, false); !errors.Is(err, ErrForbidden) {
+	if _, err := svc.SetMessagePinned(context.Background(), 2, 10, sent.MessageID, false); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("moderator denied READ_MESSAGES must not unpin: got %v", err)
 	}
 	// The existence oracle is closed with it: an id that is not in this channel
 	// is refused by the same permission check, not by a distinguishable
 	// not-found answer.
-	if err := svc.SetMessagePinned(context.Background(), 2, 10, sent.MessageID+999, true); !errors.Is(err, ErrForbidden) {
+	if _, err := svc.SetMessagePinned(context.Background(), 2, 10, sent.MessageID+999, true); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("denied role must not learn which message ids exist: got %v", err)
 	}
 
@@ -821,7 +821,7 @@ func TestDMBlock_EnforcedOnEveryInteractionSink(t *testing.T) {
 	if _, err := svc.AddReaction(context.Background(), 1, sent.MessageID, "👋"); !errors.Is(err, ErrBlocked) {
 		t.Fatalf("blocked reaction must be refused: got %v", err)
 	}
-	if err := svc.SetMessagePinned(context.Background(), 1, 50, sent.MessageID, true); !errors.Is(err, ErrBlocked) {
+	if _, err := svc.SetMessagePinned(context.Background(), 1, 50, sent.MessageID, true); !errors.Is(err, ErrBlocked) {
 		t.Fatalf("blocked pin must be refused: got %v", err)
 	}
 
@@ -861,7 +861,7 @@ func TestSetMessagePinned_DeletedMessageReturnsNotFound(t *testing.T) {
 		t.Fatalf("send: %v", err)
 	}
 
-	if err := svc.SetMessagePinned(context.Background(), 1, 10, sent.MessageID, true); err != nil {
+	if _, err := svc.SetMessagePinned(context.Background(), 1, 10, sent.MessageID, true); err != nil {
 		t.Fatalf("pin: %v", err)
 	}
 
@@ -869,7 +869,7 @@ func TestSetMessagePinned_DeletedMessageReturnsNotFound(t *testing.T) {
 		t.Fatalf("delete: %v", err)
 	}
 
-	err = svc.SetMessagePinned(context.Background(), 1, 10, sent.MessageID, false)
+	_, err = svc.SetMessagePinned(context.Background(), 1, 10, sent.MessageID, false)
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected service.ErrNotFound for a soft-deleted message, got %v", err)
 	}

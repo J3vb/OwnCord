@@ -182,7 +182,7 @@ type Message struct {
 }
 
 // The stored values of messages.kind. 0 is a message a user wrote, 1 a call
-// log row (WP 3B-9) and 2 to 6 the group DM event rows (WP 3B-10).
+// log row (WP 3B-9) and 2 to 6 the group DM event rows (WP 3B-10), 7 a pin row (WP 6.12).
 // MessageKindName gives their wire names (protocol enum chat_message.kind).
 const (
 	MessageKindUser        int64 = 0
@@ -192,6 +192,7 @@ const (
 	MessageKindGroupLeave  int64 = 4
 	MessageKindGroupRename int64 = 5
 	MessageKindGroupIcon   int64 = 6
+	MessageKindPinAdd      int64 = 7
 
 	MessageKindNameCall = "call"
 )
@@ -212,6 +213,8 @@ func MessageKindName(kind int64) string {
 		return "group_rename"
 	case MessageKindGroupIcon:
 		return "group_icon"
+	case MessageKindPinAdd:
+		return "pin_add"
 	}
 	return ""
 }

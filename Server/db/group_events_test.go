@@ -312,7 +312,7 @@ func TestSoftDeleteMessage_GroupRowUntouched(t *testing.T) {
 	if err := f.database.DeleteMessage(ctx, row, f.bob, true); !errors.Is(err, db.ErrNotFound) {
 		t.Errorf("moderator delete: err = %v, want ErrNotFound", err)
 	}
-	if err := f.database.SetMessagePinned(ctx, row, true); !errors.Is(err, db.ErrNotFound) {
+	if _, err := f.database.SetMessagePinned(ctx, db.SetPinnedParams{MessageID: row, Pinned: true, UserID: 1}); !errors.Is(err, db.ErrNotFound) {
 		t.Errorf("pin: err = %v, want ErrNotFound", err)
 	}
 	if got := count(t, f.database, `SELECT deleted + pinned FROM messages WHERE id = ?`, row); got != 0 {
