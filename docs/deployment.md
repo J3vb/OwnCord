@@ -614,36 +614,59 @@ the signs of a missed one are at the end.
    sudo mv /opt/owncord/data /opt/owncord/config.yaml /var/lib/owncord/
    ```
 
-3. Find absolute `/opt/owncord` paths in the moved config and rewrite them to
-   `/var/lib/owncord`. The usual ones are `data_dir`, `backup.dir`,
-   `upload.storage_dir` and TLS certificate paths:
+3. Check the moved config for absolute `/opt/owncord` paths:
 
    ```bash
    sudo grep -n '/opt/owncord' /var/lib/owncord/config.yaml
-   sudo sed -i 's#/opt/owncord/#/var/lib/owncord/#g' /var/lib/owncord/config.yaml
    ```
 
-   Relative paths (the default `data_dir: data`) need no change. Move anything
-   else you keep under `/opt/owncord` the same way.
+   Read the list before you change anything. Relative paths (the default
+   `data_dir: data`) need no change.
+   - Paths into the data you just moved (`data_dir`, `backup.dir`,
+     `upload.storage_dir` under `/opt/owncord/data`) now live under
+     `/var/lib/owncord/data`. Edit those keys by hand, or rewrite only that
+     tree:
 
-4. Hand the state to the service and the program to root:
+     ```bash
+     sudo sed -i 's#/opt/owncord/data#/var/lib/owncord/data#g' /var/lib/owncord/config.yaml
+     ```
+
+   - TLS certificate and key files kept elsewhere under `/opt/owncord`: move
+     them into `/var/lib/owncord` first, then edit their paths.
+   - `voice.livekit_binary` and anything else that stays beside the program
+     keeps its `/opt/owncord` path. The program folder is read-only to the
+     service, which is fine for files it only reads.
+   - A `data_dir`, `backup.dir` or `upload.storage_dir` outside both folders
+     (for example `/srv/owncord`) stays where it is, but add it to
+     `ReadWritePaths=` in the unit (step 5), or writes there fail.
+
+   If a move is interrupted, do not start the service: delete the partial copy
+   under `/var/lib/owncord` and redo the move.
+
+4. Hand the state to the service and the program to root, and point the
+   service user's home at the state folder:
 
    ```bash
    sudo chown -R owncord:owncord /var/lib/owncord
    sudo chmod 0750 /var/lib/owncord
    sudo chown -R root:root /opt/owncord
+   sudo usermod -d /var/lib/owncord owncord
    ```
 
-5. Copy the new unit and start the service:
+5. Edit the new unit before you install it, if you need to:
+   - `tls.mode: acme`: uncomment `AmbientCapabilities=CAP_NET_BIND_SERVICE`.
+   - A data, backup or upload folder outside `/var/lib/owncord`: add it to
+     `ReadWritePaths=`.
+   - Admin-panel updates: follow
+     [Opt in to admin-panel updates](#opt-in-to-admin-panel-updates) after the
+     next step.
+
+6. Copy the new unit and start the service:
 
    ```bash
    sudo cp deploy/owncord.service /etc/systemd/system/owncord.service
    sudo systemctl daemon-reload && sudo systemctl start owncord
    ```
-
-6. If you use `tls.mode: acme`, uncomment `AmbientCapabilities=CAP_NET_BIND_SERVICE`
-   in the unit first. If you want admin-panel updates, follow
-   [Opt in to admin-panel updates](#opt-in-to-admin-panel-updates).
 
 **Signs of a missed step:**
 
