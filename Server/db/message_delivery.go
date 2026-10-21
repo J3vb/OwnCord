@@ -43,6 +43,10 @@ type MessageDeliveryParams struct {
 	// set, 0 for none. It is stored as a message_mentions row flagged reply_ping.
 	ReplyPingUserID  int64
 	MentionsEveryone bool
+	// Forward, when set, makes this send a forward (WP 6.9a): the message is
+	// the snapshot, AttachmentIDs are the sender's own clones of the original's
+	// files, and the transaction re-checks the original before it writes.
+	Forward *ForwardRow
 }
 
 // MessageDelivery is the committed result. A duplicate carries only the
@@ -113,6 +117,11 @@ func (d *DB) CreateMessageDelivery(ctx context.Context, p MessageDeliveryParams)
 	if err := refuseWhileErasing(ctx, tx, p.UserID); err != nil {
 		return nil, fmt.Errorf("message delivery: %w", err)
 	}
+	if p.Forward != nil {
+		if err := recheckForwardSource(ctx, q, p.Forward); err != nil {
+			return nil, err
+		}
+	}
 	r, err := q.CreateMessageForDelivery(ctx, dbgen.CreateMessageForDeliveryParams{
 		ChannelID: p.ChannelID, UserID: p.UserID, Content: p.Content,
 		ReplyTo: p.ReplyTo, MentionsEveryone: b2i64(p.MentionsEveryone),
@@ -129,6 +138,11 @@ func (d *DB) CreateMessageDelivery(ctx context.Context, p MessageDeliveryParams)
 	}
 	if p.Content == "" && len(linked) == 0 {
 		return nil, ErrMessageDeliveryEmpty
+	}
+	if p.Forward != nil {
+		if err := insertForwardRow(ctx, q, r.ID, p.Forward); err != nil {
+			return nil, err
+		}
 	}
 	if err := q.InsertMessageDeliveryReceipt(ctx, dbgen.InsertMessageDeliveryReceiptParams{
 		UserID: p.UserID, ClientMessageID: p.ClientMessageID, ChannelID: p.ChannelID,

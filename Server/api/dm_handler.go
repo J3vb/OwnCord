@@ -432,7 +432,7 @@ func handleBlockUser(svc *service.Services, broadcaster DMBroadcaster) http.Hand
 // already in the pair's 1:1 DM voice call stays in it indefinitely — the
 // block gate otherwise runs only on voice_join and voluntary
 // voice_token_refresh, both of which the blocked client controls. Group DM
-// calls are deliberately untouched, matching requireDMNotBlocked's group
+// calls are deliberately untouched, matching RequireDMReachable's group
 // exemption.
 func evictBlockedUserFromVoice(ctx context.Context, svc *service.Services, broadcaster DMBroadcaster, blockerID, targetID int64) {
 	ve, evictable := broadcaster.(dmVoiceEvictor)

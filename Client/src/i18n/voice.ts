@@ -44,6 +44,7 @@ export const voiceText = defineCatalog("voice", {
   "widget.control.unmute": "Unmute",
   "widget.control.pttGated": "Push-to-talk — hold your key to talk",
   "widget.control.listenOnly": "Listening only — no microphone access",
+  "widget.control.afkLocked": "You can't speak in the AFK channel",
   "widget.control.deafen": "Deafen",
   "widget.control.undeafen": "Undeafen",
   "widget.control.camera": "Camera",
@@ -91,6 +92,9 @@ export const voiceText = defineCatalog("voice", {
 
   "tile.watch": "Watch {name}",
   "tile.live": "LIVE",
+  "tile.viewers": "Watching: {names}",
+  "tile.viewersMore": "Watching: {names} and {count} more",
+  "tile.viewersYou": "You",
   "tile.backToGrid": "Back to grid",
   "grid.showChat": "Show chat",
   "grid.viewOptions": "View options",
@@ -173,7 +177,7 @@ export const voiceText = defineCatalog("voice", {
   "picker.portalNote":
     "Your desktop will now ask which screen or window to share. Choose the source there; OwnCord only sets the quality below.",
   "picker.windowsNote":
-    "Windows will now ask which screen or window to share, and whether to share its audio. OwnCord only sets the quality below.",
+    "Windows will now ask which screen or window to share. A whole screen shares all sound except OwnCord's own. OwnCord only sets the quality below.",
   "picker.browserNote":
     "Your browser will now ask which screen or window to share. OwnCord only sets the quality below.",
   "picker.audio": "Audio",
@@ -181,6 +185,8 @@ export const voiceText = defineCatalog("voice", {
     "Audio sharing needs a PulseAudio or PipeWire sound server, and none answered; only the picture is shared.",
   "picker.shareAudio": "Share audio",
   "picker.shareAudioHint": "All sound playing on this computer, except OwnCord's own.",
+  "picker.shareAppAudio": "Share the app's sound",
+  "picker.shareAppAudioHint": "When you share one window, its app's sound is shared too.",
   "picker.quality": "Stream quality",
   "picker.qualityHint": "Defaults from Settings → Voice & Video; applies to this share only.",
   "picker.frameRate": "Frame rate",
@@ -250,6 +256,7 @@ export const voiceText = defineCatalog("voice", {
   "share.screenFailed": "Failed to start screen sharing",
   "share.changeFailed": "Couldn't change what you're sharing",
   "share.qualityFailed": "Couldn't change the stream quality",
+  "share.appAudioFailed": "Couldn't share this app's sound. The picture is still shared.",
   "card.label": "Your stream",
   "card.changeSource": "Change source",
   "card.sourceNamed": "{kind}: {name}",

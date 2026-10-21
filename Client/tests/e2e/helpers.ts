@@ -273,10 +273,12 @@ function buildReadyPayload(overrides?: {
   roles?: unknown[];
   dm_channels?: unknown[];
   notices?: unknown[];
+  categories?: unknown[];
 }): unknown {
   return {
     type: "ready",
     payload: {
+      ...(overrides?.categories === undefined ? {} : { categories: overrides.categories }),
       channels: overrides?.channels ?? MOCK_CHANNELS,
       members: overrides?.members ?? MOCK_READY_PAYLOAD.payload.members,
       voice_states: overrides?.voice_states ?? [],
@@ -530,6 +532,8 @@ export function buildTauriMockScript(opts: {
     roles?: unknown[];
     dm_channels?: unknown[];
     notices?: unknown[];
+    /** The manager's category list (WP 6.5a); omitted = the key is absent from ready. */
+    categories?: unknown[];
   };
   /** Functions run after the mock installs `__TAURI_INTERNALS__`, inside the
    *  same init script, because Playwright does not order separate
@@ -893,6 +897,8 @@ export function buildTauriMockScript(opts: {
         // The taskbar/tray unread badge (DP-27); calls stay in __invokeLog.
         if (cmd === "set_unread_badge") return null;
         if (cmd === "ptt_polling_supported") return false;
+        // Windows per-app share audio (6.7): no WASAPI host, no picker switch.
+        if (cmd === "app_audio_available") return false;
         if (cmd === "voice_shortcuts_supported") return false;
         // Global keys backend (LP-9b): matches the two probes above, nothing delivers a key.
         if (cmd === "global_keys_status")

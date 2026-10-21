@@ -484,6 +484,19 @@
   color: var(--on-accent);
 }
 
+/* A forwarded message (WP 6.9a): its body in a quoted frame under a "Forwarded" header. */
+.msg-forward {
+  border-left: 3px solid var(--border);
+  padding-left: 8px;
+}
+.msg-forward-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-size-xxs);
+  color: var(--text-muted);
+}
+
 /* Reply */
 .msg-reply-ref {
   display: flex;

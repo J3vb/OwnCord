@@ -14,12 +14,17 @@ import {
   setModeratorDeafened,
   restateSelfVoiceState,
   setPeerVideoDecode,
+  setPeerWatching,
+  noteWatchingResync,
+  clearPeerWatching,
 } from "../../stores/voice.store";
 import { ensureIdentityKeyPublished } from "../../lib/identity";
 import { showToast } from "../../lib/toast";
 import { noteJoinFailed } from "./joinBackoff";
+import { takeWatchRefusal } from "../../lib/watchRequest";
 import { noteJoinSent, takeJoinRefusal } from "./joinRequest";
-import { noteVoiceMoved } from "./moveHint";
+import { noteVoiceMoved, noteAfkMove, takeAfkMove, clearAfkMove } from "./moveHint";
+import { channelsStore } from "../../stores/channels.store";
 import { livekitSession, cancelVoiceRejoin } from "../connection/dispatchContext";
 import type {
   DispatchApi,
@@ -124,6 +129,9 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
   const prevSelfServerDeafened = voiceStore.getState().localServerDeafened ?? false;
   return (ws, payload) => {
     setVoiceStates(payload.voice_states);
+    // A reconnect supersedes any AFK move still awaiting its join
+    // acknowledgement: that move was abandoned, so it earns no toast.
+    clearAfkMove();
 
     // Defense-in-depth: if the ready payload shows us in a voice channel
     // but we have no LiveKit session (e.g. after F5 reload), send
@@ -167,6 +175,10 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
       const modMuted = prevSelfServerMuted || selfVoiceState.server_muted === true;
       const modDeafened = prevSelfServerDeafened || selfVoiceState.server_deafened === true;
       restateSelfVoiceState(ws, modMuted || modDeafened, modDeafened);
+      // The server does not re-relay a resumed member's own watch set to
+      // peers: send ours again, and keep the viewer sounds out of the re-sync.
+      noteWatchingResync();
+      clearPeerWatching();
 
       // OC-0201: same gap, for E2EE. A full resync never replays the
       // voice_leave for anyone who departed our voice channel during the
@@ -195,11 +207,17 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
       // The same gap for the camera and share flags: an announce sent while
       // the socket was down never reached the server (WP 1C-8).
       for (const uid of left) setPeerVideoDecode(uid, undefined);
-      void livekitSession().then(({ handleParticipantLeft, reconcileVideoFlags }) => {
-        for (const uid of left) void handleParticipantLeft(uid);
-        if (prevVoiceChannelId === selfVoiceState.channel_id)
-          reconcileVideoFlags(selfVoiceState.camera === true, selfVoiceState.screenshare === true);
-      });
+      void livekitSession().then(
+        ({ handleParticipantLeft, reconcileVideoFlags, resendWatching }) => {
+          for (const uid of left) void handleParticipantLeft(uid);
+          resendWatching();
+          if (prevVoiceChannelId === selfVoiceState.channel_id)
+            reconcileVideoFlags(
+              selfVoiceState.camera === true,
+              selfVoiceState.screenshare === true,
+            );
+        },
+      );
     }
   };
 }
@@ -237,6 +255,15 @@ export function handleVoiceState(ws: DispatchWs, payload: Payload<"voice_state">
   updateVoiceState(payload);
   if (!isSelf) return;
   joinVoiceChannel(payload.channel_id);
+  // The server's answer to the join that followed an AFK move: only now is
+  // the move real, so only now does the user hear why.
+  if (takeAfkMove(payload.channel_id)) {
+    const name = channelsStore.getState().channels.get(payload.channel_id)?.name;
+    showToast(
+      connectText("voice.movedAfk", { channel: name ?? connectText("voice.afkChannelFallback") }),
+      "info",
+    );
+  }
   enforceModeratorAudioState(
     ws,
     payload.server_muted === true,
@@ -265,6 +292,8 @@ export function handleVoiceMoved(
   // Noted at once, so the leave sound queued by the voice_leave just before
   // this frame sees the move and stays silent.
   noteVoiceMoved(payload.to_channel_id);
+  if (payload.reason === "afk") noteAfkMove(payload.to_channel_id);
+  else clearAfkMove();
   void livekitSession().then(({ leaveVoice }) => {
     void leaveVoice(false);
     leaveVoiceChannel();
@@ -305,6 +334,7 @@ export function handleVoiceDisconnected(
   // RT-12: a kick is a deliberate membership change, so a pending
   // restart-rejoin must not put the user back.
   cancelVoiceRejoin(clock);
+  clearAfkMove();
   log.info("Disconnected from voice by a moderator", { channelId: payload.channel_id });
   void livekitSession().then(({ leaveVoice }) => leaveVoice(false));
   leaveVoiceChannel();
@@ -332,6 +362,9 @@ export function handleVoiceLeave(payload: Payload<"voice_leave">, clock: Reconne
   // leaveVoiceChannel() below clears currentChannelId.
   const sameChannel = voiceStore.getState().currentChannelId === payload.channel_id;
   const shouldTeardownSession = isSelf && sameChannel;
+  // Leaving after an AFK move was noted ends the move; the leave that
+  // precedes the voice_moved frame arrives before the note is made.
+  if (isSelf) clearAfkMove();
   // Notify E2EE state machine so key holder can rotate the room key, and
   // (when applicable) tear down the media session — both through one lazy
   // import so the two effects cannot land in different ticks.
@@ -413,6 +446,32 @@ export function handleVoiceE2eeAnnounce(payload: Payload<"voice_e2ee_announce">)
   );
 }
 
+/** Whose screen shares a member of our channel watches (6.6). The wire is
+ *  untrusted: non-integer entries are dropped, and the store ignores a user
+ *  who is not in our current channel's roster (one that already left). */
+export function handleVoiceWatching(payload: Payload<"voice_watching">): void {
+  const raw: unknown = payload.user_ids;
+  const ids = Array.isArray(raw)
+    ? [...new Set((raw as unknown[]).filter((v): v is number => Number.isInteger(v)))].toSorted(
+        (a, b) => a - b,
+      )
+    : [];
+  setPeerWatching(payload.user_id, ids);
+}
+
+/** An error answering our voice_watch is swallowed (an old server does not
+ *  know the type); a rate-limited one re-sends the set once after a second.
+ *  True when the frame was ours. */
+export function handleVoiceWatchError(payload: Payload<"error">, id: string | undefined): boolean {
+  if (!takeWatchRefusal(id)) return false;
+  if (payload.code === "RATE_LIMITED") {
+    void livekitSession()
+      .then(({ retryWatching }) => retryWatching())
+      .catch((err: unknown) => log.debug("voice_watch retry failed", err));
+  }
+  return true;
+}
+
 export function handleVoiceE2eeOffer(payload: Payload<"voice_e2ee_offer">): void {
   void livekitSession().then(({ handleE2EEOffer }) =>
     handleE2EEOffer(payload.from_user_id, payload.encrypted_key, payload.iv),
@@ -463,6 +522,8 @@ export function handleVoiceJoinRollback(payload: Payload<"error">, id: string | 
   // already tolerates a null Room, aborting the in-flight attempt at its
   // next checkpoint.
   if (voiceStore.getState().voiceStatus === "joining" && takeJoinRefusal(payload.code, id)) {
+    // A refused join abandons an AFK move: nothing to explain.
+    clearAfkMove();
     // A refused join (often before any voice token) is a failed join: back
     // off the next one, or every click re-sends voice_join.
     noteJoinFailed();

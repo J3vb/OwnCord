@@ -132,3 +132,16 @@
   background: var(--red);
   color: var(--on-accent);
 }
+
+/* Shown only for a member who has a banner; the avatar overlaps its lower edge. */
+.dps-banner {
+  height: var(--upp-banner-h, 60px);
+  margin: 0 -16px;
+  overflow: hidden;
+  background: var(--accent-gradient);
+}
+.dps-banner + .dps-avatar {
+  margin-top: -40px;
+  border: 4px solid var(--bg-secondary);
+  box-sizing: content-box;
+}

@@ -87,6 +87,7 @@ import { setHideMutedChannels } from "@lib/hide-muted-channels";
 
 function resetStores(): void {
   channelsStore.setState(() => ({
+    categories: [],
     channels: new Map(),
     activeChannelId: null,
     roles: [],
@@ -1474,7 +1475,7 @@ describe("ChannelSidebar", () => {
     const btn = container.querySelector<HTMLElement>("[data-testid='create-channel-empty']");
     expect(btn).not.toBeNull();
     btn!.click();
-    expect(onCreateChannel).toHaveBeenCalledWith("");
+    expect(onCreateChannel).toHaveBeenCalledWith({ id: 0, name: "" });
   });
 
   it("hides the empty-state create affordance from a non-manager (#9)", () => {
@@ -2044,7 +2045,7 @@ describe("ChannelSidebar", () => {
     expect(addBtn!.textContent).toBe("+");
   });
 
-  it("clicking create channel button calls onCreateChannel with category name", () => {
+  it("clicking create channel button calls onCreateChannel with the category (id and name)", () => {
     const onCreateChannel = vi.fn();
     sidebar.destroy?.();
     setAdminUser();
@@ -2062,7 +2063,25 @@ describe("ChannelSidebar", () => {
     ) as HTMLElement;
     addBtn.click();
 
-    expect(onCreateChannel).toHaveBeenCalledWith("Text Channels");
+    // These fixtures carry no category_id: a name-only category (older server).
+    expect(onCreateChannel).toHaveBeenCalledWith({ id: 0, name: "Text Channels" });
+  });
+
+  it("the + of a real category passes its id, and the synthetic Voice group's passes none and a voice hint", () => {
+    const onCreateChannel = vi.fn();
+    sidebar.destroy?.();
+    setAdminUser();
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onCreateChannel });
+    setChannels([
+      { id: 1, name: "general", type: "text", category: "Chat", category_id: 4, position: 0 },
+      { id: 2, name: "lounge", type: "voice", category: null, position: 1 },
+    ]);
+    sidebar.mount(container);
+
+    (container.querySelector('[data-testid="create-channel-chat"]') as HTMLElement).click();
+    expect(onCreateChannel).toHaveBeenLastCalledWith({ id: 4, name: "Chat" });
+    (container.querySelector('[data-testid="create-channel-voice"]') as HTMLElement).click();
+    expect(onCreateChannel).toHaveBeenLastCalledWith({ id: 0, name: "" }, "voice");
   });
 
   it("create channel button does not collapse the category", () => {
@@ -3595,6 +3614,39 @@ describe("ChannelSidebar channel feature flags", () => {
 
       channelsStore.flush();
       expect(lock(1)).toBeNull();
+    });
+  });
+
+  describe("AFK channel marker", () => {
+    const afkTestId = "[data-testid='channel-afk-5']";
+
+    it("shows a moon and an AFK label on the AFK channel only", () => {
+      setChannels([
+        { id: 5, name: "parking", type: "voice", category: "Voice", position: 0, afk: true },
+        { id: 6, name: "lounge", type: "voice", category: "Voice", position: 1 },
+      ]);
+      sidebar.mount(container);
+
+      const badge = container.querySelector(afkTestId);
+      expect(badge?.textContent).toBe("AFK");
+      expect(badge?.querySelector("svg")?.getAttribute("data-icon")).toBe("moon");
+      expect(container.querySelector("[data-testid='channel-afk-6']")).toBeNull();
+    });
+
+    it("appears and disappears in place when the flag changes", () => {
+      setChannels([{ id: 5, name: "parking", type: "voice", category: "Voice", position: 0 }]);
+      sidebar.mount(container);
+      expect(container.querySelector(afkTestId)).toBeNull();
+      const wrapper = container.querySelector("[data-testid='channel-5']")!.parentElement;
+
+      updateChannel({ id: 5, afk: true });
+      channelsStore.flush();
+      expect(container.querySelector(afkTestId)?.textContent).toBe("AFK");
+      expect(container.querySelector("[data-testid='channel-5']")!.parentElement).toBe(wrapper);
+
+      updateChannel({ id: 5, afk: false });
+      channelsStore.flush();
+      expect(container.querySelector(afkTestId)).toBeNull();
     });
   });
 

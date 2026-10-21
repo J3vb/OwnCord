@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"payload\":{\"user_ids\":[]},\"type\":\"voice_watch\"}")

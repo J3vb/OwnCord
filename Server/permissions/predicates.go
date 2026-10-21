@@ -49,8 +49,8 @@ type Subject struct {
 	Override  ChannelOverride
 	Channel   ChannelRef // Type and Archived; ID is not consulted
 	// DMParticipant and DMBlocked are consulted only when Channel.Type is
-	// "dm". Group DMs pass DMBlocked=false — blocks are enforced at group
-	// creation, not per message (service.requireDMNotBlocked).
+	// "dm". DMBlocked means the 1:1 counterpart cannot be reached by this
+	// actor (service.RequireDMReachable). Group DMs pass DMBlocked=false.
 	DMParticipant bool
 	DMBlocked     bool
 	// NSFWAcknowledged is consulted only when Channel.NSFW is set: whether
@@ -299,6 +299,19 @@ func CanModerate(s Subject) error {
 		return nil
 	}
 	return missing(ModerateMembers)
+}
+
+// CanManageChannels is the gate on everything that edits the channel list and
+// on the channel_categories view (WP 6.5a): MANAGE_CHANNELS or Administrator,
+// server-wide. Like CanModerate it reads the role only; a per-channel override
+// can neither grant nor strip it. The ws hub asks it at send time to decide
+// which connected clients may be told the full category list, empty and
+// hidden categories included.
+func CanManageChannels(s Subject) error {
+	if HasAdmin(s.RolePerms) || HasPerm(s.RolePerms, ManageChannels) {
+		return nil
+	}
+	return missing(ManageChannels)
 }
 
 // CanModerateVoice is the actor's authority in the TARGET's channel:

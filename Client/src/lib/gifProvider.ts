@@ -31,6 +31,12 @@ export interface GifResult {
   readonly fullUrl: string;
 }
 
+/** One page of results plus the cursor for the next ("" when there is none). */
+export interface GifPage {
+  readonly gifs: readonly GifResult[];
+  readonly next: string;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -46,6 +52,10 @@ export function isAllowedGifUrl(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+function parsePage(data: GifSearchResponse): GifPage {
+  return { gifs: parseResults(data), next: data.next ?? "" };
 }
 
 function parseResults(data: GifSearchResponse): readonly GifResult[] {
@@ -67,19 +77,28 @@ function parseResults(data: GifSearchResponse): readonly GifResult[] {
 // Public API
 // ---------------------------------------------------------------------------
 
-/** Search the server's GIF proxy for GIFs matching the given query. */
+/**
+ * Search the server's GIF proxy for GIFs matching the given query. `pos` is
+ * the previous page's `next` cursor; omit it for the first page.
+ */
 export async function searchGifs(
   api: GifApi,
   query: string,
   limit: number = DEFAULT_LIMIT,
-): Promise<readonly GifResult[]> {
-  return parseResults(await api.gifSearch(query, limit));
+  pos?: string,
+): Promise<GifPage> {
+  return parsePage(
+    await (pos === undefined ? api.gifSearch(query, limit) : api.gifSearch(query, limit, pos)),
+  );
 }
 
-/** Fetch currently trending GIFs via the server's GIF proxy. */
+/** Fetch currently trending GIFs via the server's GIF proxy (`pos` as above). */
 export async function getTrendingGifs(
   api: GifApi,
   limit: number = DEFAULT_LIMIT,
-): Promise<readonly GifResult[]> {
-  return parseResults(await api.gifTrending(limit));
+  pos?: string,
+): Promise<GifPage> {
+  return parsePage(
+    await (pos === undefined ? api.gifTrending(limit) : api.gifTrending(limit, pos)),
+  );
 }

@@ -111,11 +111,19 @@ CREATE TABLE IF NOT EXISTS audit_log (
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS channel_categories (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT    NOT NULL,
+    position   INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_categories_name ON channel_categories(name COLLATE NOCASE);
+
 CREATE TABLE IF NOT EXISTS channels (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     name             TEXT    NOT NULL,
     type             TEXT    NOT NULL DEFAULT 'text',
-    category         TEXT,
+    category_id INTEGER REFERENCES channel_categories(id) ON DELETE SET NULL,
     topic            TEXT,
     position         INTEGER NOT NULL DEFAULT 0,
     slow_mode        INTEGER NOT NULL DEFAULT 0,
@@ -470,12 +478,13 @@ type mockHubWB struct{}
 func (m *mockHubWB) BroadcastServerRestart(reason ws.RestartReason, delaySeconds int) {}
 func (m *mockHubWB) BroadcastChannelCreate(ch *db.Channel)                            {}
 func (m *mockHubWB) BroadcastChannelUpdate(ch *db.Channel)                            {}
+func (m *mockHubWB) BroadcastChannelCategories(cats []db.ChannelCategory)             {}
 func (m *mockHubWB) BroadcastChannelDelete(channelID int64)                           {}
 func (m *mockHubWB) BroadcastMemberBan(userID int64)                                  {}
 func (m *mockHubWB) BroadcastChatBulkDeleted(channelID int64, messageIDs []int64)     {}
-func (m *mockHubWB) BroadcastMemberUpdate(userID int64, roleName string)              {}
+func (m *mockHubWB) RevokeUnreadableChannels(userID int64)                            {}
+func (m *mockHubWB) EnqueueRoleRefresh(r ws.RoleRefresh)                              {}
 func (m *mockHubWB) RefreshChannelVisibility(ch *db.Channel)                          {}
-func (m *mockHubWB) RefreshAllChannelVisibility()                                     {}
 func (m *mockHubWB) BroadcastRolesUpdate(roles []*db.Role)                            {}
 func (m *mockHubWB) CleanupVoiceForChannel(channelID int64)                           {}
 func (m *mockHubWB) ClientCount() int                                                 { return 0 }

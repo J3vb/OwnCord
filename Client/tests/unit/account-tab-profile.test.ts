@@ -9,6 +9,9 @@ vi.mock("../../src/components/message-list/attachments", async (importOriginal) 
 
 import { buildAccountTab, validateAvatarFile } from "@components/settings/AccountTab";
 import { authStore } from "@stores/auth.store";
+import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
+import { ApiClientError } from "@lib/api";
+import * as imageCrop from "@lib/imageCrop";
 import type { SettingsOverlayOptions } from "@components/SettingsOverlay";
 
 /**
@@ -273,5 +276,100 @@ describe("Remove avatar (3C-7a)", () => {
     );
     expect(btn.hidden).toBe(false);
     expect(btn.disabled).toBe(false);
+  });
+});
+
+describe("Banner controls (6.11d)", () => {
+  afterEach(() => {
+    document.body.replaceChildren();
+    resetServerCapabilities();
+    cropSpy?.mockRestore();
+    cropSpy = undefined;
+  });
+  let cropSpy: ReturnType<typeof vi.spyOn> | undefined;
+
+  function build(opts: SettingsOverlayOptions): HTMLElement {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    container.appendChild(buildAccountTab(opts, new AbortController().signal));
+    return container;
+  }
+  const q = (c: HTMLElement, id: string): HTMLButtonElement =>
+    c.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)!;
+  const withBanners = (over?: Partial<SettingsOverlayOptions>): SettingsOverlayOptions =>
+    makeOptions({
+      onUploadBanner: vi.fn().mockResolvedValue("/api/v1/files/b1"),
+      onRemoveBanner: vi.fn().mockResolvedValue(undefined),
+      ...over,
+    });
+
+  it("banner controls hidden without capability", () => {
+    setUser({ banner: "/api/v1/files/b1", banner_color: "#112233" });
+    const container = build(withBanners());
+    expect(container.querySelector('[data-testid="banner-editor"]')).toBeNull();
+    expect(container.querySelector('[data-testid="banner-upload-btn"]')).toBeNull();
+    expect(container.querySelector('[data-testid="banner-color-input"]')).toBeNull();
+  });
+
+  it("remove shown only with a banner", () => {
+    applyReadyCapabilities({ profile_banners: true });
+    setUser({ banner: null });
+    const container = build(withBanners());
+    expect(q(container, "banner-upload-btn").hidden).toBe(false);
+    expect(q(container, "banner-remove-btn").hidden).toBe(true);
+    // An upload (or another device) that sets a banner shows it.
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { ...prev.user!, banner: "/api/v1/files/b1" },
+    }));
+    return vi.waitFor(() => expect(q(container, "banner-remove-btn").hidden).toBe(false));
+  });
+
+  it("404 on upload shows the storage-off error", async () => {
+    applyReadyCapabilities({ profile_banners: true });
+    setUser({});
+    cropSpy = vi.spyOn(imageCrop, "cropImage").mockResolvedValue({
+      ok: true,
+      file: new File(["b"], "banner.png", { type: "image/png" }),
+    });
+    const onUploadBanner = vi.fn().mockRejectedValue(new ApiClientError(404, "NOT_FOUND", "gone"));
+    const container = build(withBanners({ onUploadBanner }));
+    const input = q(container, "banner-file-input") as unknown as HTMLInputElement;
+    Object.defineProperty(input, "files", {
+      value: [new File(["x"], "pic.png", { type: "image/png" })],
+    });
+    input.dispatchEvent(new Event("change"));
+    await vi.waitFor(() =>
+      expect(container.querySelector('[data-testid="banner-error"]')?.textContent).toBe(
+        "Banner uploads are turned off on this server.",
+      ),
+    );
+    expect(onUploadBanner).toHaveBeenCalledTimes(1);
+    expect(q(container, "banner-upload-btn").disabled).toBe(false);
+  });
+
+  it("saves an edited colour with Save Profile and sends nothing when unchanged", async () => {
+    applyReadyCapabilities({ profile_banners: true });
+    setUser({ banner_color: "#112233" });
+    const onUpdateProfile = vi.fn().mockResolvedValue(undefined);
+    const container = build(withBanners({ onUpdateProfile }));
+    q(container, "profile-save-btn").click();
+    await vi.waitFor(() => expect(onUpdateProfile).toHaveBeenCalledTimes(1));
+    expect(onUpdateProfile.mock.calls[0]![0]).not.toHaveProperty("banner_color");
+    await vi.waitFor(() => expect(q(container, "profile-save-btn").disabled).toBe(false));
+
+    const colour = q(container, "banner-color-input") as unknown as HTMLInputElement;
+    colour.value = "#ff0000";
+    colour.dispatchEvent(new Event("input"));
+    q(container, "profile-save-btn").click();
+    await vi.waitFor(() => expect(onUpdateProfile).toHaveBeenCalledTimes(2));
+    expect(onUpdateProfile.mock.calls[1]![0]).toMatchObject({ banner_color: "#ff0000" });
+    await vi.waitFor(() => expect(q(container, "profile-save-btn").disabled).toBe(false));
+
+    q(container, "banner-color-clear").click();
+    await vi.waitFor(() => expect(q(container, "profile-save-btn").disabled).toBe(false));
+    q(container, "profile-save-btn").click();
+    await vi.waitFor(() => expect(onUpdateProfile).toHaveBeenCalledTimes(3));
+    expect(onUpdateProfile.mock.calls[2]![0]).toMatchObject({ banner_color: "" });
   });
 });

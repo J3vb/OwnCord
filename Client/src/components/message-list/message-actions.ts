@@ -29,6 +29,7 @@ export interface ActionGate {
 export interface MessageActionGates {
   readonly react: ActionGate;
   readonly edit: ActionGate;
+  readonly forward: ActionGate;
   readonly pin: ActionGate;
   readonly delete: ActionGate;
   readonly report: ActionGate;
@@ -78,7 +79,9 @@ export function messageActionGates(msg: Message, opts: MessageListOptions): Mess
   const canDelete = deletable && (own || (!isDm && channelBitOrRole(channel?.canDeleteOthers)));
   return {
     react: gate(on, on ? reactionLockReason(channelCanReact(msg.channelId)) : null),
-    edit: gate(on && own),
+    // A forward is a snapshot the server refuses to edit.
+    edit: gate(on && own && msg.forward === undefined),
+    forward: gate(on && opts.onForwardClick !== undefined, on ? deleteLockReason() : null),
     pin: gate(on && canPin),
     delete: gate(canDelete, canDelete ? deleteLockReason() : null),
     report: gate(on && opts.onReportClick !== undefined && !own),

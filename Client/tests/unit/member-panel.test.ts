@@ -46,6 +46,7 @@ function resetStores(): void {
   }));
   membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
   channelsStore.setState(() => ({
+    categories: [],
     channels: new Map(),
     activeChannelId: null,
     roles: [

@@ -224,6 +224,8 @@ var commandPayloadSeeds = []struct {
 	{MsgTypeChatSend, `{"channel_id":1,"content":"hello"}`},
 	{MsgTypeChatSend, `{"channel_id":"1","content":"","attachments":[],"reply_to":null}`},
 	{MsgTypeChatSend, `{"channel_id":1,"user_id":999,"content":"spoof"}`},
+	{MsgTypeChatForward, `{"client_message_id":"x","channel_id":0,"message_id":-1}`},
+	{MsgTypeChatForward, `{"client_message_id":"","channel_id":1,"message_id":1}`},
 	{MsgTypeChatEdit, `{"message_id":1,"content":"edited"}`},
 	{MsgTypeChatDelete, `{"message_id":1}`},
 	{MsgTypeTypingStart, `{"channel_id":0}`},
@@ -288,8 +290,8 @@ func corpusFirstString(t *testing.T, target string) []string {
 // TestCommandPayloadSeedsCoverEveryConstructor is the guardrail that keeps the
 // corpus honest: registering a command in commandConstructors without a seed
 // leaves its decoder reachable only if the fuzzer guesses the type string,
-// which is not coverage. Ten of the 26 constructors appear in no epoch-1
-// journey, so their corpus entries carry a minimal valid payload instead.
+// which is not coverage. Constructors that appear in no epoch-1 journey get
+// a corpus entry with a minimal valid payload instead.
 func TestCommandPayloadSeedsCoverEveryConstructor(t *testing.T) {
 	seeded := make(map[string]bool, len(commandConstructors))
 	for _, s := range commandPayloadSeeds {

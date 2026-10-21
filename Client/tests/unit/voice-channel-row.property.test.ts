@@ -25,6 +25,7 @@ const capacity = fc.record({ label: text, title: text });
 
 /** The patchable part of a chrome model. */
 const patchable = fc.record({
+  afk: fc.boolean(),
   joined: fc.boolean(),
   frozenReason: fc.option(text, { nil: null }),
   timeoutReason: fc.option(text, { nil: null }),
@@ -53,6 +54,8 @@ function mutateChrome(model: VoiceChannelChromeModel, field: string): VoiceChann
       return { ...model, nsfw: !model.nsfw };
     case "private":
       return { ...model, private: !model.private };
+    case "afk":
+      return { ...model, afk: !model.afk };
     case "joined":
       return { ...model, joined: !model.joined };
     case "frozenReason":
@@ -116,6 +119,7 @@ describe("voice channel row view", () => {
 
   it("the patch fields are exactly the ones patchVoiceChannelChrome handles", () => {
     expect(VOICE_CHROME_PATCH_FIELDS.toSorted()).toEqual([
+      "afk",
       "capacity",
       "frozenReason",
       "joined",

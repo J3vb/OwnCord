@@ -10,13 +10,19 @@
  * does one a server leaves out.
  */
 
+/** The flags a full `ready` can carry that this module answers for. */
+export interface ReadyCapabilityFlags {
+  readonly read_pointer?: boolean;
+  readonly user_notes?: boolean;
+  readonly profile_banners?: boolean;
+  readonly dm_privacy?: boolean;
+}
+
 /** The last full `ready`'s capabilities; null until one arrives. */
-let caps: { readonly read_pointer?: boolean } | null = null;
+let caps: ReadyCapabilityFlags | null = null;
 
 /** Record the capabilities of a full `ready`. An absent field means false. */
-export function applyReadyCapabilities(
-  next: { readonly read_pointer?: boolean } | undefined,
-): void {
+export function applyReadyCapabilities(next: ReadyCapabilityFlags | undefined): void {
   caps = next ?? {};
 }
 
@@ -37,4 +43,32 @@ export function hasReceivedReady(): boolean {
  */
 export function readPointerEnabled(): boolean {
   return caps?.read_pointer === true;
+}
+
+/**
+ * Whether the server keeps private profile notes (WP 6.11a): `GET` and `PUT`
+ * `/users/me/notes/{userId}`. False keeps today's behaviour: the note lives in
+ * `localStorage` on this device only.
+ */
+export function userNotesEnabled(): boolean {
+  return caps?.user_notes === true;
+}
+
+/**
+ * Whether the server keeps a profile banner (WP 6.11b): an uploaded image
+ * and/or a colour. False hides every banner control. True does not promise the
+ * upload route exists: a server with attachment storage off advertises it too
+ * and answers the upload with 404.
+ */
+export function profileBannersEnabled(): boolean {
+  return caps?.profile_banners === true;
+}
+
+/**
+ * Whether the server stores the two direct message privacy settings (WP 6.8b):
+ * `GET` and `PUT` `/users/me/privacy`. False hides Settings > Safety > Direct
+ * messages.
+ */
+export function dmPrivacyEnabled(): boolean {
+  return caps?.dm_privacy === true;
 }

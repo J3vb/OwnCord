@@ -27,6 +27,7 @@ import type {
   ApiError,
   ChannelType,
   ChannelResponse,
+  ChannelCategory,
   EmojiResponse,
   InviteResponse,
   UploadResponse,
@@ -326,6 +327,19 @@ export interface SessionInfo {
    *  acknowledges every row but the caller's own, so this is visible in
    *  exactly one listing per device. */
   readonly unseen: boolean;
+}
+
+/** The caller's direct message privacy settings (WP 6.8b). Both are always sent. */
+export interface DmPrivacy {
+  readonly allow_member_dms: boolean;
+  readonly message_requests: boolean;
+}
+
+/** GET and PUT /users/me/notes/{userId}: the caller's private note about one
+ *  member. `note` is "" when there is none (a PUT of "" deletes it). */
+export interface UserNote {
+  readonly user_id: number;
+  readonly note: string;
 }
 
 /** DELETE /users/me/sessions: every session is revoked, the caller's included. */
@@ -888,6 +902,8 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         /** Omit to leave unchanged; "" clears the field. */
         display_name?: string;
         about?: string;
+        /** `#rgb` / `#rrggbb`; omit to leave unchanged, "" clears (WP 6.11b). */
+        banner_color?: string;
       },
       signal?: AbortSignal,
     ): Promise<MemberResponse> {
@@ -929,6 +945,28 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
           signal,
         );
       }
+    },
+
+    /**
+     * Upload a profile banner (PNG/JPEG/WebP, max 1 MiB, max 1920x960).
+     * `POST /users/me/banner`. A server with attachment storage off advertises
+     * `profile_banners` but does not mount this route, so it answers 404; the
+     * caller turns that into its own message. On success the server has already
+     * broadcast a user_update.
+     */
+    uploadBanner(file: File, signal?: AbortSignal): Promise<UploadResponse> {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      return request<UploadResponse>("POST", "/users/me/banner", formData, signal, {
+        multipart: true,
+      });
+    },
+
+    /** Remove the signed-in user's banner image and return the updated user.
+     *  `DELETE /users/me/banner`; the colour is cleared by `updateProfile`. */
+    removeBanner(signal?: AbortSignal): Promise<MemberResponse> {
+      return request<MemberResponse>("DELETE", "/users/me/banner", undefined, signal);
     },
 
     changePassword(
@@ -1002,6 +1040,27 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
     getRecoveryKitStatus(signal?: AbortSignal): Promise<RecoveryKitStatus> {
       return request<RecoveryKitStatus>("GET", "/users/me/recovery-kit", undefined, signal);
+    },
+
+    /** The caller's private note about `userId` ("" when none). Callers wrap in try/catch. */
+    getUserNote(userId: number, signal?: AbortSignal): Promise<UserNote> {
+      return request<UserNote>("GET", `/users/me/notes/${userId}`, undefined, signal);
+    },
+
+    /** Store (or, when empty after trimming, delete) the caller's note about
+     *  `userId`; resolves to the stored value. Callers wrap in try/catch. */
+    putUserNote(userId: number, note: string, signal?: AbortSignal): Promise<UserNote> {
+      return request<UserNote>("PUT", `/users/me/notes/${userId}`, { note }, signal);
+    },
+
+    /** The caller's DM privacy settings. Callers wrap in try/catch. */
+    getDmPrivacy(signal?: AbortSignal): Promise<DmPrivacy> {
+      return request<DmPrivacy>("GET", "/users/me/privacy", undefined, signal);
+    },
+
+    /** Replace both DM privacy settings; resolves to the stored values. Callers wrap in try/catch. */
+    putDmPrivacy(settings: DmPrivacy, signal?: AbortSignal): Promise<DmPrivacy> {
+      return request<DmPrivacy>("PUT", "/users/me/privacy", settings, signal);
     },
 
     getOwnModeration(signal?: AbortSignal): Promise<OwnModerationAction[]> {
@@ -1351,8 +1410,14 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     // ships in this bundle. A 503 GIF_DISABLED means the operator has not
     // configured a key — callers must degrade, not retry.
 
-    gifSearch(query: string, limit: number, signal?: AbortSignal): Promise<GifSearchResponse> {
+    gifSearch(
+      query: string,
+      limit: number,
+      pos?: string,
+      signal?: AbortSignal,
+    ): Promise<GifSearchResponse> {
       const params = new URLSearchParams({ q: query, limit: String(limit) });
+      if (pos) params.set("pos", pos);
       return request<GifSearchResponse>(
         "GET",
         `/gif/search?${params.toString()}`,
@@ -1361,8 +1426,9 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       );
     },
 
-    gifTrending(limit: number, signal?: AbortSignal): Promise<GifSearchResponse> {
+    gifTrending(limit: number, pos?: string, signal?: AbortSignal): Promise<GifSearchResponse> {
       const params = new URLSearchParams({ limit: String(limit) });
+      if (pos) params.set("pos", pos);
       return request<GifSearchResponse>(
         "GET",
         `/gif/trending?${params.toString()}`,
@@ -1695,7 +1761,13 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       data: {
         name: string;
         type: ChannelType;
-        category: string;
+        /**
+         * The category's id, 0 for none (WP 6.5a). It wins over `category`
+         * when both are sent; a server from before 6.5a ignores it.
+         */
+        category_id?: number;
+        /** The category name (legacy): matched ignoring case, created when new, "" = none. */
+        category?: string;
         topic?: string;
         position?: number;
       },
@@ -1709,8 +1781,10 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       data: {
         name?: string;
         topic?: string;
-        // Moving a channel between categories is a rename of free text; an
-        // omitted field keeps the channel's current category server-side.
+        // Moving a channel between categories is an edit; an omitted field
+        // keeps the channel's current category server-side. `category_id` (0 =
+        // none) wins over the legacy `category` name when both are sent.
+        category_id?: number;
         category?: string;
         slow_mode?: number;
         position?: number;
@@ -1736,6 +1810,42 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
     adminDeleteChannel(id: number, signal?: AbortSignal): Promise<void> {
       return channelRequest<void>("DELETE", `/${id}`, undefined, signal);
+    },
+
+    // ── Admin: Channel categories (WP 6.5a) ──────────────────
+    // The list itself arrives over the socket (ready.categories and the
+    // channel_categories event), so there is no GET here.
+
+    /** Create a category, appended last. 409 CATEGORY_NAME_TAKEN on a duplicate name. */
+    adminCreateCategory(name: string, signal?: AbortSignal): Promise<ChannelCategory> {
+      return channelRequest<ChannelCategory>("POST", "/categories", { name }, signal);
+    },
+
+    /** Rename a category: every channel in it follows. 409 CATEGORY_NAME_TAKEN, 404 when gone. */
+    adminRenameCategory(id: number, name: string, signal?: AbortSignal): Promise<ChannelCategory> {
+      return channelRequest<ChannelCategory>("PATCH", `/categories/${id}`, { name }, signal);
+    },
+
+    /** Delete a category. Its channels are not deleted: they become uncategorized. */
+    adminDeleteCategory(id: number, signal?: AbortSignal): Promise<void> {
+      return channelRequest<void>("DELETE", `/categories/${id}`, undefined, signal);
+    },
+
+    /**
+     * Put the categories in `ids` order. `ids` must be exactly the server's
+     * current set: anything else is refused with 409 CATEGORY_LIST_STALE and
+     * nothing is written.
+     */
+    adminReorderCategories(
+      ids: readonly number[],
+      signal?: AbortSignal,
+    ): Promise<readonly ChannelCategory[]> {
+      return channelRequest<readonly ChannelCategory[]>(
+        "PUT",
+        "/categories/order",
+        { ids },
+        signal,
+      );
     },
 
     // ── Members (moderation) ────────────────────────────────

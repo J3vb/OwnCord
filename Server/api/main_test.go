@@ -20,5 +20,6 @@ func TestMain(m *testing.M) {
 		goleak.IgnoreTopFunction("github.com/J3vb/OwnCord/Server/ws.(*Hub).Run.func1"),
 		goleak.IgnoreTopFunction("github.com/J3vb/OwnCord/Server/ws.(*Hub).runRemovedVoiceWatch"),
 		goleak.IgnoreTopFunction("github.com/J3vb/OwnCord/Server/ws.(*Hub).runChannelActivity"),
+		goleak.IgnoreTopFunction("github.com/J3vb/OwnCord/Server/ws.(*Hub).runRoleRefresh"),
 	)
 }

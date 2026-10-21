@@ -182,7 +182,7 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 	// whoever is inside), and for a DM membership plus no block (blocking
 	// never touches dm_participants, so membership alone would let a blocked
 	// user into the blocker's call — same rule as every other DM sink,
-	// service.requireDMNotBlocked, group DMs exempt). The same predicate
+	// service.RequireDMReachable, group DMs exempt). The same predicate
 	// gates the token refresh and a moderator move's destination.
 	sub, subErr := channelSubject(ctx, h.readers.Dispatch, h.permChecker, h.perms, c.userID, ch, true)
 	if subErr != nil {
@@ -577,6 +577,7 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, txn *voiceTxn, c *Client, c
 	// reconnecting client — voice_e2ee_announce itself is an unsequenced
 	// pub/sub frame that no reconnect replay tier can ever recover (OC-0276).
 	h.sendVoicePeerKeys(c, channelID)
+	h.sendVoicePeerWatching(c, channelID)
 
 	// Send voice_config to the joiner. h.defaultVoiceQuality (the operator's
 	// voice.quality config) is the only source. A per-channel voice_quality

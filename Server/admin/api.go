@@ -40,8 +40,8 @@ var setupLimiterHook func(*auth.RateLimiter)
 // Force-logout is KICK_MEMBERS; account erasure by an administrator (B4-9)
 // is ADMINISTRATOR with the hierarchy re-checked in the service; recovery
 // credentials (B4-6) are owner-only.
-func mountUserRoutes(r chi.Router, svc *service.Services, hub HubBroadcaster, permInvalidator PermissionInvalidator, mod *service.ModerationService) {
-	mountMemberActionRoutes(r, "/users", svc, hub, permInvalidator, mod)
+func mountUserRoutes(r chi.Router, svc *service.Services, hub HubBroadcaster, mod *service.ModerationService) {
+	mountMemberActionRoutes(r, "/users", svc, hub, mod)
 	r.With(requirePerm(permissions.Administrator)).
 		Delete("/users/{id}", handleDeleteUser(mod, hub))
 	ownerOnly(r, http.MethodPost, "/users/{id}/recovery-credential", handleIssueRecoveryCredential(svc.Auth))
@@ -53,13 +53,13 @@ func mountUserRoutes(r chi.Router, svc *service.Services, hub HubBroadcaster, pe
 // /api/v1/moderation/members (NewMemberAPI) for the client, so both run the
 // same handlers and the same ModerationService rank checks. The list sits at
 // base itself, the per-user routes under base/{id}.
-func mountMemberActionRoutes(r chi.Router, base string, svc *service.Services, hub HubBroadcaster, permInvalidator PermissionInvalidator, mod *service.ModerationService) {
+func mountMemberActionRoutes(r chi.Router, base string, svc *service.Services, hub HubBroadcaster, mod *service.ModerationService) {
 	list := base
 	if list == "" {
 		list = "/"
 	}
 	r.Get(list, handleListUsers(svc.Users))
-	r.Patch(base+"/{id}", handlePatchUser(svc.Users, hub, permInvalidator, mod))
+	r.Patch(base+"/{id}", handlePatchUser(svc.Users, hub, mod))
 	r.With(requirePerm(permissions.KickMembers)).
 		Delete(base+"/{id}/sessions", handleForceLogout(mod))
 }
@@ -74,10 +74,10 @@ func mountMemberActionRoutes(r chi.Router, base string, svc *service.Services, h
 // server.admin_allowed_cidrs: these are routine moderator actions. They accept
 // only a session or API token issued by this server, and the permission and
 // rank checks, not the network, are what bound them.
-func NewMemberAPI(svc *service.Services, hub HubBroadcaster, permInvalidator PermissionInvalidator) http.Handler {
+func NewMemberAPI(svc *service.Services, hub HubBroadcaster, _ PermissionInvalidator) http.Handler {
 	r := chi.NewRouter()
 	r.Use(adminAuthMiddleware(svc.Sessions))
-	mountMemberActionRoutes(r, "", svc, hub, permInvalidator, svc.Moderation)
+	mountMemberActionRoutes(r, "", svc, hub, svc.Moderation)
 	return r
 }
 
@@ -95,6 +95,13 @@ func mountChannelActionRoutes(r chi.Router, base string, channels *service.Chann
 	r.Group(func(r chi.Router) {
 		r.Use(requirePerm(permissions.ManageChannels))
 		r.Post(create, handleCreateChannel(channels, hub))
+		// Categories (WP 6.5a). "/categories/order" is registered before
+		// "/categories/{id}" so "order" is never read as an id.
+		r.Get(base+"/categories", handleListCategories(channels))
+		r.Post(base+"/categories", handleCreateCategory(channels, hub))
+		r.Put(base+"/categories/order", handleReorderCategories(channels, hub))
+		r.Patch(base+"/categories/{id}", handleRenameCategory(channels, hub))
+		r.Delete(base+"/categories/{id}", handleDeleteCategory(channels, hub))
 		r.Patch(base+"/{id}", handlePatchChannel(channels, hub))
 		r.Delete(base+"/{id}", handleDeleteChannel(channels, hub))
 	})
@@ -234,7 +241,7 @@ func adminRequiredServices(database *db.DB, svc *service.Services) *service.Serv
 	return &filled
 }
 
-func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer, allowedOrigins []string, permInvalidator PermissionInvalidator, svc *service.Services, opts ...SetupOptions) http.Handler {
+func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer, allowedOrigins []string, _ PermissionInvalidator, svc *service.Services, opts ...SetupOptions) http.Handler {
 	r := chi.NewRouter()
 	// Fresh per call: ownerOnly (below) rebuilds this from scratch for the
 	// router this call is about to return.
@@ -319,7 +326,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		// Attention panel (RI-07): server health detail, ADMINISTRATOR like
 		// the support bundle that carries the same counters.
 		r.With(requirePerm(permissions.Administrator)).Get("/attention", handleGetAttention(svc.Attention))
-		mountUserRoutes(r, svc, hub, permInvalidator, mod)
+		mountUserRoutes(r, svc, hub, mod)
 		// The approval-mode registration queue (B4-1): deciding who joins
 		// is server management, not moderation of existing members.
 		r.With(requirePerm(permissions.ManageServer)).
@@ -335,12 +342,12 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 			r.Use(requirePerm(permissions.ManageChannels))
 			r.Get("/channels", handleListChannels(channels))
 			r.Get("/channels/{id}/permissions", handleGetChannelPermissions(channels))
-			r.Put("/channels/{id}/permissions/{roleId}", handlePutChannelPermission(channels, hub, permInvalidator))
-			r.Delete("/channels/{id}/permissions/{roleId}", handleDeleteChannelPermission(channels, hub, permInvalidator))
+			r.Put("/channels/{id}/permissions/{roleId}", handlePutChannelPermission(channels))
+			r.Delete("/channels/{id}/permissions/{roleId}", handleDeleteChannelPermission(channels))
 			// Per-user overrides — the last layer of the resolution order,
 			// gated on the same MANAGE_CHANNELS bit as the role layer.
-			r.Put("/channels/{id}/user-permissions/{userId}", handlePutChannelUserPermission(channels, hub, permInvalidator))
-			r.Delete("/channels/{id}/user-permissions/{userId}", handleDeleteChannelUserPermission(channels, hub, permInvalidator))
+			r.Put("/channels/{id}/user-permissions/{userId}", handlePutChannelUserPermission(channels))
+			r.Delete("/channels/{id}/user-permissions/{userId}", handleDeleteChannelUserPermission(channels))
 			// RI-06: explain a member's effective access and preview a
 			// proposed override — read-only, same bit as editing overrides.
 			r.Get("/channels/{id}/access/explain", handleExplainAccess(channels))
@@ -354,11 +361,11 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		r.Group(func(r chi.Router) {
 			r.Use(requirePerm(permissions.ManageRoles))
 			r.Get("/roles", handleListRoles(roles))
-			r.Post("/roles", handleCreateRole(hub, roles))
+			r.Post("/roles", handleCreateRole(roles))
 			// Registered before /roles/{id} so "reorder" is never parsed as an id.
-			r.Patch("/roles/reorder", handleReorderRoles(hub, permInvalidator, roles))
-			r.Patch("/roles/{id}", handlePatchRole(hub, permInvalidator, roles))
-			r.Delete("/roles/{id}", handleDeleteRole(hub, permInvalidator, roles))
+			r.Patch("/roles/reorder", handleReorderRoles(roles))
+			r.Patch("/roles/{id}", handlePatchRole(roles))
+			r.Delete("/roles/{id}", handleDeleteRole(roles))
 		})
 
 		r.With(requirePerm(permissions.ViewAuditLog)).

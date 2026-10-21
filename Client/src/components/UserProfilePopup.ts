@@ -21,6 +21,9 @@ import { createAvatarElement } from "@components/message-list/avatar";
 import { roleColorVar } from "@lib/formatting";
 import { reportEntryText } from "../i18n/reportEntry";
 import { statusLabel } from "../i18n/shell";
+import { NOTE_MAX_LENGTH, type NoteBinding } from "../features/profiles/userNotes";
+import { paintBanner } from "../features/profiles/banner";
+import { bannerImages } from "./bannerImages";
 import { requestsText } from "../i18n/requests";
 import { shellText } from "../i18n/shell";
 
@@ -41,6 +44,9 @@ export interface UserProfileData {
   /** Free-text status line, shown under the name. */
   readonly customStatus?: string | null;
   readonly joinDate?: string | null;
+  /** Banner image path and colour (WP 6.11); absent or null = the gradient. */
+  readonly banner?: string | null;
+  readonly banner_color?: string | null;
   readonly isDeleted?: boolean;
 }
 
@@ -83,6 +89,13 @@ export interface UserProfilePopupOptions {
   readonly unavailableReason?: string;
   /** Live role and role picker. Absent: the badge shows `user.role` as given. */
   readonly roleControl?: ProfileRoleControl;
+  /** The viewer's private note about this member (WP 6.11c). Absent: no Note
+   *  section (the viewer's own card, or no session to keep a note in). */
+  readonly note?: NoteBinding;
+  /** Called when the popup is destroyed, before `onClose`, so an edit still
+   *  waiting on its debounce is sent. The opener binds it to the session that
+   *  opened the card. */
+  readonly onNoteFlush?: () => void;
   /** Called once when the popup closes, however it was closed. */
   readonly onClose?: () => void;
   /** Where focus goes on close when the opener has left the document. */
@@ -207,6 +220,7 @@ export function createUserProfilePopup(
     overlay = null;
     popup = null;
     disposable.destroy();
+    options.onNoteFlush?.();
 
     // Return focus to the element that was focused before opening
     if (previousFocus instanceof HTMLElement && previousFocus.isConnected) {
@@ -456,6 +470,58 @@ export function createUserProfilePopup(
       appendChildren(aboutSection, aboutTitle, aboutText);
     }
 
+    // Note section: private to the viewer, saved as they type.
+    const noteSection = createElement("div", {
+      class: "upp-note",
+      "data-testid": "upp-note-section",
+    });
+    const note = options.note;
+    if (note !== undefined) {
+      const noteTitle = createElement(
+        "div",
+        { class: "upp-section-title" },
+        requestsText("profile.note"),
+      );
+      const noteInput = createElement("textarea", {
+        class: "upp-note-input",
+        placeholder: requestsText("profile.notePlaceholder"),
+        "aria-label": requestsText("profile.note"),
+        "data-testid": "upp-note",
+        maxlength: String(NOTE_MAX_LENGTH),
+        rows: "2",
+      });
+      const noteError = createElement("div", {
+        class: "upp-note-error",
+        role: "status",
+        "data-testid": "upp-note-error",
+      });
+      let noteDirty = false;
+      if (note.remote) {
+        void note.load(signal).then(
+          (text) => {
+            if (!noteDirty && !signal.aborted) noteInput.value = text;
+          },
+          () => undefined,
+        );
+      } else {
+        noteInput.value = note.readLocal();
+      }
+      note.onFailedChange((failed) => {
+        setText(noteError, failed ? requestsText("profile.noteNotSaved") : "");
+        if (popup !== null && popup.isConnected) position(popup, options.anchorX, options.anchorY);
+      });
+      noteInput.addEventListener(
+        "input",
+        () => {
+          noteDirty = true;
+          note.change(noteInput.value);
+        },
+        { signal },
+      );
+      noteInput.addEventListener("blur", () => note.flush(), { signal });
+      appendChildren(noteSection, noteTitle, noteInput, noteError);
+    }
+
     // Join date
     const joinSection = createElement("div", { class: "upp-join-date" });
     if (user.joinDate !== undefined && user.joinDate !== null) {
@@ -580,6 +646,7 @@ export function createUserProfilePopup(
       roleHolder,
       statusLine,
       aboutSection,
+      noteSection,
       joinSection,
     );
     if (actions.childElementCount > 0) {
@@ -589,6 +656,7 @@ export function createUserProfilePopup(
     // rather than the body — the body scrolls, and a scroll container clips.
     // Appending it last puts it over the banner without needing a z-index.
     appendChildren(popup, banner, body, avatar);
+    paintBanner(banner, user, popup, bannerImages);
 
     renderRole();
     overlay.appendChild(popup);

@@ -163,6 +163,16 @@ func TestRequestDeadline_ResponseControllerReachesConnection(t *testing.T) {
 // "METHOD /pattern" as chi.Walk reports them, or "* /prefix/*" for a mounted
 // handler that answers every method (postureKey).
 var deadlineBound = []string{
+	"GET /admin/api/channels/categories",
+	"POST /admin/api/channels/categories",
+	"PUT /admin/api/channels/categories/order",
+	"PATCH /admin/api/channels/categories/{id}",
+	"DELETE /admin/api/channels/categories/{id}",
+	"GET /api/v1/moderation/channels/categories",
+	"POST /api/v1/moderation/channels/categories",
+	"PUT /api/v1/moderation/channels/categories/order",
+	"PATCH /api/v1/moderation/channels/categories/{id}",
+	"DELETE /api/v1/moderation/channels/categories/{id}",
 	"DELETE /api/v1/uploads/{id}",
 	"DELETE /admin/api/backups/{name}",
 	"DELETE /admin/api/channels/{id}",
@@ -251,6 +261,7 @@ var deadlineBound = []string{
 	"GET /api/v1/server-info",
 	"GET /api/v1/users/me/moderation",
 	"GET /api/v1/users/me/notes/{userId}",
+	"GET /api/v1/users/me/privacy",
 	"GET /api/v1/users/me/recovery-kit",
 	"GET /api/v1/users/me/sessions",
 	"GET /health",
@@ -324,6 +335,7 @@ var deadlineBound = []string{
 	"PUT /api/v1/gif/favorites",
 	"PUT /api/v1/users/me/notes/{userId}",
 	"PUT /api/v1/users/me/password",
+	"PUT /api/v1/users/me/privacy",
 }
 
 // deadlineExempt lists every walked route the exempt table must skip, with the

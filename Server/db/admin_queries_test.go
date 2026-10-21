@@ -16,11 +16,19 @@ import (
 
 // adminTestSchema extends testSchema with tables needed for admin queries.
 var adminTestSchema = append(testSchema, []byte(`
+CREATE TABLE IF NOT EXISTS channel_categories (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT    NOT NULL,
+    position   INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_categories_name ON channel_categories(name COLLATE NOCASE);
+
 CREATE TABLE IF NOT EXISTS channels (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     name             TEXT    NOT NULL,
     type             TEXT    NOT NULL DEFAULT 'text',
-    category         TEXT,
+    category_id INTEGER REFERENCES channel_categories(id) ON DELETE SET NULL,
     topic            TEXT,
     position         INTEGER NOT NULL DEFAULT 0,
     slow_mode        INTEGER NOT NULL DEFAULT 0,
@@ -484,7 +492,7 @@ func TestAdminUpdateChannel(t *testing.T) {
 	if err := database.AdminUpdateChannel(context.Background(), id, db.ChannelUpdate{
 		Name:          "new-name",
 		Topic:         "new topic",
-		Category:      "Moved",
+		CategoryName:  new("Moved"),
 		SlowMode:      5,
 		Position:      2,
 		Archived:      true,

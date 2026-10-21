@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 203 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 215 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -56,6 +56,11 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/admin/api/backups/{name}/restore`                                  |
 | GET     | `/admin/api/channels`                                                |
 | POST    | `/admin/api/channels`                                                |
+| GET     | `/admin/api/channels/categories`                                     |
+| POST    | `/admin/api/channels/categories`                                     |
+| PUT     | `/admin/api/channels/categories/order`                               |
+| DELETE  | `/admin/api/channels/categories/{id}`                                |
+| PATCH   | `/admin/api/channels/categories/{id}`                                |
 | DELETE  | `/admin/api/channels/{id}`                                           |
 | PATCH   | `/admin/api/channels/{id}`                                           |
 | GET     | `/admin/api/channels/{id}/access/explain`                            |
@@ -177,6 +182,11 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/moderation/appeals/{id}/assign`                             |
 | POST    | `/api/v1/moderation/appeals/{id}/decide`                             |
 | POST    | `/api/v1/moderation/channels/`                                       |
+| GET     | `/api/v1/moderation/channels/categories`                             |
+| POST    | `/api/v1/moderation/channels/categories`                             |
+| PUT     | `/api/v1/moderation/channels/categories/order`                       |
+| DELETE  | `/api/v1/moderation/channels/categories/{id}`                        |
+| PATCH   | `/api/v1/moderation/channels/categories/{id}`                        |
 | DELETE  | `/api/v1/moderation/channels/{id}`                                   |
 | PATCH   | `/api/v1/moderation/channels/{id}`                                   |
 | GET     | `/api/v1/moderation/members/`                                        |
@@ -212,6 +222,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | PUT     | `/api/v1/users/me/notes/{userId}`                                    |
 | POST    | `/api/v1/users/me/notices/{id}/ack`                                  |
 | PUT     | `/api/v1/users/me/password`                                          |
+| GET     | `/api/v1/users/me/privacy`                                           |
+| PUT     | `/api/v1/users/me/privacy`                                           |
 | GET     | `/api/v1/users/me/recovery-kit`                                      |
 | POST    | `/api/v1/users/me/recovery-kit`                                      |
 | DELETE  | `/api/v1/users/me/sessions`                                          |
@@ -288,6 +300,8 @@ endpoints return plain-text errors — see their section):
 | `NSFW_ACKNOWLEDGEMENT_REQUIRED` | 403         | Content from a labelled channel requested before the caller acknowledged it (history, around, pins, reaction users, search, attachment bytes — B5-7)                                                                                             |
 | `NOT_NSFW`                      | 409         | `PUT /api/v1/channels/{id}/nsfw-acknowledgement` on a channel that is not labelled                                                                                                                                                               |
 | `CHANNEL_NAME_TAKEN`            | 409         | Admin channel create or rename onto a name the same type already has in that category                                                                                                                                                            |
+| `CATEGORY_NAME_TAKEN`           | 409         | Category create or rename onto a name another category already has, ignoring case                                                                                                                                                                |
+| `CATEGORY_LIST_STALE`           | 409         | `PUT .../categories/order` with an id set that is not exactly the current set of categories; nothing is written                                                                                                                                  |
 
 ### Request deadline
 
@@ -1128,19 +1142,21 @@ List all channels the authenticated user has `READ_MESSAGES` permission for. DM 
 ]
 ```
 
-| Field             | Type   | Description                                                                                                               |
-| ----------------- | ------ | ------------------------------------------------------------------------------------------------------------------------- |
-| `id`              | int64  | Channel ID                                                                                                                |
-| `name`            | string | Channel name                                                                                                              |
-| `type`            | string | `text`, `voice`, or `announcement` (announcement channels are read like text but only `MANAGE_MESSAGES` holders can post) |
-| `topic`           | string | Channel topic/description                                                                                                 |
-| `category`        | string | Category grouping                                                                                                         |
-| `position`        | int    | Sort order within category                                                                                                |
-| `slow_mode`       | int    | Slow-mode delay in seconds (0 = disabled)                                                                                 |
-| `archived`        | bool   | Whether the channel is archived                                                                                           |
-| `nsfw`            | bool   | Age-restriction label, enforced server-side (B5-7): its content needs the caller's own acknowledgement (see below)        |
-| `voice_max_users` | int    | Voice capacity, 0 = unlimited. Enforced on join (`CHANNEL_FULL`)                                                          |
-| `voice_max_video` | int    | Simultaneous cameras/screen shares, 0 = unlimited. Enforced on publish (`VIDEO_LIMIT`)                                    |
+| Field               | Type   | Description                                                                                                               |
+| ------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `id`                | int64  | Channel ID                                                                                                                |
+| `name`              | string | Channel name                                                                                                              |
+| `type`              | string | `text`, `voice`, or `announcement` (announcement channels are read like text but only `MANAGE_MESSAGES` holders can post) |
+| `topic`             | string | Channel topic/description                                                                                                 |
+| `category`          | string | Name of the channel's category, `""` when none                                                                            |
+| `category_id`       | int64  | The category's id, `0` when none (WP 6.5a)                                                                                |
+| `category_position` | int    | The category's position in the category order, `0` when none                                                              |
+| `position`          | int    | Sort order within category                                                                                                |
+| `slow_mode`         | int    | Slow-mode delay in seconds (0 = disabled)                                                                                 |
+| `archived`          | bool   | Whether the channel is archived                                                                                           |
+| `nsfw`              | bool   | Age-restriction label, enforced server-side (B5-7): its content needs the caller's own acknowledgement (see below)        |
+| `voice_max_users`   | int    | Voice capacity, 0 = unlimited. Enforced on join (`CHANNEL_FULL`)                                                          |
+| `voice_max_video`   | int    | Simultaneous cameras/screen shares, 0 = unlimited. Enforced on publish (`VIDEO_LIMIT`)                                    |
 
 #### The `nsfw` flag
 
@@ -1234,6 +1250,13 @@ were in the call at any point. `content` is fallback text for clients that do no
 know the field. A call row is read-only: editing, deleting, pinning, reacting to
 or replying to it is refused, and search does not return it. A client treats an
 unknown `kind` as an ordinary message and shows `content`.
+
+A forwarded message (`chat_forward`, see `docs/protocol.md`) carries a `forward`
+block, omitted for every other message: `{"source_channel_id", "source_message_id",
+"source_timestamp"}`. `source_message_id` is `null` when the original is deleted or
+purged. The block has no author and no channel name, and a deleted forward carries
+none. The forward's `content` and `attachments` are its own snapshot and copies,
+and it cannot be edited.
 
 A group DM can also hold group event rows: `kind` is `group_add`, `group_remove`,
 `group_leave`, `group_rename` or `group_icon`, with a `group_event` block
@@ -1560,10 +1583,11 @@ them against its `klipy.com` CDN allowlist before rendering.
 
 #### Query Parameters
 
-| Param   | Type   | Default    | Range       | Description               |
-| ------- | ------ | ---------- | ----------- | ------------------------- |
-| `q`     | string | (required) | 1-100 chars | Search term               |
-| `limit` | int    | 20         | 1-50        | Maximum results to return |
+| Param   | Type   | Default    | Range       | Description                                                                   |
+| ------- | ------ | ---------- | ----------- | ----------------------------------------------------------------------------- |
+| `q`     | string | (required) | 1-100 chars | Search term                                                                   |
+| `limit` | int    | 20         | 1-50        | Maximum results to return                                                     |
+| `pos`   | string | (none)     | 1-256 chars | Paging cursor from the previous response's `next` (`A-Za-z0-9._:=+/%~-` only) |
 
 #### Response 200 OK
 
@@ -1578,7 +1602,8 @@ them against its `klipy.com` CDN allowlist before rendering.
         "gif": { "url": "https://media.klipy.com/abc123.gif" }
       }
     }
-  ]
+  ],
+  "next": "CAoQ"
 }
 ```
 
@@ -1586,24 +1611,31 @@ Only `id`, `title`, and the two `media_formats` URLs are forwarded. Every other
 field the upstream returns is dropped, so an upstream that echoed the API key
 could not leak it to clients. Results missing either format are omitted.
 
+`next` is the opaque cursor for the following page: send it back as `pos` to
+get it. It is `""` when there is nothing more, and also when the upstream's
+cursor fails the same character rule as `pos` (it is dropped, never relayed).
+A provider that ignores `pos` returns the same page again, so a client pages
+only while a page brings GIFs it has not seen.
+
 #### Errors
 
-| Status | Code            | When                                                           |
-| ------ | --------------- | -------------------------------------------------------------- |
-| 400    | `INVALID_INPUT` | Missing/blank `q`, `q` over 100 chars, or `limit` outside 1-50 |
-| 401    | `UNAUTHORIZED`  | No valid session (checked before the disabled check)           |
-| 429    | `RATE_LIMITED`  | Over 30 requests/minute                                        |
-| 502    | `BAD_GATEWAY`   | Upstream error, timeout, or unparseable response               |
-| 503    | `GIF_DISABLED`  | `gif.api_key` is not configured                                |
+| Status | Code            | When                                                                              |
+| ------ | --------------- | --------------------------------------------------------------------------------- |
+| 400    | `INVALID_INPUT` | Missing/blank `q`, `q` over 100 chars, `limit` outside 1-50, or a malformed `pos` |
+| 401    | `UNAUTHORIZED`  | No valid session (checked before the disabled check)                              |
+| 429    | `RATE_LIMITED`  | Over 30 requests/minute                                                           |
+| 502    | `BAD_GATEWAY`   | Upstream error, timeout, or unparseable response                                  |
+| 503    | `GIF_DISABLED`  | `gif.api_key` is not configured                                                   |
 
 ### GET /api/v1/gif/trending
 
 Same auth, rate limit, response shape, and error codes as
 `/api/v1/gif/search`, minus the `q` parameter.
 
-| Param   | Type | Default | Range | Description               |
-| ------- | ---- | ------- | ----- | ------------------------- |
-| `limit` | int  | 20      | 1-50  | Maximum results to return |
+| Param   | Type   | Default | Range       | Description               |
+| ------- | ------ | ------- | ----------- | ------------------------- |
+| `limit` | int    | 20      | 1-50        | Maximum results to return |
+| `pos`   | string | (none)  | 1-256 chars | Paging cursor, as above   |
 
 ### GET /api/v1/gif/favorites
 
@@ -1805,6 +1837,13 @@ user, `POST /api/v1/dms` accepts it, atomically: trusts the sender, opens the
 conversation and marks the request `accepted`, and sends the caller's other
 devices the `dm_channel_open` and `dm_request` frames `accept` sends.
 
+If either user has blocked the other, or the recipient has turned off direct
+messages from members (`allow_member_dms` in `/users/me/privacy`) and has no
+trust row for the caller (accepted, written to first, or grandfathered), the
+call is refused with `403 FORBIDDEN` and the same body for every cause:
+`you can't message this user`. A recipient who does not exist or whose account
+is not active is `404 NOT_FOUND`.
+
 ---
 
 ### GET /api/v1/dms
@@ -1882,7 +1921,11 @@ to look up.
 
 Blocks are enforced in both directions, per recipient — a user may neither pull
 someone they have blocked into a room with them nor use a group to reach
-someone who has blocked them. The check is creation-time only; see
+someone who has blocked them. A recipient is also refused when they have turned
+off direct messages from members (`allow_member_dms`) and hold no trust row for
+the caller, or when the caller holds a message request to them that they have not
+accepted (pending, ignored or deleted); only the caller's own trust counts. Staff
+are checked like anyone else. The check is creation-time only; see
 `docs/protocol.md` § DM Authorization for why sending into a group is not
 block-checked.
 
@@ -1913,7 +1956,7 @@ The creator is the group's owner (`owner_id`).
 | Status | Code          | Reason                                                                |
 | ------ | ------------- | --------------------------------------------------------------------- |
 | 400    | `BAD_REQUEST` | Fewer than 2 or more than 8 recipients, or a name over 100 characters |
-| 403    | `FORBIDDEN`   | A recipient is blocked by, or has blocked, the caller                 |
+| 403    | `FORBIDDEN`   | A recipient cannot be added to a group by the caller (any cause)      |
 | 403    | `TIMED_OUT`   | The caller is timed out                                               |
 | 404    | `NOT_FOUND`   | A recipient does not exist                                            |
 
@@ -2004,13 +2047,18 @@ A leave is never refused for a timeout and is not rate limited.
 Add people to a group DM. Any member may add, up to 10 members in all. A 1:1 DM
 refuses.
 
-Adding has no trust or message-request gate: groups are outside message requests,
-as at create. The recipient checks are the ones create runs (the same code):
-every user must exist and not be banned (either is "not found"), and none of the
-new people may be blocked by, or have blocked, any other new person or any
-current member. The pairs between people who are already in the group are not
-re-checked. Once added, the group is a shared room and sends are not
-block-checked, as today. Added people see the earlier history.
+The recipient checks are the ones create runs (the same code): every user must
+exist and not be banned (either is "not found"), and none of the new people may
+be blocked by, or have blocked, any other new person or any current member. Each
+new person must also be reachable by the caller: they have not turned off direct
+messages from members without trusting the caller, and the caller holds no
+message request to them that they have not accepted (pending, ignored or
+deleted). Only the caller's trust counts, not that of the members already in the
+group, and staff are checked like anyone else. If one of several new people is
+refused, nobody is added. The pairs between people who are already in the group
+are not re-checked, and a member who later turns direct messages off stays in the
+group, keeps sending and can leave. Once added, the group is a shared room and
+sends are not block-checked. Added people see the earlier history.
 
 **Auth:** Required (member)
 
@@ -2039,9 +2087,9 @@ So on each connection the open arrives before the row, and an added user never
 sees a row for a DM they do not know yet. The cap is counted inside the
 transaction: two adds that together pass 10 cannot both succeed.
 
-The blocked-pair check runs again inside the transaction, so a block or another
-add that lands between the first check and the commit cannot slip a blocked pair
-into the room (403 `FORBIDDEN`).
+The blocked-pair and reachability checks run again inside the transaction, so a
+block, a changed setting or another add that lands between the first check and
+the commit cannot slip a refused person into the room (403 `FORBIDDEN`).
 
 If the change commits but the server cannot then read the summary back, the route
 answers `204 No Content` instead (the change and its events have happened, and the
@@ -2052,14 +2100,14 @@ Limited to 20 group changes per user per minute.
 
 #### Errors
 
-| Status | Code            | Reason                                                                                |
-| ------ | --------------- | ------------------------------------------------------------------------------------- |
-| 400    | `BAD_REQUEST`   | A 1:1 DM, no ids, more than 9 ids, a non-positive id, or every id is already a member |
-| 403    | `FORBIDDEN`     | A blocked pair among the new people and the members                                   |
-| 403    | `TIMED_OUT`     | The caller is timed out                                                               |
-| 404    | `NOT_FOUND`     | The caller is not a member, or a new user does not exist or is banned                 |
-| 409    | `GROUP_DM_FULL` | The group would pass 10 members                                                       |
-| 429    | `RATE_LIMITED`  | More than 20 group changes in a minute                                                |
+| Status | Code            | Reason                                                                                             |
+| ------ | --------------- | -------------------------------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST`   | A 1:1 DM, no ids, more than 9 ids, a non-positive id, or every id is already a member              |
+| 403    | `FORBIDDEN`     | A new person cannot be added by the caller, or a blocked pair among the new people and the members |
+| 403    | `TIMED_OUT`     | The caller is timed out                                                                            |
+| 404    | `NOT_FOUND`     | The caller is not a member, or a new user does not exist or is banned                              |
+| 409    | `GROUP_DM_FULL` | The group would pass 10 members                                                                    |
+| 429    | `RATE_LIMITED`  | More than 20 group changes in a minute                                                             |
 
 ---
 
@@ -2231,6 +2279,14 @@ silence, not a rejection. `block` is not part of this claim: a blocked
 sender's _later_ sends fail with `ErrBlocked` (Codex P2-9) — that denial is
 the existing block gate (`PUT /api/v1/blocks/{userId}`), unchanged by B5-6,
 and it is visible to the sender by design.
+
+A recipient who has direct messages on and message requests off
+(`message_requests: false` in `/users/me/privacy`) gets no request: the first
+message is recorded as already accepted, the conversation opens for them
+(`dm_channel_open`) and the message is delivered, mentioned and pushed as for
+any trusted sender, with no `dm_request` frame. Requests already in the inbox
+stay `pending`, and turning requests back on keeps that pair trusted. With
+direct messages off the send is refused instead (see above).
 
 Transitions are **recipient-only** and legal **only from `pending`**:
 
@@ -5290,6 +5346,18 @@ Partial update — every field is optional and an omitted one is left alone.
 Same body and same errors as `POST`, plus `404 NOT_FOUND` for a missing role.
 Editing a role at or above your own position is `403`.
 
+`expected_permissions` (optional integer) is the permission mask the editor
+loaded. When present and the role's stored mask is different, nothing is
+written and the response is `409` with code `ROLE_CONFLICT`: another admin
+changed the role since it was loaded, so reload it and apply the change again.
+Omit the field to skip the check (the admin panel always sends it). The
+comparison and the write happen under one lock, so two edits that carry the
+same `expected_permissions` cannot both succeed.
+
+| Status | Code            | When                                                       |
+| ------ | --------------- | ---------------------------------------------------------- |
+| 409    | `ROLE_CONFLICT` | `expected_permissions` differs from the role's stored mask |
+
 A permission change additionally invalidates the cached permissions of that
 role's members and re-syncs their channel visibility (the server sends targeted
 `channel_create`/`channel_delete`), because a role's mask is the base every
@@ -5340,8 +5408,8 @@ The full role list after the reorder, position descending.
 
 ## Channel Management (admin)
 
-`POST /admin/api/channels` takes `{name, type, category, topic, position}`;
-`PATCH /admin/api/channels/{id}` takes `{name, topic, category, slow_mode,
+`POST /admin/api/channels` takes `{name, type, category_id, category, topic, position}`;
+`PATCH /admin/api/channels/{id}` takes `{name, topic, category_id, category, slow_mode,
 position, archived, nsfw, voice_max_users, voice_max_video}` and seeds every
 omitted field from the current row, so a partial body is safe.
 
@@ -5375,11 +5443,38 @@ to a synthetic "Voice" group only for voice channels with no category at all.
 (Before phase 5 the server refused any non-voice channel under a category
 literally named "Voice Channels", and any voice channel outside it.)
 
-`PATCH` accepts `category`, so moving a channel between categories is an edit
-rather than a delete-and-recreate. An empty string makes it uncategorized.
+`PATCH` accepts `category_id`, so moving a channel between categories is an edit
+rather than a delete-and-recreate. `0` makes it uncategorized, and an id that
+does not exist is `400 INVALID_INPUT`. The older `category` name string still
+works on create and `PATCH`: it is matched to a category by name ignoring case,
+a name that matches none creates the category, and an empty string means none.
+`category_id` wins when both are sent, and a `PATCH` that names neither leaves
+the category alone.
+
+### Categories (WP 6.5a)
+
+A category is an object with an `id`, a `name` (at most 100 characters, unique
+ignoring case) and a `position`. Five routes manage them, all behind
+`MANAGE_CHANNELS`, mounted under both `/admin/api/channels` and
+`/api/v1/moderation/channels`:
+
+| Route                        | Body           | Result                                                                                                               |
+| ---------------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `GET  .../categories`        | none           | `200` array of `{id, name, position}` by `(position, id)`                                                            |
+| `POST .../categories`        | `{name}`       | `201` the new category, appended last. `409 CATEGORY_NAME_TAKEN` on a duplicate                                      |
+| `PUT  .../categories/order`  | `{ids: [...]}` | `200` the new list. The ids must be exactly the current set: `409 CATEGORY_LIST_STALE` and nothing written otherwise |
+| `PATCH .../categories/{id}`  | `{name}`       | `200` the renamed category. `404` when missing, `409 CATEGORY_NAME_TAKEN` on a duplicate                             |
+| `DELETE .../categories/{id}` | none           | `204`. Its channels are not deleted: they keep their overrides and become uncategorized                              |
+
+Every mutation is audited (`category_create`, `category_rename`,
+`category_reorder`, `category_delete`). A rename, reorder or delete changes the
+`category`, `category_id` and `category_position` of the channels in the
+touched categories, so the server re-broadcasts `channel_update` for each of
+them and then sends `channel_categories` to connected managers (see
+[protocol.md](protocol.md#channel_categories-server---client)).
 
 A name already used by another channel of the same `type` in the same
-`category` is refused with `409 CHANNEL_NAME_TAKEN`, ignoring case: a create,
+category (`category_id`) is refused with `409 CHANNEL_NAME_TAKEN`, ignoring case: a create,
 or a `PATCH` that changes the name or the category. It is a check at write
 time, not a database constraint, so channels that already share a name are
 left as they are, and a `PATCH` that leaves both name and category alone still

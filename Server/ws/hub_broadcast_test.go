@@ -172,12 +172,12 @@ func TestHub_ChannelReadAudience_ExcludesArchivedChannel(t *testing.T) {
 		t.Fatalf("GetChannel: %v", err)
 	}
 	if err := database.AdminUpdateChannel(context.Background(), chID, db.ChannelUpdate{
-		Name:     ch.Name,
-		Topic:    ch.Topic,
-		Category: ch.Category,
-		SlowMode: ch.SlowMode,
-		Position: ch.Position,
-		Archived: true,
+		Name:       ch.Name,
+		Topic:      ch.Topic,
+		CategoryID: ch.CategoryID,
+		SlowMode:   ch.SlowMode,
+		Position:   ch.Position,
+		Archived:   true,
 	}); err != nil {
 		t.Fatalf("AdminUpdateChannel: %v", err)
 	}

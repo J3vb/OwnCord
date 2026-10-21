@@ -34,6 +34,47 @@ function makeOptions(overrides: Partial<DmProfileSidebarOptions> = {}): DmProfil
   };
 }
 
+describe("DmProfileSidebar banner (6.11d)", () => {
+  let container: HTMLDivElement;
+  beforeEach(() => {
+    fetchImageAsObjectUrl.mockReset();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+  afterEach(() => container.remove());
+
+  it("has no strip without a banner, shows a colour strip, and follows update()", () => {
+    const sidebar = createDmProfileSidebar(makeOptions());
+    sidebar.mount(container);
+    expect(container.querySelector('[data-testid="dps-banner"]')).toBeNull();
+
+    sidebar.update(makeUser({ banner_color: "#336699" }));
+    const strip = container.querySelector<HTMLElement>('[data-testid="dps-banner"]')!;
+    expect(strip.style.background).toContain("rgb(51, 102, 153)");
+
+    // A presence-only update does not repaint (and refetch) the strip.
+    sidebar.update(makeUser({ banner_color: "#336699", status: "idle" }));
+    expect(container.querySelector('[data-testid="dps-banner"]')).toBe(strip);
+
+    sidebar.update(makeUser());
+    expect(container.querySelector('[data-testid="dps-banner"]')).toBeNull();
+    sidebar.destroy?.();
+  });
+
+  it("an image banner is fetched through the authenticated path", async () => {
+    fetchImageAsObjectUrl.mockResolvedValue("blob:b");
+    const sidebar = createDmProfileSidebar(
+      makeOptions({ user: makeUser({ banner: "/api/v1/files/3" }) }),
+    );
+    sidebar.mount(container);
+    await vi.waitFor(() =>
+      expect(container.querySelector(".dps-banner img")?.getAttribute("src")).toBe("blob:b"),
+    );
+    expect(fetchImageAsObjectUrl).toHaveBeenCalledWith("https://server.test/api/v1/files/3");
+    sidebar.destroy?.();
+  });
+});
+
 describe("DmProfileSidebar", () => {
   let container: HTMLDivElement;
 
@@ -604,6 +645,30 @@ describe("DmProfileSidebar", () => {
       confirm.remove();
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
       expect(onClose).toHaveBeenCalledOnce();
+      sidebar.destroy?.();
+    });
+  });
+
+  describe("server-synced note (6.11c)", () => {
+    it("server note shown when capable", async () => {
+      localStorage.clear();
+      const getUserNote = vi.fn(() => Promise.resolve({ user_id: 7, note: "from the server" }));
+      const putUserNote = vi.fn();
+      const sidebar = createDmProfileSidebar(
+        makeOptions({
+          user: makeUser({ id: 7 }),
+          host: "a.example.com",
+          notes: {
+            api: { getUserNote, putUserNote } as never,
+            host: "a.example.com",
+            sessionSignal: new AbortController().signal,
+          },
+        }),
+      );
+      sidebar.mount(container);
+      const noteEl = container.querySelector('[data-testid="dps-note"]') as HTMLTextAreaElement;
+      await vi.waitFor(() => expect(noteEl.value).toBe("from the server"));
+      expect(getUserNote).toHaveBeenCalledWith(7, expect.any(AbortSignal));
       sidebar.destroy?.();
     });
   });

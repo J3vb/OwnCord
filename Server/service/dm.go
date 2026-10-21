@@ -117,7 +117,8 @@ func dmReachableUser(u *db.User) bool {
 }
 
 // CreateDM creates or retrieves a DM channel between two users.
-// Validates that neither user has blocked the other.
+// Validates that neither user has blocked the other and that the recipient
+// accepts direct messages from the caller.
 func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*CreateDMResult, error) {
 	ctx, done := traceCall(ctx, "service/dm", "DMService.CreateDM",
 		telemetry.Int64("user_id", userID),
@@ -147,7 +148,18 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 		return nil, fmt.Errorf("%w: failed to check block status: %w", ErrInternal, err)
 	}
 	if blocked {
-		return nil, fmt.Errorf("%w: cannot create DM — user is blocked", ErrForbidden)
+		return nil, fmt.Errorf("%w: %s", ErrForbidden, dmUnreachableText)
+	}
+	// The recipient may have turned off direct messages from members. A
+	// trusted sender (accepted, sent_first, grandfathered) still reaches them,
+	// which includes a recipient opening a DM they were first written to in.
+	// Same refusal as a block, so the two causes read alike.
+	refused, err := storeDMReader{s.st}.DMRefusesSender(ctx, recipientID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to check DM privacy: %w", ErrInternal, err)
+	}
+	if refused {
+		return nil, fmt.Errorf("%w: %s", ErrForbidden, dmUnreachableText)
 	}
 
 	// A new channel can notify the recipient (dm_channel_open), which a
@@ -296,11 +308,15 @@ type CreateGroupDMResult struct {
 //
 // Blocks are enforced in both directions, per recipient: a user cannot pull
 // someone they have blocked into a room with them, and cannot use a group to
-// reach someone who blocked them. The check is deliberately *creation-time
-// only* — once the group exists, sending into it is not block-checked, because
-// a group DM is a shared room and silently dropping one member's messages for
-// one other member would make the conversation lie to everybody in it. That is
-// also why the composer gate on the client applies to 1:1 DMs alone.
+// reach someone who blocked them. A recipient who has turned off direct
+// messages from members and does not trust the caller, or whom the caller
+// holds an unaccepted message request to, is refused the same way. The check
+// is deliberately *creation-time only* — once the group exists, sending into
+// it is not block-checked, because a group DM is a shared room and silently
+// dropping one member's messages for one other member would make the
+// conversation lie to everybody in it. That is also why the composer gate on
+// the client applies to 1:1 DMs alone, and why a member who later turns DMs
+// off stays in the group.
 //
 // Unlike CreateDM this always creates a new channel: the same set of people may
 // want more than one group, so there is no "the group for these users" to find.
@@ -334,16 +350,19 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 	}
 
 	// The same checks an add runs, so the two cannot drift: recipients are
-	// dmReachableUser, and no pair in the room is blocked. Group DMs are
-	// exempt from the send-time block gate (RequireDMNotBlocked skips groups
-	// entirely) on the strength of this check, so two mutually-blocked
+	// dmReachableUser, no pair in the room is blocked, and each recipient is
+	// reachable by the creator. The send-time gate (RequireDMReachable) skips
+	// groups entirely, so this check is the only one: two mutually-blocked
 	// recipients must not both end up in the same group even when neither of
 	// them blocked the creator.
-	if _, err = s.validateGroupRecipients(ctx, unique, []int64{userID}); err != nil {
+	if _, err = s.validateGroupRecipients(ctx, userID, unique, []int64{userID}); err != nil {
 		return nil, err
 	}
 	participantIDs := append([]int64{userID}, unique...)
 	ch, err := s.st.CreateGroupDMChannel(ctx, cleanName, userID, participantIDs)
+	if errors.Is(err, db.ErrGroupDMBlockedPair) {
+		return nil, mapGroupDBError("failed to create group DM", err)
+	}
 	if err != nil {
 		slog.Error("DMService.CreateGroupDM", "err", err)
 		return nil, fmt.Errorf("%w: failed to create group DM", ErrInternal)
@@ -473,7 +492,7 @@ func (s *DMService) DMSummaryFor(ctx context.Context, viewerID, channelID int64)
 
 // SharedOneToOneDM returns the id of the 1:1 DM channel the two users share,
 // or ok=false when they have none. Group DMs never match, mirroring the
-// block-enforcement boundary (RequireDMNotBlocked exempts groups).
+// block-enforcement boundary (RequireDMReachable exempts groups).
 func (s *DMService) SharedOneToOneDM(ctx context.Context, userA, userB int64) (int64, bool, error) {
 	id, ok, err := s.st.FindDMChannelIDBetween(ctx, userA, userB)
 	if err != nil {
@@ -514,9 +533,9 @@ func (s *DMService) callTargets(ctx context.Context, userID, channelID int64, ri
 	}
 	// A ring is a DM interaction like any other sink: without this check a
 	// blocked user could still make the blocker's client ring (A-2026-08-03).
-	// Group DMs are exempt inside RequireDMNotBlocked, matching every other
+	// Group DMs are exempt inside RequireDMReachable, matching every other
 	// sink — blocks are enforced at group creation instead.
-	if err := RequireDMNotBlocked(ctx, s.st, userID, channelID); err != nil {
+	if err := RequireDMReachable(ctx, storeDMReader{s.st}, userID, channelID); err != nil {
 		return nil, err
 	}
 	if ring {

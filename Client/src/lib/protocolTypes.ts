@@ -21,6 +21,7 @@ export const ServerMessageType = {
   READY: "ready",
   CHAT_MESSAGE: "chat_message",
   CHAT_SEND_OK: "chat_send_ok",
+  CHAT_FORWARD_OK: "chat_forward_ok",
   CHAT_EDITED: "chat_edited",
   CHAT_DELETED: "chat_deleted",
   CHAT_PINNED: "chat_pinned", // a message was pinned or unpinned in a channel the recipient can read
@@ -49,6 +50,7 @@ export const ServerMessageType = {
   MOD_QUEUE: "mod_queue", // B5-8: a report queue change, to connected MODERATE_MEMBERS/Administrator holders only
   MOD_ACTION: "mod_action", // B5-9: a warning or timeout applied to the live target, targeted and unsequenced -- not replayed
   MEMBER_TIMEOUTS: "member_timeouts", // WP 3C-7c: the active-timeout list, to connected MODERATE_MEMBERS/Administrator holders (everyone) and each timed-out member (own entry only); targeted, unsequenced, never replayed -- replaces the viewer's list wholesale
+  CHANNEL_CATEGORIES: "channel_categories", // WP 6.5a: the full channel category list {categories:[{id,name,position}]}, sent per connected client only to MANAGE_CHANNELS/Administrator holders after any category mutation (permission evaluated at send time); targeted, unsequenced, never replayed -- replaces the manager's list wholesale. Everyone else derives groups from the category fields on the channels they can see
   APPEAL_STATUS: "appeal_status", // B5-10: an appeal's state changed, to the appellant only, targeted and unsequenced -- not replayed
   MENTION_COUNT: "mention_count", // DP-27: this user's read_states.mention_count changed in a channel; targeted and unsequenced -- the live taskbar/tray badge signal
   READ_STATE: "read_state", // WP 3D-5c: the caller's read pointer moved in a channel (after every accepted mark_read and mark_unread); targeted to the caller and unsequenced -- not replayed
@@ -60,6 +62,7 @@ export const ServerMessageType = {
   DM_REQUEST: "dm_request",
   CALL_INCOMING: "call_incoming",
   CALL_DECLINED: "call_declined",
+  VOICE_WATCHING: "voice_watching",
   VOICE_E2EE_ANNOUNCE: "voice_e2ee_announce", // broadcast (same string as client msg)
   VOICE_E2EE_OFFER: "voice_e2ee_offer", // relay (same string as client msg)
   COMMAND_REPLY: "command_reply", // ephemeral plugin reply, sent only to the invoking client
@@ -76,6 +79,7 @@ export type ServerMessageTypeValue = (typeof ServerMessageType)[keyof typeof Ser
 export const ClientMessageType = {
   AUTH: "auth",
   CHAT_SEND: "chat_send",
+  CHAT_FORWARD: "chat_forward", // forward one message to one target channel or DM (WP 6.9a)
   CHAT_EDIT: "chat_edit",
   CHAT_DELETE: "chat_delete",
   REACTION_ADD: "reaction_add",
@@ -99,6 +103,7 @@ export const ClientMessageType = {
   VOICE_TOKEN_REFRESH: "voice_token_refresh",
   VOICE_E2EE_ANNOUNCE: "voice_e2ee_announce",
   VOICE_E2EE_OFFER: "voice_e2ee_offer",
+  VOICE_WATCH: "voice_watch",
   CALL_RING: "call_ring",
   CALL_DECLINE: "call_decline",
   CHAT_COMMAND: "chat_command", // plugin slash-command dispatch (Phase C)

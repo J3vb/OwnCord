@@ -1672,11 +1672,19 @@ CREATE TABLE IF NOT EXISTS recovery_assists (
     expires_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS channel_categories (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT    NOT NULL,
+    position   INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_categories_name ON channel_categories(name COLLATE NOCASE);
+
 CREATE TABLE IF NOT EXISTS channels (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     name             TEXT    NOT NULL,
     type             TEXT    NOT NULL DEFAULT 'text',
-    category         TEXT,
+    category_id INTEGER REFERENCES channel_categories(id) ON DELETE SET NULL,
     topic            TEXT,
     position         INTEGER NOT NULL DEFAULT 0,
     slow_mode        INTEGER NOT NULL DEFAULT 0,
@@ -1805,6 +1813,14 @@ CREATE TABLE IF NOT EXISTS trusted_senders (
     PRIMARY KEY (recipient_id, sender_id)
 );
 
+-- Per-user DM privacy (migration 070, WP 6.8b).
+CREATE TABLE IF NOT EXISTS user_privacy (
+    user_id           INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    allow_member_dms  INTEGER NOT NULL DEFAULT 1 CHECK (allow_member_dms IN (0, 1)),
+    message_requests  INTEGER NOT NULL DEFAULT 1 CHECK (message_requests IN (0, 1)),
+    updated_at        TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
 CREATE TABLE IF NOT EXISTS message_requests (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     sender_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1857,7 +1873,7 @@ CREATE TABLE IF NOT EXISTS attachments (
     width       INTEGER,
     height      INTEGER
 );
-`), mustMigration("057_member_generation.sql"), mustMigration("061_member_generation_about.sql"), mustMigration("062_custom_status_expiry.sql"), mustMigration("063_mention_receipts.sql"), mustMigration("064_call_log.sql"), mustMigration("065_group_dm_owner.sql"), mustMigration("066_group_dm_icon.sql"), mustMigration("069_profile_notes_banners.sql")))
+`), mustMigration("057_member_generation.sql"), mustMigration("061_member_generation_about.sql"), mustMigration("062_custom_status_expiry.sql"), mustMigration("063_mention_receipts.sql"), mustMigration("064_call_log.sql"), mustMigration("065_group_dm_owner.sql"), mustMigration("066_group_dm_icon.sql"), mustMigration("069_profile_notes_banners.sql"), mustMigration("071_message_forwards.sql")))
 
 // mustMigration returns a shipped migration file's SQL.
 func mustMigration(name string) []byte {

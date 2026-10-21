@@ -125,6 +125,36 @@ describe("group_event (WP 3B-11a)", () => {
     });
   });
 
+  it("carries the forward block from a live message and from history", () => {
+    const forward = { source_channel_id: 5, source_message_id: null, source_timestamp: "t" };
+    const live = chatPayloadToMessage({
+      id: 1,
+      channel_id: 3,
+      user,
+      content: "hi",
+      reply_to: null,
+      attachments: [],
+      timestamp: "2026-03-15T10:00:00Z",
+      forward,
+    });
+    expect(live.forward).toEqual(forward);
+    const history = messageResponseToMessage({
+      id: 1,
+      channel_id: 3,
+      user,
+      content: "hi",
+      reply_to: null,
+      attachments: [],
+      reactions: [],
+      pinned: false,
+      edited_at: null,
+      deleted: false,
+      timestamp: "2026-03-15T10:00:00Z",
+      forward,
+    });
+    expect(history.forward).toEqual(forward);
+  });
+
   it("leaves an ordinary message without the field", () => {
     const m = chatPayloadToMessage({
       id: 1,

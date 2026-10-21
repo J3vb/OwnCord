@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -25,7 +26,7 @@ func newRolesHandler(t *testing.T, database *db.DB) (http.Handler, *mockHub, *mo
 	hub := &mockHub{}
 	inv := &mockPermInvalidator{}
 	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv,
-		newTestServices(database))
+		newTestServicesFor(database, hub, inv))
 	return handler, hub, inv, createAdminUser(t, database)
 }
 
@@ -89,16 +90,14 @@ func TestAdminAPI_CreateRole_OK(t *testing.T) {
 	if role.Color == nil || *role.Color != "#12AB34" {
 		t.Errorf("color = %v, want #12AB34", role.Color)
 	}
-	// Every mutation ships the new list to connected clients.
-	if len(hub.rolesUpdates) != 1 {
-		t.Fatalf("BroadcastRolesUpdate called %d times, want 1", len(hub.rolesUpdates))
-	}
-	if len(hub.rolesUpdates[0]) != 4 {
-		t.Errorf("broadcast carried %d roles, want the full list of 4", len(hub.rolesUpdates[0]))
+	// Every mutation ships the new list to connected clients: one enqueue
+	// asking for a roles_update, which the hub's worker re-reads at send time.
+	if len(hub.roleRefreshes) != 1 || hub.rolesEnqueues() != 1 {
+		t.Fatalf("role refresh enqueues = %+v, want exactly one asking for roles_update", hub.roleRefreshes)
 	}
 	// A new role has no members, so nothing changed visibility.
-	if hub.allVisibilityRefreshes != 0 {
-		t.Errorf("RefreshAllChannelVisibility called %d times on create, want 0", hub.allVisibilityRefreshes)
+	if hub.visibilityEnqueues() != 0 || len(hub.memberUpdateIDs()) != 0 {
+		t.Errorf("create enqueued a visibility refresh or member_update: %+v", hub.roleRefreshes)
 	}
 }
 
@@ -232,11 +231,14 @@ func TestAdminAPI_PatchRole_PermissionChangeInvalidatesAndResyncs(t *testing.T) 
 		t.Errorf("InvalidateUser calls = %v, want the single role member", inv.invalidateUserIDs)
 	}
 	// … and every channel's audience is recomputed, because READ_MESSAGES moved.
-	if hub.allVisibilityRefreshes != 1 {
-		t.Errorf("RefreshAllChannelVisibility called %d times, want 1", hub.allVisibilityRefreshes)
+	if hub.visibilityEnqueues() != 1 {
+		t.Errorf("visibility refresh enqueues = %d, want 1", hub.visibilityEnqueues())
 	}
-	if len(hub.rolesUpdates) != 1 {
-		t.Errorf("roles_update broadcasts = %d, want 1", len(hub.rolesUpdates))
+	if got := hub.roleRefreshes[0].Visibility; !slices.Equal(got, inv.invalidateUserIDs) {
+		t.Errorf("refreshed users = %v, want the invalidated role members %v", got, inv.invalidateUserIDs)
+	}
+	if hub.rolesEnqueues() != 1 {
+		t.Errorf("roles_update enqueues = %d, want 1", hub.rolesEnqueues())
 	}
 }
 
@@ -252,16 +254,16 @@ func TestAdminAPI_PatchRole_RenameOnlySkipsResync(t *testing.T) {
 	if decodeRole(t, w.Body.Bytes()).Name != "Regulars" {
 		t.Errorf("name not applied: %s", w.Body.String())
 	}
-	if hub.allVisibilityRefreshes != 0 {
-		t.Errorf("RefreshAllChannelVisibility called %d times for a rename, want 0", hub.allVisibilityRefreshes)
+	if hub.visibilityEnqueues() != 0 {
+		t.Errorf("visibility refresh enqueues = %d for a rename, want 0", hub.visibilityEnqueues())
 	}
 	// The cached snapshot holds the role row (name, colour, position), so even a
 	// rename drops the members' entries or GetRoleForUser would serve the old one.
 	if len(inv.invalidateUserIDs) != 1 {
 		t.Errorf("InvalidateUser calls = %v for a rename, want the single role member", inv.invalidateUserIDs)
 	}
-	if len(hub.rolesUpdates) != 1 {
-		t.Errorf("roles_update broadcasts = %d, want 1 — the name is in the client's role list", len(hub.rolesUpdates))
+	if hub.rolesEnqueues() != 1 {
+		t.Errorf("roles_update enqueues = %d, want 1 — the name is in the client's role list", hub.rolesEnqueues())
 	}
 }
 
@@ -321,7 +323,7 @@ func TestAdminAPI_DeleteRole_ReassignsAndBroadcasts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	hub.rolesUpdates = nil
+	hub.roleRefreshes = nil
 
 	w = doRequest(t, handler, http.MethodDelete, "/roles/"+itoa(created.ID), token, nil)
 	if w.Code != http.StatusNoContent {
@@ -338,17 +340,17 @@ func TestAdminAPI_DeleteRole_ReassignsAndBroadcasts(t *testing.T) {
 	if len(inv.invalidateUserIDs) == 0 {
 		t.Error("reassigned member's cached permissions were not invalidated")
 	}
-	if len(hub.memberUpdates) != 1 || hub.memberUpdates[0].userID != uid {
-		t.Errorf("member_update broadcasts = %+v, want one for the reassigned member", hub.memberUpdates)
+	// One enqueue carries the whole fan-out; the worker reads the fallback
+	// role's name when it sends, so the request names only the users.
+	if len(hub.roleRefreshes) != 1 {
+		t.Fatalf("role refresh enqueues = %+v, want exactly one", hub.roleRefreshes)
 	}
-	if hub.memberUpdates[0].roleName != "Member" {
-		t.Errorf("member_update role = %q, want the default role's name", hub.memberUpdates[0].roleName)
+	got := hub.roleRefreshes[0]
+	if !slices.Equal(got.MemberUpdate, []int64{uid}) || !slices.Equal(got.Visibility, []int64{uid}) {
+		t.Errorf("enqueue = %+v, want member_update and visibility for just the reassigned member %d", got, uid)
 	}
-	if hub.allVisibilityRefreshes != 1 {
-		t.Errorf("RefreshAllChannelVisibility called %d times, want 1", hub.allVisibilityRefreshes)
-	}
-	if len(hub.rolesUpdates) != 1 {
-		t.Errorf("roles_update broadcasts = %d, want 1", len(hub.rolesUpdates))
+	if !got.Roles || got.AllConnected {
+		t.Errorf("enqueue = %+v, want roles_update and no all-connected sweep", got)
 	}
 }
 
@@ -404,39 +406,12 @@ func TestAdminAPI_ReorderRoles_NormalizesAndBroadcasts(t *testing.T) {
 	if inv.invalidateAllN == 0 {
 		t.Error("InvalidateAll was not called after a reorder")
 	}
-	if len(hub.rolesUpdates) != 1 {
-		t.Errorf("roles_update broadcasts = %d, want 1", len(hub.rolesUpdates))
+	if hub.rolesEnqueues() != 1 {
+		t.Errorf("roles_update enqueues = %d, want 1", hub.rolesEnqueues())
 	}
 	// "reorder" must not be parsed as a role id by the {id} route.
-	if hub.allVisibilityRefreshes != 0 {
-		t.Errorf("RefreshAllChannelVisibility called %d times for a reorder, want 0", hub.allVisibilityRefreshes)
-	}
-}
-
-// ─── broadcast fan-out must survive request cancellation ────────────────────
-
-// TestBroadcastRoles_SurvivesCanceledRequestContext pins OC-0170:
-// broadcastRoles re-reads the role list with r.Context() AFTER the mutation
-// (create/update/delete/reorder) has already committed. If the admin's
-// request is aborted (tab closed, deadline fired) in that window, the re-read
-// must not ride the same now-canceled context, or the roles_update broadcast
-// is silently skipped and every connected client keeps the stale role list.
-// This mirrors OC-0139's fix for broadcastEmojiSet in api/emoji_handler.go
-// and the analogous fix for broadcastDMOpen in api/dm_handler.go.
-func TestBroadcastRoles_SurvivesCanceledRequestContext(t *testing.T) {
-	database := openAdminTestDB(t)
-	hub := &mockHub{}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // the request was already aborted by the time the commit lands
-
-	admin.BroadcastRolesForTest(ctx, newTestRoleService(database), hub)
-
-	if len(hub.rolesUpdates) != 1 {
-		t.Fatalf("roles_update broadcasts = %d, want 1 (fan-out must survive a canceled request context)", len(hub.rolesUpdates))
-	}
-	if len(hub.rolesUpdates[0]) != 3 {
-		t.Errorf("broadcast carried %d roles, want the seeded 3", len(hub.rolesUpdates[0]))
+	if hub.visibilityEnqueues() != 0 {
+		t.Errorf("visibility refresh enqueues = %d for a reorder, want 0", hub.visibilityEnqueues())
 	}
 }
 
@@ -450,7 +425,49 @@ func TestAdminAPI_ReorderRoles_PartialListRefused(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400; body: %s", w.Code, w.Body.String())
 	}
-	if len(hub.rolesUpdates) != 0 {
+	if len(hub.roleRefreshes) != 0 {
 		t.Error("a refused reorder must not broadcast")
+	}
+}
+
+func TestAdminAPI_PatchRole_StaleExpectedPermissionsIs409(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler, hub, inv, token := newRolesHandler(t, database)
+	createUserWithRole(t, database, "member1", 3)
+
+	// Role 3's stored mask is not 1, so an editor that loaded 1 is stale.
+	w := doRequest(t, handler, http.MethodPatch, "/roles/3", token, map[string]any{
+		"permissions":          permissions.ReadMessages,
+		"expected_permissions": 1,
+	})
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"ROLE_CONFLICT"`) {
+		t.Errorf("body = %s, want code ROLE_CONFLICT", w.Body.String())
+	}
+	if len(inv.invalidateUserIDs) != 0 || hub.rolesEnqueues() != 0 {
+		t.Errorf("a refused edit must have no side effects: invalidations=%v roles enqueues=%d",
+			inv.invalidateUserIDs, hub.rolesEnqueues())
+	}
+
+	// The current mask goes through.
+	var stored db.Role
+	rw := doRequest(t, handler, http.MethodGet, "/roles", token, nil)
+	var list []db.Role
+	if err := json.Unmarshal(rw.Body.Bytes(), &list); err != nil {
+		t.Fatalf("unmarshal roles: %v", err)
+	}
+	for _, r := range list {
+		if r.ID == 3 {
+			stored = r
+		}
+	}
+	w = doRequest(t, handler, http.MethodPatch, "/roles/3", token, map[string]any{
+		"permissions":          permissions.ReadMessages,
+		"expected_permissions": stored.Permissions,
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("matching: status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
 }

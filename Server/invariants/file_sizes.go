@@ -132,7 +132,7 @@ var FileSizeOverrides = map[string]FileSizeOverride{
 		Note:    "client command dispatch",
 	},
 	"service/message_crud.go": {
-		Ceiling: 700,
+		Ceiling: 640,
 		Class:   classGrandfathered,
 		Note:    "message create, edit and delete",
 	},

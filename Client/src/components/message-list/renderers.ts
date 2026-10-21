@@ -10,6 +10,7 @@ import { createIcon } from "@lib/icons";
 import { isPinRowKind, isServerRowKind } from "@lib/messageKind";
 import { groupRowIcon, groupRowText } from "./groupRows";
 import { renderPinRowText } from "./pinRows";
+import { endForwardBlock, startForwardBlock } from "./forwardBlock";
 import { connectionLockReason, messageActionGates } from "./message-actions";
 import { QUICK_REACTIONS, emojiNode, quickReactionEmojiForPass } from "./quick-reactions";
 import { messagesStore, type Message } from "@stores/messages.store";
@@ -665,15 +666,17 @@ export function renderMessage(
     // a unique identity — those parse uncached.
     const cacheKey = msg.id === 0 ? undefined : `${msg.id}\u0000${msg.editedAt ?? ""}`;
     const body = renderMessageContent(msg.content, mentionInfo, cacheKey);
+    // A forward's text, files and embeds sit inside its "Forwarded" frame (WP 6.9a).
+    const box = msg.forward === undefined ? el : startForwardBlock();
     if (msg.status === "uploading" && msg.correlationId !== null) {
       // A queued row's Cancel describes itself by this text (3A-9).
       const wrap = createElement("div", { id: `msg-body-${msg.correlationId}` });
       wrap.style.display = "contents";
       wrap.appendChild(body);
-      el.appendChild(wrap);
-    } else el.appendChild(body);
+      box.appendChild(wrap);
+    } else box.appendChild(body);
     if (msg.editedAt !== null) {
-      el.appendChild(
+      box.appendChild(
         createElement(
           "span",
           { class: "msg-edited", title: fullDateTimeTitle(msg.editedAt) },
@@ -682,12 +685,16 @@ export function renderMessage(
       );
     }
 
-    appendAttachments(el, msg);
+    appendAttachments(box, msg);
 
     // URL embeds (YouTube players, link previews)
     const embeds = renderUrlEmbeds(msg.content);
     if (embeds.childNodes.length > 0) {
-      el.appendChild(embeds);
+      box.appendChild(embeds);
+    }
+    if (msg.forward !== undefined) {
+      endForwardBlock(box, msg.forward);
+      el.appendChild(box);
     }
 
     if (msg.reactions.length > 0) {

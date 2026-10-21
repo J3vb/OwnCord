@@ -13,6 +13,7 @@ import {
 import { addDmToChannelsStore, clearDmUnread, dmStore, dmDisplayName } from "@stores/dm.store";
 import { isCategoryCollapsed, setActiveDmUser, uiStore } from "@stores/ui.store";
 import { isChannelMuted } from "./channel-mutes";
+import { visibleCategories } from "./permissions";
 import { hiddenByMute } from "./hide-muted-channels";
 import { hasUnread } from "./read-state";
 
@@ -121,7 +122,7 @@ function navigableChannelIds(unreadOnly: boolean): number[] {
   const ids: number[] = [];
   // The active channel always stays in, so a step starts from where you are.
   const active = channelsStore.getState().activeChannelId;
-  for (const [category, channels] of getChannelsByCategory()) {
+  for (const [category, channels] of getChannelsByCategory(visibleCategories())) {
     if (!unreadOnly && category !== null && isCategoryCollapsed(category)) continue;
     for (const ch of channels) {
       if (ch.type === "voice" || hiddenByMute(ch, active)) continue;

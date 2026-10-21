@@ -198,6 +198,33 @@ export function collapseCategories(categories: readonly string[]): void {
   });
 }
 
+/**
+ * Translate collapsed entries saved under a category NAME (before WP 6.5b) to
+ * the category's id key, once the channel list says which name is which id, and
+ * rewrite the saved list. `keysByName` maps a category name to its group key.
+ * An entry that matches no known name stays untouched (the synthetic Voice
+ * group's key, or a category not loaded yet), and a set with nothing to
+ * translate is left as it is without a write. After this the collapsed state
+ * survives a rename, because the id does not change with it.
+ */
+export function migrateCollapsedCategoryNames(keysByName: ReadonlyMap<string, string>): void {
+  const current = uiStore.getState().collapsedCategories;
+  let changed = false;
+  const next = new Set<string>();
+  for (const entry of current) {
+    const key = keysByName.get(entry);
+    if (key !== undefined && key !== entry) {
+      next.add(key);
+      changed = true;
+    } else {
+      next.add(entry);
+    }
+  }
+  if (!changed) return;
+  saveCollapsedCategories(next);
+  uiStore.setState((prev) => ({ ...prev, collapsedCategories: next }));
+}
+
 /** Selector: check if a category is collapsed. */
 export function isCategoryCollapsed(category: string): boolean {
   return uiStore.select((s) => s.collapsedCategories.has(category));

@@ -78,6 +78,14 @@ type Channel struct {
 	DmOwnerID       *int64  `json:"dmOwnerId"`
 	DmIcon          *string `json:"dmIcon"`
 	Afk             int64   `json:"afk"`
+	CategoryID      *int64  `json:"categoryId"`
+}
+
+type ChannelCategory struct {
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	Position  int64  `json:"position"`
+	CreatedAt string `json:"createdAt"`
 }
 
 type ChannelOverride struct {
@@ -227,6 +235,13 @@ type MessageDeliveryReceipt struct {
 	MessageID       int64  `json:"messageId"`
 	Timestamp       string `json:"timestamp"`
 	ExpiresAtMs     int64  `json:"expiresAtMs"`
+}
+
+type MessageForward struct {
+	MessageID       int64  `json:"messageId"`
+	SourceMessageID *int64 `json:"sourceMessageId"`
+	SourceChannelID int64  `json:"sourceChannelId"`
+	SourceTimestamp string `json:"sourceTimestamp"`
 }
 
 type MessageGroupEvent struct {
@@ -511,6 +526,13 @@ type UserNote struct {
 	TargetID  int64  `json:"targetId"`
 	Note      string `json:"note"`
 	UpdatedAt string `json:"updatedAt"`
+}
+
+type UserPrivacy struct {
+	UserID          int64  `json:"userId"`
+	AllowMemberDms  int64  `json:"allowMemberDms"`
+	MessageRequests int64  `json:"messageRequests"`
+	UpdatedAt       string `json:"updatedAt"`
 }
 
 type UserRole struct {

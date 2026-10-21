@@ -24,6 +24,7 @@ import { USER_LOCAL_MUTE_CHANGED } from "@lib/constants";
 import { loadPref, savePref } from "@lib/preferences";
 import type { MountableComponent } from "@lib/safe-render";
 import { voiceText } from "../i18n/voice";
+import { viewersLabel } from "./video-grid/viewers";
 import type { StreamInfo } from "./video-grid/stream-info";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import type { StreamSample, VideoView } from "../features/voice/remoteTracks";
@@ -190,6 +191,11 @@ export interface VideoGridComponent extends MountableComponent {
   /** Mute/deafen state by userId, shown as a badge on the camera and avatar
    *  tiles (the UX spec's roster parity for tiles; not on screen-share tiles). */
   setUserAudioState(state: ReadonlyMap<number, { muted: boolean; deafened: boolean }>): void;
+  /** Display names of the other members watching each sharer's screen share
+   *  (by the sharer's user id): an eye and the count on that share's tile,
+   *  with the names on hover. You are added on a remote share you are
+   *  playing here. */
+  setStreamViewers(viewers: ReadonlyMap<number, readonly string[]>): void;
   setCallbacks(callbacks: VideoGridCallbacks): void;
   /** Your call state, for the call controls. */
   setCallState(state: CallState): void;
@@ -521,6 +527,7 @@ export function createVideoGrid(): VideoGridComponent {
   let callbacks: VideoGridCallbacks = {};
   let speaking: ReadonlySet<number> = new Set();
   let userAudioState: ReadonlyMap<number, { muted: boolean; deafened: boolean }> = new Map();
+  let streamViewers: ReadonlyMap<number, readonly string[]> = new Map();
   /** The tile in HTML full screen, or in the theatre fallback. */
   let fullscreenTile: number | null = null;
   let theatreTile: number | null = null;
@@ -1593,6 +1600,7 @@ export function createVideoGrid(): VideoGridComponent {
     }
     if (!stopped) entry.lost = false;
     cell.classList.toggle("video-cell--stopped", stopped);
+    applyStreamViewers();
     syncViews();
     entry.video.hidden = stopped;
     cell.querySelector(".video-stopped")?.remove();
@@ -1829,6 +1837,21 @@ export function createVideoGrid(): VideoGridComponent {
     if (config?.isScreenshare === true) {
       label.appendChild(createElement("span", { class: "video-live" }, voiceText("tile.live")));
     }
+    // Who is watching this screen share: an eye and the count, top-right,
+    // hidden at zero (applyStreamViewers draws it).
+    const viewers =
+      config?.isScreenshare === true
+        ? createElement("span", {
+            class: "video-viewers",
+            role: "img",
+            "data-testid": "tile-viewers",
+          })
+        : null;
+    if (viewers !== null) {
+      viewers.hidden = true;
+      viewers.appendChild(createIcon("eye", 14));
+      viewers.appendChild(createElement("span", { class: "video-viewers__count" }));
+    }
     if (config !== undefined && !config.isSelf && config.isScreenshare) {
       // Filled by the stats poll while you watch this screen share.
       const chip = createElement("button", {
@@ -1862,6 +1885,7 @@ export function createVideoGrid(): VideoGridComponent {
     appendChildren(nav, back, pip, fullscreen);
 
     appendChildren(cell, video, select, label, nav);
+    if (viewers !== null) cell.appendChild(viewers);
     // A click anywhere on a filmstrip thumb (not on one of its controls)
     // swaps it into focus, as the tile button does.
     cell.addEventListener("click", (e) => {
@@ -1941,6 +1965,7 @@ export function createVideoGrid(): VideoGridComponent {
     root.appendChild(cell);
     applySpeaking();
     applyUserAudioState();
+    applyStreamViewers();
     syncTileNav();
     relayout();
     syncViews();
@@ -2266,6 +2291,34 @@ export function createVideoGrid(): VideoGridComponent {
     applyUserAudioState();
   }
 
+  /** Draw each screen-share tile's viewer badge: the other members watching
+   *  it, and you while a remote share plays here. Hidden at zero. */
+  function applyStreamViewers(): void {
+    for (const entry of cells.values()) {
+      const config = entry.config;
+      if (config?.isScreenshare !== true) continue;
+      const badge = entry.el.querySelector<HTMLElement>(".video-viewers");
+      if (badge === null) continue;
+      const names = [...(streamViewers.get(config.audioUserId) ?? [])];
+      if (!config.isSelf && !entry.el.classList.contains("video-cell--stopped")) {
+        names.unshift(voiceText("tile.viewersYou"));
+      }
+      badge.hidden = names.length === 0;
+      entry.el.classList.toggle("video-cell--has-viewers", names.length > 0);
+      if (names.length === 0) continue;
+      const label = viewersLabel(names);
+      badge.title = label;
+      badge.setAttribute("aria-label", label);
+      const count = badge.querySelector(".video-viewers__count");
+      if (count !== null) setText(count, String(names.length));
+    }
+  }
+
+  function setStreamViewers(viewers: ReadonlyMap<number, readonly string[]>): void {
+    streamViewers = viewers;
+    applyStreamViewers();
+  }
+
   function mount(container: Element): void {
     loadViewPrefs();
     root = createElement("div", {
@@ -2379,6 +2432,7 @@ export function createVideoGrid(): VideoGridComponent {
     setPeople,
     setSpeaking,
     setUserAudioState,
+    setStreamViewers,
     setCallbacks(next: VideoGridCallbacks): void {
       callbacks = next;
       if (callView) {

@@ -45,6 +45,7 @@
         "frame": {
           "payload": {
             "capabilities": {
+              "dm_privacy": true,
               "message_deduplication": true,
               "message_retry_floor_ms": 0,
               "message_retry_window_seconds": 86400,
@@ -61,6 +62,8 @@
                 "can_react": true,
                 "can_send": true,
                 "category": "",
+                "category_id": "<id:number>",
+                "category_position": 0,
                 "id": "<id:number>",
                 "last_message_id": "<id:number>",
                 "last_read_message_id": "<id:number>",
@@ -85,6 +88,8 @@
                 "can_react": true,
                 "can_send": true,
                 "category": "",
+                "category_id": "<id:number>",
+                "category_position": 0,
                 "id": "<id:number>",
                 "last_message_id": "<id:number>",
                 "last_read_message_id": "<id:number>",
@@ -303,6 +308,7 @@
         "frame": {
           "payload": {
             "capabilities": {
+              "dm_privacy": true,
               "message_deduplication": true,
               "message_retry_floor_ms": 0,
               "message_retry_window_seconds": 86400,
@@ -319,6 +325,8 @@
                 "can_react": true,
                 "can_send": true,
                 "category": "",
+                "category_id": "<id:number>",
+                "category_position": 0,
                 "id": "<id:number>",
                 "last_message_id": "<id:number>",
                 "last_read_message_id": "<id:number>",
@@ -343,6 +351,8 @@
                 "can_react": true,
                 "can_send": true,
                 "category": "",
+                "category_id": "<id:number>",
+                "category_position": 0,
                 "id": "<id:number>",
                 "last_message_id": "<id:number>",
                 "last_read_message_id": "<id:number>",

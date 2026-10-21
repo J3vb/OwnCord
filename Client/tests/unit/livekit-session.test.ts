@@ -10,6 +10,8 @@ const mockVoiceState = vi.hoisted(() => ({
   localCamera: false,
   localScreenshare: false,
   pttGated: false,
+  // The AFK channel is listen-only: no microphone is published there.
+  inAfkChannel: false,
   // OC-0009: the real store's currentChannelId is set by joinVoiceChannel()
   // before the voice_join/voice_token round trip that produces the token a
   // test then hands to handleVoiceToken — default it to the channel id used
@@ -275,6 +277,7 @@ import { keepDmForCall, resetKeptCallDms } from "../../src/features/direct-messa
 import type { ReadyMember } from "../../src/lib/types";
 import { ensureLiveKitProxy, getLiveKitProxyPort } from "../../src/platform/desktop/nativeProxies";
 import { takeJoinRefusal } from "../../src/features/voice/joinRequest";
+import { takeWatchRefusal } from "../../src/lib/watchRequest";
 import {
   leaveVoice as boundLeaveVoice,
   setMuted as boundSetMuted,
@@ -377,6 +380,7 @@ describe("LiveKitSession", () => {
     mockVoiceState.localCamera = false;
     mockVoiceState.localScreenshare = false;
     mockVoiceState.pttGated = false;
+    mockVoiceState.inAfkChannel = false;
     mockVoiceState.currentChannelId = 1;
     mockVoiceState.voiceConfigs = new Map();
     mockVoiceState.voiceStatus = "idle";
@@ -817,6 +821,79 @@ describe("LiveKitSession", () => {
     });
   });
 
+  describe("voice_watch (6.6b)", () => {
+    const watchFrames = (ws: { send: ReturnType<typeof vi.fn> }) =>
+      ws.send.mock.calls.filter(([m]) => m.type === "voice_watch").map(([m]) => m.payload.user_ids);
+
+    it("sends the watched screen-share set when it changes, in a channel", () => {
+      const ws = { send: vi.fn(), getState: () => "connected" } as any;
+      session.setWsClient(ws);
+      (session as any)._remoteTracks.watch(9, "screenshare", true);
+      (session as any)._remoteTracks.watch(4, "screenshare", true);
+      (session as any)._remoteTracks.watch(9, "screenshare", false);
+      expect(watchFrames(ws)).toEqual([[9], [4, 9], [4]]);
+    });
+
+    it("sends nothing for a camera, or when the socket is down or no channel is joined", () => {
+      const ws = { send: vi.fn(), getState: () => "connected" } as any;
+      session.setWsClient(ws);
+      (session as any)._remoteTracks.watch(9, "camera", true);
+      expect(watchFrames(ws)).toEqual([]);
+      const down = { send: vi.fn(), getState: () => "reconnecting" } as any;
+      session.setWsClient(down);
+      (session as any)._remoteTracks.watch(9, "screenshare", true);
+      expect(watchFrames(down)).toEqual([]);
+      session.setWsClient(ws);
+      mockVoiceState.currentChannelId = null as any;
+      (session as any)._remoteTracks.watch(8, "screenshare", true);
+      expect(watchFrames(ws)).toEqual([]);
+    });
+
+    it("sends nothing when leaving clears the set (the server clears on leave)", () => {
+      const ws = { send: vi.fn(), getState: () => "connected" } as any;
+      session.setWsClient(ws);
+      (session as any)._remoteTracks.watch(9, "screenshare", true);
+      ws.send.mockClear();
+      session.leaveVoice(true);
+      expect(watchFrames(ws)).toEqual([]);
+      expect(ws.send).toHaveBeenCalledWith({ type: "voice_leave", payload: {} });
+    });
+
+    it("re-sends the current set on a resume, an empty one included", () => {
+      const ws = { send: vi.fn(), getState: () => "connected" } as any;
+      session.setWsClient(ws);
+      // The server keeps the old set across a resume, so empty must be said.
+      session.resendWatching();
+      expect(watchFrames(ws)).toEqual([[]]);
+      (session as any)._remoteTracks.watch(9, "screenshare", true);
+      ws.send.mockClear();
+      session.resendWatching();
+      expect(watchFrames(ws)).toEqual([[9]]);
+    });
+
+    it("retries once after a second when rate limited, and leaving cancels it", () => {
+      vi.useFakeTimers();
+      const ws = { send: vi.fn(), getState: () => "connected" } as any;
+      session.setWsClient(ws);
+      session.retryWatching();
+      session.retryWatching();
+      expect(watchFrames(ws)).toEqual([]);
+      vi.advanceTimersByTime(1000);
+      expect(watchFrames(ws)).toEqual([[]]);
+      session.retryWatching();
+      session.leaveVoice(false);
+      vi.advanceTimersByTime(2000);
+      expect(watchFrames(ws)).toEqual([[]]);
+    });
+
+    it("an error reply to a voice_watch is recognised and dropped", () => {
+      const ws = { send: vi.fn(() => "env-1"), getState: () => "connected" } as any;
+      session.setWsClient(ws);
+      (session as any)._remoteTracks.watch(9, "screenshare", true);
+      expect(takeWatchRefusal("env-1")).toBe(true);
+    });
+  });
+
   describe("cleanupAll", () => {
     it("resets session to disconnected state after cleanup", () => {
       const mockWs = { send: vi.fn() } as any;
@@ -1052,6 +1129,34 @@ describe("LiveKitSession", () => {
         autoSubscribe: false,
       });
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+    });
+
+    it("publishes no microphone in the AFK channel and keeps the session up", async () => {
+      mockVoiceState.inAfkChannel = true;
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+
+      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalledWith(true);
+      expect(mockRoom.disconnect).not.toHaveBeenCalled();
+      // Not a failed microphone: no listen-only notice, nothing to retry.
+      expect(setListenOnly).not.toHaveBeenCalledWith(true);
+    });
+
+    it("refuses to unmute in the AFK channel", async () => {
+      mockVoiceState.inAfkChannel = true;
+      mockVoiceState.localMuted = true;
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+      vi.mocked(setLocalMuted).mockClear();
+
+      session.setMuted(false);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(setLocalMuted).not.toHaveBeenCalled();
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalledWith(true);
     });
 
     it("uses proxy URL for non-local hosts", async () => {

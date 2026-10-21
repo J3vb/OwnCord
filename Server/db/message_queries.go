@@ -898,6 +898,10 @@ func (d *DB) scanAndEnrichMessages(ctx context.Context, rows *sql.Rows, requesti
 		return nil, fmt.Errorf("scanAndEnrichMessages group events: %w", err)
 	}
 
+	if err := d.attachForwards(ctx, msgs); err != nil {
+		return nil, fmt.Errorf("scanAndEnrichMessages forwards: %w", err)
+	}
+
 	return d.attachReferencedMessages(ctx, msgs)
 }
 

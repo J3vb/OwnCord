@@ -109,11 +109,19 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     revoked_at   TEXT
 );
 
+CREATE TABLE IF NOT EXISTS channel_categories (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT    NOT NULL,
+    position   INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_categories_name ON channel_categories(name COLLATE NOCASE);
+
 CREATE TABLE IF NOT EXISTS channels (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     name             TEXT    NOT NULL,
     type             TEXT    NOT NULL DEFAULT 'text',
-    category         TEXT,
+    category_id INTEGER REFERENCES channel_categories(id) ON DELETE SET NULL,
     topic            TEXT,
     position         INTEGER NOT NULL DEFAULT 0,
     slow_mode        INTEGER NOT NULL DEFAULT 0,
@@ -154,6 +162,12 @@ CREATE TABLE IF NOT EXISTS message_mentions (
     message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
     mentioned_user_id INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
     PRIMARY KEY (message_id, mentioned_user_id)
+);
+CREATE TABLE IF NOT EXISTS message_forwards (
+    message_id        INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+    source_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+    source_channel_id INTEGER NOT NULL,
+    source_timestamp  TEXT    NOT NULL
 );
 
 -- Needed by GetMessages' permission resolution and reaction enrichment, even
@@ -239,6 +253,14 @@ CREATE TABLE IF NOT EXISTS trusted_senders (
     source       TEXT    NOT NULL CHECK (source IN ('accepted', 'sent_first', 'grandfathered')),
     created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (recipient_id, sender_id)
+);
+
+-- Per-user DM privacy (migration 070, WP 6.8b): read on every 1:1 DM sink.
+CREATE TABLE IF NOT EXISTS user_privacy (
+    user_id           INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    allow_member_dms  INTEGER NOT NULL DEFAULT 1 CHECK (allow_member_dms IN (0, 1)),
+    message_requests  INTEGER NOT NULL DEFAULT 1 CHECK (message_requests IN (0, 1)),
+    updated_at        TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS message_requests (

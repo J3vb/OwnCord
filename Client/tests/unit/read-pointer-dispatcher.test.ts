@@ -54,6 +54,7 @@ vi.mock("@lib/livekitSession", () => ({
   disableCamera: vi.fn(async () => {}),
   disableScreenshare: vi.fn(async () => {}),
   reconcileVideoFlags: vi.fn(),
+  resendWatching: vi.fn(),
 }));
 const mockShowToast = vi.fn();
 vi.mock("@lib/toast", () => ({
@@ -147,7 +148,12 @@ describe("read pointer through the dispatcher", () => {
   beforeEach(() => {
     mockShowToast.mockClear();
     hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
-    channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+    channelsStore.setState(() => ({
+      channels: new Map(),
+      activeChannelId: null,
+      roles: [],
+      categories: [],
+    }));
     dmStore.setState(() => ({ channels: [] }));
     messagesStore.setState(() => ({
       messagesByChannel: new Map(),

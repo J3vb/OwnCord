@@ -175,6 +175,10 @@
   transition: background 0.2s;
   flex-shrink: 0;
 }
+.toggle[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .toggle.on {
   background: var(--green);
 }
@@ -670,7 +674,8 @@ details.disclose[open] > summary .icon {
 
 /* ── Discord-style account profile card ── */
 .account-banner {
-  height: 100px;
+  height: var(--upp-banner-h, 100px);
+  overflow: hidden;
   border-radius: var(--radius-md) var(--radius-md) 0 0;
   background: var(--accent);
 }

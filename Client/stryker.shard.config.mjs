@@ -38,7 +38,10 @@ export const shards = {
   "livekit-3": [
     "src/lib/livekitUrlResolver.ts",
     "src/lib/screenShare.ts",
+    "src/lib/appAudioTrack.ts",
+    "src/lib/appAudioShare.ts",
     "src/features/voice/joinRequest.ts",
+    "src/lib/watchRequest.ts",
     "src/features/voice/cameraMenu.ts",
     "src/features/voice/autoPlayCameras.ts",
     "src/features/voice/e2eePeerState.ts",
@@ -134,6 +137,7 @@ export const shards = {
     "src/lib/channel-mutes.ts",
     "src/lib/channel-mute-expiry.ts",
     "src/lib/gifProvider.ts",
+    "src/lib/gifPager.ts",
     "src/features/updates/UpdateCheckRow.ts",
     "src/features/channels/channelRow.view.ts",
     "src/features/channels/channelRowModel.ts",
@@ -192,6 +196,7 @@ export const shards = {
     "src/lib/modalFactory.ts",
     "src/lib/notificationSound.ts",
     "src/lib/serverCapabilities.ts",
+    "src/lib/imageCrop.ts",
     "src/lib/store.ts",
     "src/features/updates/updateChecker.ts",
     "src/features/whats-new/changelogSource.ts",
@@ -203,6 +208,9 @@ export const shards = {
     "src/features/messaging/fileDropGuard.ts",
     "src/features/messaging/shortcodes.ts",
     "src/features/messaging/spoilerAttachment.ts",
+    "src/features/messaging/forwardTargets.ts",
+    "src/features/messaging/forwardSend.ts",
+    "src/features/messaging/forwardRequests.ts",
     "src/features/messaging/slashCommands.ts",
     "src/lib/logger.ts",
     "src/lib/logPersistence.ts",
@@ -235,7 +243,12 @@ export const shards = {
   // mutant there is static, so each one re-runs the whole suite; on runs
   // 38902717516 and 38926807609 they used most of lib-rest-1's 90 minutes.
   // This shard skips static mutants (see ignoreStaticShards below).
-  "lib-rest-9": ["src/lib/icons.ts", "src/lib/imageHeader.ts"],
+  "lib-rest-9": [
+    "src/lib/icons.ts",
+    "src/lib/imageHeader.ts",
+    "src/features/channels/categoryActions.ts",
+    "src/features/channels/collapsedMigration.ts",
+  ], // the 6.5b category calls and the collapsed-name migration (about 100 lines together) joined the smallest shard
   "stores-1": [
     "src/stores/auth.store.ts",
     "src/stores/emoji.store.ts",
@@ -310,6 +323,7 @@ export const shards = {
   "safety-moderation-5": [
     "src/features/blocks/blockActions.ts",
     "src/features/safety/BlockedUsers.ts",
+    "src/features/safety/DmPrivacy.ts",
     "src/features/message-requests/api.ts",
     "src/features/message-requests/wsHandlers.ts",
     "src/features/moderation/AppealDetail.ts",
@@ -322,6 +336,8 @@ export const shards = {
     "src/features/moderation/api.ts",
     "src/features/messaging/emojiStill.ts",
     "src/features/profiles/openUserProfilePopup.ts",
+    "src/features/profiles/banner.ts",
+    "src/features/profiles/userNotes.ts",
     "src/features/settings/logoutConfirm.ts",
     "src/features/zoom/zoomKeys.ts",
   ], // ~1122 mutants (estimated)

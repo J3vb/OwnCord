@@ -14,6 +14,7 @@ const ProtocolEpoch = 1
 const (
 	MsgTypeAuth              = "auth"
 	MsgTypeChatSend          = "chat_send"
+	MsgTypeChatForward       = "chat_forward" // forward one message to one target channel or DM (WP 6.9a)
 	MsgTypeChatEdit          = "chat_edit"
 	MsgTypeChatDelete        = "chat_delete"
 	MsgTypeReactionAdd       = "reaction_add"
@@ -37,6 +38,7 @@ const (
 	MsgTypeVoiceTokenRefresh = "voice_token_refresh" //nolint:gosec // G101: false positive — message type constant, not a credential
 	MsgTypeVoiceE2EEAnnounce = "voice_e2ee_announce"
 	MsgTypeVoiceE2EEOffer    = "voice_e2ee_offer"
+	MsgTypeVoiceWatch        = "voice_watch"
 	MsgTypeCallRing          = "call_ring"
 	MsgTypeCallDecline       = "call_decline"
 	MsgTypeChatCommand       = "chat_command" // plugin slash-command dispatch (Phase C)
@@ -49,6 +51,7 @@ const (
 	MsgTypeReady               = "ready"
 	MsgTypeChatMessage         = "chat_message"
 	MsgTypeChatSendOK          = "chat_send_ok"
+	MsgTypeChatForwardOK       = "chat_forward_ok"
 	MsgTypeChatEdited          = "chat_edited"
 	MsgTypeChatDeleted         = "chat_deleted"
 	MsgTypeChatPinned          = "chat_pinned" // a message was pinned or unpinned in a channel the recipient can read
@@ -74,13 +77,14 @@ const (
 	MsgTypeEmojiUpdate         = "emoji_update"
 	MsgTypeUploadPolicy        = "upload_policy" // the upload file-type lists after the owner saves them in the admin panel
 	MsgTypeServerRestart       = "server_restart"
-	MsgTypeModQueue            = "mod_queue"        // B5-8: a report queue change, to connected MODERATE_MEMBERS/Administrator holders only
-	MsgTypeModAction           = "mod_action"       // B5-9: a warning or timeout applied to the live target, targeted and unsequenced -- not replayed
-	MsgTypeMemberTimeouts      = "member_timeouts"  // WP 3C-7c: the active-timeout list, to connected MODERATE_MEMBERS/Administrator holders (everyone) and each timed-out member (own entry only); targeted, unsequenced, never replayed -- replaces the viewer's list wholesale
-	MsgTypeAppealStatus        = "appeal_status"    // B5-10: an appeal's state changed, to the appellant only, targeted and unsequenced -- not replayed
-	MsgTypeMentionCount        = "mention_count"    // DP-27: this user's read_states.mention_count changed in a channel; targeted and unsequenced -- the live taskbar/tray badge signal
-	MsgTypeReadState           = "read_state"       // WP 3D-5c: the caller's read pointer moved in a channel (after every accepted mark_read and mark_unread); targeted to the caller and unsequenced -- not replayed
-	MsgTypeChannelActivity     = "channel_activity" // 2B-2: unread hint for unfocused readable channels; batched, unsequenced, never replayed
+	MsgTypeModQueue            = "mod_queue"          // B5-8: a report queue change, to connected MODERATE_MEMBERS/Administrator holders only
+	MsgTypeModAction           = "mod_action"         // B5-9: a warning or timeout applied to the live target, targeted and unsequenced -- not replayed
+	MsgTypeMemberTimeouts      = "member_timeouts"    // WP 3C-7c: the active-timeout list, to connected MODERATE_MEMBERS/Administrator holders (everyone) and each timed-out member (own entry only); targeted, unsequenced, never replayed -- replaces the viewer's list wholesale
+	MsgTypeChannelCategories   = "channel_categories" // WP 6.5a: the full channel category list {categories:[{id,name,position}]}, sent per connected client only to MANAGE_CHANNELS/Administrator holders after any category mutation (permission evaluated at send time); targeted, unsequenced, never replayed -- replaces the manager's list wholesale. Everyone else derives groups from the category fields on the channels they can see
+	MsgTypeAppealStatus        = "appeal_status"      // B5-10: an appeal's state changed, to the appellant only, targeted and unsequenced -- not replayed
+	MsgTypeMentionCount        = "mention_count"      // DP-27: this user's read_states.mention_count changed in a channel; targeted and unsequenced -- the live taskbar/tray badge signal
+	MsgTypeReadState           = "read_state"         // WP 3D-5c: the caller's read pointer moved in a channel (after every accepted mark_read and mark_unread); targeted to the caller and unsequenced -- not replayed
+	MsgTypeChannelActivity     = "channel_activity"   // 2B-2: unread hint for unfocused readable channels; batched, unsequenced, never replayed
 	MsgTypeError               = "error"
 	MsgTypePong                = "pong"
 	MsgTypeDMChannelOpen       = "dm_channel_open"
@@ -88,6 +92,7 @@ const (
 	MsgTypeDMRequest           = "dm_request"
 	MsgTypeCallIncoming        = "call_incoming"
 	MsgTypeCallDeclined        = "call_declined"
+	MsgTypeVoiceWatching       = "voice_watching"
 	MsgTypeVoiceE2EEAnnounceBC = "voice_e2ee_announce" // broadcast (same string as client msg)
 	MsgTypeVoiceE2EEOfferRelay = "voice_e2ee_offer"    // relay (same string as client msg)
 	MsgTypeCommandReply        = "command_reply"       // ephemeral plugin reply, sent only to the invoking client

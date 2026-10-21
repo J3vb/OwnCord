@@ -1,0 +1,37 @@
+import { defineCatalog } from "./format";
+
+/** The Forward picker (components/ForwardPicker.ts) and its results. Its own
+ *  catalog so the copy loads with that lazy module, not with the main page. */
+export const forwardText = defineCatalog("forward", {
+  title: "Forward message",
+  "search.label": "Search channels and direct messages",
+  "search.placeholder": "Search channels and DMs",
+  "list.label": "Where to forward",
+  "list.empty": "No matching channels or DMs",
+  "list.selected": "{count} of {max} selected",
+  "list.full": "You can pick up to {max}",
+  "comment.label": "Message to send with it",
+  "comment.placeholder": "Add a message (optional)",
+  send: "Forward",
+  retry: "Retry failed",
+  done: "Done",
+  "status.queued": "Waiting",
+  "status.sending": "Sending…",
+  "status.sent": "Sent",
+  "status.failed": "Failed: {reason}",
+  "status.commentFailed": "Forwarded, but your message wasn't sent: {reason}",
+  "toast.sent": "Forwarded to {count}",
+  "toast.stopped": "Forwarding stopped: {count} not sent",
+  "toast.partial": "Forwarded to {sent} of {total} — {name} failed: {reason}",
+  "reason.FORBIDDEN": "You can't post there",
+  "reason.NOT_FOUND": "The message is no longer available",
+  "reason.RATE_LIMITED": "Too many forwards, wait a moment",
+  "reason.SLOW_MODE": "Slow mode is on there",
+  "reason.TIMED_OUT": "You're timed out",
+  "reason.ATTACHMENTS_UNAVAILABLE": "Its files are no longer available",
+  "reason.REQUEST_TIMEOUT": "The server took too long",
+  "reason.OFFLINE": "Not connected",
+  "reason.NETWORK": "Connection problem",
+  "reason.UNCONFIRMED": "Delivery not confirmed, retrying is safe",
+  "reason.other": "Couldn't forward",
+});

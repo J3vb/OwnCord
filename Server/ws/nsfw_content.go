@@ -105,6 +105,7 @@ var contentBearingKinds = map[string]bool{
 	MsgTypeAuthError:           false,
 	MsgTypeReady:               false, // buildReady carries channel/member/voice state only, never message content
 	MsgTypeChatSendOK:          false, // direct to the sender, who already knows their own content
+	MsgTypeChatForwardOK:       false, // direct to the sender; ids only
 	MsgTypeChatDeleted:         false, // ids only
 	MsgTypeChatBulkDeleted:     false, // ids only
 	MsgTypeChatPinned:          false, // ids + flag only, no message body
@@ -137,11 +138,13 @@ var contentBearingKinds = map[string]bool{
 	MsgTypeCallDeclined:        false,
 	MsgTypeVoiceE2EEAnnounceBC: false,
 	MsgTypeVoiceE2EEOfferRelay: false,
+	MsgTypeVoiceWatching:       false,
 	MsgTypeCommandReply:        false, // ephemeral, direct to the invoking client
 	MsgTypeNSFWAck:             false, // the gate's own signal, not gated content
 	MsgTypeModQueue:            false, // a report's public id and state only (B5-8); never message content
 	MsgTypeModAction:           false, // a warning/timeout notice to its own subject (B5-9); never message content
 	MsgTypeMemberTimeouts:      false, // active-timeout ids and expiries to moderators and the target (WP 3C-7c); never message content
+	MsgTypeChannelCategories:   false, // category ids, names and positions to MANAGE_CHANNELS holders only (WP 6.5a); never message content
 	MsgTypeAppealStatus:        false, // an appeal's state to its own appellant only (B5-10); never message content
 	MsgTypeMentionCount:        false, // a channel id and this user's own mention total only (DP-27); never message content
 	MsgTypeReadState:           false, // a channel id and this user's own read pointer and counts only (3D-5c); never message content

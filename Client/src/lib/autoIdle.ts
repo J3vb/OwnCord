@@ -17,6 +17,12 @@
  *  - Only a manual Online becomes an automatic Idle, and only an automatic
  *    Idle becomes Online again. A manual Idle is a statement, not a timeout.
  *
+ * Activity the DOM and the OS cannot see (speaking in a voice call, with
+ * hands off the keyboard) reaches the watcher through `notifyActivity`. Joining
+ * or rejoining a call, whether by hand or after an automatic move or reconnect,
+ * never touches the status: an automatic Idle survives it, so an AFK move does
+ * not flip the user back to Online.
+ *
  * Input listening is throttled to one bookkeeping call per second: mousemove
  * fires hundreds of times a second and the timer's resolution is minutes, so
  * anything finer is pure cost.
@@ -103,6 +109,10 @@ export function startAutoIdle(options: AutoIdleOptions): AutoIdleController {
    *  DOM timer, then decides when the status goes idle. */
   let osKnowsIdle = false;
   let lastActivityRun = 0;
+  /** When the caller last reported activity through `notifyActivity` (own
+   *  speaking in a call, a sent message): input the OS cannot see. The OS poll
+   *  must not read a quiet keyboard as idle while this is recent. */
+  let lastNotified = Number.NEGATIVE_INFINITY;
   let destroyed = false;
   /** True while the timer is the reason the status is idle. Kept in memory so
    *  the hot path (one mousemove per pixel) is a boolean check rather than a
@@ -192,7 +202,11 @@ export function startAutoIdle(options: AutoIdleOptions): AutoIdleController {
     // stream of polls cannot flap the status. Coming back goes through the
     // same onStatusChange as the DOM path, and so through the caller's
     // shared presence limiter.
-    apply(idleMs >= delayMs);
+    // Idle is the shorter of the OS's input idle time and the time since
+    // the caller last reported activity: a user talking in a call with
+    // hands off the keyboard has an old OS idle time but is not away.
+    // Without this every poll would flip them back to idle.
+    apply(Math.min(idleMs, Date.now() - lastNotified) >= delayMs);
   }
 
   if (options.systemIdleMs !== undefined) {
@@ -207,6 +221,7 @@ export function startAutoIdle(options: AutoIdleOptions): AutoIdleController {
 
   return {
     notifyActivity(): void {
+      lastNotified = Date.now();
       onActivity();
     },
     destroy(): void {

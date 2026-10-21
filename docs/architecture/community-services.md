@@ -70,7 +70,23 @@ private to the user who wrote it: no other user, administrator or moderator rout
 reads it, and it is removed with either user (lifecycle row 16a in
 `data-lifecycle.md`). The banner columns are public profile fields like the
 avatar, unused until the banner endpoints land. They add no community service.
-Other historical
+**Amended 2026-10-21 (DM privacy):** `070_user_privacy.sql` adds `user_privacy`, one
+row per user holding the two direct message settings (WP 6.8b). The row is read and
+written only through the owner's session and is removed with the account (lifecycle
+row 16b in `data-lifecycle.md`). It adds no community service.
+**Amended 2026-10-21 (message forwarding):** `071_message_forwards.sql` adds
+`message_forwards`, the side row that marks a message as a forward (WP 6.9a). It
+stores the source message, channel and time, never an author, and goes with the
+forward by cascade. A forward is an ordinary message of the forwarder, carrying a
+snapshot of text and its own copies of the files (class 12, charged to the
+forwarder's quota), so it adds no data class and follows the message and
+attachment rows. Forwards of an erased user's message stay without any author
+(`data-lifecycle.md`, O1).
+**Amended 2026-10-21 (channel categories):** `072_channel_categories.sql` adds
+`channel_categories` and `channels.category_id` (WP 6.5a). A category is a name and
+a position an administrator writes, holds no user content and no personal data, and
+is shared by every member who can see a channel in it, so it adds no data class. A
+channel outlives its category (`ON DELETE SET NULL`). Other historical
 status statements retain their `cbebd37c` baseline.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each
 service are documented"). **Input to:** HP-5, and to the retention and
@@ -233,6 +249,30 @@ send-time block gate for one-to-one DMs only
 (`Server/service/message_perms.go`, `requireDMNotBlocked`). A stranger with
 an account can open a DM with anyone who has not blocked them and send into
 it immediately; nothing stages first contact.
+
+**Recipient opt-out of first contact.** A member can turn off direct messages
+from members (`user_privacy.allow_member_dms`, migration `070`). The 1:1 gate
+(`Server/service/message_perms.go`, `RequireDMReachable`, the successor of
+`requireDMNotBlocked`) then refuses every sink in a two-person DM, and
+`DMService.CreateDM` refuses to open one, for a sender the member does not
+trust (any `trusted_senders` row: accepted, `sent_first` or `grandfathered`).
+The refusal is the same error and text as a block, so the sender cannot tell
+the causes apart, and it happens before any message or request is written. A
+failed read of the setting is an internal error, not a refusal. Group DMs are
+not affected by this gate.
+
+**Recipient opt-out of requests.** With `allow_member_dms` on and
+`user_privacy.message_requests` off, `db.CreateMessageRequest` reads the
+setting inside its own transaction and, for a sender the member does not
+trust, inserts the pair's `message_requests` row as `accepted`, writes
+`trusted_senders(recipient, sender, 'accepted')` next to the `sent_first` edge
+and opens the DM for the recipient. The send then delivers as for a trusted
+sender and sends no `dm_request`. Requests already `pending` stay pending, and
+the pair stays trusted if the setting is turned back on. Two concurrent first
+sends from the same sender keep one row (`INSERT OR IGNORE`); the loser finds
+the trust the winner wrote and is delivered too. Opposite directions are two
+pairs with a row each. A block between the pair, read in the same
+transaction, always stages instead.
 
 ### Abuse cases
 

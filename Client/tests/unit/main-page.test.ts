@@ -369,7 +369,12 @@ import {
 } from "../../src/features/direct-messages/callAlerts";
 
 function resetStores(): void {
-  channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  channelsStore.setState(() => ({
+    channels: new Map(),
+    activeChannelId: null,
+    roles: [],
+    categories: [],
+  }));
   authStore.setState(() => ({
     token: "t",
     user: { id: 1, username: "alice", avatar: null, role: "member" },
@@ -440,6 +445,7 @@ function fakeWs(): FakeWsClient {
 function fakeApi(host = ""): ApiClient {
   return {
     getConfig: () => ({ host }),
+    getSession: () => ({ signal: new AbortController().signal }),
     getReactionUsers: vi.fn(async () => ({ users: [] })),
     getRecoveryKitStatus: vi.fn(async () => ({ enrolled: false, used_at: null })),
     getSessions: vi.fn(async () => []),
@@ -3194,6 +3200,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     const hostedApi = {
       getConfig: () => ({ host: "chat.example.com" }),
+      getSession: () => ({ signal: new AbortController().signal }),
       getReactionUsers: vi.fn(async () => ({ users: [] })),
       getRecoveryKitStatus: vi.fn(async () => ({ enrolled: false, used_at: null })),
       getSessions: vi.fn(async () => []),
@@ -3242,6 +3249,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       "password changed, but other sessions could not be revoked; revoke them from the sessions list";
     const hostedApi = {
       getConfig: () => ({ host: "chat.example.com" }),
+      getSession: () => ({ signal: new AbortController().signal }),
       changePassword: vi.fn(async () => ({ warning, sessions_revoked: 0 })),
       getRecoveryKitStatus: vi.fn(async () => ({ enrolled: false, used_at: null })),
       getSessions: vi.fn(async () => []),
@@ -3488,6 +3496,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it("clears local auth when sign-out-everywhere revoked this device's session (B7-14)", async () => {
     const hostedApi = {
       getConfig: () => ({ host: "chat.example.com" }),
+      getSession: () => ({ signal: new AbortController().signal }),
       getRecoveryKitStatus: vi.fn(async () => ({ enrolled: false, used_at: null })),
       getSessions: vi.fn(async () => []),
       revokeAllSessions: vi.fn(async () => ({
@@ -3517,6 +3526,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it("toasts a sign-in not yet reviewed from the listing made on mount (B7-14)", async () => {
     const hostedApi = {
       getConfig: () => ({ host: "chat.example.com" }),
+      getSession: () => ({ signal: new AbortController().signal }),
       getRecoveryKitStatus: vi.fn(async () => ({ enrolled: false, used_at: null })),
       getSessions: vi.fn(async () => [
         {

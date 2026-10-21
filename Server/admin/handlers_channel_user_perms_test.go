@@ -30,7 +30,7 @@ func TestPutChannelUserPermission_PersistsInvalidatesAndAudits(t *testing.T) {
 	database := openAdminTestDB(t)
 	hub := &mockHub{}
 	inv := &mockPermInvalidator{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv, newTestServices(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv, newTestServicesFor(database, hub, inv))
 	token := createAdminUser(t, database)
 	target := seedOverrideTarget(t, database, "override-target")
 
@@ -331,7 +331,7 @@ func TestDeleteChannelUserPermission_ClearsOverride(t *testing.T) {
 	database := openAdminTestDB(t)
 	hub := &mockHub{}
 	inv := &mockPermInvalidator{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv, newTestServices(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv, newTestServicesFor(database, hub, inv))
 	token := createAdminUser(t, database)
 	target := seedOverrideTarget(t, database, "clear-target")
 

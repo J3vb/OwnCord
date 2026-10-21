@@ -37,7 +37,7 @@ async function renderChannels(){
       const id=ch.id||ch.ID;const name=ch.name||ch.Name||'';const type=ch.type||ch.Type||'text';
       const archived=ch.archived||ch.Archived||false;
       html+='<tr data-channel="'+esc(id)+'"><td><div class="ch-name"><span class="ch-type" title="'+esc(CH_TYPE_NAME[type]||type)+'">'+chIcon(type)+'<span class="sr-only">'+esc(CH_TYPE_NAME[type]||type)+'</span></span><strong>'+esc(name)+'</strong>'
-        +(archived?'<span class="badge badge-muted">Archived</span>':'')+'</div></td>';
+        +(archived?'<span class="badge badge-muted">Archived</span>':'')+(ch.afk?'<span class="badge badge-accent">AFK</span>':'')+'</div></td>';
       const lockBtn=type==='dm'?'':'<button class="act-btn" title="Who can see this" aria-label="Who can see #'+esc(name)+'" data-action="openChannelPermsModal" data-args="'+actArgs(id,name)+'">'+I.lock+'</button>';
       state.channelCache[id]=ch;
       if(ch.category||ch.Category)catSet.add(ch.category||ch.Category);
@@ -102,7 +102,7 @@ function openChannelEditModal(id){
     +'<div class="modal-body">'
     +'<div class="form-group"><label class="form-label" for="chEditName">Name</label><input class="form-input" id="chEditName" value="'+esc(name)+'"></div>'
     +'<div class="form-group"><label class="form-label" for="chEditTopic">Topic</label><input class="form-input" id="chEditTopic" value="'+esc(topic)+'"></div>'
-    +'<div class="form-group"><label class="form-label" for="chEditCat">Category</label><input class="form-input" id="chEditCat" list="chEditCatList" value="'+esc(cat)+'" autocomplete="off">'+categoryDatalist('chEditCatList')+'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Move the channel to another category, or blank it to leave it uncategorized.</div></div>'
+    +'<div class="form-group"><label class="form-label" for="chEditCat">Category</label><input class="form-input" id="chEditCat" list="chEditCatList" value="'+esc(cat)+'" data-orig="'+esc(cat.trim())+'" autocomplete="off">'+categoryDatalist('chEditCatList')+'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Move the channel to another category, or blank it to leave it uncategorized.</div></div>'
     +'<div class="form-group"><label class="form-label" for="chEditSlow">Slow mode (seconds, 0 = off)</label><input class="form-input" id="chEditSlow" type="number" min="0" value="'+esc(slow)+'"></div>'
     +'<div class="form-group"><label class="form-label" for="chEditPos">Position</label><input class="form-input" id="chEditPos" type="number" min="0" value="'+esc(pos)+'"></div>'
     +voiceRows
@@ -118,12 +118,17 @@ async function saveChannelEdit(id){
   const body={
     name,
     topic:document.getElementById('chEditTopic').value.trim(),
-    category:document.getElementById('chEditCat').value.trim(),
     slow_mode:parseInt(document.getElementById('chEditSlow').value,10)||0,
     position:parseInt(document.getElementById('chEditPos').value,10)||0,
     archived:document.getElementById('chEditArchived').classList.contains('on'),
     nsfw:document.getElementById('chEditNsfw').classList.contains('on'),
   };
+  /* Send category only when the input differs from what the modal opened
+     with. The row's name can be stale (a category renamed since the list
+     loaded), and echoing it back would recreate the old name. */
+  const catEl=document.getElementById('chEditCat');
+  const catNow=catEl.value.trim();
+  if(catNow!==(catEl.dataset.orig||'')){body.category=catNow}
   /* Only present for a voice channel. Omitting them entirely (rather than
      sending 0) is what keeps a text-channel edit from clobbering limits a
      channel might carry from an earlier life as a voice channel — the handler
@@ -755,6 +760,9 @@ function openRoleModal(id){
   const role=id===null?null:state.roleList.find(r=>r.id===id);
   if(id!==null&&!role){showToast('Role not found','error');return}
   state.roleEditId=role?role.id:null;
+  /* The mask as loaded into this editor; saveRole sends it back so the server
+     can refuse an edit made from a copy that has since moved (WP 5.1b). */
+  state.roleEditLoadedPerms=role?role.permissions:null;
   const name=role?role.name:'';
   const color=(role&&role.color)?role.color:'';
   const perms=role?role.permissions:0;
@@ -837,9 +845,29 @@ async function saveRole(id){
   };
   try{
     if(id===null)await api('POST','/roles',body);
-    else await api('PATCH','/roles/'+id,body);
+    else await api('PATCH','/roles/'+id,Object.assign({expected_permissions:state.roleEditLoadedPerms},body));
     closeModal();showToast(id===null?'Role created':'Role updated');renderContent();
-  }catch(e){showToast(e.message,'error')}
+  }catch(e){
+    if(e.status===409&&e.code==='ROLE_CONFLICT'){await reloadRoleAfterConflict(id);return}
+    showToast(e.message,'error');
+  }
+}
+
+/* Another admin changed this role's permissions after the editor loaded it, so
+   the save was refused and nothing was written. Reload the list and reopen the
+   editor on the latest copy; the edit is not carried over, so it is applied
+   again on purpose rather than on top of a mask the admin has not seen. */
+async function reloadRoleAfterConflict(id){
+  try{
+    state.roleList=(await api('GET','/roles'))||[];
+    if(state.roleList.some(r=>r.id===id))openRoleModal(id);
+    else{closeModal();renderContent()}
+  }catch(e){
+    closeModal();renderContent();
+    showToast('Someone else changed this role and it could not be reloaded. Refresh the page and apply your change again.','error');
+    return;
+  }
+  showToast('Someone else changed this role. The latest version is loaded; apply your change again.','error');
 }
 
 function openDeleteRole(id){

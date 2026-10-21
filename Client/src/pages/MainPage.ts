@@ -8,7 +8,7 @@ import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
 import { bracketBareIPv6Host } from "@lib/ws";
 import type { UserStatus } from "@lib/types";
-import { errorText } from "@lib/api";
+import { ApiClientError, errorText } from "@lib/api";
 import type { ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { desktop } from "../platform/desktop";
@@ -44,7 +44,12 @@ import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
 import { startStatusTimerWatcher, type StatusTimerWatcher } from "@lib/statusTimer";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
-import { voiceStore, isSelfMuted, restoreSavedSelfVoiceState } from "@stores/voice.store";
+import {
+  voiceStore,
+  isSelfMuted,
+  restoreSavedSelfVoiceState,
+  streamViewers,
+} from "@stores/voice.store";
 import type { VoiceState } from "@stores/voice.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import {
@@ -72,6 +77,7 @@ import {
   setReactionUsersFetcher,
   clearReactionUsersCache,
 } from "../features/messaging/reactionUsers";
+import { createNotesContext, setNotesContextSource } from "../features/profiles/userNotes";
 import { markAllRead, setMarkReadSender } from "@lib/read-state";
 import { setMarkUnreadSender } from "@components/message-list/mark-unread";
 import { onChannelReselect, stepChannel } from "@lib/channel-navigation";
@@ -175,7 +181,8 @@ function buildDmProfileUser(channelId: number): DmProfileData | null {
   // Prefer membersStore's status, like the chat header's refreshDmHeader
   // does (ChannelController.ts) -- falling back to dmStore's own copy keeps
   // this correct even for a DM partner who isn't a guild member.
-  const rawStatus = membersStore.getState().members.get(recipient.id)?.status ?? recipient.status;
+  const member = membersStore.getState().members.get(recipient.id);
+  const rawStatus = member?.status ?? recipient.status;
   const status =
     rawStatus === "online" || rawStatus === "idle" || rawStatus === "dnd" || rawStatus === "offline"
       ? rawStatus
@@ -192,6 +199,8 @@ function buildDmProfileUser(channelId: number): DmProfileData | null {
     status,
     about: null,
     joinDate: null,
+    banner: member?.banner ?? null,
+    banner_color: member?.banner_color ?? null,
   };
 }
 
@@ -279,6 +288,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     return res.users;
   });
 
+  // Cards opened from anywhere (member list, message author) take the notes
+  // context of this session when they open, never later.
+  setNotesContextSource(() => createNotesContext(api, apiConfig.host ?? ""));
+
   const limiters = createRateLimiterSet();
 
   // The one presence_update sender for this session — owns the limiter
@@ -321,6 +334,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   /** Inactivity watcher that flips the status to idle after ten quiet
    *  minutes. Started once the socket is up, torn down with the page. */
   let autoIdle: AutoIdleController | null = null;
+  let speakingActivityTimer: ReturnType<typeof setInterval> | null = null;
   let statusTimerWatcher: StatusTimerWatcher | null = null;
 
   // Toast container for user-facing error feedback
@@ -530,12 +544,18 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       (s) => s.members.get(recipientId)?.status,
       refresh,
     );
+    // A banner change shows without reopening the panel.
+    const unsubBanner = membersStore.subscribeSelector((s) => {
+      const m = s.members.get(recipientId);
+      return `${m?.banner ?? ""}|${m?.banner_color ?? ""}`;
+    }, refresh);
     const unsubDm = dmStore.subscribeSelector(
       (s) => s.channels.find((c) => c.channelId === channelId),
       refresh,
     );
     dmProfileUnsub = () => {
       unsubMembers();
+      unsubBanner();
       unsubDm();
     };
   }
@@ -564,6 +584,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         dmProfileSidebar = createDmProfileSidebar({
           user: profileUser,
           host: apiConfig.host ?? "",
+          notes: createNotesContext(api, apiConfig.host ?? ""),
           focus,
           onClose: () => {
             closeDmProfileByUser();
@@ -923,6 +944,30 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onStatusChange: (status) => applyPresence(status),
       systemIdleMs: () => desktop.systemIdle.idleMs(),
     });
+    // Talking in a call is being here even with hands off the keyboard and
+    // mouse, which neither the window nor (for another app) the OS poll sees.
+    // The local ring is the same on web and native (voice.store withLocalRing).
+    unsubscribers.push(
+      voiceStore.subscribeSelector(
+        (v) => {
+          const uid = authStore.getState().user?.id ?? 0;
+          const ch = v.currentChannelId;
+          return ch !== null && v.voiceUsers.get(ch)?.get(uid)?.speaking === true;
+        },
+        (speaking) => {
+          if (speakingActivityTimer !== null) clearInterval(speakingActivityTimer);
+          speakingActivityTimer = null;
+          if (!speaking) return;
+          autoIdle?.notifyActivity();
+          // Talking for longer than the idle delay must keep counting.
+          speakingActivityTimer = setInterval(() => autoIdle?.notifyActivity(), 60_000);
+        },
+      ),
+      () => {
+        if (speakingActivityTimer !== null) clearInterval(speakingActivityTimer);
+        speakingActivityTimer = null;
+      },
+    );
 
     unsubscribers.push(
       ws.on("server_restart", (payload) => {
@@ -1193,6 +1238,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             username: updated.username,
             display_name: updated.display_name ?? null,
             about: updated.about ?? null,
+            // An older server sends no banner keys: leave the stored colour be.
+            ...(updated.banner_color === undefined ? {} : { banner_color: updated.banner_color }),
           });
           showToast(account("toast.profileUpdated"), "success");
         } catch (err) {
@@ -1227,6 +1274,34 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         } catch (err) {
           const msg = errorText(err, account("toast.avatarRemoveFailed"));
           showToast(msg, "error");
+          throw err;
+        }
+      },
+      onUploadBanner: async (file) => {
+        try {
+          const uploaded = await api.uploadBanner(file);
+          // The user_update broadcast also lands; this keeps the card from lagging.
+          updateUser({ banner: uploaded.url });
+          showToast(account("toast.bannerUpdated"), "success");
+          return uploaded.url;
+        } catch (err) {
+          // 404: the server advertises banners but has attachment storage off,
+          // so the upload route is not mounted.
+          const msg =
+            err instanceof ApiClientError && err.status === 404
+              ? account("profile.bannerStorageOff")
+              : errorText(err, account("profile.bannerUploadFailed"));
+          showToast(msg, "error");
+          throw err;
+        }
+      },
+      onRemoveBanner: async () => {
+        try {
+          const updated = await api.removeBanner();
+          updateUser({ banner: updated.banner ?? null });
+          showToast(account("toast.bannerRemoved"), "success");
+        } catch (err) {
+          showToast(errorText(err, account("toast.bannerRemoveFailed")), "error");
           throw err;
         }
       },
@@ -1859,6 +1934,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     let prevVideoSignature = "";
     let prevSpeaking = "";
     let prevAudioState = "";
+    let prevViewers = "";
     let prevCallState = "";
     /** Your call state for the grid's call controls, from the voice store and
      *  the chat socket (camera and share freeze while it is down). */
@@ -1932,6 +2008,24 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           if (audioKey !== prevAudioState) {
             prevAudioState = audioKey;
             videoGrid?.setUserAudioState(audioState);
+          }
+          // Eye + count on each screen-share tile: the other members watching it.
+          let viewersKey = "";
+          const viewerNames = new Map<number, readonly string[]>();
+          const roster = channelId !== null ? state.voiceUsers.get(channelId) : undefined;
+          for (const u of roster?.values() ?? []) {
+            if (!u.screenshare) continue;
+            const names = streamViewers(u.userId, false, state).flatMap((id) => {
+              const name = roster?.get(id)?.username;
+              return name === undefined ? [] : [name];
+            });
+            if (names.length === 0) continue;
+            viewerNames.set(u.userId, names);
+            viewersKey += `${String(u.userId)}:${names.join("\u0000")};`;
+          }
+          if (viewersKey !== prevViewers) {
+            prevViewers = viewersKey;
+            videoGrid?.setStreamViewers(viewerNames);
           }
           syncCallState(state);
 
@@ -2109,6 +2203,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         contentNav = null;
       });
       step("teardownToast", teardownToast);
+      step("notesContext", () => setNotesContextSource(null));
       // Full voice cleanup — tears down room, callbacks, ws ref, serverHost.
       // Prevents stale module-level state persisting across logout/reconnect cycles.
       step("voiceCleanupAll", voiceCleanupAll);

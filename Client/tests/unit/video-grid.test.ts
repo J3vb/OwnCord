@@ -1223,6 +1223,70 @@ describe("VideoGrid", () => {
       expect(cell(2).classList.contains("video-cell--speaking")).toBe(false);
     });
 
+    describe("viewer badge (6.6b)", () => {
+      const badge = (id: number) =>
+        cell(id).querySelector<HTMLElement>("[data-testid='tile-viewers']");
+
+      it("is hidden at zero viewers and absent from cameras", () => {
+        grid.addStream(SCREEN, "Otto (Screen)", null, screen());
+        grid.addStream(3, "Sam", fakeStream(), camera());
+        // Stopped (not played here): no "You", and nobody else watching.
+        grid.setStreamViewers(new Map());
+        expect(badge(SCREEN)!.hidden).toBe(true);
+        expect(badge(3)).toBeNull();
+      });
+
+      it("shows the count and lists the names on hover and to screen readers", () => {
+        grid.addStream(SCREEN, "Otto (Screen)", null, screen());
+        grid.setStreamViewers(new Map([[2, ["Ann", "Bob"]]]));
+        const el = badge(SCREEN)!;
+        expect(el.hidden).toBe(false);
+        expect(el.querySelector(".video-viewers__count")!.textContent).toBe("2");
+        expect(el.title).toBe("Watching: Ann, Bob");
+        expect(el.getAttribute("aria-label")).toBe("Watching: Ann, Bob");
+        expect(cell(SCREEN).classList.contains("video-cell--has-viewers")).toBe(true);
+      });
+
+      it("updates live and hides again when the viewers go", () => {
+        grid.addStream(SCREEN, "Otto (Screen)", null, screen());
+        grid.setStreamViewers(new Map([[2, ["Ann"]]]));
+        grid.setStreamViewers(new Map([[2, ["Ann", "Bob", "Cy"]]]));
+        expect(badge(SCREEN)!.querySelector(".video-viewers__count")!.textContent).toBe("3");
+        grid.setStreamViewers(new Map());
+        expect(badge(SCREEN)!.hidden).toBe(true);
+        expect(cell(SCREEN).classList.contains("video-cell--has-viewers")).toBe(false);
+      });
+
+      it("adds You while the remote share plays here, and drops it when stopped", () => {
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen());
+        grid.setStreamViewers(new Map([[2, ["Ann"]]]));
+        expect(badge(SCREEN)!.title).toBe("Watching: You, Ann");
+        cell(SCREEN).querySelector<HTMLElement>("[data-tile-control='stop']")!.click();
+        expect(badge(SCREEN)!.title).toBe("Watching: Ann");
+      });
+
+      it("shows on your own share tile without You", () => {
+        grid.addStream(
+          SCREEN,
+          "Me (Screen)",
+          fakeStream(),
+          screen({ isSelf: true, audioUserId: 1, name: "Me" }),
+        );
+        grid.setStreamViewers(new Map([[1, ["Ann"]]]));
+        expect(badge(SCREEN)!.title).toBe("Watching: Ann");
+      });
+
+      it("caps the list at ten names and counts the rest", () => {
+        grid.addStream(SCREEN, "Otto (Screen)", null, screen());
+        const names = Array.from({ length: 13 }, (_, i) => `U${String(i + 1)}`);
+        grid.setStreamViewers(new Map([[2, names]]));
+        expect(badge(SCREEN)!.querySelector(".video-viewers__count")!.textContent).toBe("13");
+        expect(badge(SCREEN)!.title).toBe(
+          "Watching: U1, U2, U3, U4, U5, U6, U7, U8, U9, U10 and 3 more",
+        );
+      });
+    });
+
     it("marks a muted/deafened peer on their camera tile, and clears it", () => {
       grid.addStream(2, "Otto", fakeStream(), camera({ audioUserId: 2, name: "Otto" }));
 

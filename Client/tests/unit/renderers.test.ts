@@ -312,6 +312,36 @@ describe("renderers", () => {
       ac.abort();
     });
 
+    it("frames a forwarded message's body and files, with reactions outside the frame", () => {
+      const msg = makeMessage({
+        content: "snapshot text",
+        forward: {
+          source_channel_id: 5,
+          source_message_id: 9,
+          source_timestamp: "2025-01-10T09:00:00Z",
+        },
+        reactions: [{ emoji: "👍", count: 1, me: false }],
+      });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      const box = el.querySelector(".msg-forward");
+      expect(box?.querySelector(".msg-forward-head")?.textContent).toBe("Forwarded");
+      expect(box?.querySelector(".msg-text")?.textContent).toBe("snapshot text");
+      expect(el.querySelector(".msg-reactions")?.closest(".msg-forward")).toBeNull();
+
+      ac.abort();
+    });
+
+    it("draws an ordinary message without the frame", () => {
+      const msg = makeMessage();
+      const ac = new AbortController();
+      container.appendChild(renderMessage(msg, false, [msg], makeOpts(), ac.signal));
+      expect(container.querySelector(".msg-forward")).toBeNull();
+      ac.abort();
+    });
+
     it("marks the author name and avatar as a keyboard-reachable profile control", () => {
       const msg = makeMessage({ user: { id: 42, username: "Alice", avatar: null } });
       const ac = new AbortController();

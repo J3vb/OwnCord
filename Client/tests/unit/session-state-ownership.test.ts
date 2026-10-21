@@ -60,9 +60,19 @@ const sourceFiles = readdirSync(srcDir, { recursive: true, encoding: "utf8" })
   .map((entry) => entry.split(path.sep).join("/"))
   .toSorted();
 
+/** The two scan tests walk the same tree; parse each file once and share it. */
+const parsed = new Map<string, { readonly text: string; readonly sf: ts.SourceFile }>();
+
 function parse(rel: string, text: string): ts.SourceFile {
-  return ts.createSourceFile(rel, text, ts.ScriptTarget.Latest, true);
+  const hit = parsed.get(rel);
+  if (hit !== undefined && hit.text === text) return hit.sf;
+  const sf = ts.createSourceFile(rel, text, ts.ScriptTarget.Latest, true);
+  parsed.set(rel, { text, sf });
+  return sf;
 }
+
+/** Parsing the whole tree is CPU-bound and slow on a loaded CI runner. */
+const SCAN_TIMEOUT_MS = 30_000;
 
 function isRegistrarCall(node: ts.Node | undefined): boolean {
   let n = node;
@@ -171,37 +181,47 @@ describe("session state ownership", () => {
     expect(sourceFiles).toContain("stores/auth.store.ts");
   });
 
-  it("every per-server looking top-level binding registers a reset or is allowlisted", () => {
-    const flags = scan(real);
-    const key = (f: Flag): string => `${f.file}|${f.binding}`;
-    const allowed = new Set(allowlist.map((e) => `${e.file}|${e.binding}`));
-    const unowned = flags.filter((f) => !allowed.has(key(f))).map((f) => `${f.file}: ${f.binding}`);
-    expect(
-      unowned,
-      "register a reset with registerSessionReset (lib/sessionRegistry.ts), or add the binding to tests/session-state-allowlist.json with a reason",
-    ).toEqual([]);
-  });
+  it(
+    "every per-server looking top-level binding registers a reset or is allowlisted",
+    () => {
+      const flags = scan(real);
+      const key = (f: Flag): string => `${f.file}|${f.binding}`;
+      const allowed = new Set(allowlist.map((e) => `${e.file}|${e.binding}`));
+      const unowned = flags
+        .filter((f) => !allowed.has(key(f)))
+        .map((f) => `${f.file}: ${f.binding}`);
+      expect(
+        unowned,
+        "register a reset with registerSessionReset (lib/sessionRegistry.ts), or add the binding to tests/session-state-allowlist.json with a reason",
+      ).toEqual([]);
+    },
+    SCAN_TIMEOUT_MS,
+  );
 
-  it("the allowlist only shrinks: every entry still names an unregistered binding", () => {
-    const flagged = new Set(scan(real).map((f) => `${f.file}|${f.binding}`));
-    const stale = allowlist
-      .filter((e) => !flagged.has(`${e.file}|${e.binding}`))
-      .map((e) => {
-        const text = real.get(e.file);
-        const why =
-          text === undefined
-            ? "file is gone"
-            : callsRegistrar(parse(e.file, text))
-              ? "file now registers a reset"
-              : "binding is gone";
-        return `${e.file}: ${e.binding} (${why}); remove this entry`;
-      });
-    expect(stale).toEqual([]);
-    for (const e of allowlist)
-      expect(CATEGORIES.has(e.category), `${e.file} ${e.binding}: unknown category`).toBe(true);
-    for (const e of allowlist)
-      expect(e.reason.length, `${e.file} ${e.binding}`).toBeGreaterThan(10);
-  });
+  it(
+    "the allowlist only shrinks: every entry still names an unregistered binding",
+    () => {
+      const flagged = new Set(scan(real).map((f) => `${f.file}|${f.binding}`));
+      const stale = allowlist
+        .filter((e) => !flagged.has(`${e.file}|${e.binding}`))
+        .map((e) => {
+          const text = real.get(e.file);
+          const why =
+            text === undefined
+              ? "file is gone"
+              : callsRegistrar(parse(e.file, text))
+                ? "file now registers a reset"
+                : "binding is gone";
+          return `${e.file}: ${e.binding} (${why}); remove this entry`;
+        });
+      expect(stale).toEqual([]);
+      for (const e of allowlist)
+        expect(CATEGORIES.has(e.category), `${e.file} ${e.binding}: unknown category`).toBe(true);
+      for (const e of allowlist)
+        expect(e.reason.length, `${e.file} ${e.binding}`).toBeGreaterThan(10);
+    },
+    SCAN_TIMEOUT_MS,
+  );
 
   it("flags an unregistered cache and passes a registered one", () => {
     const flagged = (src: string): string[] => scan(new Map([["x.ts", src]])).map((f) => f.binding);

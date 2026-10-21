@@ -78,6 +78,8 @@ export type VoiceChannelChromeModel = {
   readonly name: string;
   readonly nsfw: boolean;
   readonly private: boolean;
+  /** The server's AFK channel: marked with a moon and an "AFK" label. */
+  readonly afk: boolean;
   /** The local user is in this channel: drawn as `active`. */
   readonly joined: boolean;
   /** Why a click does nothing now (socket down, timed out); null when it works. */
@@ -95,6 +97,7 @@ export const VOICE_USER_PATCH_FIELDS = ["speaking"] as const;
 
 /** The fields `patchVoiceChannelChrome` changes in place. */
 export const VOICE_CHROME_PATCH_FIELDS = [
+  "afk",
   "joined",
   "frozenReason",
   "timeoutReason",
@@ -204,6 +207,20 @@ function drawCapacity(
   return badge;
 }
 
+/** The moon and "AFK" on the server's AFK channel; a readout, the server owns
+ *  the flag. The glyph is decorative, the text names it. */
+function drawAfk(channelId: number): HTMLSpanElement {
+  const badge = createElement("span", {
+    class: "ch-afk",
+    "data-testid": `channel-afk-${channelId}`,
+  });
+  const glyph = createElement("span", { "aria-hidden": "true" });
+  glyph.appendChild(createIcon("moon", 11));
+  appendChildren(badge, glyph, createElement("span", {}, shellText("channel.afk")));
+  badge.title = shellText("channel.afkTitle");
+  return badge;
+}
+
 function drawRestriction(channelId: number, reason: string): HTMLDivElement {
   return createElement(
     "div",
@@ -245,6 +262,7 @@ export function drawVoiceChannelChrome(model: VoiceChannelChromeModel): HTMLDivE
   appendChildren(item, prefix, createElement("span", { class: "ch-name" }, model.name));
   if (model.nsfw) item.appendChild(nsfwIndicator(model.channelId));
   if (model.private) item.appendChild(privateIndicator(model.channelId));
+  if (model.afk) item.appendChild(drawAfk(model.channelId));
   if (model.capacity !== null) item.appendChild(drawCapacity(model.channelId, model.capacity));
   if (model.mentionCount > 0) item.appendChild(mentionBadge(model.channelId, model.mentionCount));
 
@@ -275,6 +293,17 @@ export function patchVoiceChannelChrome(wrapper: Element, next: VoiceChannelChro
   } else {
     item.title = next.frozenReason;
     item.setAttribute("aria-disabled", "true");
+  }
+
+  const afkBadge = item.querySelector(":scope > .ch-afk");
+  if (!next.afk) {
+    afkBadge?.remove();
+  } else if (afkBadge === null) {
+    const drawn = drawAfk(next.channelId);
+    // Before the capacity and mention badges, as a fresh draw orders them.
+    const later = item.querySelector(":scope > .ch-capacity, :scope > .mention-badge");
+    if (later === null) item.appendChild(drawn);
+    else later.before(drawn);
   }
 
   const badge = item.querySelector(":scope > .ch-capacity");

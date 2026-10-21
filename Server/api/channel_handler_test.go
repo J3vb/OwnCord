@@ -91,11 +91,19 @@ CREATE TABLE IF NOT EXISTS recovery_assists (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
 
+CREATE TABLE IF NOT EXISTS channel_categories (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT    NOT NULL,
+    position   INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_categories_name ON channel_categories(name COLLATE NOCASE);
+
 CREATE TABLE IF NOT EXISTS channels (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     name             TEXT    NOT NULL,
     type             TEXT    NOT NULL DEFAULT 'text',
-    category         TEXT,
+    category_id INTEGER REFERENCES channel_categories(id) ON DELETE SET NULL,
     topic            TEXT,
     position         INTEGER NOT NULL DEFAULT 0,
     slow_mode        INTEGER NOT NULL DEFAULT 0,
@@ -145,6 +153,14 @@ CREATE TABLE IF NOT EXISTS message_mentions (
     message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
     mentioned_user_id INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
     PRIMARY KEY (message_id, mentioned_user_id)
+);
+
+-- History reads look up forward blocks on every page (migration 071).
+CREATE TABLE IF NOT EXISTS message_forwards (
+    message_id        INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+    source_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+    source_channel_id INTEGER NOT NULL,
+    source_timestamp  TEXT    NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, id DESC);
@@ -233,6 +249,34 @@ CREATE TABLE IF NOT EXISTS dm_open_state (
     channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
     opened_at  TEXT    NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (user_id, channel_id)
+);
+
+-- Group DM create reads the recipients' DM privacy, trust rows and the
+-- creator's message requests (migrations 046 and 070, WP 6.8d).
+CREATE TABLE IF NOT EXISTS user_privacy (
+    user_id           INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    allow_member_dms  INTEGER NOT NULL DEFAULT 1 CHECK (allow_member_dms IN (0, 1)),
+    message_requests  INTEGER NOT NULL DEFAULT 1 CHECK (message_requests IN (0, 1)),
+    updated_at        TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+CREATE TABLE IF NOT EXISTS trusted_senders (
+    recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    sender_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source       TEXT    NOT NULL CHECK (source IN ('accepted', 'sent_first', 'grandfathered')),
+    created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (recipient_id, sender_id)
+);
+CREATE TABLE IF NOT EXISTS message_requests (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    sender_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    recipient_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    channel_id       INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    first_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+    state            TEXT    NOT NULL DEFAULT 'pending'
+                     CHECK (state IN ('pending', 'accepted', 'ignored', 'deleted', 'blocked')),
+    created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+    decided_at       TEXT,
+    UNIQUE (sender_id, recipient_id)
 );
 
 -- B5-9: PurgeMessages/DeleteMessage write a removal row here in the same
@@ -854,6 +898,21 @@ func newPinTestDB(t *testing.T) *db.DB {
 		-- Mirrors migration 012. DM pin authorization consults the block list
 		-- (a blocked user must not mutate the blocker's pins), so this fixture
 		-- needs the table or the lookup fails closed with a 500.
+		-- DM pin authorization also reads the recipient's DM privacy (migration
+		-- 070) and trust rows (migration 046) through the same gate.
+		CREATE TABLE IF NOT EXISTS user_privacy (
+			user_id           INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+			allow_member_dms  INTEGER NOT NULL DEFAULT 1 CHECK (allow_member_dms IN (0, 1)),
+			message_requests  INTEGER NOT NULL DEFAULT 1 CHECK (message_requests IN (0, 1)),
+			updated_at        TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+		);
+		CREATE TABLE IF NOT EXISTS trusted_senders (
+			recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			sender_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			source       TEXT    NOT NULL CHECK (source IN ('accepted', 'sent_first', 'grandfathered')),
+			created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+			PRIMARY KEY (recipient_id, sender_id)
+		);
 		CREATE TABLE IF NOT EXISTS user_blocks (
 			blocker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			blocked_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

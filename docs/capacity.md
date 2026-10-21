@@ -876,6 +876,70 @@ K6_PEAK_VUS=2000 K6_SCALE_CHANNELS="$CHANNEL_IDS" K6_SCALE_TOKENS="$WORK/tokens.
   taskset -c 2,3 k6 run --insecure-skip-tls-verify ws-load.js
 ```
 
+### Role changes
+
+An optional scenario on the scale profile (WP 4.4a), off unless
+`K6_ROLE_FLIP_EVERY` is set. Changing a role fans out per affected user inside
+the admin request today, so this is the instrument that shows what that costs
+the other 2,000 people online, before and after the refresh worker of WP 4.4b.
+
+```
+gh workflow run load-baseline.yml -f profile=scale-role-flip --ref dev
+# the scale profile with K6_ROLE_FLIP_EVERY=30; by hand, add to the scale
+# command above (the token file holds the owner session token from setup):
+#   K6_ROLE_FLIP_EVERY=30 K6_ROLE_FLIP_TOKEN="$WORK/admin-token.txt"
+```
+
+- **What it does.** One admin VU, from the start of `steady` to the start of
+  `herd`, every N seconds: moves one loadtest user (`loadtest<K6_PEAK_VUS>`,
+  override with `K6_ROLE_FLIP_USER`) between the default role and
+  `K6_ROLE_FLIP_ROLE` (default Moderator), and PATCHes the default role, which
+  every loadtest user holds, renaming it and flipping its ADD_REACTIONS bit.
+  The second call is the one that touches every connected client: a
+  `member_update` per holder and a visibility refresh of everyone. It stops
+  before the herd, so the herd's zero-kick gate stays about the herd: the last
+  tick before it only restores, so the run ends with the default role, its mask
+  and the user as they started. Each PATCH has a 120 s timeout, so a slow
+  handler is a measurement, not a failed request.
+- **The flipped user may be offline.** VU ids come from a shared pool, so
+  `loadtest<K6_PEAK_VUS>` is not guaranteed to hold a socket. The fan-out to
+  everyone else is the same either way; only that one user's own revocation path
+  may go unexercised.
+- **Artifacts.** The workflow's artifact is named with a `-role-flip` suffix
+  for this variant, so the two runs sit side by side.
+- **Admin token.** The owner session token the workflow already obtains at setup
+  is written to the run directory (mode 0600, never uploaded) only when the
+  scenario is on, and read by k6 from that file, not from its environment.
+- **One more account.** The admin VU takes an id from the same pool as the
+  connections, so the workflow seeds one more user (`N + 502`) when it is on.
+- **What it reports** (in `load_measurement.role_flip` and the k6 sub-metrics,
+  per window): role-PATCH handler time p50/p95/p99 (`role_patch_time`, measured
+  by the VU around the request), the user-role PATCH time, `bpQueueDisconnects`
+  (`obs_backpressure{kind:queue_disconnects}`), `broadcastDrops`
+  (`obs_broadcast_drops`) and dispatch lag (`obs_dispatch_lag_p99_ms` and
+  `_max_ms`, gauges whose last value in each window is published). The server's
+  figure covers everything since boot, seeding and ramp included, so a lag
+  caused by the role changes is diluted in it; a real effect may be larger
+  than it shows, so treat it as indicative, not a per-window measurement. `role_patches` must be at least 1 and
+  `role_flip_errors` must be 0. The scale budgets and gates (steady and burst
+  p95, population, login burst, herd) still apply, so a red run is a possible,
+  readable outcome: it says the role changes cost the rest of the server more
+  than the budgets allow. The role-change figures themselves are recorded to be
+  compared, not gated.
+- **How to read it.** Compare a run of `scale-role-flip` with a plain `scale`
+  run at the same commit, and with the same run after WP 4.4b. A rise in the
+  steady, burst or login latencies over the plain run is the cost of the role
+  changes to everyone else.
+
+Baseline on `dev` (before WP 4.4b): **not yet measured.** The owner runs it and
+fills in this table.
+
+| Window | Role-PATCH p95   | `bpQueueDisconnects` | `broadcastDrops` | Dispatch lag p99 |
+| ------ | ---------------- | -------------------- | ---------------- | ---------------- |
+| steady | not yet measured | not yet measured     | not yet measured | not yet measured |
+| burst  | not yet measured | not yet measured     | not yet measured | not yet measured |
+| login  | not yet measured | not yet measured     | not yet measured | not yet measured |
+
 ### Measured
 
 Two runs, both dispatched on `dev` on 2026-10-17 from the same commit with

@@ -100,7 +100,7 @@ func newNSFWGateFixture(t *testing.T) *nsfwGateFixture {
 	if _, err := svc.Messages.SetMessagePinned(ctx, authorID, labelledID, sent.MessageID, true); err != nil {
 		t.Fatalf("SetMessagePinned: %v", err)
 	}
-	if _, err := svc.Messages.AddReaction(ctx, authorID, sent.MessageID, "👍"); err != nil {
+	if err := database.AddReaction(ctx, sent.MessageID, authorID, "👍"); err != nil {
 		t.Fatalf("AddReaction: %v", err)
 	}
 	const attID = "nsfw-gate-attachment"
@@ -804,7 +804,7 @@ func TestNSFW_UnlabellingDeletesAcknowledgementsAndRelabellingReprompts(t *testi
 	if err != nil || existing == nil {
 		t.Fatalf("GetChannel: %v", err)
 	}
-	if _, err := f.svc.Channels.AdminUpdateChannel(ctx, f.authorID, existing, service.AdminChannelUpdate{
+	if _, _, err := f.svc.Channels.AdminUpdateChannel(ctx, f.authorID, existing, service.AdminChannelUpdate{
 		Name: existing.Name, NSFW: false,
 	}, nil); err != nil {
 		t.Fatalf("AdminUpdateChannel (unlabel): %v", err)
@@ -817,7 +817,7 @@ func TestNSFW_UnlabellingDeletesAcknowledgementsAndRelabellingReprompts(t *testi
 	if err != nil || existing == nil {
 		t.Fatalf("GetChannel (re-read): %v", err)
 	}
-	if _, err := f.svc.Channels.AdminUpdateChannel(ctx, f.authorID, existing, service.AdminChannelUpdate{
+	if _, _, err := f.svc.Channels.AdminUpdateChannel(ctx, f.authorID, existing, service.AdminChannelUpdate{
 		Name: existing.Name, NSFW: true,
 	}, nil); err != nil {
 		t.Fatalf("AdminUpdateChannel (relabel): %v", err)

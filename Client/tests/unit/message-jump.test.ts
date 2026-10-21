@@ -82,7 +82,12 @@ function resetStores(): void {
     motd: null,
     isAuthenticated: true,
   }));
-  channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  channelsStore.setState(() => ({
+    channels: new Map(),
+    activeChannelId: null,
+    roles: [],
+    categories: [],
+  }));
   setChannels(CHANNELS);
   toastCalls.length = 0;
 }

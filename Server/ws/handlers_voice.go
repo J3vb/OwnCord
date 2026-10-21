@@ -24,6 +24,7 @@ func registerVoiceControlsV2(r *HandlerRegistry, deps VoiceDeps) {
 	r.RegisterV2(MsgTypeVoiceScreenshare, handleVoiceScreenshareV2, deps)
 	r.RegisterV2(MsgTypeVoiceE2EEAnnounce, handleVoiceE2EEAnnounceV2, deps)
 	r.RegisterV2(MsgTypeVoiceE2EEOffer, handleVoiceE2EEOfferV2, deps)
+	r.RegisterV2(MsgTypeVoiceWatch, handleVoiceWatchV2, deps)
 	r.RegisterV2(MsgTypeVoiceTokenRefresh, handleVoiceTokenRefreshV2, deps)
 	registerVoiceModerationV2(r, deps)
 }

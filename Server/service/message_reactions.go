@@ -81,6 +81,12 @@ func validateEmoji(emoji string) error {
 	return nil
 }
 
+// errReactionTargetNotFound is the single answer for a reaction target that is
+// missing, deleted or not readable by the caller.
+func errReactionTargetNotFound() error {
+	return fmt.Errorf("%w: message not found", ErrNotFound)
+}
+
 func (s *MessageService) handleReaction(ctx context.Context, userID, msgID int64, emoji string, add bool) (*ReactionResult, error) {
 	// Rate limit.
 	ratKey := auth.Key("reaction", userID)
@@ -95,20 +101,26 @@ func (s *MessageService) handleReaction(ctx context.Context, userID, msgID int64
 		return nil, err
 	}
 
+	// A missing id, a deleted message and a channel the caller may not read all
+	// answer identically: the history read check runs before any
+	// message-state-specific answer.
 	msg, err := s.st.GetMessage(ctx, msgID)
 	if err != nil || msg == nil {
-		return nil, fmt.Errorf("%w: message not found", ErrBadRequest)
+		return nil, errReactionTargetNotFound()
+	}
+	if err := s.requireChannelRead(ctx, userID, msg.ChannelID); err != nil {
+		return nil, errReactionTargetNotFound()
 	}
 	if msg.Deleted {
-		return nil, fmt.Errorf("%w: cannot react to deleted message", ErrBadRequest)
+		return nil, errReactionTargetNotFound()
 	}
 
 	participantIDs, isDM, err := s.reactionAudience(ctx, userID, msg.ChannelID)
 	if err != nil {
 		return nil, err
 	}
-	// After the audience check, so a non-member gets the same answer for a
-	// system row (call or group event) as for a missing id.
+	// After the read check and the audience check, so only a reader learns the
+	// message is a system row (call or group event).
 	if msg.Kind != db.MessageKindUser {
 		return nil, fmt.Errorf("%w: cannot react to a system message", ErrBadRequest)
 	}
@@ -149,19 +161,19 @@ func (s *MessageService) handleReaction(ctx context.Context, userID, msgID int64
 // reactionAudience resolves the channel a message lives in and enforces the
 // channel-scoped gates on reacting in it — archived, DM participation, DM
 // block, and the non-DM READ_MESSAGES|ADD_REACTIONS check. The gates its
-// caller keeps (rate limit, message id, emoji validity, deleted message) stay
-// in handleReaction and still run first. It also returns the DM participant
-// ids, resolved here so they exist before anything is mutated. The order of
-// the checks is load-bearing and unchanged.
+// caller keeps (rate limit, message id, emoji validity, channel read check,
+// deleted message) stay in handleReaction and still run first. It also returns
+// the DM participant ids, resolved here so they exist before anything is
+// mutated. The order of the checks is load-bearing.
 func (s *MessageService) reactionAudience(ctx context.Context, userID, channelID int64) ([]int64, bool, error) {
 	// Fail closed, mirroring EditMessage/DeleteMessage (message_crud.go): a
 	// lookup failure must not fall through to the non-DM permission branch
 	// below. That branch passes on the base role mask alone
 	// (READ_MESSAGES|ADD_REACTIONS, no per-channel override exists for a DM),
-	// skipping both IsDMParticipant and RequireDMNotBlocked entirely.
+	// skipping both IsDMParticipant and RequireDMReachable entirely.
 	ch, chErr := s.st.GetChannel(ctx, channelID)
 	if chErr != nil || ch == nil {
-		return nil, false, fmt.Errorf("%w: cannot react to this message", ErrForbidden)
+		return nil, false, errReactionTargetNotFound()
 	}
 	isDM := ch.Type == "dm"
 
@@ -184,7 +196,7 @@ func (s *MessageService) reactionAudience(ctx context.Context, userID, channelID
 	var participantIDs []int64
 	if isDM {
 		if !sub.DMParticipant {
-			return nil, false, fmt.Errorf("%w: not a DM participant", ErrBadRequest)
+			return nil, false, errReactionTargetNotFound()
 		}
 		if err := denial(permissions.CanAddReaction(sub)); err != nil {
 			return nil, false, err

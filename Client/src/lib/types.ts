@@ -132,6 +132,11 @@ export interface UserWithRole extends MessageUser {
   /** The user's profile text. Null = unset. Sent for every member since the
    *  server's 3C-7 (absent from older servers). */
   readonly about?: string | null;
+  /** Profile banner image path (`/api/v1/files/<id>`). Null = none, absent =
+   *  older server (WP 6.11b). */
+  readonly banner?: string | null;
+  /** Profile banner colour (`#rgb` / `#rrggbb`). Null = none, absent = older server. */
+  readonly banner_color?: string | null;
   /** Account creation time (RFC3339), the "Member since" date. Absent from
    *  older servers. */
   readonly created_at?: string;
@@ -175,6 +180,10 @@ export interface ReadyChannel {
   readonly name: string;
   readonly type: ChannelType;
   readonly category: string | null;
+  /** The category's id, 0 when none (WP 6.5a). Absent from older servers: group by `category`. */
+  readonly category_id?: number;
+  /** The category's place in the category order, 0 when none (WP 6.5a). */
+  readonly category_position?: number;
   /** Channel topic ("" = none). Absent from older servers. */
   readonly topic?: string;
   readonly position: number;
@@ -271,6 +280,10 @@ export interface ReadyMember {
   readonly custom_status?: string | null;
   /** Profile text. Null = unset; absent from servers before 3C-7. */
   readonly about?: string | null;
+  /** Banner image path; absent = none (omitted for members without one). */
+  readonly banner?: string | null;
+  /** Banner colour; absent = none. */
+  readonly banner_color?: string | null;
   /** Account creation time (RFC3339); absent from servers before 3C-7. */
   readonly created_at?: string;
   /** Long-term E2EE identity public key (base64) for voice TOFU (F3). */
@@ -391,6 +404,18 @@ export interface AuthErrorPayload {
   readonly min_epoch?: number;
 }
 
+/** One channel category, as the managers' list carries it (WP 6.5a). */
+export interface ChannelCategory {
+  readonly id: number;
+  readonly name: string;
+  readonly position: number;
+}
+
+/** channel_categories — the managers' full category list, replacing what they hold (WP 6.5a). */
+export interface ChannelCategoriesPayload {
+  readonly categories: readonly ChannelCategory[];
+}
+
 export interface ReadyPayload {
   readonly capabilities?: {
     readonly message_deduplication?: boolean;
@@ -402,8 +427,32 @@ export interface ReadyPayload {
      * exist (WP 3D-5). Absent means an older server.
      */
     readonly read_pointer?: boolean;
+    /**
+     * The server keeps private per-member profile notes (WP 6.11a), read and
+     * written over `/users/me/notes/{userId}`. Absent means an older server.
+     */
+    readonly user_notes?: boolean;
+    /**
+     * The server keeps a profile banner, an image and/or a colour (WP 6.11b):
+     * `POST` and `DELETE` `/users/me/banner`, `banner_color` on `PATCH
+     * /users/me`. Advertised even when attachment storage is off, in which case
+     * the upload route is not mounted. Absent means an older server.
+     */
+    readonly profile_banners?: boolean;
+    /**
+     * The server stores the caller's two direct message privacy settings (WP
+     * 6.8b), read and written over `/users/me/privacy`. Absent means an older
+     * server.
+     */
+    readonly dm_privacy?: boolean;
   };
   readonly channels: readonly ReadyChannel[];
+  /**
+   * The full category list, present only for a viewer holding MANAGE_CHANNELS
+   * (WP 6.5a). Absent for everyone else and for older servers, which derive
+   * their groups from the channels alone.
+   */
+  readonly categories?: readonly ChannelCategory[];
   readonly members: readonly ReadyMember[];
   readonly voice_states: readonly ReadyVoiceState[];
   readonly roles: readonly ReadyRole[];
@@ -532,6 +581,17 @@ export interface GroupEventInfo {
   readonly icon_removed?: boolean;
 }
 
+/**
+ * The snapshot link on a forwarded message (WP 6.9a). No author and no channel
+ * name ride on it; `source_message_id` is null once the original is deleted or
+ * purged, so the jump link is shown only while it is set.
+ */
+export interface ForwardInfo {
+  readonly source_channel_id: number;
+  readonly source_message_id: number | null;
+  readonly source_timestamp: string;
+}
+
 export interface ChatMessagePayload {
   readonly client_message_id?: string;
   readonly id: number;
@@ -569,6 +629,8 @@ export interface ChatMessagePayload {
   readonly call?: CallInfo;
   /** See GroupEventInfo; present on a group DM system row only. */
   readonly group_event?: GroupEventInfo;
+  /** Present on a forwarded message only (WP 6.9a). */
+  readonly forward?: ForwardInfo;
 }
 
 export interface ChatSendOkPayload {
@@ -578,6 +640,14 @@ export interface ChatSendOkPayload {
   readonly timestamp: string;
   /** Requested uploads the server did not attach (2A-3); absent from older servers. */
   readonly skipped_attachment_ids?: readonly string[];
+}
+
+/** The reply to `chat_forward`: `message_id` is the new message in `channel_id` (the target). */
+export interface ChatForwardOkPayload {
+  readonly message_id: number;
+  readonly channel_id: number;
+  readonly client_message_id: string;
+  readonly deduplicated: boolean;
 }
 
 export interface ChatEditedPayload {
@@ -640,6 +710,10 @@ export interface ChannelCreatePayload {
   readonly name: string;
   readonly type: ChannelType;
   readonly category: string | null;
+  /** See ReadyChannel.category_id. */
+  readonly category_id?: number;
+  /** See ReadyChannel.category_position. */
+  readonly category_position?: number;
   readonly topic?: string;
   readonly position: number;
   readonly slow_mode?: number;
@@ -650,6 +724,8 @@ export interface ChannelCreatePayload {
   /** Voice capacity limits (0 = unlimited). See ReadyChannel. */
   readonly voice_max_users?: number;
   readonly voice_max_video?: number;
+  /** See ReadyChannel.afk — absent means unchanged. */
+  readonly afk?: boolean;
   /**
    * This viewer's composer affordance — see ReadyChannel.can_send.
    *
@@ -682,6 +758,10 @@ export interface ChannelUpdatePayload {
    * the sidebar regroups without a reconnect.
    */
   readonly category?: string | null;
+  /** See ReadyChannel.category_id — absent means unchanged. */
+  readonly category_id?: number;
+  /** See ReadyChannel.category_position — absent means unchanged. */
+  readonly category_position?: number;
   readonly position?: number;
   readonly slow_mode?: number;
   /** See ReadyChannel.nsfw — the age-restriction label the server enforces. */
@@ -691,6 +771,8 @@ export interface ChannelUpdatePayload {
   /** Voice capacity limits (0 = unlimited). See ReadyChannel. */
   readonly voice_max_users?: number;
   readonly voice_max_video?: number;
+  /** See ReadyChannel.afk — absent means unchanged. */
+  readonly afk?: boolean;
 }
 
 /** nsfw_ack — the caller acknowledged or revoked a labelled channel on another device (B5-7). */
@@ -785,6 +867,12 @@ export interface VoiceE2EEOfferPayload {
   readonly iv: string;
 }
 
+/** Server→Client: whose screen shares a member of the voice channel watches. */
+export interface VoiceWatchingPayload {
+  readonly user_id: number;
+  readonly user_ids: readonly number[];
+}
+
 /** One user's presence in a presence_batch. */
 export interface PresenceBatchEntry {
   readonly user_id: number;
@@ -853,6 +941,10 @@ export interface UserUpdatePayload {
    *  of the profile wholesale. */
   readonly display_name?: string | null;
   readonly about?: string | null;
+  /** Always present from a server with banners (null = cleared); absent from
+   *  an older one, which leaves the stored banner alone. */
+  readonly banner?: string | null;
+  readonly banner_color?: string | null;
   /** Updated E2EE identity public key (base64) — lets peers detect an
    *  identity-key change (TOFU mismatch) as it happens (F3). */
   readonly identity_public_key?: string | null;
@@ -1019,6 +1111,13 @@ export interface ChatSendPayload {
   readonly attachments: readonly string[];
 }
 
+/** Copy one message into one channel or DM; `client_message_id` is required (WP 6.9a). */
+export interface ChatForwardPayload {
+  readonly client_message_id: string;
+  readonly channel_id: number;
+  readonly message_id: number;
+}
+
 export interface ChatEditPayload {
   readonly message_id: number;
   readonly content: string;
@@ -1154,6 +1253,7 @@ export type ServerMessage =
   | (WsEnvelope<ReadyPayload> & { readonly type: "ready" })
   | (WsEnvelope<ChatMessagePayload> & { readonly type: "chat_message" })
   | (WsEnvelope<ChatSendOkPayload> & { readonly type: "chat_send_ok" })
+  | (WsEnvelope<ChatForwardOkPayload> & { readonly type: "chat_forward_ok" })
   | (WsEnvelope<ChatEditedPayload> & { readonly type: "chat_edited" })
   | (WsEnvelope<ChatDeletedPayload> & { readonly type: "chat_deleted" })
   | (WsEnvelope<ChatBulkDeletedPayload> & { readonly type: "chat_bulk_deleted" })
@@ -1164,6 +1264,7 @@ export type ServerMessage =
   | (WsEnvelope<PresenceBatchPayload> & { readonly type: "presence_batch" })
   | (WsEnvelope<ChannelCreatePayload> & { readonly type: "channel_create" })
   | (WsEnvelope<ChannelUpdatePayload> & { readonly type: "channel_update" })
+  | (WsEnvelope<ChannelCategoriesPayload> & { readonly type: "channel_categories" })
   | (WsEnvelope<ChannelDeletePayload> & { readonly type: "channel_delete" })
   | (WsEnvelope<NsfwAckPayload> & { readonly type: "nsfw_ack" })
   | (WsEnvelope<VoiceStatePayload> & { readonly type: "voice_state" })
@@ -1174,6 +1275,7 @@ export type ServerMessage =
   | (WsEnvelope<VoiceDisconnectedPayload> & { readonly type: "voice_disconnected" })
   | (WsEnvelope<VoiceE2EEAnnouncePayload> & { readonly type: "voice_e2ee_announce" })
   | (WsEnvelope<VoiceE2EEOfferPayload> & { readonly type: "voice_e2ee_offer" })
+  | (WsEnvelope<VoiceWatchingPayload> & { readonly type: "voice_watching" })
   | (WsEnvelope<MemberJoinPayload> & { readonly type: "member_join" })
   | (WsEnvelope<MemberUpdatePayload> & { readonly type: "member_update" })
   | (WsEnvelope<UserUpdatePayload> & { readonly type: "user_update" })
@@ -1203,6 +1305,7 @@ export type ServerMessage =
 export type ClientMessage =
   | (WsEnvelope<AuthPayload> & { readonly type: "auth" })
   | (WsEnvelope<ChatSendPayload> & { readonly type: "chat_send" })
+  | (WsEnvelope<ChatForwardPayload> & { readonly type: "chat_forward" })
   | (WsEnvelope<ChatEditPayload> & { readonly type: "chat_edit" })
   | (WsEnvelope<ChatDeletePayload> & { readonly type: "chat_delete" })
   | (WsEnvelope<ReactionAddPayload> & { readonly type: "reaction_add" })
@@ -1229,6 +1332,7 @@ export type ClientMessage =
   | (WsEnvelope<{ target_user_id: number; encrypted_key: string; iv: string }> & {
       readonly type: "voice_e2ee_offer";
     })
+  | (WsEnvelope<{ user_ids: readonly number[] }> & { readonly type: "voice_watch" })
   | (WsEnvelope<CallSignalRequestPayload> & { readonly type: "call_ring" })
   | (WsEnvelope<CallSignalRequestPayload> & { readonly type: "call_decline" });
 
@@ -1364,6 +1468,8 @@ export interface MessageResponse {
   readonly call?: CallInfo;
   /** See GroupEventInfo; present on a group DM system row only. */
   readonly group_event?: GroupEventInfo;
+  /** Present on a forwarded message only (WP 6.9a). */
+  readonly forward?: ForwardInfo;
 }
 
 /**
@@ -1425,6 +1531,8 @@ export interface MemberResponse {
   readonly totp_enabled?: boolean;
   readonly display_name?: string | null;
   readonly about?: string | null;
+  readonly banner?: string | null;
+  readonly banner_color?: string | null;
   readonly custom_status?: string | null;
 }
 
@@ -1539,6 +1647,8 @@ export interface GifFavoritesResponse {
 /** Envelope for both GIF endpoints. */
 export interface GifSearchResponse {
   readonly results: readonly GifApiResult[];
+  /** Opaque cursor for the next page (send back as `pos`); "" or absent when there is none. */
+  readonly next?: string;
 }
 
 /** GET /api/v1/dms response. */

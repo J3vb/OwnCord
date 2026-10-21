@@ -92,19 +92,19 @@ platform invoke bindings, including all conditional platform/feature handlers:
 
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
-| Files under `Client/src/` importing `@tauri-apps/*`        | 26    |
-| Distinct `invoke` command names called from `Client/src/`  | 88    |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 91    |
+| Files under `Client/src/` importing `@tauri-apps/*`        | 27    |
+| Distinct `invoke` command names called from `Client/src/`  | 91    |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 94    |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
-| Files under `Client/src/platform/`                         | 52    |
+| Files under `Client/src/platform/`                         | 54    |
 
-The handler count covers the 91 distinct registrations
+The handler count covers the 94 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
 `#[cfg(feature = "devtools")]` and the forty-three `native_voice_*` commands
-behind `#[cfg(target_os = "linux")]`, so a default build (no `devtools`) registers 90 on Linux
-and 47 elsewhere. The one environment-detection helper is
+behind `#[cfg(target_os = "linux")]`, so a default build (no `devtools`) registers 93 on Linux
+and 50 elsewhere. The one environment-detection helper is
 `features/voice/native/platform.ts`'s `isLinuxDesktop()`, a Tauri-host plus
 Linux user-agent check that selects the native voice backend; it is not a
 desktop/browser seam.
@@ -124,6 +124,7 @@ guard. Keep it and the table in sync when changing registrations.
 
 ```text
 accept_cert_fingerprint
+app_audio_available
 check_client_update
 clear_call_notification
 delete_credential
@@ -202,8 +203,10 @@ save_settings
 set_unread_badge
 set_window_pref
 show_next_launch
+start_app_audio
 start_http_proxy
 start_livekit_proxy
+stop_app_audio
 stop_http_proxy
 stop_livekit_proxy
 store_identity_pin
@@ -217,8 +220,13 @@ ws_send
 ```
 
 Three registered handlers have no production platform caller:
-`get_cert_fingerprint` (native E2E), `native_voice_build_info` (native diagnostics),
-and `stop_http_proxy`. They still belong in the registration inventory.
+`get_cert_fingerprint` (native E2E), `native_voice_build_info` (native diagnostics)
+and `stop_http_proxy`. The three Windows per-app share audio commands
+`app_audio_available`, `start_app_audio` and `stop_app_audio` (WP 6.7a, the host
+half: they exist on every target and answer "unavailable" off Windows) have their
+caller since WP 6.7b: `src/platform/desktop/appAudio.ts`, behind the `AppAudio`
+contract, a twenty-seventh importer. They still belong in the registration
+inventory.
 
 There is no `window.__TAURI__` access, and the only environment branching is
 the SDK `isTauri` guard in `lib/pendingMessages.ts` (imported, not global), which is

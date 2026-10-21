@@ -33,21 +33,18 @@ type HubBroadcaster interface {
 	BroadcastChannelCreate(ch *db.Channel)
 	BroadcastChannelUpdate(ch *db.Channel)
 	BroadcastChannelDelete(channelID int64)
+	// BroadcastChannelCategories sends the full category list to the connected
+	// clients that hold MANAGE_CHANNELS (permission evaluated at send time),
+	// and to nobody else, after a category mutation (WP 6.5a).
+	BroadcastChannelCategories(cats []db.ChannelCategory)
 	BroadcastMemberBan(userID int64)
 	// BroadcastChatBulkDeleted tells a channel's subscribers that messageIDs
 	// were deleted at once (one committed batch of a ban's message purge).
 	BroadcastChatBulkDeleted(channelID int64, messageIDs []int64)
-	BroadcastMemberUpdate(userID int64, roleName string)
 	// RefreshChannelVisibility sends targeted channel_create/channel_delete
 	// messages after a channel permission override change so each connected
 	// client's sidebar reflects its new visibility without a reconnect.
 	RefreshChannelVisibility(ch *db.Channel)
-	// RefreshAllChannelVisibility is RefreshChannelVisibility across every
-	// non-DM channel. A role's permission mask is the base every channel's
-	// effective permission derives from, so a role edit can change visibility
-	// of all of them at once — unlike a channel_overrides edit, which touches
-	// exactly one.
-	RefreshAllChannelVisibility()
 	// BroadcastRolesUpdate ships the full role list to every connected client
 	// after a role mutation, so name colors and permission-gated affordances
 	// converge without a reconnect.
@@ -62,8 +59,12 @@ type HubBroadcaster interface {
 
 // ─── PermissionInvalidator ───────────────────────────────────────────────────
 
-// PermissionInvalidator allows admin handlers to invalidate the permission
-// cache when roles or permissions change. Satisfied by *service.PermissionService.
+// PermissionInvalidator was how admin handlers invalidated the permission cache
+// when roles or permissions changed. Since WP 5.1a the services do that
+// themselves (service.PermissionChangeNotifier's callers invalidate first), so
+// the admin constructors accept the value but no longer use it; it is kept so
+// their signatures, and every caller, stay unchanged. Satisfied by
+// *service.PermissionService.
 type PermissionInvalidator interface {
 	InvalidateUser(userID int64)
 	InvalidateAll()

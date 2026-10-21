@@ -24,7 +24,9 @@ var (
 	// ErrNoNewGroupMembers means every user named by an add is already a member.
 	ErrNoNewGroupMembers = errors.New("no new group members")
 	// ErrGroupDMBlockedPair means a new member and another new member or a
-	// current member have blocked each other (either direction).
+	// current member have blocked each other (either direction), or a new
+	// member refuses the actor (DMs off without trusting them, or an
+	// unaccepted message request from the actor).
 	ErrGroupDMBlockedPair = errors.New("blocked pair in group DM")
 )
 
@@ -239,6 +241,11 @@ func (d *DB) AddGroupDMMembers(ctx context.Context, channelID, actorID int64, id
 		// Re-check blocks inside the transaction: the service's check ran
 		// earlier, and a block or another add may have landed since.
 		if err := requireNoBlockedPair(ctx, tx, fresh, slices.Concat(members, fresh)); err != nil {
+			return err
+		}
+		// Likewise a target that has turned DMs off since, or that the actor
+		// holds an unaccepted request to. Only the actor's trust counts.
+		if err := requireReachableTargets(ctx, tx, actorID, fresh); err != nil {
 			return err
 		}
 

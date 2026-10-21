@@ -66,7 +66,9 @@ tauri-plugin-updater = "2.13"
 minisign-verify = "0.2"
 tauri-plugin-process = "2"
 url = "2"
-tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }
+# ws_proxy.rs always passes its own rustls Connector, so tungstenite needs the
+# rustls backend but not a bundled root store of its own.
+tokio-tungstenite = { version = "0.30.0", features = ["__rustls-tls"] }
 futures-util = "0.3.32"
 tokio = { version = "1", features = ["sync", "net", "io-util", "rt", "macros", "time"] }
 tokio-rustls = { version = "0.26", default-features = false }
@@ -75,8 +77,7 @@ tokio-rustls = { version = "0.26", default-features = false }
 socket2 = { version = "0.6", features = ["all"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 # Mozilla root bundle for the updater's HostScopedVerifier: non-pinned hosts
-# (the GitHub installer download) get web-PKI validation. Already in the
-# dependency tree via tokio-tungstenite's rustls-tls-webpki-roots feature.
+# (the GitHub installer download) get web-PKI validation.
 webpki-roots = "1"
 ring = "0.17"
 log = "0.4"
@@ -150,6 +151,16 @@ notify-rust = "4"
 windows = { version = "0.58", features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_System_SystemInformation",
+    # Per-app share audio (windows_app_audio.rs): WASAPI process loopback
+    # activation, its COM apartment and completion event, and the blob
+    # PROPVARIANT that carries the target process id.
+    "Win32_Media_Audio",
+    "Win32_Security",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+    "Win32_Foundation",
     "Data_Xml_Dom",
     "UI_Notifications",
 ] }
@@ -161,6 +172,11 @@ windows-sys = { version = "0.60", features = [
     "Win32_Foundation",
     "Win32_Security_Cryptography",
     "Win32_UI_WindowsAndMessaging",
+    # windows_app_audio.rs: the build number (RtlGetVersion) and the parent
+    # map that keeps OwnCord's own process tree out of a capture.
+    "Wdk_System_SystemServices",
+    "Win32_System_SystemInformation",
+    "Win32_System_Diagnostics_ToolHelp",
 ] }
 # WebView2 profile permission state (windows_media.rs). Both match the
 # versions tauri/wry already build, so no new crate enters the tree.

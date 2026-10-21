@@ -27,10 +27,33 @@ export function takeVoiceMoved(channelId: number | null): boolean {
   return moved;
 }
 
+let pendingAfkChannelId: number | null = null;
+
+/** The AFK sweep moved this client to `channelId`; its toast waits for the
+ *  join to be acknowledged. A newer move replaces an older one. */
+export function noteAfkMove(channelId: number): void {
+  pendingAfkChannelId = channelId;
+}
+
+/** Whether `channelId` is the noted AFK move. Any self join acknowledgement
+ *  settles the note, so one for a different channel (the user clicked away
+ *  first) does not leave it to fire on a later manual join. */
+export function takeAfkMove(channelId: number): boolean {
+  const matched = pendingAfkChannelId === channelId;
+  pendingAfkChannelId = null;
+  return matched;
+}
+
+/** Forget a noted AFK move whose join was refused, abandoned or superseded. */
+export function clearAfkMove(): void {
+  pendingAfkChannelId = null;
+}
+
 void registerSessionReset(
   "voice:move-hint",
   () => {
     pendingMoveChannelId = null;
+    pendingAfkChannelId = null;
   },
   { phase: "cache" },
 ); // app-lifetime
