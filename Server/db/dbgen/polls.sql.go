@@ -533,7 +533,7 @@ func (q *Queries) ListPollUserAnswerIDs(ctx context.Context, arg ListPollUserAns
 }
 
 const nextPollExpiry = `-- name: NextPollExpiry :one
-SELECT expires_at FROM polls WHERE ended_at IS NULL ORDER BY expires_at
+SELECT expires_at FROM polls WHERE ended_at IS NULL ORDER BY expires_at LIMIT 1
 `
 
 // The soonest expiry among polls not yet ended, served by the partial index.

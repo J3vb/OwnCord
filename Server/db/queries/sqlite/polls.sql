@@ -84,7 +84,7 @@ RETURNING version, ended_at;
 
 -- name: NextPollExpiry :one
 -- The soonest expiry among polls not yet ended, served by the partial index.
-SELECT expires_at FROM polls WHERE ended_at IS NULL ORDER BY expires_at;
+SELECT expires_at FROM polls WHERE ended_at IS NULL ORDER BY expires_at LIMIT 1;
 
 -- name: ListDuePolls :many
 -- Polls to end: not yet ended and expired at or before now, oldest first.
