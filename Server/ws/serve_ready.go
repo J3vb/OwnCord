@@ -11,7 +11,6 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
-	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // buildAuthOK constructs the auth_ok server→client message.
@@ -415,18 +414,10 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 	}
 	return &readyFields{
 		head: readyHead{
-			Capabilities: map[string]any{
-				"message_deduplication":        true,
-				"message_retry_window_seconds": int64(service.MessageRetryWindow.Seconds()),
-				"message_retry_floor_ms":       retryFloorMS,
-				"read_pointer":                 true,
-				"user_notes":                   true,
-				"profile_banners":              true,
-				"dm_privacy":                   true,
-			},
-			Categories: categories,
-			Channels:   channelPayloads,
-			DMChannels: dmChannels,
+			Capabilities: readyCapabilities(retryFloorMS),
+			Categories:   categories,
+			Channels:     channelPayloads,
+			DMChannels:   dmChannels,
 
 			MemberTimeouts: timeouts.entries,
 		},
