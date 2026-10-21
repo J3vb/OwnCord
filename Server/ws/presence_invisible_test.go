@@ -264,7 +264,7 @@ func TestAuthOK_CarriesOwnTrueStatusAndProfileFields(t *testing.T) {
 
 	user := seedOwnerUser(t, database, "authok-ghost")
 	name, about, custom := "Ghosty", "boo", "lurking"
-	if err := database.UpdateUserProfile(ctx, user.ID, user.Username, nil, &name, &about); err != nil {
+	if err := database.UpdateUserProfile(ctx, user.ID, user.Username, nil, &name, &about, nil, nil); err != nil {
 		t.Fatalf("UpdateUserProfile: %v", err)
 	}
 	if err := database.UpdateUserCustomStatus(ctx, user.ID, &custom); err != nil {

@@ -279,6 +279,17 @@ func normalizeSettingUpdates(updates map[string]string) (map[string]string, erro
 	return normalized, nil
 }
 
+// AFKTimeoutSeconds reads a stored AFKTimeoutKey value: the seconds when it is
+// one of the allowed choices, AFKTimeoutDefaultSeconds for anything else
+// (unset, blank, hand-edited to a value the PATCH would refuse).
+func AFKTimeoutSeconds(stored string) int {
+	secs, err := strconv.Atoi(strings.TrimSpace(stored))
+	if err != nil || !slices.Contains(afkTimeoutChoices, secs) {
+		return AFKTimeoutDefaultSeconds
+	}
+	return secs
+}
+
 // normalizeAFKTimeout accepts only the choices in afkTimeoutChoices and
 // returns the value in canonical decimal form.
 func normalizeAFKTimeout(key, value string) (string, error) {

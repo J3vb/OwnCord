@@ -132,9 +132,8 @@ type Hub struct {
 	// In-flight guards for the DB-heavy sweeps Run kicks off in their own
 	// goroutines (startSweep): a tick that arrives while the previous sweep
 	// is still running is skipped rather than stacked.
-	sessionSweepInFlight   atomic.Bool
-	voiceSweepInFlight     atomic.Bool
-	voiceReconcileInFlight atomic.Bool
+	sessionSweepInFlight                                         atomic.Bool
+	voiceSweepInFlight, voiceReconcileInFlight, afkSweepInFlight atomic.Bool
 
 	voiceReconcile voiceReconcileState // RT-3 (voice_reconcile.go)
 	voiceReg       voiceRegistry       // voice membership lock and grace window (voice_registry.go)
@@ -319,8 +318,10 @@ func (h *Hub) Run() {
 					h.startSweep(&h.sessionSweepInFlight, h.sweepRevokedSessions)
 				case <-voiceSweepTicker.C:
 					h.startSweep(&h.voiceSweepInFlight, h.sweepStaleVoiceStates)
-					// RT-3 has its own guard: a slow ListParticipants never suppresses the ghost sweep.
+					// RT-3 and WP 6.10b (AFK moves) each have their own guard: a slow
+					// ListParticipants or move never suppresses the ghost sweep.
 					h.startSweep(&h.voiceReconcileInFlight, h.reconcileVoiceMembership)
+					h.startSweep(&h.afkSweepInFlight, h.sweepAFK)
 				}
 			}
 		}()

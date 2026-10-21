@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { attachChannelContextMenu } from "@components/channel-sidebar/context-menu";
 import { authStore } from "@stores/auth.store";
-import type { Channel } from "@stores/channels.store";
+import { channelsStore, type Channel } from "@stores/channels.store";
+import { voiceStore } from "@stores/voice.store";
 import { setChannelMutesHost } from "@lib/channel-mutes";
 import { parseChannelLink } from "@lib/deep-link";
 import { setDeveloperMode } from "../helpers/message-actions-fixtures";
@@ -96,6 +97,30 @@ describe("channel context menu - Copy Link / Invite People / Copy Channel ID", (
     attachChannelContextMenu(el, { ...channel, type: "voice" }, ac.signal, ac.signal);
     el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 4, clientY: 4 }));
     expect(item("ctx-copy-channel-link")).toBeNull();
+  });
+
+  it("Open chat navigates without voice_join", () => {
+    signInAs("member");
+    const voice: Channel = { ...channel, id: 7, name: "lounge", type: "voice" };
+    channelsStore.setState((s) => ({ ...s, channels: new Map([[7, voice]]) }));
+    const joinsBefore = voiceStore.getState().currentChannelId;
+    const el = document.createElement("div");
+    container.appendChild(el);
+    attachChannelContextMenu(el, voice, ac.signal, ac.signal);
+    el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 4, clientY: 4 }));
+    // Mark as Read and Mute stay off a voice row; Open chat is its entry.
+    expect(item("ctx-mark-read")).toBeNull();
+    item("ctx-open-chat")!.click();
+    expect(channelsStore.getState().activeChannelId).toBe(7);
+    // Joining is voiceStore.currentChannelId (set by the voice_join answer).
+    expect(voiceStore.getState().currentChannelId).toBe(joinsBefore);
+    expect(document.querySelector(".channel-ctx-menu")).toBeNull();
+  });
+
+  it("offers no Open chat on a text channel", () => {
+    signInAs("member");
+    openMenu();
+    expect(item("ctx-open-chat")).toBeNull();
   });
 
   it("shows Invite People only to a role that can manage invites, and calls back", () => {

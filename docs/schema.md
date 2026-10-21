@@ -420,6 +420,12 @@ additionally admits one that some user's `avatar` currently equals, so an
 avatar is readable by every authenticated user for exactly as long as it is in
 use.
 
+`idx_users_banner_id` covers the same probe for `users.banner_id` (migration
+069), the profile banner image. It names an attachment the way
+`channels.dm_icon` does, and `GET /api/v1/files/{id}` admits the file to every
+authenticated user for exactly as long as a `banner_id` names it. `banner_color`
+is the optional colour, stored lower-case as `#rgb` or `#rrggbb`.
+
 ---
 
 ### sessions

@@ -165,5 +165,6 @@ export function voiceChannelChrome(
             title: shellText("channel.voiceCapacity", { connected, max }),
           }
         : null,
+    mentionCount: channel.mentionCount,
   };
 }

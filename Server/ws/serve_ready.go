@@ -51,6 +51,8 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 				// is what the "edit my profile" form pre-fills from.
 				"display_name":  user.DisplayName,
 				"about":         user.About,
+				"banner":        user.BannerPath(),
+				"banner_color":  user.BannerColor,
 				"custom_status": customStatus,
 				// RFC 3339 instant the custom status clears itself, or null.
 				"custom_status_expires_at": expiresAtVal,
@@ -459,7 +461,6 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 	}
 
 	voiceStates := h.readyVoiceStates(ctx, database, visibleChannels, dmChannels, userID)
-
 	serverName, motd := h.getCachedSettings(ctx)
 
 	notices, err := readyNotices(ctx, database, userID)
@@ -479,6 +480,7 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 				"message_retry_floor_ms":       retryFloorMS,
 				"read_pointer":                 true,
 				"user_notes":                   true,
+				"profile_banners":              true,
 			},
 			Channels:   channelPayloads,
 			DMChannels: dmChannels,
