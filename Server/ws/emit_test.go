@@ -90,9 +90,10 @@ type stubChannelEvent struct {
 	payload   []byte
 }
 
-func (e stubChannelEvent) EventType() string { return "test_channel" }
-func (e stubChannelEvent) ChannelID() int64  { return e.channelID }
-func (e stubChannelEvent) Payload() []byte   { return e.payload }
+func (e stubChannelEvent) EventType() string            { return "test_channel" }
+func (e stubChannelEvent) deliveryClass() deliveryClass { return classChannel }
+func (e stubChannelEvent) ChannelID() int64             { return e.channelID }
+func (e stubChannelEvent) Payload() []byte              { return e.payload }
 
 type stubExcludeSenderEvent struct {
 	channelID     int64
@@ -100,10 +101,11 @@ type stubExcludeSenderEvent struct {
 	payload       []byte
 }
 
-func (e stubExcludeSenderEvent) EventType() string    { return "test_exclude" }
-func (e stubExcludeSenderEvent) ChannelID() int64     { return e.channelID }
-func (e stubExcludeSenderEvent) ExcludeUserID() int64 { return e.excludeUserID }
-func (e stubExcludeSenderEvent) Payload() []byte      { return e.payload }
+func (e stubExcludeSenderEvent) EventType() string            { return "test_exclude" }
+func (e stubExcludeSenderEvent) deliveryClass() deliveryClass { return classExcludeSender }
+func (e stubExcludeSenderEvent) ChannelID() int64             { return e.channelID }
+func (e stubExcludeSenderEvent) ExcludeUserID() int64         { return e.excludeUserID }
+func (e stubExcludeSenderEvent) Payload() []byte              { return e.payload }
 
 type stubSequencedDMEvent struct {
 	channelID      int64
@@ -111,26 +113,29 @@ type stubSequencedDMEvent struct {
 	payload        []byte
 }
 
-func (e stubSequencedDMEvent) EventType() string       { return "test_dm" }
-func (e stubSequencedDMEvent) ChannelID() int64        { return e.channelID }
-func (e stubSequencedDMEvent) ParticipantIDs() []int64 { return e.participantIDs }
-func (e stubSequencedDMEvent) Payload() []byte         { return e.payload }
+func (e stubSequencedDMEvent) EventType() string            { return "test_dm" }
+func (e stubSequencedDMEvent) deliveryClass() deliveryClass { return classSequencedDM }
+func (e stubSequencedDMEvent) ChannelID() int64             { return e.channelID }
+func (e stubSequencedDMEvent) ParticipantIDs() []int64      { return e.participantIDs }
+func (e stubSequencedDMEvent) Payload() []byte              { return e.payload }
 
 type stubUserTargetedEvent struct {
 	targetUserID int64
 	payload      []byte
 }
 
-func (e stubUserTargetedEvent) EventType() string   { return "test_targeted" }
-func (e stubUserTargetedEvent) TargetUserID() int64 { return e.targetUserID }
-func (e stubUserTargetedEvent) Payload() []byte     { return e.payload }
+func (e stubUserTargetedEvent) EventType() string            { return "test_targeted" }
+func (e stubUserTargetedEvent) deliveryClass() deliveryClass { return classUserTargeted }
+func (e stubUserTargetedEvent) TargetUserID() int64          { return e.targetUserID }
+func (e stubUserTargetedEvent) Payload() []byte              { return e.payload }
 
 type stubBroadcastAllEvent struct {
 	payload []byte
 }
 
-func (e stubBroadcastAllEvent) EventType() string { return "test_broadcast_all" }
-func (e stubBroadcastAllEvent) Payload() []byte   { return e.payload }
+func (e stubBroadcastAllEvent) EventType() string            { return "test_broadcast_all" }
+func (e stubBroadcastAllEvent) deliveryClass() deliveryClass { return classBroadcastAll }
+func (e stubBroadcastAllEvent) Payload() []byte              { return e.payload }
 
 type stubVoiceChannelEvent struct {
 	voiceChannelID int64
@@ -138,10 +143,11 @@ type stubVoiceChannelEvent struct {
 	payload        []byte
 }
 
-func (e stubVoiceChannelEvent) EventType() string     { return "test_voice" }
-func (e stubVoiceChannelEvent) VoiceChannelID() int64 { return e.voiceChannelID }
-func (e stubVoiceChannelEvent) ExcludeUserID() int64  { return e.excludeUserID }
-func (e stubVoiceChannelEvent) Payload() []byte       { return e.payload }
+func (e stubVoiceChannelEvent) EventType() string            { return "test_voice" }
+func (e stubVoiceChannelEvent) deliveryClass() deliveryClass { return classVoiceChannel }
+func (e stubVoiceChannelEvent) VoiceChannelID() int64        { return e.voiceChannelID }
+func (e stubVoiceChannelEvent) ExcludeUserID() int64         { return e.excludeUserID }
+func (e stubVoiceChannelEvent) Payload() []byte              { return e.payload }
 
 type stubVoiceChannelGuardedEvent struct {
 	voiceChannelID int64
@@ -149,14 +155,16 @@ type stubVoiceChannelGuardedEvent struct {
 	payload        []byte
 }
 
-func (e stubVoiceChannelGuardedEvent) EventType() string     { return "test_voice_guarded" }
-func (e stubVoiceChannelGuardedEvent) VoiceChannelID() int64 { return e.voiceChannelID }
-func (e stubVoiceChannelGuardedEvent) TargetUserID() int64   { return e.targetUserID }
-func (e stubVoiceChannelGuardedEvent) Payload() []byte       { return e.payload }
+func (e stubVoiceChannelGuardedEvent) EventType() string            { return "test_voice_guarded" }
+func (e stubVoiceChannelGuardedEvent) deliveryClass() deliveryClass { return classVoiceChannelGuarded }
+func (e stubVoiceChannelGuardedEvent) VoiceChannelID() int64        { return e.voiceChannelID }
+func (e stubVoiceChannelGuardedEvent) TargetUserID() int64          { return e.targetUserID }
+func (e stubVoiceChannelGuardedEvent) Payload() []byte              { return e.payload }
 
 type stubUnknownEvent struct{}
 
-func (e stubUnknownEvent) EventType() string { return "test_unknown" }
+func (e stubUnknownEvent) EventType() string            { return "test_unknown" }
+func (e stubUnknownEvent) deliveryClass() deliveryClass { return classInvalid }
 
 // ── tests ────────────────────────────────────────────────────────────────────
 

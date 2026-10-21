@@ -18,6 +18,7 @@ type ChannelService struct {
 	st    Store
 	afk   AFKStore
 	cats  CategoryStore
+	cperm CategoryPermStore
 	forum ForumStore
 	perms *PermissionService
 	batch *ConnWrites
@@ -37,11 +38,13 @@ func NewChannelService(st Store, perms *PermissionService) *ChannelService {
 	// that does not leaves SetAFKChannel answering ErrInternal.
 	afk, _ := st.(AFKStore)
 	cats, _ := st.(CategoryStore)
+	cperm, _ := st.(CategoryPermStore)
 	forum, _ := st.(ForumStore)
 	return &ChannelService{
 		st:    st,
 		afk:   afk,
 		cats:  cats,
+		cperm: cperm,
 		forum: forum,
 		perms: perms,
 		now:   time.Now,

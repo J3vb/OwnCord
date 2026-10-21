@@ -151,11 +151,15 @@ func (d *DB) ReorderChannelCategories(ctx context.Context, ids []int64) error {
 	})
 }
 
-// DeleteChannelCategory removes a category. Its channels keep every other
-// field and become uncategorized (ON DELETE SET NULL). ErrNotFound when it is
-// already gone.
+// DeleteChannelCategory removes a category and, by cascade, its permission
+// template. Its channels keep every other field, including the override rows
+// they carry, and become uncategorized (ON DELETE SET NULL) and unsynced.
+// ErrNotFound when it is already gone.
 func (d *DB) DeleteChannelCategory(ctx context.Context, id int64) error {
 	return d.inWriteTx(ctx, "DeleteChannelCategory", func(q *dbgen.Queries) error {
+		if err := q.UnsyncCategoryChannels(ctx, &id); err != nil {
+			return err
+		}
 		n, err := q.DeleteChannelCategory(ctx, id)
 		if err != nil {
 			return err
@@ -208,7 +212,15 @@ func (d *DB) CreateChannelIn(ctx context.Context, c NewChannel) (int64, error) {
 			return err
 		}
 		id, err = res.LastInsertId()
-		return err
+		if err != nil {
+			return err
+		}
+		if catID == nil {
+			return nil
+		}
+		// The channel starts as a copy of its category's template and synced
+		// to it, in this same transaction (WP 6.5d).
+		return copyTemplateToNewChannelTx(ctx, q, id, *catID)
 	})
 	if err != nil {
 		return 0, err

@@ -117,6 +117,16 @@ only with MANAGE_CHANNELS, carrying no personal data, and deleted with the forum
 A post's tag links go with the post or the tag. A client that did not declare the
 `forums` feature is sent no forum row, so an NSFW-labelled forum's name and topic
 reach only sockets that can read it and render it. It adds no other data class.
+
+**Amended 2026-10-21 (category permissions):** `076_category_permissions.sql` adds
+`category_overrides`, `category_user_overrides` and `channels.permissions_synced`
+(WP 6.5d), a template of permission overrides that a category's synced channels
+follow. The per-member rows are keyed by user exactly like `channel_user_overrides`,
+so they join the account-erasure inventory (class 18c) and are deleted with the
+account; the per-role rows hold no personal data. No new data class beyond that.
+A new channel in a category copies the template without an actor check: every
+template row was guarded when it was written, and template rows stay in force
+after their writer is demoted.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each
 service are documented"). **Input to:** HP-5, and to the retention and
 erasure obligations every B5 step carries.
