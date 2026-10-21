@@ -124,7 +124,8 @@ func (d *DB) DeleteChannelRetention(ctx context.Context, channelID int64) (bool,
 }
 
 // RetentionWindows returns the effective policy of every non-DM channel that
-// has one: the channel override where present, else the server window;
+// has one: the channel override where present (a thread's being its
+// parent's, 6.9c), else the server window;
 // channels with an effective 0 are omitted. DMs are never in scope (owner
 // decision 4).
 func (d *DB) RetentionWindows(ctx context.Context) ([]RetentionWindow, error) {
@@ -134,7 +135,7 @@ func (d *DB) RetentionWindows(ctx context.Context) ([]RetentionWindow, error) {
 	}
 	rows, err := d.reader.QueryContext(ctx,
 		`SELECT c.id, c.name, cr.days FROM channels c
-		   LEFT JOIN channel_retention cr ON cr.channel_id = c.id
+		   LEFT JOIN channel_retention cr ON cr.channel_id = COALESCE(c.parent_channel_id, c.id)
 		  WHERE c.type <> 'dm' AND c.is_group = 0
 		  ORDER BY c.id`)
 	if err != nil {

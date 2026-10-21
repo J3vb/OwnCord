@@ -11,7 +11,8 @@ import (
 
 const acknowledgeNSFW = `-- name: AcknowledgeNSFW :exec
 
-INSERT OR IGNORE INTO nsfw_acknowledgements (user_id, channel_id) VALUES (?, ?)
+INSERT OR IGNORE INTO nsfw_acknowledgements (user_id, channel_id)
+VALUES (?1, (SELECT COALESCE(ac.parent_channel_id, ac.id) FROM channels ac WHERE ac.id = ?2))
 `
 
 type AcknowledgeNSFWParams struct {
@@ -22,6 +23,10 @@ type AcknowledgeNSFWParams struct {
 // Per-user, per-channel NSFW acknowledgement (migration 047, B5-7). See the
 // migration's own comment for the shape and Server/permissions/predicates.go
 // (CanReadContent) for the gate these back.
+//
+// Every channel id is resolved through its parent first (migration 073): a
+// thread takes its parent's NSFW label, so it takes the parent's consent too,
+// and no acknowledgement row is ever keyed by a thread id.
 func (q *Queries) AcknowledgeNSFW(ctx context.Context, arg AcknowledgeNSFWParams) error {
 	_, err := q.db.ExecContext(ctx, acknowledgeNSFW, arg.UserID, arg.ChannelID)
 	return err
@@ -37,7 +42,7 @@ func (q *Queries) DeleteNSFWAcknowledgementsForChannel(ctx context.Context, chan
 }
 
 const hasNSFWAcknowledgement = `-- name: HasNSFWAcknowledgement :one
-SELECT COUNT(*) FROM nsfw_acknowledgements WHERE user_id = ? AND channel_id = ?
+SELECT COUNT(*) FROM nsfw_acknowledgements WHERE user_id = ?1 AND channel_id = (SELECT COALESCE(ac.parent_channel_id, ac.id) FROM channels ac WHERE ac.id = ?2)
 `
 
 type HasNSFWAcknowledgementParams struct {
@@ -53,7 +58,7 @@ func (q *Queries) HasNSFWAcknowledgement(ctx context.Context, arg HasNSFWAcknowl
 }
 
 const listNSFWAcknowledgedUserIDs = `-- name: ListNSFWAcknowledgedUserIDs :many
-SELECT user_id FROM nsfw_acknowledgements WHERE channel_id = ?
+SELECT user_id FROM nsfw_acknowledgements WHERE channel_id = (SELECT COALESCE(ac.parent_channel_id, ac.id) FROM channels ac WHERE ac.id = ?1)
 `
 
 func (q *Queries) ListNSFWAcknowledgedUserIDs(ctx context.Context, channelID int64) ([]int64, error) {
@@ -80,7 +85,7 @@ func (q *Queries) ListNSFWAcknowledgedUserIDs(ctx context.Context, channelID int
 }
 
 const revokeNSFW = `-- name: RevokeNSFW :exec
-DELETE FROM nsfw_acknowledgements WHERE user_id = ? AND channel_id = ?
+DELETE FROM nsfw_acknowledgements WHERE user_id = ?1 AND channel_id = (SELECT COALESCE(ac.parent_channel_id, ac.id) FROM channels ac WHERE ac.id = ?2)
 `
 
 type RevokeNSFWParams struct {

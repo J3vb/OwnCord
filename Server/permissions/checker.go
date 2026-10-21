@@ -37,6 +37,20 @@ type ChannelRef struct {
 	// NSFW is consulted only by CanReadContent (B5-7); every other predicate
 	// ignores it. Always false for a DM — DMs cannot be labelled.
 	NSFW bool
+	// AuthorityID is the parent of a thread (6.9c), whose overrides are the
+	// thread's; 0 means the channel is its own authority. A thread's Archived
+	// and NSFW are already its parent's (the channel queries merge them).
+	AuthorityID int64
+	// ThreadLocked is a locked thread: only MANAGE_MESSAGES may post or react.
+	ThreadLocked bool
+}
+
+// OverrideKey is the channel id whose overrides govern this channel.
+func (c ChannelRef) OverrideKey() int64 {
+	if c.AuthorityID != 0 {
+		return c.AuthorityID
+	}
+	return c.ID
 }
 
 // DB is the minimal database interface the Checker needs.
@@ -114,7 +128,9 @@ func (ck *Checker) Subject(ctx context.Context, rolePerms int64, roleID, userID,
 
 // HasChannelPermBatch reports whether the member has the given permission on
 // the channel using a pre-fetched overrides map carrying BOTH layers (build it
-// with db.GetChannelOverridesFor). This avoids N+1 queries when filtering many
+// with db.GetChannelOverridesFor). The map is keyed by override authority, so
+// a thread's id must be resolved to its parent's first
+// (service.PermissionService does). This avoids N+1 queries when filtering many
 // channels in bulk. The zero-value ChannelOverride (no entry in map) is correct
 // -- it means no override exists at either layer.
 func (ck *Checker) HasChannelPermBatch(rolePerms int64, overrides map[int64]ChannelOverride, channelID, perm int64) bool {
@@ -139,7 +155,7 @@ func (ck *Checker) VisibleChannelIDs(rolePerms int64, channels []ChannelRef, ove
 		// CanViewChannel hides archived channels from every client surface
 		// (admins included) — they stay manageable from the admin panel,
 		// which lists channels without this predicate.
-		if CanViewChannel(Subject{RolePerms: rolePerms, Override: overrides[ch.ID], Channel: ch}) == nil {
+		if CanViewChannel(Subject{RolePerms: rolePerms, Override: overrides[ch.OverrideKey()], Channel: ch}) == nil {
 			visible[ch.ID] = true
 		}
 	}

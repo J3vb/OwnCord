@@ -176,6 +176,8 @@ type Channel struct {
 	// AFK marks the server's one AFK voice channel (migration 068): members
 	// parked there can only listen. At most one row carries it.
 	AFK bool `json:"afk"`
+	// Thread is set on a thread row only (migration 073); never on the wire.
+	Thread ChannelThread `json:"-"`
 }
 
 // Message represents a row in the messages table.

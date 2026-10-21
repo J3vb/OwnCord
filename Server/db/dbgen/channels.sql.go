@@ -119,14 +119,21 @@ SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
        COALESCE(c.category_id, 0) AS category_id,
        COALESCE(cc.position, 0) AS category_position,
        COALESCE(c.topic, '') AS topic,
-       c.position, c.slow_mode, c.archived, c.created_at,
+       c.position,
+       CAST(CASE WHEN p.id IS NULL THEN c.slow_mode ELSE p.slow_mode END AS INTEGER) AS slow_mode,
+       CAST(CASE WHEN p.id IS NULL THEN c.archived ELSE p.archived END AS INTEGER) AS archived,
+       c.created_at,
        COALESCE(c.voice_max_users, 0) AS voice_max_users,
        c.voice_quality,
        c.mixing_threshold,
        COALESCE(c.voice_max_video, 0) AS voice_max_video,
-       c.nsfw,
-       c.afk
+       CAST(CASE WHEN p.id IS NULL THEN c.nsfw ELSE p.nsfw END AS INTEGER) AS nsfw,
+       c.afk,
+       COALESCE(c.parent_channel_id, 0) AS parent_channel_id,
+       c.thread_archived,
+       c.thread_locked
 FROM channels c
+LEFT JOIN channels p ON p.id = c.parent_channel_id
 LEFT JOIN channel_categories cc ON cc.id = c.category_id WHERE c.afk = 1
 `
 
@@ -148,6 +155,9 @@ type GetAFKChannelRow struct {
 	VoiceMaxVideo    int64   `json:"voiceMaxVideo"`
 	Nsfw             int64   `json:"nsfw"`
 	Afk              int64   `json:"afk"`
+	ParentChannelID  int64   `json:"parentChannelId"`
+	ThreadArchived   int64   `json:"threadArchived"`
+	ThreadLocked     int64   `json:"threadLocked"`
 }
 
 func (q *Queries) GetAFKChannel(ctx context.Context) (GetAFKChannelRow, error) {
@@ -171,6 +181,9 @@ func (q *Queries) GetAFKChannel(ctx context.Context) (GetAFKChannelRow, error) {
 		&i.VoiceMaxVideo,
 		&i.Nsfw,
 		&i.Afk,
+		&i.ParentChannelID,
+		&i.ThreadArchived,
+		&i.ThreadLocked,
 	)
 	return i, err
 }
@@ -180,14 +193,21 @@ SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
        COALESCE(c.category_id, 0) AS category_id,
        COALESCE(cc.position, 0) AS category_position,
        COALESCE(c.topic, '') AS topic,
-       c.position, c.slow_mode, c.archived, c.created_at,
+       c.position,
+       CAST(CASE WHEN p.id IS NULL THEN c.slow_mode ELSE p.slow_mode END AS INTEGER) AS slow_mode,
+       CAST(CASE WHEN p.id IS NULL THEN c.archived ELSE p.archived END AS INTEGER) AS archived,
+       c.created_at,
        COALESCE(c.voice_max_users, 0) AS voice_max_users,
        c.voice_quality,
        c.mixing_threshold,
        COALESCE(c.voice_max_video, 0) AS voice_max_video,
-       c.nsfw,
-       c.afk
+       CAST(CASE WHEN p.id IS NULL THEN c.nsfw ELSE p.nsfw END AS INTEGER) AS nsfw,
+       c.afk,
+       COALESCE(c.parent_channel_id, 0) AS parent_channel_id,
+       c.thread_archived,
+       c.thread_locked
 FROM channels c
+LEFT JOIN channels p ON p.id = c.parent_channel_id
 LEFT JOIN channel_categories cc ON cc.id = c.category_id WHERE c.id = ?
 `
 
@@ -209,6 +229,9 @@ type GetChannelRow struct {
 	VoiceMaxVideo    int64   `json:"voiceMaxVideo"`
 	Nsfw             int64   `json:"nsfw"`
 	Afk              int64   `json:"afk"`
+	ParentChannelID  int64   `json:"parentChannelId"`
+	ThreadArchived   int64   `json:"threadArchived"`
+	ThreadLocked     int64   `json:"threadLocked"`
 }
 
 func (q *Queries) GetChannel(ctx context.Context, id int64) (GetChannelRow, error) {
@@ -232,12 +255,15 @@ func (q *Queries) GetChannel(ctx context.Context, id int64) (GetChannelRow, erro
 		&i.VoiceMaxVideo,
 		&i.Nsfw,
 		&i.Afk,
+		&i.ParentChannelID,
+		&i.ThreadArchived,
+		&i.ThreadLocked,
 	)
 	return i, err
 }
 
 const getChannelOverrides = `-- name: GetChannelOverrides :many
-SELECT role_id, allow, deny FROM channel_overrides WHERE channel_id = ?
+SELECT role_id, allow, deny FROM channel_overrides WHERE channel_id = (SELECT COALESCE(ac.parent_channel_id, ac.id) FROM channels ac WHERE ac.id = ?1)
 `
 
 type GetChannelOverridesRow struct {
@@ -270,7 +296,8 @@ func (q *Queries) GetChannelOverrides(ctx context.Context, channelID int64) ([]G
 }
 
 const getChannelPermission = `-- name: GetChannelPermission :one
-SELECT allow, deny FROM channel_overrides WHERE channel_id = ? AND role_id = ?
+SELECT allow, deny FROM channel_overrides
+WHERE channel_id = (SELECT COALESCE(ac.parent_channel_id, ac.id) FROM channels ac WHERE ac.id = ?1) AND role_id = ?2
 `
 
 type GetChannelPermissionParams struct {
@@ -291,7 +318,7 @@ func (q *Queries) GetChannelPermission(ctx context.Context, arg GetChannelPermis
 }
 
 const getChannelUserOverrides = `-- name: GetChannelUserOverrides :many
-SELECT user_id, allow, deny FROM channel_user_overrides WHERE channel_id = ?
+SELECT user_id, allow, deny FROM channel_user_overrides WHERE channel_id = (SELECT COALESCE(ac.parent_channel_id, ac.id) FROM channels ac WHERE ac.id = ?1)
 `
 
 type GetChannelUserOverridesRow struct {
@@ -324,7 +351,8 @@ func (q *Queries) GetChannelUserOverrides(ctx context.Context, channelID int64) 
 }
 
 const getChannelUserPermission = `-- name: GetChannelUserPermission :one
-SELECT allow, deny FROM channel_user_overrides WHERE channel_id = ? AND user_id = ?
+SELECT allow, deny FROM channel_user_overrides
+WHERE channel_id = (SELECT COALESCE(ac.parent_channel_id, ac.id) FROM channels ac WHERE ac.id = ?1) AND user_id = ?2
 `
 
 type GetChannelUserPermissionParams struct {
@@ -415,15 +443,24 @@ SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
        COALESCE(c.category_id, 0) AS category_id,
        COALESCE(cc.position, 0) AS category_position,
        COALESCE(c.topic, '') AS topic,
-       c.position, c.slow_mode, c.archived, c.created_at,
+       c.position,
+       CAST(CASE WHEN p.id IS NULL THEN c.slow_mode ELSE p.slow_mode END AS INTEGER) AS slow_mode,
+       CAST(CASE WHEN p.id IS NULL THEN c.archived ELSE p.archived END AS INTEGER) AS archived,
+       c.created_at,
        COALESCE(c.voice_max_users, 0) AS voice_max_users,
        c.voice_quality,
        c.mixing_threshold,
        COALESCE(c.voice_max_video, 0) AS voice_max_video,
-       c.nsfw,
-       c.afk
+       CAST(CASE WHEN p.id IS NULL THEN c.nsfw ELSE p.nsfw END AS INTEGER) AS nsfw,
+       c.afk,
+       COALESCE(c.parent_channel_id, 0) AS parent_channel_id,
+       c.thread_archived,
+       c.thread_locked
 FROM channels c
-LEFT JOIN channel_categories cc ON cc.id = c.category_id ORDER BY c.position ASC, c.id ASC
+LEFT JOIN channels p ON p.id = c.parent_channel_id
+LEFT JOIN channel_categories cc ON cc.id = c.category_id
+WHERE c.parent_channel_id IS NULL
+ORDER BY c.position ASC, c.id ASC
 `
 
 type ListChannelsRow struct {
@@ -444,6 +481,9 @@ type ListChannelsRow struct {
 	VoiceMaxVideo    int64   `json:"voiceMaxVideo"`
 	Nsfw             int64   `json:"nsfw"`
 	Afk              int64   `json:"afk"`
+	ParentChannelID  int64   `json:"parentChannelId"`
+	ThreadArchived   int64   `json:"threadArchived"`
+	ThreadLocked     int64   `json:"threadLocked"`
 }
 
 func (q *Queries) ListChannels(ctx context.Context) ([]ListChannelsRow, error) {
@@ -473,6 +513,9 @@ func (q *Queries) ListChannels(ctx context.Context) ([]ListChannelsRow, error) {
 			&i.VoiceMaxVideo,
 			&i.Nsfw,
 			&i.Afk,
+			&i.ParentChannelID,
+			&i.ThreadArchived,
+			&i.ThreadLocked,
 		); err != nil {
 			return nil, err
 		}

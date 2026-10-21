@@ -10,8 +10,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// channelFields carries the 17 columns shared by GetChannelRow and
-// ListChannelsRow; both generated row types are structurally identical, so a
+// channelFields carries the 20 columns shared by GetChannelRow,
+// ListChannelsRow and GetAFKChannelRow; both generated row types are structurally identical, so a
 // single mapper narrows either to the domain Channel model.
 type channelFields struct {
 	ID               int64
@@ -32,8 +32,11 @@ type channelFields struct {
 	// Nsfw keeps sqlc's spelling, not the domain model's NSFW: the two
 	// generated row types are narrowed by a direct struct conversion, which
 	// requires identical field names.
-	Nsfw int64
-	Afk  int64
+	Nsfw            int64
+	Afk             int64
+	ParentChannelID int64
+	ThreadArchived  int64
+	ThreadLocked    int64
 }
 
 func channelFromFields(f channelFields) Channel {
@@ -55,6 +58,11 @@ func channelFromFields(f channelFields) Channel {
 		VoiceMaxVideo:    int(f.VoiceMaxVideo),
 		NSFW:             f.Nsfw != 0,
 		AFK:              f.Afk != 0,
+		Thread: ChannelThread{
+			ParentID: f.ParentChannelID,
+			Archived: f.ThreadArchived != 0,
+			Locked:   f.ThreadLocked != 0,
+		},
 	}
 }
 

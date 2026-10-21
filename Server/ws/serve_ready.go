@@ -163,7 +163,7 @@ func presentDMStatuses(dmChannels []db.DMChannelInfo, viewerID int64, liveStatus
 func channelRefs(channels []db.Channel) []permissions.ChannelRef {
 	refs := make([]permissions.ChannelRef, len(channels))
 	for i := range channels {
-		refs[i] = permissions.ChannelRef{ID: channels[i].ID, Type: channels[i].Type, Archived: channels[i].Archived}
+		refs[i] = channelRef(&channels[i])
 	}
 	return refs
 }
@@ -209,7 +209,8 @@ func channelCanModerateVoice(role *db.Role, o db.ChannelOverride, chanType strin
 
 // channelRef maps one db channel to the predicates' db-agnostic ChannelRef.
 func channelRef(ch *db.Channel) permissions.ChannelRef {
-	return permissions.ChannelRef{ID: ch.ID, Type: ch.Type, Archived: ch.Archived, NSFW: ch.NSFW}
+	return permissions.ChannelRef{ID: ch.ID, Type: ch.Type, Archived: ch.Archived, NSFW: ch.NSFW,
+		AuthorityID: ch.Thread.ParentID, ThreadLocked: ch.Thread.Locked}
 }
 
 // permOverride maps one db override (both layers) to the checker's type.
