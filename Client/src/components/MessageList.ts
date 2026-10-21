@@ -83,6 +83,7 @@ import {
 } from "./message-list/image-sizes";
 import { extractUrls, isDirectImageUrl } from "./message-list/media";
 import { FenwickTree } from "./message-list/fenwick";
+import type { PollOutcome } from "../features/messaging/pollSend";
 import { messagingText } from "../i18n/messaging";
 import {
   markChannelRead,
@@ -136,6 +137,13 @@ export interface MessageListOptions {
   readonly onReportClick?: (messageId: number) => void;
   /** Opens the Forward picker for a message (WP 6.9a). Absent, the menu offers no Forward. */
   readonly onForwardClick?: (messageId: number) => void;
+  /** Set the viewer's whole selection on a poll (`[]` removes the vote); absent disables voting (WP 6.9b). */
+  readonly onPollVote?: (
+    messageId: number,
+    answerIds: readonly number[],
+  ) => Promise<PollOutcome<unknown>>;
+  /** End a poll now; absent hides End poll (WP 6.9b). */
+  readonly onPollEnd?: (messageId: number) => Promise<PollOutcome<unknown>>;
   /** Retry a failed optimistic send (by its correlation id). */
   readonly onRetry?: (correlationId: string) => void;
   /** Discard a failed optimistic send without retrying. */

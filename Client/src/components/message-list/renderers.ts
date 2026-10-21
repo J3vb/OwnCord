@@ -11,6 +11,7 @@ import { isPinRowKind, isServerRowKind } from "@lib/messageKind";
 import { groupRowIcon, groupRowText } from "./groupRows";
 import { renderPinRowText } from "./pinRows";
 import { endForwardBlock, startForwardBlock } from "./forwardBlock";
+import { renderPollCard } from "./pollCard";
 import { connectionLockReason, messageActionGates } from "./message-actions";
 import { QUICK_REACTIONS, emojiNode, quickReactionEmojiForPass } from "./quick-reactions";
 import { messagesStore, type Message } from "@stores/messages.store";
@@ -658,6 +659,13 @@ export function renderMessage(
     text.style.color = "var(--text-muted)";
     setText(text, messagingText("message.deleted"));
     el.appendChild(text);
+  } else if (msg.poll !== undefined) {
+    // A poll's card takes the body's place (the server's fallback text is for
+    // clients that predate polls); it has no files or embeds, and reactions stay.
+    el.appendChild(renderPollCard(msg, opts, signal));
+    if (msg.reactions.length > 0) {
+      el.appendChild(renderReactions(msg, opts, signal));
+    }
   } else {
     // Key the parse cache by the message's identity plus its edit stamp: an
     // unchanged message reuses its parse when a row is re-materialised, and an
