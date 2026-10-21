@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
 )
@@ -1055,4 +1056,71 @@ func TestErasureJob_ListedUntilReplayPurged(t *testing.T) {
 	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_messages_reply_to'`).Scan(&idx); err != nil || idx != 1 {
 		t.Errorf("idx_messages_reply_to present = %d (%v), want 1", idx, err)
 	}
+}
+
+// Deleting an erased voter's rows bumps polls.version for each poll they voted
+// on, on both the single-transaction path and the chunked drain, so a client
+// refetch reads counts fresher than any copy it holds (WP 6.9b). A poll the
+// subject did not vote on keeps its version.
+func TestEraseAccount_PollVotesBumpVersion(t *testing.T) {
+	versions := func(t *testing.T, database *db.DB) (voted, untouched int64) {
+		t.Helper()
+		ctx := context.Background()
+		if err := database.QueryRowContext(ctx,
+			`SELECT version FROM polls WHERE message_id = (SELECT MIN(message_id) FROM polls)`).Scan(&voted); err != nil {
+			t.Fatalf("read voted poll version: %v", err)
+		}
+		if err := database.QueryRowContext(ctx,
+			`SELECT version FROM polls WHERE message_id = (SELECT MAX(message_id) FROM polls)`).Scan(&untouched); err != nil {
+			t.Fatalf("read untouched poll version: %v", err)
+		}
+		return voted, untouched
+	}
+	seed := func(t *testing.T) (*db.DB, eraseSubject) {
+		t.Helper()
+		database := openMigratedMemory(t)
+		sub := seedEraseSubject(t, database)
+		ctx := context.Background()
+		m, err := database.CreateMessageWithMentions(ctx, sub.channel, sub.other, "second poll", nil, nil, 0, false)
+		if err != nil {
+			t.Fatalf("CreateMessageWithMentions: %v", err)
+		}
+		for _, q := range []string{
+			`INSERT INTO polls (message_id, question, expires_at) VALUES (?1, 'q2', '2999-01-01T00:00:00Z')`,
+			`INSERT INTO poll_answers (message_id, answer_id, text) VALUES (?1, 1, 'a'), (?1, 2, 'b')`,
+			`INSERT INTO poll_votes (message_id, answer_id, user_id) VALUES (?1, 1, ?2)`,
+		} {
+			if _, err := database.ExecContext(ctx, q, m.ID, sub.other); err != nil {
+				t.Fatalf("%s: %v", q, err)
+			}
+		}
+		if v, u := versions(t, database); v != 0 || u != 0 {
+			t.Fatalf("seed versions = %d, %d; want 0, 0", v, u)
+		}
+		return database, sub
+	}
+
+	t.Run("single transaction", func(t *testing.T) {
+		database, sub := seed(t)
+		if _, err := database.EraseAccount(context.Background(), sub.id, ""); err != nil {
+			t.Fatalf("EraseAccount: %v", err)
+		}
+		if v, u := versions(t, database); v != 1 || u != 0 {
+			t.Errorf("versions after erasure = %d, %d; want 1, 0", v, u)
+		}
+	})
+	t.Run("chunked drain", func(t *testing.T) {
+		defer db.SetErasureChunkSizesForTest(1, 10)()
+		database, sub := seed(t)
+		ctx := context.Background()
+		if _, err := database.EraseAccountLock(ctx, sub.id, true); err != nil {
+			t.Fatalf("EraseAccountLock: %v", err)
+		}
+		if done, err := database.EraseAccountDrain(ctx, sub.id, time.Time{}); err != nil || !done {
+			t.Fatalf("EraseAccountDrain = %v, %v; want done", done, err)
+		}
+		if v, u := versions(t, database); v < 1 || u != 0 {
+			t.Errorf("versions after drain = %d, %d; want at least 1, 0", v, u)
+		}
+	})
 }
