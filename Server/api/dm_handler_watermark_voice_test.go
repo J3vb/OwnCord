@@ -163,7 +163,7 @@ func TestBlockUser_NoSharedDM_NoEviction(t *testing.T) {
 }
 
 // Group DM calls are exempt from block enforcement (matching
-// requireDMNotBlocked's group exemption), so blocking a co-member of a group
+// RequireDMReachable's group exemption), so blocking a co-member of a group
 // must not evict them from the group's call.
 func TestBlockUser_GroupDMOnly_NoEviction(t *testing.T) {
 	database := newDMTestDB(t)

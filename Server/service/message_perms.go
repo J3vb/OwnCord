@@ -175,7 +175,7 @@ func channelSubject(ctx context.Context, st Store, perms *PermissionService, use
 	}
 	sub.DMParticipant = ok
 	if ok && withBlock {
-		switch blkErr := RequireDMNotBlocked(ctx, st, userID, ch.ID); {
+		switch blkErr := RequireDMReachable(ctx, storeDMReader{st}, userID, ch.ID); {
 		case errors.Is(blkErr, ErrBlocked):
 			sub.DMBlocked = true
 		case blkErr != nil:
@@ -193,7 +193,7 @@ func denial(err error) error {
 	case err == nil:
 		return nil
 	case errors.Is(err, permissions.ErrBlocked):
-		return fmt.Errorf("%w: user is blocked", ErrBlocked)
+		return fmt.Errorf("%w: %s", ErrBlocked, dmUnreachableText)
 	case errors.Is(err, permissions.ErrTimedOut):
 		return fmt.Errorf("%w: user is timed out", ErrTimedOut)
 	default:
@@ -299,17 +299,45 @@ func requireChannelWritable(ch *db.Channel) error {
 	return fmt.Errorf("%w: channel is archived", ErrForbidden)
 }
 
-// DMBlockReader is the narrow read set the block check needs — Store
-// satisfies it, and so do consumer-side seams (ws.DispatchReader) that
-// carry just these three reads.
+// dmUnreachableText is the one sentence every refused 1:1 interaction carries,
+// whatever the cause, so the sender cannot tell the causes apart.
+const dmUnreachableText = "you can't message this user"
+
+// DMBlockReader is the narrow read set the 1:1 reachability check needs —
+// Store satisfies it, and so do consumer-side seams (ws.DispatchReader) that
+// carry just these four reads.
 type DMBlockReader interface {
 	IsGroupDM(ctx context.Context, channelID int64) (bool, error)
 	GetDMRecipient(ctx context.Context, channelID, userID int64) (*db.User, error)
 	IsEitherBlocked(ctx context.Context, a, b int64) (bool, error)
+	DMRefusesSender(ctx context.Context, recipientID, senderID int64) (bool, error)
 }
 
-// RequireDMNotBlocked reports ErrBlocked when userID and the other participant
-// of DM channelID have blocked each other in either direction.
+// DMPrivacyReader is the one privacy read the 1:1 reachability check adds.
+// It is deliberately not part of Store (the Store method ratchet): *db.DB
+// satisfies it, and storeDMReader reaches it from a Store.
+type DMPrivacyReader interface {
+	DMRefusesSender(ctx context.Context, recipientID, senderID int64) (bool, error)
+}
+
+// storeDMReader lets a Store stand in as a DMBlockReader. A Store that does not
+// also satisfy DMPrivacyReader (a test double) fails closed with ErrInternal
+// rather than skipping the check.
+type storeDMReader struct{ Store }
+
+func (r storeDMReader) DMRefusesSender(ctx context.Context, recipientID, senderID int64) (bool, error) {
+	p, ok := r.Store.(DMPrivacyReader)
+	if !ok {
+		return false, errors.New("store has no DM privacy read")
+	}
+	return p.DMRefusesSender(ctx, recipientID, senderID)
+}
+
+// RequireDMReachable reports ErrBlocked when userID cannot reach the other
+// participant of DM channelID: the two have blocked each other in either
+// direction, or the other participant has turned off direct messages from
+// members and does not trust userID (trusted_senders, any source). Both causes
+// return the same error.
 //
 // It is the single block-check implementation, called from every DM
 // interaction sink — send, edit, react, pin, typing and call rings
@@ -328,6 +356,9 @@ type DMBlockReader interface {
 // reactions, ErrNotFound for pins so a foreign DM's existence stays hidden)
 // and flattening them here would change client-visible status codes.
 //
+// A failed read of the recipient's privacy state fails closed as ErrInternal,
+// never ErrBlocked, so it cannot read as a refusal by the other party.
+//
 // A GetDMRecipient lookup failure or a DM with no other participant is treated
 // as "not blocked", carrying over the posture the send path has always had
 // rather than newly failing closed on all five sinks at once.
@@ -338,7 +369,10 @@ type DMBlockReader interface {
 // them reading different conversations under the same name. Blocks are instead
 // enforced when the group is *created* (DMService.CreateGroupDM), where the
 // question "may these two be in a room together" still has one answer.
-func RequireDMNotBlocked(ctx context.Context, st DMBlockReader, userID, channelID int64) error {
+//
+// When the recipient lookup fails or the DM has no other participant, both the
+// block check and the privacy read are skipped.
+func RequireDMReachable(ctx context.Context, st DMBlockReader, userID, channelID int64) error {
 	isGroup, gErr := st.IsGroupDM(ctx, channelID)
 	if gErr == nil && isGroup {
 		return nil
@@ -353,7 +387,14 @@ func RequireDMNotBlocked(ctx context.Context, st DMBlockReader, userID, channelI
 		return fmt.Errorf("%w: failed to check block status: %w", ErrInternal, blkErr)
 	}
 	if blocked {
-		return fmt.Errorf("%w: user is blocked", ErrBlocked)
+		return fmt.Errorf("%w: %s", ErrBlocked, dmUnreachableText)
+	}
+	refused, refErr := st.DMRefusesSender(ctx, recipient.ID, userID)
+	if refErr != nil {
+		return fmt.Errorf("%w: failed to check DM privacy: %w", ErrInternal, refErr)
+	}
+	if refused {
+		return fmt.Errorf("%w: %s", ErrBlocked, dmUnreachableText)
 	}
 	return nil
 }

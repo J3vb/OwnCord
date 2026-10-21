@@ -854,6 +854,21 @@ func newPinTestDB(t *testing.T) *db.DB {
 		-- Mirrors migration 012. DM pin authorization consults the block list
 		-- (a blocked user must not mutate the blocker's pins), so this fixture
 		-- needs the table or the lookup fails closed with a 500.
+		-- DM pin authorization also reads the recipient's DM privacy (migration
+		-- 070) and trust rows (migration 046) through the same gate.
+		CREATE TABLE IF NOT EXISTS user_privacy (
+			user_id           INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+			allow_member_dms  INTEGER NOT NULL DEFAULT 1 CHECK (allow_member_dms IN (0, 1)),
+			message_requests  INTEGER NOT NULL DEFAULT 1 CHECK (message_requests IN (0, 1)),
+			updated_at        TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+		);
+		CREATE TABLE IF NOT EXISTS trusted_senders (
+			recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			sender_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			source       TEXT    NOT NULL CHECK (source IN ('accepted', 'sent_first', 'grandfathered')),
+			created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+			PRIMARY KEY (recipient_id, sender_id)
+		);
 		CREATE TABLE IF NOT EXISTS user_blocks (
 			blocker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			blocked_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

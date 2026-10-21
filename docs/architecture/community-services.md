@@ -238,6 +238,17 @@ send-time block gate for one-to-one DMs only
 an account can open a DM with anyone who has not blocked them and send into
 it immediately; nothing stages first contact.
 
+**Recipient opt-out of first contact.** A member can turn off direct messages
+from members (`user_privacy.allow_member_dms`, migration `070`). The 1:1 gate
+(`Server/service/message_perms.go`, `RequireDMReachable`, the successor of
+`requireDMNotBlocked`) then refuses every sink in a two-person DM, and
+`DMService.CreateDM` refuses to open one, for a sender the member does not
+trust (any `trusted_senders` row: accepted, `sent_first` or `grandfathered`).
+The refusal is the same error and text as a block, so the sender cannot tell
+the causes apart, and it happens before any message or request is written. A
+failed read of the setting is an internal error, not a refusal. Group DMs are
+not affected.
+
 ### Abuse cases
 
 | Adversary                                            | Goal                                                                                               | Mechanism                                                                                                              | Control                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Tested at                                                                                                                                                                               |
