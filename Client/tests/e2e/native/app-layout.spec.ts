@@ -79,8 +79,20 @@ test.describe("App Layout (Logged In)", () => {
     const count = await icons.count();
     expect(count).toBeGreaterThan(0);
 
-    const firstIcon = await icons.first().textContent();
-    expect(firstIcon).toMatch(/[#🔊]/);
+    // Uncategorized channels sort first, so the first row can be an
+    // announcement channel, whose icon is an SVG with no text. Every icon is
+    // a glyph or an SVG, and at least one text or voice glyph is drawn.
+    const glyphs: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const icon = icons.nth(i);
+      const text = (await icon.textContent()) ?? "";
+      if (text.trim() === "") {
+        expect(await icon.locator("svg").count()).toBeGreaterThan(0);
+      } else {
+        glyphs.push(text);
+      }
+    }
+    expect(glyphs.some((g) => /[#🔊]/.test(g))).toBe(true);
   });
 
   test("member list is visible with real members", async ({ nativePage }) => {
