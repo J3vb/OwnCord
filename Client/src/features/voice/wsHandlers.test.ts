@@ -381,11 +381,11 @@ describe("handleVoiceE2eeAnnounce with a malformed video_decode", () => {
   });
 });
 
+const ack = (channelId: number): void =>
+  handleVoiceState(socketStub(), voiceState({ channel_id: channelId, user_id: 9 }));
+
 describe("handleVoiceMoved toast", () => {
   const clock = { voiceRejoinChannelId: null } as ReconnectClock;
-  const ack = (channelId: number): void =>
-    handleVoiceState(socketStub(), voiceState({ channel_id: channelId, user_id: 9 }));
-
   beforeEach(() => {
     clearAfkMove();
     channelsStore.setState((prev) => ({
