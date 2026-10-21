@@ -246,6 +246,10 @@ export async function installRealTransport(page: Page, server: TestServer) {
         // The taskbar/tray unread badge (DP-27): nothing to draw here.
         case "set_unread_badge":
           return null;
+        // Windows per-app share audio (6.7): no WASAPI host here, so the
+        // share picker offers no "Share the app's sound" switch.
+        case "app_audio_available":
+          return false;
         case "external_preview":
         case "external_image":
           // No external network in this stack: the broker refuses. Teardown

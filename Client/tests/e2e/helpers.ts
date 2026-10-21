@@ -893,6 +893,8 @@ export function buildTauriMockScript(opts: {
         // The taskbar/tray unread badge (DP-27); calls stay in __invokeLog.
         if (cmd === "set_unread_badge") return null;
         if (cmd === "ptt_polling_supported") return false;
+        // Windows per-app share audio (6.7): no WASAPI host, no picker switch.
+        if (cmd === "app_audio_available") return false;
         if (cmd === "voice_shortcuts_supported") return false;
         // Global keys backend (LP-9b): matches the two probes above, nothing delivers a key.
         if (cmd === "global_keys_status")
