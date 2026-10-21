@@ -112,7 +112,7 @@ func TestPrivacy_RateLimited(t *testing.T) {
 	database := newMigratedAuthTestDB(t)
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
-	api.MountProfileRoutes(r, database, service.New(database, limiter), nil, limiter, nil, nil, nil)
+	api.MountProfileRoutes(r, service.New(database, limiter), nil, limiter, nil, nil, nil)
 	token := profileCreateToken(t, database, "privacy-limit", 4)
 
 	last := 0

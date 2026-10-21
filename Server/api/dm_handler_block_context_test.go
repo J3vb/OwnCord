@@ -69,7 +69,7 @@ func TestBlockUser_EvictsVoiceEvenIfRequestContextCanceledAfterCommit(t *testing
 	svc := service.New(store, auth.NewRateLimiter())
 
 	r := chi.NewRouter()
-	api.MountDMRoutes(r, database, svc, bc, nil, nil)
+	api.MountDMRoutes(r, svc, bc, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/blocks/2", nil)
 	req.Header.Set("Authorization", "Bearer "+alice)

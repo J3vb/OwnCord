@@ -33,7 +33,7 @@ func TestPutPrivacy_DMsOffEvictsUntrustedCounterpartFromVoice(t *testing.T) {
 	bc := &privacyEvictBroadcaster{}
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
-	api.MountProfileRoutes(r, database, service.New(database, limiter), nil, limiter, nil, bc, nil)
+	api.MountProfileRoutes(r, service.New(database, limiter), nil, limiter, nil, bc, nil)
 
 	alice := profileCreateToken(t, database, "alice-pv", 4)
 	var aliceID int64

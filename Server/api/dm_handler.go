@@ -73,7 +73,7 @@ var _ dmVoiceEvictor = (*ws.Hub)(nil)
 // hub is used to send real-time WebSocket events on DM close. store may be nil,
 // in which case the group icon upload route is not registered: with nowhere to
 // put the bytes, a route that 500s on every call is worse than one that 404s.
-func MountDMRoutes(r chi.Router, database *db.DB, svc *service.Services, broadcaster DMBroadcaster, limiter *auth.RateLimiter, store FileStore) {
+func MountDMRoutes(r chi.Router, svc *service.Services, broadcaster DMBroadcaster, limiter *auth.RateLimiter, store FileStore) {
 	r.Route("/api/v1/dms", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
 		r.Post("/", handleCreateDM(svc, broadcaster))

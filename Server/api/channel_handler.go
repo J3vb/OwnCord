@@ -46,7 +46,7 @@ type PurgeBroadcaster interface {
 // All routes require authentication. The limiter is used to rate-limit
 // expensive endpoints like search. broadcaster may be nil, in which case a
 // purge still commits but no chat_bulk_deleted event is emitted.
-func MountChannelRoutes(r chi.Router, database *db.DB, svc *service.Services, limiter *auth.RateLimiter, trustedProxies []string, broadcaster PurgeBroadcaster) {
+func MountChannelRoutes(r chi.Router, svc *service.Services, limiter *auth.RateLimiter, trustedProxies []string, broadcaster PurgeBroadcaster) {
 	r.Route("/api/v1/channels", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
 		r.Get("/", handleListChannels(svc))
