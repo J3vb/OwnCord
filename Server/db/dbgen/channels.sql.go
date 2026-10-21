@@ -263,7 +263,8 @@ func (q *Queries) GetChannel(ctx context.Context, id int64) (GetChannelRow, erro
 }
 
 const getChannelOverrides = `-- name: GetChannelOverrides :many
-SELECT role_id, allow, deny FROM channel_overrides WHERE channel_id = (SELECT COALESCE(ac.parent_channel_id, ac.id) FROM channels ac WHERE ac.id = ?1)
+SELECT role_id, allow, deny FROM channel_overrides WHERE channel_id = (
+    SELECT COALESCE(ac.parent_channel_id, ac.id) FROM channels ac WHERE ac.id = ?1)
 `
 
 type GetChannelOverridesRow struct {
@@ -297,7 +298,9 @@ func (q *Queries) GetChannelOverrides(ctx context.Context, channelID int64) ([]G
 
 const getChannelPermission = `-- name: GetChannelPermission :one
 SELECT allow, deny FROM channel_overrides
-WHERE channel_id = (SELECT COALESCE(ac.parent_channel_id, ac.id) FROM channels ac WHERE ac.id = ?1) AND role_id = ?2
+WHERE channel_id = (
+    SELECT COALESCE(ac.parent_channel_id, ac.id) FROM channels ac WHERE ac.id = ?1)
+  AND role_id = ?2
 `
 
 type GetChannelPermissionParams struct {
@@ -310,6 +313,8 @@ type GetChannelPermissionRow struct {
 	Deny  int64 `json:"deny"`
 }
 
+// The single-channel override reads resolve a thread id to its parent first
+// (migration 073): a thread has no overrides of its own, it has its parent's.
 func (q *Queries) GetChannelPermission(ctx context.Context, arg GetChannelPermissionParams) (GetChannelPermissionRow, error) {
 	row := q.db.QueryRowContext(ctx, getChannelPermission, arg.ChannelID, arg.RoleID)
 	var i GetChannelPermissionRow
@@ -318,7 +323,8 @@ func (q *Queries) GetChannelPermission(ctx context.Context, arg GetChannelPermis
 }
 
 const getChannelUserOverrides = `-- name: GetChannelUserOverrides :many
-SELECT user_id, allow, deny FROM channel_user_overrides WHERE channel_id = (SELECT COALESCE(ac.parent_channel_id, ac.id) FROM channels ac WHERE ac.id = ?1)
+SELECT user_id, allow, deny FROM channel_user_overrides WHERE channel_id = (
+    SELECT COALESCE(ac.parent_channel_id, ac.id) FROM channels ac WHERE ac.id = ?1)
 `
 
 type GetChannelUserOverridesRow struct {
@@ -352,7 +358,9 @@ func (q *Queries) GetChannelUserOverrides(ctx context.Context, channelID int64) 
 
 const getChannelUserPermission = `-- name: GetChannelUserPermission :one
 SELECT allow, deny FROM channel_user_overrides
-WHERE channel_id = (SELECT COALESCE(ac.parent_channel_id, ac.id) FROM channels ac WHERE ac.id = ?1) AND user_id = ?2
+WHERE channel_id = (
+    SELECT COALESCE(ac.parent_channel_id, ac.id) FROM channels ac WHERE ac.id = ?1)
+  AND user_id = ?2
 `
 
 type GetChannelUserPermissionParams struct {

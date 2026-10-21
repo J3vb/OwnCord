@@ -9,7 +9,8 @@ import (
 
 // TestRollback073_Rehearsal reverses migration 073 on a database holding a
 // thread: the thread row and its messages go, the parent and its own messages
-// stay, and type 'thread' is refused again.
+// stay, and type 'thread' is refused again. It runs with foreign keys off, as
+// the sqlite3 shell runs a reversal, so nothing may depend on a cascade.
 func TestRollback073_Rehearsal(t *testing.T) {
 	database := openMigratedMemoryInternal(t)
 	ctx := context.Background()
@@ -40,9 +41,28 @@ func TestRollback073_Rehearsal(t *testing.T) {
 		t.Fatal(err)
 	}
 	thread, _ := res.LastInsertId()
-	if _, err := database.CreateMessage(ctx, thread, u, "in thread", nil); err != nil {
+	inThread, err := database.CreateMessage(ctx, thread, u, "in thread", nil)
+	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO reactions (message_id, user_id, emoji) VALUES (?, ?, 'x')`, inThread, u); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO read_states (user_id, channel_id, last_message_id) VALUES (?, ?, ?)`, u, thread, inThread); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.CreateAttachment(ctx, "att-rb", u, "a.png", "a.png", "image/png", 1, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.LinkAttachmentsToMessage(ctx, inThread, u, []string{"att-rb"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.writer.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = database.writer.Exec(`PRAGMA foreign_keys = ON`) })
 
 	raw, err := rollback.FS.ReadFile("073_threads.down.sql")
 	if err != nil {
@@ -52,7 +72,7 @@ func TestRollback073_Rehearsal(t *testing.T) {
 		if sqlText(stmt) == "" {
 			continue
 		}
-		if _, err := database.ExecContext(ctx, stmt); err != nil {
+		if _, err := database.writer.ExecContext(ctx, stmt); err != nil {
 			t.Fatalf("reversal statement %q: %v", stmt, err)
 		}
 	}
@@ -73,6 +93,12 @@ func TestRollback073_Rehearsal(t *testing.T) {
 	}
 	if n := count(`SELECT COUNT(*) FROM messages WHERE content = 'kept'`); n != 1 {
 		t.Error("the parent's message did not survive the reversal")
+	}
+	if n := count(`SELECT COUNT(*) FROM pragma_foreign_key_check`); n != 0 {
+		t.Errorf("foreign_key_check reports %d violations after the reversal", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM attachments WHERE id = 'att-rb' AND message_id IS NULL`); n != 1 {
+		t.Error("the thread message's attachment was not unlinked")
 	}
 	if _, err := database.ExecContext(ctx, `INSERT INTO channels (name, type) VALUES ('x', 'thread')`); err == nil {
 		t.Error("type 'thread' accepted after the reversal")

@@ -11,8 +11,9 @@ import (
 )
 
 // channelFields carries the 20 columns shared by GetChannelRow,
-// ListChannelsRow and GetAFKChannelRow; both generated row types are structurally identical, so a
-// single mapper narrows either to the domain Channel model.
+// ListChannelsRow and GetAFKChannelRow; the generated row types are
+// structurally identical, so a single mapper narrows any of them to the
+// domain Channel model.
 type channelFields struct {
 	ID               int64
 	Name             string
