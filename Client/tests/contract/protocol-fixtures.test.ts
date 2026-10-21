@@ -71,7 +71,8 @@ import {
   resetMessagesStore,
   setMessages,
 } from "../../src/stores/messages.store";
-import { setDmChannels } from "../../src/stores/dm.store";
+import { dmStore, setDmChannels } from "../../src/stores/dm.store";
+import { emojiStore } from "../../src/stores/emoji.store";
 import {
   voiceStore,
   getChannelVoiceUsers,
@@ -85,7 +86,15 @@ import {
   messageRequestsStore,
   resetMessageRequests,
 } from "../../src/features/message-requests/store";
+import { createForwardSession } from "../../src/features/messaging/forwardSend";
+import { handleServerRestart } from "../../src/features/connection/wsHandlers";
+import type { ReconnectClock } from "../../src/features/connection/dispatchContext";
+import { modAppealStore, modQueueStore } from "../../src/features/moderation/store";
+import { safetyStore } from "../../src/features/safety/store";
 import type { ServerMessage } from "../../src/lib/types";
+import { showToast } from "@lib/toast";
+import * as livekitSession from "@lib/livekitSession";
+import { createOutgoingCall, createRingController } from "../../src/lib/call-ring";
 
 // ─── fixture loading ─────────────────────────────────────────────────────────
 
@@ -529,6 +538,468 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
     expect(getChannelVoiceUsers(2).some((u) => u.userId === USER_ID)).toBe(false);
   });
 
+  // ── WP 7.3a: voice self-state, moderation, calls and error frames ─────────
+
+  /** Let the voice handlers' lazy `livekitSession()` import and the `.then`
+   *  bodies that follow it run before the assertion reads their effects. */
+  async function settle(): Promise<void> {
+    await vi.dynamicImportSettled();
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+  }
+
+  it("voice-self-state: each voice_state broadcast sets exactly the flags it carries", async () => {
+    // alice's connection records her own joins and her own eight toggles. The
+    // fixture does not keep user ids stable across frames, so one id is pinned
+    // for every alice frame; bob's relayed state (the second frame) is left out.
+    const USER_ID = 8200;
+    const frames = s2cFrames("voice-self-state", "voice_state").filter(
+      (f) => (f.payload as { username?: string }).username === "alice",
+    );
+    // Join, then mute on/off, deafen on/off, camera on/off, screenshare on/off.
+    const expected = [
+      { muted: false, deafened: false, camera: false, screenshare: false },
+      { muted: true, deafened: false, camera: false, screenshare: false },
+      { muted: false, deafened: false, camera: false, screenshare: false },
+      { muted: false, deafened: true, camera: false, screenshare: false },
+      { muted: false, deafened: false, camera: false, screenshare: false },
+      { muted: false, deafened: false, camera: true, screenshare: false },
+      { muted: false, deafened: false, camera: false, screenshare: false },
+      { muted: false, deafened: false, camera: false, screenshare: true },
+      { muted: false, deafened: false, camera: false, screenshare: false },
+    ];
+    // Both connections record alice's states; the list is the first n of them.
+    const aliceOnly = frames.slice(0, expected.length);
+    expect(aliceOnly).toHaveLength(expected.length);
+    const counter = { n: 0 };
+    for (const [i, frame] of aliceOnly.entries()) {
+      await send(frame, { user_id: USER_ID }, counter);
+      const user = getChannelVoiceUsers(2).find((u) => u.userId === USER_ID);
+      expect(user, `voice_state ${i}`).toMatchObject(expected[i]!);
+    }
+  });
+
+  it("voice-moderation: server mute and deafen land in the roster's server_* flags", async () => {
+    // bob is the target; his connection records each broadcast.
+    const USER_ID = 8201;
+    const states = s2c("voice-moderation", "b")
+      .map((f) => f.frame)
+      .filter(
+        (f) => f.type === "voice_state" && (f.payload as { username?: string }).username === "bob",
+      );
+    // After the join relay: server mute on, off, server deafen on (implies mute), off.
+    const flags = states.map((f) => {
+      const p = f.payload as { server_muted: boolean; server_deafened: boolean };
+      return [p.server_muted, p.server_deafened];
+    });
+    expect(flags).toEqual([
+      [false, false],
+      [true, false],
+      [false, false],
+      [true, true],
+      [false, false],
+    ]);
+    const counter = { n: 0 };
+    for (const frame of states) {
+      await send(frame, { user_id: USER_ID }, counter);
+      const p = frame.payload as { server_muted: boolean; server_deafened: boolean };
+      const user = getChannelVoiceUsers(2).find((u) => u.userId === USER_ID);
+      expect(user).toMatchObject({
+        serverMuted: p.server_muted,
+        serverDeafened: p.server_deafened,
+      });
+    }
+  });
+
+  it("voice-moderation-move-kick: voice_moved leaves the room and re-joins the fixture's destination", async () => {
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 2 }));
+    ws.clearSent();
+    // The server fixture normalises every *_id, to_channel_id included, so the
+    // destination (the seeded second voice channel) is pinned here rather than
+    // read from the fixture.
+    await dispatch("voice-moderation-move-kick", "voice_moved", { to_channel_id: 3 });
+    await settle();
+    expect(vi.mocked(livekitSession.leaveVoice)).toHaveBeenCalledWith(false);
+    expect(voiceStore.getState().currentChannelId).toBe(3);
+    expect(ws.getSentMessages().map((m) => ({ type: m.type, payload: m.payload }))).toEqual([
+      { type: "voice_join", payload: { channel_id: 3 } },
+    ]);
+  });
+
+  it("voice-moderation-move-kick: voice_disconnected tears the session down and toasts the reason", async () => {
+    // The kick's voice_leave has already cleared the store by the time this
+    // arrives (the ordinary path), so currentChannelId is null here.
+    vi.mocked(showToast).mockClear();
+    vi.mocked(livekitSession.leaveVoice).mockClear();
+    await dispatch("voice-moderation-move-kick", "voice_disconnected");
+    await settle();
+    expect(vi.mocked(livekitSession.leaveVoice)).toHaveBeenCalledWith(false);
+    expect(voiceStore.getState().currentChannelId).toBeNull();
+    expect(vi.mocked(showToast)).toHaveBeenCalledWith(
+      "You were disconnected from voice by a moderator",
+      "error",
+    );
+  });
+
+  it("voice-moderation-move-kick: a voice_disconnected for another channel than the live one is stale", async () => {
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 2 }));
+    vi.mocked(showToast).mockClear();
+    // The fixture's frame names channel 3; the client has since joined 2.
+    await dispatch("voice-moderation-move-kick", "voice_disconnected");
+    await settle();
+    expect(voiceStore.getState().currentChannelId).toBe(2);
+    expect(vi.mocked(showToast)).not.toHaveBeenCalled();
+  });
+
+  it("voice-mod-denied: the error frame becomes a toast with the server's text", async () => {
+    vi.mocked(showToast).mockClear();
+    await dispatch("voice-mod-denied", "error");
+    expectConsole("error", "Server error");
+    expect(vi.mocked(showToast)).toHaveBeenCalledTimes(1);
+    const [text, kind] = vi.mocked(showToast).mock.calls[0]!;
+    // serverErrorText capitalises the server's message; the code is FORBIDDEN.
+    expect(text).toBe("Cannot moderate a user of equal or higher rank");
+    expect(kind).toBe("error");
+  });
+
+  it("voice-token-refresh: the refresh reply is a voice_token the dispatcher hands to the session", async () => {
+    // The first voice_token on a is the join's, the second the refresh's.
+    const tokens = s2c("voice-token-refresh", "a").filter((f) => f.frame.type === "voice_token");
+    expect(tokens).toHaveLength(2);
+    vi.mocked(livekitSession.handleVoiceToken).mockClear();
+    await send(tokens[1]!.frame, {}, { n: 0 });
+    await settle();
+    expect(vi.mocked(livekitSession.handleVoiceToken)).toHaveBeenCalledTimes(1);
+    // (token, url, channel_id, direct_url, is_key_holder): the refresh
+    // reply names the room alice is in and keeps her key-holder flag.
+    expect(vi.mocked(livekitSession.handleVoiceToken)).toHaveBeenCalledWith(
+      expect.stringMatching(/^tok-/),
+      "/livekit",
+      2,
+      expect.any(String),
+      true,
+    );
+  });
+
+  // call_incoming / call_declined are not dispatcher frames: MainPage subscribes
+  // to them itself (pages/MainPage.ts), and mounting the whole page is out of
+  // scope for a contract test. So these two feed the fixture's payload through
+  // the same state machines MainPage hands it to (lib/call-ring.ts), mapping
+  // the fields exactly as MainPage does with a caller no member store knows.
+
+  it("call-ring-decline: call_incoming rings with the fixture's caller and channel", () => {
+    const payload = s2cFrame("call-ring-decline", "call_incoming").payload as {
+      channel_id: number;
+      from_user: number;
+      username: string;
+    };
+    expect(payload).toEqual({ channel_id: 3, from_user: 1, username: "alice" });
+    const onRingStateChange = vi.fn();
+    const onChime = vi.fn();
+    const ring = createRingController({
+      onRingStateChange,
+      onChime,
+      onAccept: vi.fn(),
+      onDecline: vi.fn(),
+    });
+    ring.incoming({
+      channelId: payload.channel_id,
+      fromUserId: payload.from_user,
+      fromUsername: payload.username,
+    });
+    expect(ring.current()).toEqual({ channelId: 3, fromUserId: 1, fromUsername: "alice" });
+    expect(onRingStateChange).toHaveBeenCalledWith(ring.current());
+    expect(onChime).toHaveBeenCalledWith(true);
+    ring.destroy();
+  });
+
+  it("call-ring-decline: call_declined ends the caller's outgoing ring for the fixture's channel", () => {
+    const payload = s2cFrame("call-ring-decline", "call_declined").payload as {
+      channel_id: number;
+      from_user: number;
+      username: string;
+    };
+    expect(payload).toEqual({ channel_id: 3, from_user: 2, username: "bob" });
+    const onChange = vi.fn();
+    const outgoing = createOutgoingCall({ onChange });
+    outgoing.start(payload.channel_id, [payload.from_user]);
+    expect(outgoing.current()?.phase).toBe("ringing");
+    outgoing.declined(payload.channel_id, payload.from_user);
+    expect(outgoing.current()).toEqual({ channelId: 3, phase: "declined", pending: [] });
+    outgoing.destroy();
+  });
+
+  // ─── WP 7.3b: channel, chat and admin frames ──────────────────────────────
+
+  /** A minimal ready-channel row for seeding the channels store. */
+  const readyChannel = (id: number, name: string, extra: Record<string, unknown> = {}): never =>
+    ({ id, name, type: "text", category: null, position: id, ...extra }) as never;
+
+  /** A stored message row, shaped like the ones the edit/delete cases seed. */
+  const seedRow = (id: number, channelId: number, content: string): never =>
+    ({
+      id,
+      channel_id: channelId,
+      user: { id: 1, username: "alice", avatar: null, role: "member" },
+      content,
+      reply_to: null,
+      attachments: [],
+      reactions: [],
+      pinned: false,
+      edited_at: null,
+      deleted: false,
+      timestamp: "2026-09-05 11:00:00",
+    }) as never;
+
+  it("chat-forward-pin: the forward is a chat_message in the target DM and carries its source", async () => {
+    await dispatch("chat-forward-pin", "chat_message");
+    const forwarded = getChannelMessages(3).find((m) => m.content === "message to forward");
+    expect(forwarded).toBeDefined();
+    expect(forwarded?.user.username).toBe("alice");
+    expect(forwarded?.forward).toMatchObject({ source_timestamp: "2026-09-05 12:00:00" });
+  });
+
+  it("chat-forward-pin: the forward session sends the fixture's chat_forward shape and settles on its chat_forward_ok", async () => {
+    const sentFrame = fixture("chat-forward-pin").connections["a"]!.find(
+      (f) => f.dir === "c2s" && f.frame.type === "chat_forward",
+    )!.frame;
+    const wsMock = createMockWsClient();
+    wsMock.connect();
+    const abort = new AbortController();
+    const session = createForwardSession({
+      ws: wsMock,
+      sourceMessageId: 900,
+      channelIds: [3],
+      comment: "",
+      onChange: () => undefined,
+      signal: abort.signal,
+    });
+    const done = session.start();
+    await vi.advanceTimersByTimeAsync(0);
+    const out = wsMock.getSentMessages() as unknown as {
+      type: string;
+      id: string;
+      payload: Record<string, unknown>;
+    }[];
+    expect(out).toHaveLength(1);
+    // The client sends exactly the fields the server recorded receiving.
+    expect(Object.keys(out[0]!.payload).sort()).toEqual(
+      Object.keys(sentFrame.payload as Record<string, unknown>).sort(),
+    );
+    // The recorded reply, with the ids the session actually sent.
+    const reply = s2cFrame("chat-forward-pin", "chat_forward_ok");
+    wsMock.simulateMessage(
+      "chat_forward_ok",
+      substitute(
+        reply.payload,
+        { client_message_id: out[0]!.payload["client_message_id"] },
+        { n: 0 },
+      ) as never,
+      out[0]!.id,
+    );
+    await done;
+    expect(session.results().map((r) => r.status)).toEqual(["sent"]);
+    abort.abort();
+  });
+
+  it("chat-forward-pin: chat_pinned sets then clears the pin on the fixture's channel", async () => {
+    const MESSAGE_ID = 5100;
+    setMessages(1, [seedRow(MESSAGE_ID, 1, "message to forward")], false);
+    const pinned = (): boolean | undefined =>
+      getChannelMessages(1).find((m) => m.id === MESSAGE_ID)?.pinned;
+    const frames = s2cFrames("chat-forward-pin", "chat_pinned");
+    expect(frames).toHaveLength(4); // pin + unpin, seen by each of the two sockets
+    await send(frames[0]!, { message_id: MESSAGE_ID }, { n: 0 });
+    expect(pinned()).toBe(true);
+    await send(frames[1]!, { message_id: MESSAGE_ID }, { n: 0 });
+    expect(pinned()).toBe(false);
+  });
+
+  it("chat-bulk-delete: one frame removes every id it lists", async () => {
+    const ids = (s2cFrame("chat-bulk-delete", "chat_bulk_deleted").payload as { ids: number[] })
+      .ids;
+    expect(ids).toEqual([1, 2, 3]);
+    setMessages(
+      1,
+      [...ids, 99].map((id) => seedRow(id, 1, `row ${id}`)),
+      false,
+    );
+    await dispatch("chat-bulk-delete", "chat_bulk_deleted");
+    const rows = new Map(getChannelMessages(1).map((m) => [m.id, m]));
+    for (const id of ids) {
+      expect(rows.get(id) === undefined || rows.get(id)?.deleted === true, `id ${id}`).toBe(true);
+    }
+    expect(rows.get(99)?.deleted).toBe(false);
+  });
+
+  it("mention-count-nsfw-ack: mention_count sets the fixture channel's badge to the frame's total", async () => {
+    setChannels([readyChannel(1, "general")]);
+    await dispatch("mention-count-nsfw-ack", "mention_count");
+    expect(channelsStore.getState().channels.get(1)?.mentionCount).toBe(2);
+  });
+
+  it("mention-count-nsfw-ack: nsfw_ack acknowledges then revokes the labelled channel", async () => {
+    setChannels([readyChannel(3, "adults", { nsfw: true })]);
+    const acknowledged = (): boolean | undefined =>
+      channelsStore.getState().channels.get(3)?.nsfwAcknowledged;
+    expect(acknowledged()).toBe(false);
+    const [grant, revoke] = s2cFrames("mention-count-nsfw-ack", "nsfw_ack");
+    await send(grant!, {}, { n: 0 });
+    expect(acknowledged()).toBe(true);
+    await send(revoke!, {}, { n: 0 });
+    expect(acknowledged()).toBe(false);
+  });
+
+  it("chat-command-unknown: the refusal reaches the user as a toast with the server's text", async () => {
+    vi.mocked(showToast).mockClear();
+    await dispatch("chat-command-unknown", "error");
+    expectConsole("error", "Server error");
+    expect(vi.mocked(showToast)).toHaveBeenCalledTimes(1);
+    const [text, kind] = vi.mocked(showToast).mock.calls[0]!;
+    expect(text).toBe("Unknown command: /nosuchcommand (no plugins loaded)");
+    expect(kind).toBe("error");
+  });
+
+  it("channel-crud: create adds the channel with this viewer's verdicts, update edits it, delete removes it", async () => {
+    const CHANNEL_ID = 5200;
+    const counter = { n: 0 };
+    const [create] = s2c("channel-crud", "a").filter((f) => f.frame.type === "channel_create");
+    await send(create!.frame, { id: CHANNEL_ID }, counter);
+    expect(channelsStore.getState().channels.get(CHANNEL_ID)).toMatchObject({
+      name: "announcements",
+      category: "Info",
+      topic: "fixture topic",
+      canSend: true,
+      canPin: false,
+      canReact: true,
+      slowMode: 0,
+    });
+    const [update] = s2c("channel-crud", "a").filter((f) => f.frame.type === "channel_update");
+    await send(update!.frame, { id: CHANNEL_ID }, counter);
+    expect(channelsStore.getState().channels.get(CHANNEL_ID)).toMatchObject({
+      name: "news",
+      topic: "edited topic",
+      slowMode: 10,
+    });
+    const [del] = s2c("channel-crud", "a").filter((f) => f.frame.type === "channel_delete");
+    await send(del!.frame, { id: CHANNEL_ID }, counter);
+    expect(channelsStore.getState().channels.has(CHANNEL_ID)).toBe(false);
+  });
+
+  it("dm-open-close: dm_channel_open lists the DM with its partner, dm_channel_close drops it", async () => {
+    await dispatch("dm-open-close", "dm_channel_open");
+    const dm = dmStore.getState().channels.find((c) => c.channelId === 3);
+    expect(dm?.recipient.username).toBe("alice");
+    expect(dm?.isGroup).toBe(false);
+    await dispatch("dm-open-close", "dm_channel_close");
+    expect(dmStore.getState().channels.some((c) => c.channelId === 3)).toBe(false);
+  });
+
+  it("server-admin-broadcasts: emoji_update replaces the custom-emoji set", async () => {
+    await dispatch("server-admin-broadcasts", "emoji_update");
+    expect(emojiStore.getState().emoji.map((e) => e.shortcode)).toEqual(["fixture"]);
+    expect(emojiStore.getState().byShortcode.get("fixture")?.url).toBe("/api/v1/emoji/1/image");
+  });
+
+  it("server-admin-broadcasts: upload_policy replaces both file-type lists", async () => {
+    await dispatch("server-admin-broadcasts", "upload_policy");
+    expect(authStore.getState().uploadPolicy).toMatchObject({
+      blocked_extensions: ["bat", "exe"],
+      allowed_extensions: [],
+    });
+  });
+
+  it("server-admin-broadcasts: server_restart announces the drop and opens the rejoin window", () => {
+    const clock: ReconnectClock = {
+      hasAuthenticatedBefore: false,
+      hasReceivedReadyBefore: false,
+      lastReconnectHandshakeAt: null,
+      serverClockSkewMs: 0,
+      restartAnnounced: false,
+      voiceRejoinChannelId: null,
+      voiceRejoinExpiresAt: null,
+    };
+    const payload = s2cFrame("server-admin-broadcasts", "server_restart").payload as Parameters<
+      typeof handleServerRestart
+    >[1];
+    expect(payload).toMatchObject({ reason: "update", delay_seconds: 30 });
+    expect(typeof payload.reconnect_spread_ms).toBe("number");
+    handleServerRestart(clock, payload);
+    expectConsole("warn", "Server restarting");
+    expect(clock.restartAnnounced).toBe(true);
+    expect(clock.voiceRejoinExpiresAt).not.toBeNull();
+  });
+
+  it("server-admin-broadcasts: presence updates the member's status and custom text", async () => {
+    const USER_ID = 8101;
+    setMembers([
+      {
+        id: USER_ID,
+        username: "alice",
+        avatar: null,
+        role: "member",
+        status: "online",
+        display_name: null,
+        custom_status: null,
+        identity_public_key: null,
+      },
+    ]);
+    await dispatch("server-admin-broadcasts", "presence", { user_id: USER_ID });
+    expect(membersStore.getState().members.get(USER_ID)).toMatchObject({
+      status: "idle",
+      customStatus: "fixture custom status",
+    });
+  });
+
+  it("moderation-queue: mod_queue bumps the report signal for a report and the appeal signal for an appeal", async () => {
+    const frames = s2c("moderation-queue", "a").filter((f) => f.frame.type === "mod_queue");
+    const reportFrame = frames.find(
+      (f) => (f.frame.payload as { report_id?: string }).report_id !== undefined,
+    )!;
+    const appealFrames = frames.filter(
+      (f) => (f.frame.payload as { appeal_id?: string }).appeal_id !== undefined,
+    );
+    expect(appealFrames).toHaveLength(3);
+    const reports = modQueueStore.getState();
+    const appeals = modAppealStore.getState();
+    await send(reportFrame.frame, {}, { n: 0 });
+    expect(modQueueStore.getState()).toBe(reports + 1);
+    expect(modAppealStore.getState()).toBe(appeals);
+    for (const f of appealFrames) await send(f.frame, {}, { n: 0 });
+    expect(modAppealStore.getState()).toBe(appeals + 3);
+    expect(modQueueStore.getState()).toBe(reports + 1);
+  });
+
+  it("moderation-queue: mod_action shows the warning once, with the fixture's reason", async () => {
+    vi.mocked(showToast).mockClear();
+    await dispatch("moderation-queue", "mod_action", { id: 5300 });
+    expect(safetyStore.getState().notices.map((n) => n.reason)).toEqual(["fixture warning"]);
+    expect(vi.mocked(showToast)).toHaveBeenCalledWith(
+      expect.stringContaining("fixture warning"),
+      "warning",
+    );
+  });
+
+  it("moderation-queue: appeal_status carries the appeal through assigned to the decision", async () => {
+    const APPEAL_ID = "appeal-5400";
+    safetyStore.setState((prev) => ({
+      ...prev,
+      appeals: [
+        { id: APPEAL_ID, state: "open", decision_note: null, created_at: "2026-09-05 11:00:00" },
+      ] as never,
+    }));
+    const frames = s2c("moderation-queue", "b").filter((f) => f.frame.type === "appeal_status");
+    expect(frames).toHaveLength(2);
+    const stateNow = (): { state?: string; decision_note?: string | null } | undefined =>
+      (
+        safetyStore.getState().appeals as
+          readonly { id: string; state: string; decision_note: string | null }[] | null
+      )?.find((a) => a.id === APPEAL_ID);
+    await send(frames[0]!.frame, { id: APPEAL_ID }, { n: 0 });
+    expect(stateNow()).toMatchObject({ state: "assigned", decision_note: null });
+    await send(frames[1]!.frame, { id: APPEAL_ID }, { n: 0 });
+    expect(stateNow()).toMatchObject({ state: "overturned", decision_note: "fixture decision" });
+  });
+
   it("every fixture connection replays end to end without a handler throw", async () => {
     for (const [journey, tr] of FIXTURES) {
       for (const conn of Object.keys(tr.connections)) {
@@ -543,6 +1014,13 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
         // auth-failure is the one journey whose handler deliberately logs an
         // error; claim it so the console guard does not fail the run.
         if (journey === "auth-failure") expectConsole("error", "Auth failed");
+        // voice-mod-denied's error frame is logged by the same handler.
+        if (journey === "voice-mod-denied" && conn === "b") expectConsole("error", "Server error");
+        // server_restart is logged as a warning by its handler.
+        if (journey === "server-admin-broadcasts") expectConsole("warn", "Server restarting");
+        // chat-command-unknown's refusal is logged by the same handler.
+        if (journey === "chat-command-unknown" && conn === "a")
+          expectConsole("error", "Server error");
       }
     }
   });

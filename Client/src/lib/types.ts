@@ -1616,6 +1616,8 @@ export interface GifFavoritesResponse {
 /** Envelope for both GIF endpoints. */
 export interface GifSearchResponse {
   readonly results: readonly GifApiResult[];
+  /** Opaque cursor for the next page (send back as `pos`); "" or absent when there is none. */
+  readonly next?: string;
 }
 
 /** GET /api/v1/dms response. */

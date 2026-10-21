@@ -1,0 +1,61 @@
+{
+  "journey": "chat-command-unknown",
+  "connections": {
+    "a": [
+      {
+        "dir": "c2s",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "args": [
+              "one",
+              "two"
+            ],
+            "channel_id": 1,
+            "command": "/nosuchcommand"
+          },
+          "type": "chat_command"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "code": "BAD_REQUEST",
+            "message": "unknown command: /nosuchcommand (no plugins loaded)"
+          },
+          "type": "error"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ],
+    "b": [
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ]
+  }
+}

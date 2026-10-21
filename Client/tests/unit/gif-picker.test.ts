@@ -4,7 +4,7 @@ import { messagingText } from "../../src/i18n/messaging";
 import { gifFavoritesText } from "../../src/i18n/gifFavorites";
 import { ApiClientError } from "@lib/api";
 import type { GifPickerOptions } from "@components/GifPicker";
-import type { GifApi, GifFavoritesApi, GifResult } from "@lib/gifProvider";
+import type { GifApi, GifFavoritesApi, GifPage, GifResult } from "@lib/gifProvider";
 import {
   bindGifFavoritesApi,
   resetGifFavorites,
@@ -62,6 +62,11 @@ function makeGif(id: string): GifResult {
   };
 }
 
+/** A single, final page: no further cursor. */
+function lastPage(gifs: readonly GifResult[]): GifPage {
+  return { gifs, next: "" };
+}
+
 const TRENDING_GIFS: readonly GifResult[] = [makeGif("t1"), makeGif("t2"), makeGif("t3")];
 
 const SEARCH_GIFS: readonly GifResult[] = [makeGif("s1"), makeGif("s2")];
@@ -101,8 +106,8 @@ describe("GifPicker", () => {
     vi.useFakeTimers();
 
     // Default: trending returns data, search returns search data
-    vi.mocked(getTrendingGifs).mockResolvedValue(TRENDING_GIFS);
-    vi.mocked(searchGifs).mockResolvedValue(SEARCH_GIFS);
+    vi.mocked(getTrendingGifs).mockResolvedValue(lastPage(TRENDING_GIFS));
+    vi.mocked(searchGifs).mockResolvedValue(lastPage(SEARCH_GIFS));
 
     URL.createObjectURL = createObjectURLMock;
     URL.revokeObjectURL = vi.fn();
@@ -334,7 +339,7 @@ describe("GifPicker", () => {
         url: "https://media.klipy.com/preview/no-title.gif",
         fullUrl: "https://media.klipy.com/full/no-title.gif",
       };
-      vi.mocked(getTrendingGifs).mockResolvedValue([gifNoTitle]);
+      vi.mocked(getTrendingGifs).mockResolvedValue(lastPage([gifNoTitle]));
 
       const { picker } = makePicker();
       container.appendChild(picker.element);
@@ -490,7 +495,7 @@ describe("GifPicker", () => {
 
   describe("empty state", () => {
     it("shows empty state when getTrendingGifs returns empty array", async () => {
-      vi.mocked(getTrendingGifs).mockResolvedValue([]);
+      vi.mocked(getTrendingGifs).mockResolvedValue(lastPage([]));
 
       const { picker } = makePicker();
       container.appendChild(picker.element);
@@ -505,7 +510,7 @@ describe("GifPicker", () => {
     });
 
     it("shows empty state when searchGifs returns empty array", async () => {
-      vi.mocked(searchGifs).mockResolvedValue([]);
+      vi.mocked(searchGifs).mockResolvedValue(lastPage([]));
 
       const { picker } = makePicker();
       container.appendChild(picker.element);
@@ -548,7 +553,7 @@ describe("GifPicker", () => {
   describe("loading state", () => {
     it("shows loading indicator while search is in flight", async () => {
       // getTrendingGifs resolves immediately; search never resolves
-      vi.mocked(getTrendingGifs).mockResolvedValue(TRENDING_GIFS);
+      vi.mocked(getTrendingGifs).mockResolvedValue(lastPage(TRENDING_GIFS));
       vi.mocked(searchGifs).mockReturnValue(new Promise(() => {}));
 
       const { picker } = makePicker();
@@ -609,7 +614,7 @@ describe("GifPicker", () => {
     it("retries the last query when the retry is activated", async () => {
       vi.mocked(getTrendingGifs)
         .mockRejectedValueOnce(new Error("Network error"))
-        .mockResolvedValue(TRENDING_GIFS);
+        .mockResolvedValue(lastPage(TRENDING_GIFS));
 
       const { picker } = makePicker();
       container.appendChild(picker.element);
@@ -724,16 +729,16 @@ describe("GifPicker", () => {
   describe("stale request cancellation", () => {
     it("does not render results from a superseded request", async () => {
       // First search resolves late, second resolves immediately
-      let resolveFirst!: (v: readonly GifResult[]) => void;
-      const firstPromise = new Promise<readonly GifResult[]>((res) => {
+      let resolveFirst!: (v: GifPage) => void;
+      const firstPromise = new Promise<GifPage>((res) => {
         resolveFirst = res;
       });
 
-      vi.mocked(getTrendingGifs).mockResolvedValue(TRENDING_GIFS);
+      vi.mocked(getTrendingGifs).mockResolvedValue(lastPage(TRENDING_GIFS));
 
       vi.mocked(searchGifs)
         .mockReturnValueOnce(firstPromise) // "ca" — resolves late
-        .mockResolvedValueOnce(SEARCH_GIFS); // "cats" — resolves immediately
+        .mockResolvedValueOnce(lastPage(SEARCH_GIFS)); // "cats" — resolves immediately
 
       const { picker } = makePicker();
       container.appendChild(picker.element);
@@ -757,7 +762,7 @@ describe("GifPicker", () => {
       await Promise.resolve();
 
       // Now resolve the stale first request
-      resolveFirst([makeGif("stale")]);
+      resolveFirst(lastPage([makeGif("stale")]));
       await Promise.resolve();
       await Promise.resolve();
 
@@ -803,7 +808,7 @@ describe("GifPicker", () => {
         url: "https://media.klipy.com/preview/no-title.gif",
         fullUrl: "https://media.klipy.com/full/no-title.gif",
       };
-      vi.mocked(getTrendingGifs).mockResolvedValue([gifNoTitle]);
+      vi.mocked(getTrendingGifs).mockResolvedValue(lastPage([gifNoTitle]));
 
       const { picker } = makePicker();
       container.appendChild(picker.element);
@@ -957,6 +962,257 @@ describe("GifPicker", () => {
       await Promise.resolve();
 
       expect(vi.mocked(searchGifs)).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Load more on scroll ───────────────────────────────────────────────────
+
+  describe("load more on scroll", () => {
+    // jsdom has no IntersectionObserver: a fake records what is observed and
+    // lets a test report the sentinel as in view.
+    let observed: Element[];
+    let fire: () => void;
+
+    beforeEach(() => {
+      observed = [];
+      fire = () => {};
+      class FakeObserver {
+        constructor(cb: (entries: { isIntersecting: boolean }[]) => void) {
+          fire = () => cb([{ isIntersecting: true }]);
+        }
+        observe(el: Element): void {
+          observed.push(el);
+        }
+        unobserve(el: Element): void {
+          observed = observed.filter((e) => e !== el);
+        }
+        disconnect(): void {
+          observed = [];
+        }
+      }
+      vi.stubGlobal("IntersectionObserver", FakeObserver);
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    function itemIds(root: HTMLElement): string[] {
+      return [...root.querySelectorAll<HTMLElement>(".gp-item")].map(
+        (i) => i.dataset.fullUrl?.replace(/^.*\/full\/|\.gif$/g, "") ?? "",
+      );
+    }
+
+    async function flush(): Promise<void> {
+      for (let i = 0; i < 6; i++) await Promise.resolve();
+    }
+
+    it("appends the next page, deduped by id, and passes the cursor", async () => {
+      vi.mocked(getTrendingGifs)
+        .mockResolvedValueOnce({ gifs: [makeGif("a"), makeGif("b")], next: "C1" })
+        .mockResolvedValueOnce({ gifs: [makeGif("b"), makeGif("c")], next: "" });
+      const { picker } = makePicker();
+      container.appendChild(picker.element);
+      await flush();
+      expect(itemIds(picker.element)).toEqual(["a", "b"]);
+      expect(observed).toHaveLength(1);
+
+      fire();
+      await flush();
+
+      expect(vi.mocked(getTrendingGifs)).toHaveBeenLastCalledWith(stubApi, 20, "C1");
+      expect(itemIds(picker.element)).toEqual(["a", "b", "c"]);
+      // next was empty: nothing left to watch.
+      expect(observed).toHaveLength(0);
+      picker.destroy();
+    });
+
+    it("pages a search with the query and stops on a page of only duplicates", async () => {
+      vi.mocked(searchGifs)
+        .mockResolvedValueOnce({ gifs: [makeGif("a")], next: "S1" })
+        .mockResolvedValueOnce({ gifs: [makeGif("a")], next: "S1" });
+      const { picker } = makePicker();
+      container.appendChild(picker.element);
+      const input = picker.element.querySelector(".gp-search") as HTMLInputElement;
+      input.value = "cats";
+      input.dispatchEvent(new Event("input"));
+      vi.advanceTimersByTime(300);
+      await flush();
+
+      fire();
+      await flush();
+
+      expect(vi.mocked(searchGifs)).toHaveBeenLastCalledWith(stubApi, "cats", 20, "S1");
+      expect(itemIds(picker.element)).toEqual(["a"]);
+      expect(observed).toHaveLength(0);
+      picker.destroy();
+    });
+
+    it("ignores a page that resolves after the query changed", async () => {
+      let resolveMore!: (p: GifPage) => void;
+      vi.mocked(getTrendingGifs)
+        .mockResolvedValueOnce({ gifs: [makeGif("a")], next: "C1" })
+        .mockReturnValueOnce(new Promise<GifPage>((r) => (resolveMore = r)));
+      vi.mocked(searchGifs).mockResolvedValue({ gifs: [makeGif("s")], next: "" });
+      const { picker } = makePicker();
+      container.appendChild(picker.element);
+      await flush();
+
+      fire(); // page 2 of trending is now in flight
+      const input = picker.element.querySelector(".gp-search") as HTMLInputElement;
+      input.value = "cats";
+      input.dispatchEvent(new Event("input"));
+      vi.advanceTimersByTime(300);
+      await flush();
+      resolveMore({ gifs: [makeGif("late")], next: "C2" });
+      await flush();
+
+      expect(itemIds(picker.element)).toEqual(["s"]);
+      picker.destroy();
+    });
+
+    it("shows nothing broken after a failed page and retries on a scroll after the cooldown", async () => {
+      vi.mocked(getTrendingGifs)
+        .mockResolvedValueOnce({ gifs: [makeGif("a")], next: "C1" })
+        .mockRejectedValueOnce(new Error("offline"))
+        .mockResolvedValueOnce({ gifs: [makeGif("b")], next: "" });
+      const { picker } = makePicker();
+      container.appendChild(picker.element);
+      await flush();
+      const area = picker.element.querySelector(".gp-grid-area")!;
+
+      fire();
+      await flush();
+      expect(itemIds(picker.element)).toEqual(["a"]);
+      expect(picker.element.textContent).not.toContain("Couldn't load GIFs");
+      expect(vi.mocked(getTrendingGifs)).toHaveBeenCalledTimes(2);
+
+      // Inside the cooldown a scroll does not retry.
+      vi.advanceTimersByTime(2999);
+      area.dispatchEvent(new Event("scroll"));
+      fire();
+      await flush();
+      expect(vi.mocked(getTrendingGifs)).toHaveBeenCalledTimes(2);
+
+      vi.advanceTimersByTime(1);
+      area.dispatchEvent(new Event("scroll"));
+      fire();
+      await flush();
+
+      expect(vi.mocked(getTrendingGifs)).toHaveBeenLastCalledWith(stubApi, 20, "C1");
+      expect(itemIds(picker.element)).toEqual(["a", "b"]);
+      picker.destroy();
+    });
+
+    it("does not hammer the server while a page keeps failing", async () => {
+      vi.mocked(getTrendingGifs)
+        .mockResolvedValueOnce({ gifs: [makeGif("a")], next: "C1" })
+        .mockRejectedValue(new Error("offline"));
+      const { picker } = makePicker();
+      container.appendChild(picker.element);
+      await flush();
+      const area = picker.element.querySelector(".gp-grid-area")!;
+
+      fire();
+      await flush();
+      for (let i = 0; i < 20; i++) {
+        area.dispatchEvent(new Event("scroll"));
+        fire();
+        await flush();
+      }
+
+      expect(vi.mocked(getTrendingGifs)).toHaveBeenCalledTimes(2);
+      picker.destroy();
+    });
+
+    it("stops paging on a 4xx error", async () => {
+      vi.mocked(getTrendingGifs)
+        .mockResolvedValueOnce({ gifs: [makeGif("a")], next: "C1" })
+        .mockRejectedValue(new ApiClientError(400, "INVALID_INPUT", "bad"));
+      const { picker } = makePicker();
+      container.appendChild(picker.element);
+      await flush();
+
+      fire();
+      await flush();
+      vi.advanceTimersByTime(60_000);
+      picker.element.querySelector(".gp-grid-area")!.dispatchEvent(new Event("scroll"));
+      fire();
+      await flush();
+
+      expect(vi.mocked(getTrendingGifs)).toHaveBeenCalledTimes(2);
+      expect(observed).toHaveLength(0);
+      picker.destroy();
+    });
+
+    it("shows page two when the first page is empty but has a cursor", async () => {
+      vi.mocked(getTrendingGifs)
+        .mockResolvedValueOnce({ gifs: [], next: "C1" })
+        .mockResolvedValueOnce({ gifs: [makeGif("b")], next: "" });
+      const { picker } = makePicker();
+      container.appendChild(picker.element);
+      await flush();
+      expect(picker.element.querySelector(".gp-empty")).toBeNull();
+      expect(observed).toHaveLength(1);
+
+      fire();
+      await flush();
+
+      expect(itemIds(picker.element)).toEqual(["b"]);
+      picker.destroy();
+    });
+
+    it("keeps the Tab stop where the user left it when a page is appended", async () => {
+      vi.mocked(getTrendingGifs)
+        .mockResolvedValueOnce({ gifs: [makeGif("a"), makeGif("b")], next: "C1" })
+        .mockResolvedValueOnce({ gifs: [makeGif("c")], next: "" });
+      const { picker } = makePicker();
+      container.appendChild(picker.element);
+      await flush();
+      const cells = () => [...picker.element.querySelectorAll<HTMLElement>(".gp-item")];
+      cells()[0]!.setAttribute("tabindex", "-1");
+      cells()[1]!.setAttribute("tabindex", "0");
+
+      fire();
+      await flush();
+
+      expect(cells().map((c) => c.getAttribute("tabindex"))).toEqual(["-1", "0", "-1"]);
+      picker.destroy();
+    });
+
+    it("leaves the grid alone when the tab changed while a page was in flight", async () => {
+      let resolveMore!: (p: GifPage) => void;
+      vi.mocked(getTrendingGifs)
+        .mockResolvedValueOnce({ gifs: [makeGif("a")], next: "C1" })
+        .mockReturnValueOnce(new Promise<GifPage>((r) => (resolveMore = r)));
+      const { picker } = makePicker();
+      container.appendChild(picker.element);
+      await flush();
+      fire();
+      (picker.element.querySelectorAll(".gp-tab")[1] as HTMLElement).click();
+      resolveMore({ gifs: [makeGif("late")], next: "C2" });
+      await flush();
+
+      expect(observed).toHaveLength(0);
+      expect(itemIds(picker.element)).not.toContain("late");
+      picker.destroy();
+    });
+
+    it("does not page on the favorites tab", async () => {
+      vi.mocked(getTrendingGifs).mockResolvedValue({ gifs: [makeGif("a")], next: "C1" });
+      const { picker } = makePicker();
+      container.appendChild(picker.element);
+      await flush();
+      expect(observed).toHaveLength(1);
+
+      (picker.element.querySelectorAll(".gp-tab")[1] as HTMLElement).click();
+      await flush();
+      expect(observed).toHaveLength(0);
+      fire();
+      await flush();
+
+      expect(vi.mocked(getTrendingGifs)).toHaveBeenCalledTimes(1);
+      picker.destroy();
     });
   });
 

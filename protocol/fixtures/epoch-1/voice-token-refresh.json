@@ -1,0 +1,163 @@
+{
+  "journey": "voice-token-refresh",
+  "connections": {
+    "a": [
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {
+            "channel_id": 2
+          },
+          "type": "voice_join"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "channel_id": 2,
+            "direct_url": "<url:string>",
+            "is_key_holder": true,
+            "token": "<token:string>",
+            "url": "/livekit"
+          },
+          "type": "voice_token"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "cseq": 5,
+          "payload": {
+            "camera": false,
+            "channel_id": 2,
+            "deafened": false,
+            "muted": false,
+            "screenshare": false,
+            "server_deafened": false,
+            "server_muted": false,
+            "speaking": false,
+            "user_id": "<id:number>",
+            "username": "alice"
+          },
+          "seq": "<seq:number>",
+          "type": "voice_state"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "bitrate": 64000,
+            "channel_id": 2,
+            "max_users": 0,
+            "mixing_threshold": 0,
+            "quality": "medium",
+            "threshold_mode": "top_speakers",
+            "top_speakers": 5
+          },
+          "type": "voice_config"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "voice_token_refresh"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "channel_id": 2,
+            "direct_url": "<url:string>",
+            "is_key_holder": true,
+            "token": "<token:string>",
+            "url": "/livekit"
+          },
+          "type": "voice_token"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "voice_leave"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "cseq": 6,
+          "payload": {
+            "channel_id": 2,
+            "user_id": "<id:number>"
+          },
+          "seq": "<seq:number>",
+          "type": "voice_leave"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ],
+    "b": [
+      {
+        "dir": "s2c",
+        "frame": {
+          "cseq": 3,
+          "payload": {
+            "camera": false,
+            "channel_id": 2,
+            "deafened": false,
+            "muted": false,
+            "screenshare": false,
+            "server_deafened": false,
+            "server_muted": false,
+            "speaking": false,
+            "user_id": "<id:number>",
+            "username": "alice"
+          },
+          "seq": "<seq:number>",
+          "type": "voice_state"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "cseq": 4,
+          "payload": {
+            "channel_id": 2,
+            "user_id": "<id:number>"
+          },
+          "seq": "<seq:number>",
+          "type": "voice_leave"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ]
+  }
+}

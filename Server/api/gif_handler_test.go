@@ -165,6 +165,108 @@ func TestGIFTrendingProxiesUpstream(t *testing.T) {
 	}
 }
 
+// The paging cursor is forwarded upstream as `pos`, trimmed, on both endpoints.
+func TestGIFPosForwardedUpstream(t *testing.T) {
+	database := newAuthTestDB(t)
+	token := profileCreateToken(t, database, "gifuser", 4)
+	up := stubKlipy(t, gifUpstreamBody, http.StatusOK)
+	router := buildGIFRouter(database, "server-side-key")
+
+	const cursor = "CAoQ.9_x:y=z-1"
+	for _, path := range []string{
+		"/api/v1/gif/search?q=cats&pos=" + cursor,
+		"/api/v1/gif/trending?pos=%20" + cursor + "%20",
+	} {
+		rr := gifGET(t, router, path, token)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d, want 200 (body=%s)", path, rr.Code, rr.Body.String())
+		}
+		if got := up.get("pos"); got != cursor {
+			t.Errorf("%s: upstream pos = %q, want %q", path, got, cursor)
+		}
+	}
+
+	// No pos (or a blank one) sends none upstream.
+	if rr := gifGET(t, router, "/api/v1/gif/trending?pos=%20", token); rr.Code != http.StatusOK {
+		t.Fatalf("blank pos: status = %d, want 200", rr.Code)
+	}
+	if _, present := up.query["pos"]; present {
+		t.Errorf("blank pos must not be forwarded, got %q", up.get("pos"))
+	}
+}
+
+// A valid upstream `next` reaches the client; absent means "".
+func TestGIFNextPassedThrough(t *testing.T) {
+	database := newAuthTestDB(t)
+	token := profileCreateToken(t, database, "gifuser", 4)
+	router := buildGIFRouter(database, "server-side-key")
+
+	for _, tt := range []struct{ name, body, want string }{
+		{"present", `{"results":[],"next":"CAoQ-9_.x:y="}`, "CAoQ-9_.x:y="},
+		{"absent", `{"results":[]}`, ""},
+		{"empty", `{"results":[],"next":""}`, ""},
+		{"number", `{"results":[],"next":20}`, "20"},
+		{"null", `{"results":[],"next":null}`, ""},
+		{"object", `{"results":[],"next":{"a":1}}`, ""},
+		{"array", `{"results":[],"next":["a"]}`, ""},
+		{"bool", `{"results":[],"next":true}`, ""},
+		{"escaped chars", `{"results":[],"next":"a+b/c%3D~"}`, "a+b/c%3D~"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			stubKlipy(t, tt.body, http.StatusOK)
+			rr := gifGET(t, router, "/api/v1/gif/trending", token)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200 (body=%s)", rr.Code, rr.Body.String())
+			}
+			var env struct {
+				Next *string `json:"next"`
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if env.Next == nil || *env.Next != tt.want {
+				t.Errorf("next = %v, want %q", env.Next, tt.want)
+			}
+		})
+	}
+}
+
+// A `next` that fails the cursor rule is dropped rather than relayed.
+func TestGIFBadNextDropped(t *testing.T) {
+	database := newAuthTestDB(t)
+	token := profileCreateToken(t, database, "gifuser", 4)
+	router := buildGIFRouter(database, "server-side-key")
+
+	for name, next := range map[string]string{
+		"space":    "a b",
+		"markup":   "<script>",
+		"hash":     "a#b",
+		"too long": strings.Repeat("a", 257),
+		"the key":  "server-side-key",
+	} {
+		t.Run(name, func(t *testing.T) {
+			body, err := json.Marshal(map[string]any{"results": []any{}, "next": next})
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			stubKlipy(t, string(body), http.StatusOK)
+			rr := gifGET(t, router, "/api/v1/gif/trending", token)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200 (body=%s)", rr.Code, rr.Body.String())
+			}
+			var env struct {
+				Next string `json:"next"`
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if env.Next != "" {
+				t.Errorf("next = %q, want it dropped", env.Next)
+			}
+		})
+	}
+}
+
 // The API key must never reach the client, directly or via an upstream echo.
 func TestGIFResponseNeverLeaksAPIKey(t *testing.T) {
 	database := newAuthTestDB(t)
@@ -300,6 +402,11 @@ func TestGIFSearchValidatesInput(t *testing.T) {
 		{"limit zero", "/api/v1/gif/search?q=cats&limit=0"},
 		{"limit over max", "/api/v1/gif/search?q=cats&limit=51"},
 		{"limit negative", "/api/v1/gif/search?q=cats&limit=-1"},
+		{"pos with a space", "/api/v1/gif/search?q=cats&pos=a%20b"},
+		{"pos with a hash", "/api/v1/gif/search?q=cats&pos=a%23b"},
+		{"pos with a query separator", "/api/v1/gif/search?q=cats&pos=a%26key%3Dx"},
+		{"pos too long", "/api/v1/gif/search?q=cats&pos=" + strings.Repeat("a", 257)},
+		{"trending pos with a quote", "/api/v1/gif/trending?pos=%22x%22"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

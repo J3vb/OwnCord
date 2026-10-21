@@ -1409,8 +1409,14 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     // ships in this bundle. A 503 GIF_DISABLED means the operator has not
     // configured a key — callers must degrade, not retry.
 
-    gifSearch(query: string, limit: number, signal?: AbortSignal): Promise<GifSearchResponse> {
+    gifSearch(
+      query: string,
+      limit: number,
+      pos?: string,
+      signal?: AbortSignal,
+    ): Promise<GifSearchResponse> {
       const params = new URLSearchParams({ q: query, limit: String(limit) });
+      if (pos) params.set("pos", pos);
       return request<GifSearchResponse>(
         "GET",
         `/gif/search?${params.toString()}`,
@@ -1419,8 +1425,9 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       );
     },
 
-    gifTrending(limit: number, signal?: AbortSignal): Promise<GifSearchResponse> {
+    gifTrending(limit: number, pos?: string, signal?: AbortSignal): Promise<GifSearchResponse> {
       const params = new URLSearchParams({ limit: String(limit) });
+      if (pos) params.set("pos", pos);
       return request<GifSearchResponse>(
         "GET",
         `/gif/trending?${params.toString()}`,
