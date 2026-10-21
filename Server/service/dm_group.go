@@ -93,14 +93,27 @@ func dedupeGroupRecipients(ids []int64, callerID int64) ([]int64, error) {
 	return unique, nil
 }
 
+// groupReachabilityReader is the one read the group reachability check adds to
+// Store. *db.DB satisfies it; it is deliberately not part of Store (the Store
+// method ratchet), and a Store that lacks it fails closed.
+type groupReachabilityReader interface {
+	GroupDMTargetsRefuse(ctx context.Context, actorID int64, targets []int64) (bool, error)
+}
+
 // validateGroupRecipients is the check create and add share. Every target must
 // be dmReachableUser (a missing, banned or non-active account is "not
 // found"), and no pair involving a target may be blocked in either direction,
 // against the other targets or against the people already in the room (others).
+// Each target must also be reachable by actorID: it has not turned off direct
+// messages from members without trusting the actor, and the actor holds no
+// message request to it that it has not accepted. Only the actor's trust
+// counts, not that of the people already in the room, and staff are checked
+// like anyone else. Every cause answers with the one refusal, which never
+// names the target.
 // It returns the targets' users in order. A pair of people already in the room
 // is not re-checked: they were checked when they came together, and refusing a
 // newcomer because two others fell out later would make the add unusable.
-func (s *DMService) validateGroupRecipients(ctx context.Context, targets, others []int64) ([]*db.User, error) {
+func (s *DMService) validateGroupRecipients(ctx context.Context, actorID int64, targets, others []int64) ([]*db.User, error) {
 	users := make([]*db.User, 0, len(targets))
 	for _, rid := range targets {
 		user, err := s.st.GetUserByID(ctx, rid)
@@ -127,6 +140,18 @@ func (s *DMService) validateGroupRecipients(ctx context.Context, targets, others
 				return nil, fmt.Errorf("%w: cannot add this user to a group DM", ErrForbidden)
 			}
 		}
+	}
+
+	reader, ok := s.st.(groupReachabilityReader)
+	if !ok {
+		return nil, fmt.Errorf("%w: store has no group reachability read", ErrInternal)
+	}
+	refused, err := reader.GroupDMTargetsRefuse(ctx, actorID, targets)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to check DM privacy: %w", ErrInternal, err)
+	}
+	if refused {
+		return nil, fmt.Errorf("%w: cannot add this user to a group DM", ErrForbidden)
 	}
 	return users, nil
 }
@@ -248,7 +273,9 @@ func (s *DMService) requireGroupActor(ctx context.Context, userID, channelID int
 // 1..MaxGroupDMAddPerCall ids; users already in the group are skipped and, if
 // that leaves nobody, the call is a 400. The group may not pass
 // db.MaxGroupDMParticipants (ErrGroupDMFull), counted inside the transaction.
-// There is no trust or message-request gate: groups are exempt, as at create.
+// A target that has turned off direct messages from members and does not trust
+// the caller, or that the caller holds an unaccepted message request to, is
+// refused (403) and nobody in the call is added.
 func (s *DMService) AddGroupMembers(ctx context.Context, actorID, channelID int64, userIDs []int64) (*GroupChangeResult, error) {
 	ctx, done := traceCall(ctx, "service/dm", "DMService.AddGroupMembers",
 		telemetry.Int64("user_id", actorID),
@@ -281,7 +308,7 @@ func (s *DMService) AddGroupMembers(ctx context.Context, actorID, channelID int6
 		return nil, fmt.Errorf("%w: every user is already in this group", ErrBadRequest)
 	}
 
-	users, err := s.validateGroupRecipients(ctx, fresh, members)
+	users, err := s.validateGroupRecipients(ctx, actorID, fresh, members)
 	if err != nil {
 		return nil, err
 	}

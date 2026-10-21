@@ -60,3 +60,43 @@ func (d *DB) DMRefusesSender(ctx context.Context, recipientID, senderID int64) (
 	}
 	return n > 0, nil
 }
+
+// DMCaller is a user present in the voice call of a 1:1 DM, with that DM.
+type DMCaller struct {
+	ChannelID int64
+	UserID    int64
+}
+
+// UntrustedDMCallers returns, for each 1:1 DM userID is in, the other
+// participant when they are in that DM's voice call while userID has direct
+// messages from members off and holds no trust row for them. Group DMs never
+// match. It reads nothing but the stored state, so it answers "who may no
+// longer stay" right after userID turned the setting off.
+func (d *DB) UntrustedDMCallers(ctx context.Context, userID int64) ([]DMCaller, error) {
+	rows, err := d.QueryContext(ctx, `
+SELECT c.id, other.user_id
+FROM user_privacy up
+JOIN dm_participants me ON me.user_id = up.user_id
+JOIN channels c ON c.id = me.channel_id AND c.type = 'dm' AND c.is_group = 0
+JOIN dm_participants other ON other.channel_id = c.id AND other.user_id <> me.user_id
+JOIN voice_states vs ON vs.channel_id = c.id AND vs.user_id = other.user_id
+LEFT JOIN trusted_senders ts ON ts.recipient_id = me.user_id AND ts.sender_id = other.user_id
+WHERE up.user_id = ? AND up.allow_member_dms = 0 AND ts.recipient_id IS NULL
+ORDER BY c.id`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("UntrustedDMCallers: %w", err)
+	}
+	defer func() { _ = rows.Close() }() //nolint:errcheck // read-only cursor
+	var out []DMCaller
+	for rows.Next() {
+		var c DMCaller
+		if err = rows.Scan(&c.ChannelID, &c.UserID); err != nil {
+			return nil, fmt.Errorf("UntrustedDMCallers scan: %w", err)
+		}
+		out = append(out, c)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("UntrustedDMCallers rows: %w", err)
+	}
+	return out, nil
+}

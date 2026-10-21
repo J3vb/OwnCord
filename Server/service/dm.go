@@ -308,11 +308,15 @@ type CreateGroupDMResult struct {
 //
 // Blocks are enforced in both directions, per recipient: a user cannot pull
 // someone they have blocked into a room with them, and cannot use a group to
-// reach someone who blocked them. The check is deliberately *creation-time
-// only* — once the group exists, sending into it is not block-checked, because
-// a group DM is a shared room and silently dropping one member's messages for
-// one other member would make the conversation lie to everybody in it. That is
-// also why the composer gate on the client applies to 1:1 DMs alone.
+// reach someone who blocked them. A recipient who has turned off direct
+// messages from members and does not trust the caller, or whom the caller
+// holds an unaccepted message request to, is refused the same way. The check
+// is deliberately *creation-time only* — once the group exists, sending into
+// it is not block-checked, because a group DM is a shared room and silently
+// dropping one member's messages for one other member would make the
+// conversation lie to everybody in it. That is also why the composer gate on
+// the client applies to 1:1 DMs alone, and why a member who later turns DMs
+// off stays in the group.
 //
 // Unlike CreateDM this always creates a new channel: the same set of people may
 // want more than one group, so there is no "the group for these users" to find.
@@ -346,16 +350,19 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 	}
 
 	// The same checks an add runs, so the two cannot drift: recipients are
-	// dmReachableUser, and no pair in the room is blocked. Group DMs are
-	// exempt from the send-time block gate (RequireDMReachable skips groups
-	// entirely) on the strength of this check, so two mutually-blocked
+	// dmReachableUser, no pair in the room is blocked, and each recipient is
+	// reachable by the creator. The send-time gate (RequireDMReachable) skips
+	// groups entirely, so this check is the only one: two mutually-blocked
 	// recipients must not both end up in the same group even when neither of
 	// them blocked the creator.
-	if _, err = s.validateGroupRecipients(ctx, unique, []int64{userID}); err != nil {
+	if _, err = s.validateGroupRecipients(ctx, userID, unique, []int64{userID}); err != nil {
 		return nil, err
 	}
 	participantIDs := append([]int64{userID}, unique...)
 	ch, err := s.st.CreateGroupDMChannel(ctx, cleanName, userID, participantIDs)
+	if errors.Is(err, db.ErrGroupDMBlockedPair) {
+		return nil, mapGroupDBError("failed to create group DM", err)
+	}
 	if err != nil {
 		slog.Error("DMService.CreateGroupDM", "err", err)
 		return nil, fmt.Errorf("%w: failed to create group DM", ErrInternal)

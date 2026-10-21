@@ -11,12 +11,18 @@ var _ PrivacyStore = (*db.DB)(nil)
 
 var _ DMPrivacyReader = (*db.DB)(nil)
 
+var _ groupReachabilityReader = (*db.DB)(nil)
+
 // PrivacyStore is the data access the privacy service needs. *db.DB satisfies
 // it; it is deliberately not part of Store.
 type PrivacyStore interface {
 	GetUserPrivacy(ctx context.Context, userID int64) (db.UserPrivacy, error)
 	SetUserPrivacy(ctx context.Context, userID int64, p db.UserPrivacy) error
+	UntrustedDMCallers(ctx context.Context, userID int64) ([]db.DMCaller, error)
 }
+
+// DMCaller is a user in the voice call of a 1:1 DM.
+type DMCaller = db.DMCaller
 
 // Privacy is a user's direct message privacy choices as the API sees them.
 type Privacy struct {
@@ -52,4 +58,15 @@ func (s *PrivacyService) Set(ctx context.Context, userID int64, p Privacy) (Priv
 		return Privacy{}, fmt.Errorf("set privacy: %w", err)
 	}
 	return p, nil
+}
+
+// UntrustedCallers returns the people in a 1:1 DM voice call with userID whom
+// userID does not trust while their direct messages from members are off. The
+// caller removes them from those calls once Set has stored the setting.
+func (s *PrivacyService) UntrustedCallers(ctx context.Context, userID int64) ([]DMCaller, error) {
+	callers, err := s.st.UntrustedDMCallers(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("untrusted callers: %w", err)
+	}
+	return callers, nil
 }
