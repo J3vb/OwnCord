@@ -57,12 +57,12 @@ let session: SessionScope;
 let page: Record<string, ReturnType<typeof vi.fn>>;
 let startup: () => void;
 let ensureProfileExists: ReturnType<typeof vi.fn>;
-let apiToken: string | undefined;
 
 const api = {
   getSession: () => session,
   setConfig: vi.fn(),
-  getConfig: () => ({ host: HOST, token: apiToken }),
+  // Mirrors the real client: getConfig redacts the token.
+  getConfig: () => ({ host: HOST, token: "[redacted]" }),
   endSession: vi.fn(),
 };
 
@@ -75,7 +75,6 @@ beforeEach(() => {
   sessionStorage.clear();
   for (const m of Object.values(hoisted)) m.mockReset();
   profiles = [];
-  apiToken = undefined;
   ensureProfileExists = vi.fn();
   owner = new SessionScope({ host: "", generation: 0 });
   session = new SessionScope({ host: "", generation: 0 });
@@ -197,7 +196,7 @@ describe("portal resume", () => {
 describe("portal auth_error on a resume", () => {
   it("a sign-out or auth_error in one tab leaves a different token stored by another tab", async () => {
     // This tab's attempt sent T1 (session-only); another tab has since kept T2.
-    apiToken = "T1";
+    authStore.setState((prev) => ({ ...prev, token: "T1" }));
     sessionStorage.setItem(KEY, JSON.stringify({ username: "casey", token: "T1" }));
     localStorage.setItem(KEY, JSON.stringify({ username: "casey", token: "T2" }));
     handleAuthError(api as never, { message: "invalid token" });
@@ -207,6 +206,7 @@ describe("portal auth_error on a resume", () => {
   });
 
   it("auth_error on resume deletes both copies", async () => {
+    authStore.setState((prev) => ({ ...prev, token: "tok" }));
     localStorage.setItem(KEY, CRED);
     sessionStorage.setItem(KEY, CRED);
     handleAuthError(api as never, { message: "invalid token" });
