@@ -3327,6 +3327,17 @@ describe("WS Dispatcher", () => {
     expect(authStore.getState().user?.role).toBe("admin");
   });
 
+  it("tracks role_ids for the signed-in user and drops them when the echo has none", () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 42, username: "alice", avatar: null, role: "member", role_ids: [3] },
+    }));
+    mock.dispatch("member_update", { user_id: 42, role: "vip", role_ids: [6, 3] });
+    expect(authStore.getState().user?.role_ids).toEqual([6, 3]);
+    mock.dispatch("member_update", { user_id: 42, role: "vip" });
+    expect(authStore.getState().user?.role_ids).toBeUndefined();
+  });
+
   it("leaves authStore.user.role untouched for a member_update about someone else", () => {
     authStore.setState((prev) => ({
       ...prev,

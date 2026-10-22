@@ -437,6 +437,34 @@ describe("leaving a view another way", () => {
     expect(document.body.contains(document.activeElement)).toBe(true);
   });
 
+  it("losing the permission through role_ids alone (top role unchanged) closes the view", () => {
+    setRoles([
+      { id: 6, name: "Vip", color: null, permissions: Permission.SEND_MESSAGES, position: 20 },
+      {
+        id: 7,
+        name: "Moderator",
+        color: null,
+        permissions: Permission.MODERATE_MEMBERS,
+        position: 10,
+      },
+    ]);
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 7, username: "mod", avatar: null, role: "vip", role_ids: [6, 7] },
+    }));
+    flush();
+    nav.open("moderation", opener());
+    expect(uiStore.getState().activeView).toBe("moderation");
+
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 7, username: "mod", avatar: null, role: "vip", role_ids: [6] },
+    }));
+    flush();
+
+    expect(uiStore.getState().activeView).toBeNull();
+  });
+
   it("a role change that keeps the permission leaves the view alone", () => {
     nav.open("moderation", opener());
     setRoles([{ id: 7, name: "Moderator", color: "#fff", permissions: Permission.ADMINISTRATOR }]);

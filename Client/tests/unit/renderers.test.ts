@@ -21,7 +21,7 @@ import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
 import { setConnectionStatus } from "../../src/stores/ui.store";
 import { shellText } from "../../src/i18n/shell";
-import { formatClockTime } from "../../src/lib/formatting";
+import { formatClockTime, userRoleColorVar } from "../../src/lib/formatting";
 import type { MessageListOptions } from "../../src/components/MessageList";
 import {
   clearReactionUsersCache,
@@ -2252,5 +2252,32 @@ describe("message row author identity", () => {
 
     expect(el.querySelector(".msg-author")?.textContent).toBe("Ghosty");
     expect(el.querySelector(".msg-avatar .avatar-initial")?.textContent).toBe("G");
+  });
+});
+
+describe("userRoleColorVar", () => {
+  it("uses the highest coloured held role, matching the member list", () => {
+    setRoles([
+      { id: 1, name: "Vip", color: null, permissions: 0, position: 30 },
+      { id: 2, name: "Helper", color: "#2ecc71", permissions: 0, position: 20 },
+      { id: 3, name: "Member", color: "#111111", permissions: 0, position: 10 },
+    ]);
+    membersStore.setState((p) => ({
+      ...p,
+      members: new Map([
+        [
+          9,
+          {
+            id: 9,
+            username: "u",
+            avatar: null,
+            role: "vip",
+            roleIds: [1, 3, 2],
+            status: "online" as const,
+          },
+        ],
+      ]),
+    }));
+    expect(userRoleColorVar(9)).toBe("#2ecc71");
   });
 });

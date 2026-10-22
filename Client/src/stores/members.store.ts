@@ -12,6 +12,9 @@ export interface Member {
   readonly username: string;
   readonly avatar: string | null;
   readonly role: string;
+  /** Every role the member holds, top first (WP 6.3c). Undefined = an older
+   *  server that sends none, where `role` is the only role. */
+  readonly roleIds?: readonly number[];
   readonly status: UserStatus;
   /** Nickname to render instead of `username`. Null = unset. Optional only so
    *  the many inline Member test fixtures need not restate it. Mentions still
@@ -81,6 +84,7 @@ export function setMembers(members: readonly ReadyMember[]): void {
       username: m.username,
       avatar: m.avatar,
       role: m.role,
+      ...(m.role_ids === undefined ? {} : { roleIds: m.role_ids }),
       status: m.status,
       displayName: m.display_name ?? null,
       customStatus: m.custom_status ?? null,
@@ -117,6 +121,7 @@ export function addMember(payload: MemberJoinPayload): void {
       username: payload.user.username,
       avatar: payload.user.avatar,
       role: payload.user.role,
+      ...(payload.user.role_ids === undefined ? {} : { roleIds: payload.user.role_ids }),
       status: payload.status ?? "offline",
       displayName: payload.user.display_name ?? null,
       // member_join carries no custom status; a presence event follows it and
@@ -143,13 +148,17 @@ export function removeMember(userId: number): void {
   });
 }
 
-/** Update a member's role from a member_update event. */
-export function updateMemberRole(userId: number, role: string): void {
+/** Update a member's role from a member_update event. `roleIds` is every held
+ *  role (WP 6.3c); omitted by an older server, which also drops any stale list. */
+export function updateMemberRole(userId: number, role: string, roleIds?: readonly number[]): void {
   membersStore.setState((prev) => {
     const existing = prev.members.get(userId);
     if (!existing) return prev;
     const next = new Map(prev.members);
-    next.set(userId, { ...existing, role });
+    const updated: Member = { ...existing, role };
+    // Rebuilt without the old list so an absent field cannot keep a stale one.
+    const { roleIds: _old, ...withoutIds } = updated;
+    next.set(userId, roleIds === undefined ? withoutIds : { ...withoutIds, roleIds });
     return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
   });
 }

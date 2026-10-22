@@ -1,7 +1,7 @@
 // Channel, role, member, presence and emoji WebSocket handlers — extracted
 // from lib/dispatcher.ts, which keeps every socket subscription and calls
 // these plain functions.
-import { authStore, setAuth, updateUser } from "../../stores/auth.store";
+import { authStore, setAuth } from "../../stores/auth.store";
 import {
   channelsStore,
   setChannels,
@@ -513,7 +513,7 @@ export function handleMemberBan(payload: Payload<"member_ban">): void {
 
 export function handleMemberUpdate(payload: Payload<"member_update">): void {
   log.info("Member role updated", { userId: payload.user_id, role: payload.role });
-  updateMemberRole(payload.user_id, payload.role);
+  updateMemberRole(payload.user_id, payload.role, payload.role_ids);
 
   // Keep authStore in sync when the signed-in user's own role changed —
   // every permission gate (canManageChannels, canViewAuditLog, ...) reads
@@ -522,7 +522,17 @@ export function handleMemberUpdate(payload: Payload<"member_update">): void {
   // the socket reconnects (mirrors the USER_UPDATE self-branch below).
   const me = authStore.getState().user;
   if (me && payload.user_id === me.id) {
-    updateUser({ role: payload.role });
+    // role_ids rides along so the held-role gates follow the echo too.
+    // An absent list drops the old one, as updateMemberRole does.
+    const { role_ids: _old, ...withoutIds } = me;
+    authStore.setState((prev) => ({
+      ...prev,
+      user: {
+        ...withoutIds,
+        role: payload.role,
+        ...(payload.role_ids === undefined ? {} : { role_ids: payload.role_ids }),
+      },
+    }));
   }
 }
 

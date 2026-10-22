@@ -15,14 +15,20 @@ import { parseTimestamp } from "@lib/formatting";
 import { authStore } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";
 import { membersStore } from "@stores/members.store";
-import { roleHasPermission } from "@lib/permissions";
+import { currentUserRoleHasPermission } from "@lib/permissions";
 import { Permission, type AdminUser } from "@lib/types";
 import { type ApiClient, ApiClientError, errorText } from "@lib/api";
 import type { ToastContainer } from "@components/Toast";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { shellText } from "../../i18n/shell";
 import type { BlockDeps } from "../blocks/blockActions";
-import { changeMemberRole, type RoleChangeDeps } from "../moderation/roleAssignment";
+import {
+  addMemberRole,
+  changeMemberRole,
+  removeMemberRole,
+  type RoleChangeDeps,
+  type RoleMembershipDeps,
+} from "../moderation/roleAssignment";
 import { TIMEOUT_PRESETS } from "../moderation/timeoutPresets";
 
 /** The two UI-layer functions the panel needs. Injected rather than imported:
@@ -69,7 +75,10 @@ function isBanInForce(user: AdminUser): boolean {
 
 export function createMemberPanel(opts: MemberPanelOptions): MemberPanel {
   const { api, getToast, onMessageUser, onCallUser, onVoiceModerate, ui } = opts;
-  const roleDeps: RoleChangeDeps = { api, notify: (msg, type) => getToast()?.show(msg, type) };
+  const roleDeps: RoleChangeDeps & RoleMembershipDeps = {
+    api,
+    notify: (msg, type) => getToast()?.show(msg, type),
+  };
   const blockDeps: BlockDeps = { api, notify: (msg, type) => getToast()?.show(msg, type) };
   const unsubs: Array<() => void> = [];
   // The lifetime of the dialogs this panel opens.
@@ -119,7 +128,7 @@ export function createMemberPanel(opts: MemberPanelOptions): MemberPanel {
   async function fetchBanned(): Promise<void> {
     // Read the role live, like MemberList's menu gates do: a role change
     // arrives as a store update, and this section is not remounted for it.
-    if (!roleHasPermission(authStore.getState().user?.role ?? "", Permission.BAN_MEMBERS)) {
+    if (!currentUserRoleHasPermission(Permission.BAN_MEMBERS)) {
       bannedUsers = [];
       renderBanned();
       return;
@@ -233,10 +242,7 @@ export function createMemberPanel(opts: MemberPanelOptions): MemberPanel {
             name: displayName,
             username,
             // The server also requires MANAGE_MESSAGES to delete history.
-            canDeleteMessages: roleHasPermission(
-              authStore.getState().user?.role ?? "",
-              Permission.MANAGE_MESSAGES,
-            ),
+            canDeleteMessages: currentUserRoleHasPermission(Permission.MANAGE_MESSAGES),
             submit: (req) =>
               api.adminBanMember(
                 userId,
@@ -280,6 +286,9 @@ export function createMemberPanel(opts: MemberPanelOptions): MemberPanel {
     },
     onChangeRole: (userId, username, newRole) =>
       changeMemberRole(roleDeps, userId, username, newRole),
+    onAddRole: (userId, username, roleId) => addMemberRole(roleDeps, userId, username, roleId),
+    onRemoveRole: (userId, username, roleId) =>
+      removeMemberRole(roleDeps, userId, username, roleId),
     // No reason dialog yet: the menu sends an empty reason, which the server accepts.
     onTimeoutMember: async (userId, username, seconds) => {
       try {

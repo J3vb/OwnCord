@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { createUserProfilePopup, type UserProfileData } from "@components/UserProfilePopup";
+import {
+  createUserProfilePopup,
+  type ProfileRolesControl,
+  type ProfileRolesState,
+  type UserProfileData,
+} from "@components/UserProfilePopup";
 import { createNoteBinding } from "../../src/features/profiles/userNotes";
 
 function makeUser(overrides?: Partial<UserProfileData>): UserProfileData {
@@ -602,5 +607,112 @@ describe("UserProfilePopup profile fields", () => {
       popup.destroy?.();
       expect(onNoteFlush).toHaveBeenCalledOnce();
     });
+  });
+});
+
+describe("UserProfilePopup role chips (WP 6.3d)", () => {
+  let container: HTMLDivElement;
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+  afterEach(() => {
+    container.remove();
+  });
+
+  function controlFor(
+    state: ProfileRolesState,
+  ): ProfileRolesControl & { add: ReturnType<typeof vi.fn>; remove: ReturnType<typeof vi.fn> } {
+    return {
+      read: () => state,
+      subscribe: () => () => undefined,
+      add: vi.fn(() => Promise.resolve()),
+      remove: vi.fn(() => Promise.resolve()),
+    };
+  }
+  const xButtons = (): HTMLButtonElement[] =>
+    Array.from(container.querySelectorAll<HTMLButtonElement>(".upp-chip-x"));
+
+  it("removes a chip only for roles below the viewer", () => {
+    const control = controlFor({
+      chips: [
+        { id: 2, name: "Staff", color: "#3498db", removable: false },
+        { id: 3, name: "Helper", color: null, removable: true },
+        { id: 4, name: "Member", color: null, removable: true },
+      ],
+      addable: [],
+    });
+    const popup = createUserProfilePopup({
+      user: makeUser(),
+      anchorX: 1,
+      anchorY: 1,
+      rolesControl: control,
+    });
+    popup.mount(container);
+
+    const chips = Array.from(container.querySelectorAll(".upp-chip"));
+    expect(chips.map((c) => c.textContent)).toEqual(
+      expect.arrayContaining([expect.stringContaining("Staff")]),
+    );
+    expect(chips).toHaveLength(3);
+    expect(xButtons().map((b) => b.dataset["roleId"])).toEqual(["3", "4"]);
+    xButtons()[0]!.click();
+    expect(control.remove).toHaveBeenCalledWith(3);
+    popup.destroy?.();
+  });
+
+  it("last chip has no x", () => {
+    const control = controlFor({
+      chips: [{ id: 4, name: "Member", color: null, removable: true }],
+      addable: [{ id: 3, name: "Helper" }],
+    });
+    const popup = createUserProfilePopup({
+      user: makeUser(),
+      anchorX: 1,
+      anchorY: 1,
+      rolesControl: control,
+    });
+    popup.mount(container);
+    expect(container.querySelectorAll(".upp-chip")).toHaveLength(1);
+    expect(xButtons()).toHaveLength(0);
+    popup.destroy?.();
+  });
+
+  it("the plus menu lists the assignable roles and adds the chosen one", () => {
+    const control = controlFor({
+      chips: [{ id: 4, name: "Member", color: null, removable: true }],
+      addable: [
+        { id: 3, name: "Helper" },
+        { id: 5, name: "Artist" },
+      ],
+    });
+    const popup = createUserProfilePopup({
+      user: makeUser(),
+      anchorX: 1,
+      anchorY: 1,
+      rolesControl: control,
+    });
+    popup.mount(container);
+    container.querySelector<HTMLElement>('[data-testid="upp-chip-add"]')!.click();
+    const items = Array.from(container.querySelectorAll<HTMLElement>(".upp-role-option"));
+    expect(items.map((i) => i.dataset["role"])).toEqual(["Helper", "Artist"]);
+    items[1]!.click();
+    expect(control.add).toHaveBeenCalledWith(5);
+    popup.destroy?.();
+  });
+
+  it("shows no plus when nothing is assignable", () => {
+    const popup = createUserProfilePopup({
+      user: makeUser(),
+      anchorX: 1,
+      anchorY: 1,
+      rolesControl: controlFor({
+        chips: [{ id: 4, name: "Member", color: null, removable: false }],
+        addable: [],
+      }),
+    });
+    popup.mount(container);
+    expect(container.querySelector('[data-testid="upp-chip-add"]')).toBeNull();
+    popup.destroy?.();
   });
 });
