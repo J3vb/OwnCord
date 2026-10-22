@@ -80,6 +80,7 @@ func sendResultEvents(d ChatDeps, info ClientInfo, clientMessageID string, chann
 		ReplyTo:           replyTo,
 		Attachments:       attData,
 		Mentions:          result.Mentions,
+		MentionRoles:      result.MentionRoles,
 		MentionsEveryone:  result.MentionsEveryone,
 		MentionsHere:      result.MentionsHere,
 		ReferencedMessage: result.ReferencedMessage,
@@ -198,7 +199,7 @@ func channelSendResult(reply, broadcast []byte, channelID, authorID int64, resul
 		channelEvt{evType: MsgTypeChatMessage, channelID: channelID, payload: broadcast},
 		channelActivityEvt{
 			channelID: channelID, msgID: result.MessageID, authorID: authorID,
-			mentions: result.Mentions, everyone: result.MentionsEveryone, hereOnly: result.MentionsHere,
+			mentions: result.Mentions, roleUsers: result.RoleUserIDs, everyone: result.MentionsEveryone, hereOnly: result.MentionsHere,
 		},
 	}
 	if result.Channel != nil && result.Channel.IsThread() {
@@ -220,7 +221,7 @@ func handleChatEditV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	}
 
 	editedPayload := buildChatEdited(result.MessageID, result.ChannelID, result.Content, result.EditedAt,
-		result.Mentions, result.MentionsEveryone, result.MentionsHere)
+		result.Mentions, result.MentionRoles, result.MentionsEveryone, result.MentionsHere)
 	if result.IsDM {
 		return Result{Events: []Event{dmEventOrFallback(
 			dmEvt{evType: MsgTypeChatEdited, channelID: result.ChannelID, participantIDs: result.ParticipantIDs, payload: editedPayload},

@@ -292,6 +292,10 @@ type MessageAPIResponse struct {
 	// MentionsEveryone reports an authorized @everyone/@here.
 	Mentions         []int64 `json:"mentions"`
 	MentionsEveryone bool    `json:"mentions_everyone"`
+	// RoleMentions adds mention_roles (WP 6.3f-1): the roles whose @role token
+	// cleared the mention gate. Embedded so its json tag lives outside
+	// models.go, whose tag count is pinned.
+	RoleMentions
 	// ReferencedMessage is the reply parent's snippet, computed at read time
 	// (never stored). Null when this is not a reply or the parent is gone or
 	// in another channel.

@@ -28,7 +28,7 @@ func TestSearch_HasMentionsPinned(t *testing.T) {
 	ch := f.channel(t, "main", 0)
 	plain := f.say(t, ch, f.owner.ID, "plain words")
 	linked := f.say(t, ch, f.owner.ID, "docs at https://example.com/x")
-	m, err := f.database.CreateMessageWithMentions(ctx, ch, f.owner.ID, "hey member", nil, []int64{f.member.ID}, 0, false)
+	m, err := f.database.CreateMessageWithMentions(ctx, ch, f.owner.ID, "hey member", nil, []int64{f.member.ID}, 0, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestSearch_HasMentionsPinnedNeverLeakUnreadable(t *testing.T) {
 	f := withReplyPing(t, newSearchFixture(t, "hmpl"))
 	secret := f.channel(t, "secret", 0)
 	denyReadMessages(t, f.database, secret, permissions.MemberRoleID)
-	hit, err := f.database.CreateMessageWithMentions(ctx, secret, f.owner.ID, "see https://example.com @member", nil, []int64{f.member.ID}, 0, false)
+	hit, err := f.database.CreateMessageWithMentions(ctx, secret, f.owner.ID, "see https://example.com @member", nil, []int64{f.member.ID}, 0, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

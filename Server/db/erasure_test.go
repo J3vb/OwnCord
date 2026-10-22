@@ -32,11 +32,11 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 			t.Fatalf("%s: %v", query, err)
 		}
 	}
-	msg, err := database.CreateMessageWithMentions(ctx, chID, uid, "hello @other-user needleword", nil, []int64{other}, 0, false)
+	msg, err := database.CreateMessageWithMentions(ctx, chID, uid, "hello @other-user needleword", nil, []int64{other}, 0, false, nil)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions: %v", err)
 	}
-	otherMsg, err := database.CreateMessageWithMentions(ctx, chID, other, "hi @Subject_User", nil, []int64{uid}, 0, false)
+	otherMsg, err := database.CreateMessageWithMentions(ctx, chID, other, "hi @Subject_User", nil, []int64{uid}, 0, false, nil)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions(other): %v", err)
 	}
@@ -68,7 +68,7 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	// A poll (migration 073, WP 6.9b) another user posted: the subject and a
 	// bystander each hold a vote, so class 10a is proved non-empty and the
 	// bystander's vote must survive the subject's erasure.
-	pollMsg, err := database.CreateMessageWithMentions(ctx, chID, other, "poll fallback", nil, nil, 0, false)
+	pollMsg, err := database.CreateMessageWithMentions(ctx, chID, other, "poll fallback", nil, nil, 0, false, nil)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions(poll): %v", err)
 	}
@@ -1097,7 +1097,7 @@ func TestEraseAccount_PollVotesBumpVersion(t *testing.T) {
 		database := openMigratedMemory(t)
 		sub := seedEraseSubject(t, database)
 		ctx := context.Background()
-		m, err := database.CreateMessageWithMentions(ctx, sub.channel, sub.other, "second poll", nil, nil, 0, false)
+		m, err := database.CreateMessageWithMentions(ctx, sub.channel, sub.other, "second poll", nil, nil, 0, false, nil)
 		if err != nil {
 			t.Fatalf("CreateMessageWithMentions: %v", err)
 		}

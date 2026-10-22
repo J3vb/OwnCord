@@ -1250,6 +1250,7 @@ Paginated message history for a channel.
       "deleted": false,
       "timestamp": "2026-03-14T10:30:00Z",
       "mentions": [7],
+      "mention_roles": [],
       "mentions_everyone": false
     }
   ],
@@ -1258,12 +1259,15 @@ Paginated message history for a channel.
 ```
 
 `mentions` is the server-resolved list of mentioned user IDs (always present,
-empty when the message mentions nobody) and `mentions_everyone` reports an
-`@everyone`/`@here` that cleared the `MENTION_EVERYONE` permission. Both are
-resolved at send time and re-resolved on edit; an `@word` that matches no
-username, or an `@everyone` from a user without the bit, carries no mention
-semantics and stays plain text. The same two fields appear on pinned-message
-responses and on the WebSocket `chat_message`/`chat_edited` payloads.
+empty when the message mentions nobody), `mention_roles` the role IDs whose
+`<@&id>` token cleared the role-mention gate (the role is mentionable, or the
+author holds `MENTION_EVERYONE`; always present, empty for none) and
+`mentions_everyone` reports an `@everyone`/`@here` that cleared the
+`MENTION_EVERYONE` permission. All are resolved at send time and re-resolved on
+edit; an `@word` that matches no username, a `<@&id>` the author may not ping,
+or an `@everyone` from a user without the bit, carries no mention semantics and
+stays plain text. The same fields appear on pinned-message responses and on the
+WebSocket `chat_message`/`chat_edited` payloads.
 
 A DM can also hold a call log row: a message the server writes for a call in
 the DM's voice channel. It carries two more fields, both omitted for an ordinary

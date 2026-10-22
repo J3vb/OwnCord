@@ -41,7 +41,7 @@ func TestThreadPost_JoinsAuthorAndDirectMentionsOnly(t *testing.T) {
 			send := func(everyone bool, mentioned ...int64) *db.Message {
 				t.Helper()
 				if path == "mentions" {
-					m, err := f.db.CreateMessageWithMentions(context.Background(), f.thread, author, "hi", nil, mentioned, 0, everyone)
+					m, err := f.db.CreateMessageWithMentions(context.Background(), f.thread, author, "hi", nil, mentioned, 0, everyone, nil)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -85,7 +85,7 @@ func TestThreadPost_JoinsAuthorAndDirectMentionsOnly(t *testing.T) {
 
 func TestThreadPost_InAnOrdinaryChannelJoinsNobody(t *testing.T) {
 	f := newThreadFixture(t)
-	m, err := f.db.CreateMessageWithMentions(context.Background(), f.parent, f.user, "hi", nil, []int64{f.user}, 0, false)
+	m, err := f.db.CreateMessageWithMentions(context.Background(), f.parent, f.user, "hi", nil, []int64{f.user}, 0, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,11 +187,11 @@ func TestListFollowedThreads_OpenOnlyWithReadPosition(t *testing.T) {
 	if _, err := f.db.FollowThread(ctx, f.thread, bob); err != nil {
 		t.Fatal(err)
 	}
-	first, err := f.db.CreateMessageWithMentions(ctx, f.thread, f.user, "one", nil, nil, 0, false)
+	first, err := f.db.CreateMessageWithMentions(ctx, f.thread, f.user, "one", nil, nil, 0, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.db.CreateMessageWithMentions(ctx, f.thread, f.user, "two", nil, []int64{bob}, 0, false); err != nil {
+	if _, err := f.db.CreateMessageWithMentions(ctx, f.thread, f.user, "two", nil, []int64{bob}, 0, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.exec(t, `INSERT INTO read_states (user_id, channel_id, last_message_id, mention_count) VALUES (?, ?, ?, 3)`, bob, f.thread, first.ID); err != nil {

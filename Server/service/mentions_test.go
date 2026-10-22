@@ -97,7 +97,8 @@ func TestParseMentionTokens(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tokens, everyone, here := parseMentionTokens(tt.content)
+			parsed := parseMentionTokens(tt.content)
+			tokens, everyone, here := parsed.Tokens, parsed.Everyone, parsed.Here
 			var got []string
 			for _, tok := range tokens {
 				got = append(got, tok.spellings[0])
@@ -118,7 +119,7 @@ func TestParseMentionTokens(t *testing.T) {
 // TestParseMentionTokens_TrailingPunctuationSpelling locks the fallback that
 // makes "@bob." resolve to bob when no user is literally named "bob.".
 func TestParseMentionTokens_TrailingPunctuationSpelling(t *testing.T) {
-	tokens, _, _ := parseMentionTokens("thanks @bob.")
+	tokens := parseMentionTokens("thanks @bob.").Tokens
 	if len(tokens) != 1 {
 		t.Fatalf("tokens = %d, want 1", len(tokens))
 	}
@@ -132,7 +133,7 @@ func TestParseMentionTokens_CandidateCap(t *testing.T) {
 	for i := range maxMentionCandidates + 20 {
 		fmt.Fprintf(&sb, "@user%d ", i)
 	}
-	tokens, _, _ := parseMentionTokens(sb.String())
+	tokens := parseMentionTokens(sb.String()).Tokens
 	if len(tokens) != maxMentionCandidates {
 		t.Errorf("tokens = %d, want %d", len(tokens), maxMentionCandidates)
 	}

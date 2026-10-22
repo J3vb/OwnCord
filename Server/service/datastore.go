@@ -34,7 +34,7 @@ type Store interface {
 
 	// ── Messages / reactions / read-state ──
 	CreateMessage(ctx context.Context, channelID, userID int64, content string, replyTo *int64) (int64, error)
-	CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, replyPingUserID int64, mentionsEveryone bool) (*db.Message, error)
+	CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, replyPingUserID int64, mentionsEveryone bool, mentionedRoleIDs []int64) (*db.Message, error)
 	FindMessageDelivery(ctx context.Context, p db.MessageDeliveryParams) (*db.MessageDelivery, error)
 	CreateMessageDelivery(ctx context.Context, p db.MessageDeliveryParams) (*db.MessageDelivery, error)
 	MessageDeliveryFloorMS() int64
@@ -63,7 +63,7 @@ type Store interface {
 	GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int64]db.ChannelUnread, error)
 
 	// ── Mentions ──
-	ReplaceMessageMentions(ctx context.Context, messageID int64, mentionedUserIDs []int64, mentionsEveryone bool) (replyPingUserID int64, err error)
+	ReplaceMessageMentions(ctx context.Context, messageID int64, mentionedUserIDs []int64, mentionsEveryone bool, mentionedRoleIDs []int64) (replyPingUserID int64, err error)
 	IncrementMentionCounts(ctx context.Context, channelID, msgID int64, userIDs []int64) error
 	// IncrementMentionCountsBatch applies a coalesced window of mention jobs in
 	// one writer transaction — the mention worker's flush path (P5-O05). It

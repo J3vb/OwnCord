@@ -357,7 +357,7 @@ func TestEraseAccountLock_RefusesLaterMessages(t *testing.T) {
 		}
 		return n
 	}
-	if _, err := database.CreateMessageWithMentions(ctx, sub.channel, sub.id, "late", nil, nil, 0, false); !errors.Is(err, db.ErrAccountErasing) {
+	if _, err := database.CreateMessageWithMentions(ctx, sub.channel, sub.id, "late", nil, nil, 0, false, nil); !errors.Is(err, db.ErrAccountErasing) {
 		t.Errorf("CreateMessageWithMentions = %v, want ErrAccountErasing", err)
 	}
 	now := time.Now().UnixMilli()

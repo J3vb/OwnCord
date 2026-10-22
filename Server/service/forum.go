@@ -163,6 +163,7 @@ func (s *MessageService) CreateForumPost(ctx context.Context, p ForumPostParams)
 	mentions := s.resolveMentions(ctx, content, p.UserID, p.ChannelID, false)
 	delivery.Content, delivery.ForumPost = content, in
 	delivery.MentionedUserIDs, delivery.MentionsEveryone = mentions.UserIDs, mentions.Everyone
+	delivery.MentionedRoleIDs = mentions.RoleIDs
 	saved, err := s.st.CreateMessageDelivery(ctx, *delivery)
 	if err != nil {
 		return nil, forumPostError(err)
@@ -275,10 +276,10 @@ func (s *MessageService) forumPostResult(ctx context.Context, sp SendMessagePara
 	send := &SendMessageResult{
 		MessageID: msg.ID, Timestamp: msg.Timestamp, Content: content, Channel: postCh,
 		Attachments: attachments, SkippedAttachmentIDs: skippedAttachmentIDs(sp.AttachmentIDs, saved.LinkedAttachmentIDs),
-		Mentions: mentions.UserIDs, MentionsEveryone: mentions.Everyone, MentionsHere: mentions.HereOnly,
 	}
+	mentions.fill(send)
 	threadID, authorID := thread.ID, sp.UserID
-	if len(mentions.UserIDs) > 0 || mentions.Everyone {
+	if mentions.pings() {
 		s.dispatchMentionBadges(bgCtx, mentionJob{
 			enqueueAt: time.Now(), channelID: threadID, msgID: msg.ID,
 			apply: func(ctx context.Context) []db.MentionBatchEntry {
@@ -287,7 +288,7 @@ func (s *MessageService) forumPostResult(ctx context.Context, sp SendMessagePara
 		})
 	}
 	if s.pushNotifier != nil {
-		candidates := mentions.UserIDs
+		candidates := mentions.reachIDs()
 		s.runBackground(bgCtx, "push dispatch", func(ctx context.Context) {
 			ctx, cancel := context.WithTimeout(ctx, backgroundJobTimeout)
 			defer cancel()

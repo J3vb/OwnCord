@@ -266,6 +266,19 @@ func CanPinMessage(s Subject) error {
 	return nil
 }
 
+// CanMentionRole is the @role ping policy (WP 6.3f-1): a role may be pinged
+// when it is flagged mentionable, or when the author holds READ_MESSAGES and
+// MENTION_EVERYONE in the channel (the same bits an @everyone needs). A refusal
+// is not an error for the message: the caller leaves the token as plain text,
+// raises no badge and lists the role nowhere. mentionable is the role's own
+// flag, read by the caller.
+func CanMentionRole(s Subject, mentionable bool) error {
+	if mentionable || s.Has(ReadMessages|MentionEveryone) {
+		return nil
+	}
+	return missing(MentionEveryone)
+}
+
 // CanJoinVoice gates the LiveKit credential: CONNECT_VOICE in the channel
 // (required for DM calls too — the role bit was always demanded on top of
 // membership, so this can only ever narrow), READ_MESSAGES for a non-DM

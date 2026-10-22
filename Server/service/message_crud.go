@@ -75,10 +75,9 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 		Channel:              ch,
 		Attachments:          attachments,
 		SkippedAttachmentIDs: skipped,
-		Mentions:             mentions.UserIDs,
-		MentionsEveryone:     mentions.Everyone, MentionsHere: mentions.HereOnly,
-		ThreadJoined: msg.ThreadJoined,
+		ThreadJoined:         msg.ThreadJoined,
 	}
+	mentions.fill(result)
 	if p.ReplyTo != nil {
 		// The message is committed; a failed snippet read only costs the
 		// snippet, so it must not fail the send.
@@ -112,9 +111,9 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	// bg, so the counts are readable as soon as SendMessage returns.
 	channelID, authorID, participantIDs := p.ChannelID, p.UserID, result.ParticipantIDs
 	bgCtx := context.WithoutCancel(ctx)
-	// A message with no @user, @everyone or @here raises no badge, so it never
-	// takes a queue slot or a goroutine.
-	if len(mentions.UserIDs) > 0 || mentions.Everyone {
+	// A message with no @user, @role, @everyone or @here raises no badge, so it
+	// never takes a queue slot or a goroutine.
+	if mentions.pings() {
 		s.dispatchMentionBadges(bgCtx, mentionJob{
 			enqueueAt: time.Now(), channelID: channelID, msgID: msgID,
 			apply: func(ctx context.Context) []db.MentionBatchEntry {
@@ -127,7 +126,7 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	// (the Notify call can take seconds) rather than sharing the worker's
 	// queue.
 	if s.pushNotifier != nil {
-		candidates := mentions.UserIDs
+		candidates := mentions.reachIDs()
 		if isDM {
 			candidates = participantIDs
 		}
@@ -418,7 +417,7 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 	mentions := s.resolveMentions(context.WithoutCancel(ctx), content, userID, msg.ChannelID, isDM) // detached: it swallows read errors, so a spent deadline would empty the set
 	// A reply_ping row is kept by the replace and handed back so the broadcast
 	// keeps the replied-to author highlighted.
-	replyPingID, mErr := s.st.ReplaceMessageMentions(context.WithoutCancel(ctx), msgID, mentions.UserIDs, mentions.Everyone)
+	replyPingID, mErr := s.st.ReplaceMessageMentions(context.WithoutCancel(ctx), msgID, mentions.UserIDs, mentions.Everyone, mentions.RoleIDs)
 	if mErr != nil {
 		slog.Error("MessageService.EditMessage ReplaceMessageMentions", "err", mErr, "msg_id", msgID)
 	}
@@ -430,6 +429,7 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		EditedAt:         editedAt,
 		IsDM:             isDM,
 		Mentions:         mentions.UserIDs,
+		MentionRoles:     mentions.RoleIDs,
 		MentionsEveryone: mentions.Everyone,
 		MentionsHere:     mentions.HereOnly,
 		PostOpening:      s.isPostOpening(context.WithoutCancel(ctx), ch, msgID),

@@ -192,7 +192,7 @@ func messageDeliveryError(err error) error {
 // an accepted receipt for a message whose attachment ownership later fails.
 func (s *MessageService) persistMessage(ctx context.Context, p SendMessageParams, content string, mentions mentionSet, delivery *db.MessageDeliveryParams) (*db.Message, []db.AttachmentInfo, []string, bool, error) {
 	if delivery == nil {
-		msg, err := s.st.CreateMessageWithMentions(ctx, p.ChannelID, p.UserID, content, p.ReplyTo, mentions.UserIDs, mentions.ReplyPingUserID, mentions.Everyone)
+		msg, err := s.st.CreateMessageWithMentions(ctx, p.ChannelID, p.UserID, content, p.ReplyTo, mentions.UserIDs, mentions.ReplyPingUserID, mentions.Everyone, mentions.RoleIDs)
 		if err != nil {
 			return nil, nil, nil, false, messageDeliveryError(err)
 		}
@@ -200,7 +200,7 @@ func (s *MessageService) persistMessage(ctx context.Context, p SendMessageParams
 		return msg, attachments, skipped, false, err
 	}
 	delivery.MentionedUserIDs, delivery.MentionsEveryone = mentions.UserIDs, mentions.Everyone
-	delivery.ReplyPingUserID = mentions.ReplyPingUserID
+	delivery.ReplyPingUserID, delivery.MentionedRoleIDs = mentions.ReplyPingUserID, mentions.RoleIDs
 	saved, err := s.st.CreateMessageDelivery(ctx, *delivery)
 	if err != nil {
 		return nil, nil, nil, false, messageDeliveryError(err)

@@ -31,7 +31,7 @@ func TestCreateMessageWithMentions_StoresRowsAndFlag(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi @bob", nil, []int64{2}, 0, true)
+	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi @bob", nil, []int64{2}, 0, true, nil)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestCreateMessageWithMentions_CapsStoredRows(t *testing.T) {
 		ids = append(ids, uid)
 	}
 
-	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "spam", nil, ids, 0, false)
+	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "spam", nil, ids, 0, false, nil)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions: %v", err)
 	}
@@ -91,11 +91,11 @@ func TestReplaceMessageMentions(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi @bob", nil, []int64{2}, 0, true)
+	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi @bob", nil, []int64{2}, 0, true, nil)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions: %v", err)
 	}
-	if _, err := database.ReplaceMessageMentions(ctx, msg.ID, []int64{3}, false); err != nil {
+	if _, err := database.ReplaceMessageMentions(ctx, msg.ID, []int64{3}, false, nil); err != nil {
 		t.Fatalf("ReplaceMessageMentions: %v", err)
 	}
 
@@ -311,7 +311,7 @@ func TestDecrementMentionCounts_SkipsNeverCountedBlockedMention(t *testing.T) {
 	// records the row (fan-out, not storage, excludes blockers), but the
 	// service layer never calls IncrementMentionCounts for Bob because he
 	// blocked Alice -- so no increment ever landed for this message.
-	blockedMsg, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi @bob", nil, []int64{2}, 0, false)
+	blockedMsg, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi @bob", nil, []int64{2}, 0, false, nil)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions: %v", err)
 	}
@@ -575,7 +575,7 @@ func TestMessagesForAPI_CarryMentions(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	if _, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi @bob", nil, []int64{2}, 0, true); err != nil {
+	if _, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi @bob", nil, []int64{2}, 0, true, nil); err != nil {
 		t.Fatalf("CreateMessageWithMentions: %v", err)
 	}
 	msgs, err := database.GetMessagesForAPI(ctx, 1, 0, 10, 1)
@@ -598,7 +598,7 @@ func TestSearchMessages_CarryMentions(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	if _, err := database.CreateMessageWithMentions(ctx, 1, 1, "deployment notes", nil, []int64{2}, 0, false); err != nil {
+	if _, err := database.CreateMessageWithMentions(ctx, 1, 1, "deployment notes", nil, []int64{2}, 0, false, nil); err != nil {
 		t.Fatalf("CreateMessageWithMentions: %v", err)
 	}
 	results, err := database.SearchMessages(ctx, "deployment", nil, db.SearchPage{Limit: 10})
@@ -802,7 +802,7 @@ func TestCreateMessageWithMentions_ReplyPingRow(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			database := openMigratedMemory(t)
 			seedMentionFixture(t, database)
-			msg, err := database.CreateMessageWithMentions(context.Background(), 1, 1, "re", nil, tc.content, 2, false)
+			msg, err := database.CreateMessageWithMentions(context.Background(), 1, 1, "re", nil, tc.content, 2, false, nil)
 			if err != nil {
 				t.Fatalf("CreateMessageWithMentions: %v", err)
 			}
@@ -832,7 +832,7 @@ func TestCreateMessageWithMentions_ReplyPingIsExtraToTheCap(t *testing.T) {
 	}
 	// The target is the last content id, which the content cap would drop.
 	target := ids[len(ids)-1]
-	msg, err := database.CreateMessageWithMentions(context.Background(), 1, 1, "re", nil, ids, target, false)
+	msg, err := database.CreateMessageWithMentions(context.Background(), 1, 1, "re", nil, ids, target, false, nil)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions: %v", err)
 	}
@@ -849,13 +849,13 @@ func TestReplaceMessageMentions_KeepsReplyPingRow(t *testing.T) {
 	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 	ctx := context.Background()
-	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "re @carol", nil, []int64{3}, 2, false)
+	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "re @carol", nil, []int64{3}, 2, false, nil)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions: %v", err)
 	}
 
 	// The edit drops carol and names the reply target in content.
-	kept, err := database.ReplaceMessageMentions(ctx, msg.ID, []int64{2}, false)
+	kept, err := database.ReplaceMessageMentions(ctx, msg.ID, []int64{2}, false, nil)
 	if err != nil {
 		t.Fatalf("ReplaceMessageMentions: %v", err)
 	}
@@ -867,7 +867,7 @@ func TestReplaceMessageMentions_KeepsReplyPingRow(t *testing.T) {
 	}
 
 	// An edit with no mentions still keeps the reply row.
-	if kept, err = database.ReplaceMessageMentions(ctx, msg.ID, nil, false); err != nil || kept != 2 {
+	if kept, err = database.ReplaceMessageMentions(ctx, msg.ID, nil, false, nil); err != nil || kept != 2 {
 		t.Fatalf("second replace = (%d, %v), want (2, nil)", kept, err)
 	}
 	if got := replyPingRows(t, database, msg.ID); len(got) != 1 || got[2] != 1 {
@@ -875,11 +875,86 @@ func TestReplaceMessageMentions_KeepsReplyPingRow(t *testing.T) {
 	}
 
 	// A message that never pinged returns 0.
-	plain, err := database.CreateMessageWithMentions(ctx, 1, 1, "x", nil, []int64{3}, 0, false)
+	plain, err := database.CreateMessageWithMentions(ctx, 1, 1, "x", nil, []int64{3}, 0, false, nil)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions: %v", err)
 	}
-	if kept, err = database.ReplaceMessageMentions(ctx, plain.ID, []int64{2}, false); err != nil || kept != 0 {
+	if kept, err = database.ReplaceMessageMentions(ctx, plain.ID, []int64{2}, false, nil); err != nil || kept != 0 {
 		t.Errorf("plain replace = (%d, %v), want (0, nil)", kept, err)
+	}
+}
+
+func TestRoleMentionRows_RoundTripAndReplace(t *testing.T) {
+	database := openMigratedMemory(t)
+	seedMentionFixture(t, database)
+	ctx := context.Background()
+
+	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi", nil, nil, 0, false, []int64{1, 2, 2})
+	if err != nil {
+		t.Fatalf("CreateMessageWithMentions: %v", err)
+	}
+	other, err := database.CreateMessageWithMentions(ctx, 1, 1, "plain", nil, nil, 0, false, nil)
+	if err != nil {
+		t.Fatalf("CreateMessageWithMentions plain: %v", err)
+	}
+	got, err := database.GetRoleMentionsByMessageIDs(ctx, []int64{msg.ID, other.ID})
+	if err != nil {
+		t.Fatalf("GetRoleMentionsByMessageIDs: %v", err)
+	}
+	if len(got[msg.ID]) != 2 || got[msg.ID][0] != 1 || got[msg.ID][1] != 2 || len(got[other.ID]) != 0 {
+		t.Errorf("role mentions = %v, want {msg:[1 2]}", got)
+	}
+
+	if _, err := database.ReplaceMessageMentions(ctx, msg.ID, nil, false, []int64{3}); err != nil {
+		t.Fatalf("ReplaceMessageMentions: %v", err)
+	}
+	got, _ = database.GetRoleMentionsByMessageIDs(ctx, []int64{msg.ID})
+	if len(got[msg.ID]) != 1 || got[msg.ID][0] != 3 {
+		t.Errorf("role mentions after replace = %v, want [3]", got[msg.ID])
+	}
+
+	if empty, err := database.GetRoleMentionsByMessageIDs(ctx, nil); err != nil || len(empty) != 0 {
+		t.Errorf("empty id list = %v, %v", empty, err)
+	}
+}
+
+func TestUserAndRoleHolderLookups(t *testing.T) {
+	database := openMigratedMemory(t)
+	seedMentionFixture(t, database) // alice=1, bob=2, Carol=3, all role 4
+	ctx := context.Background()
+
+	if _, err := database.ExecContext(ctx, `UPDATE users SET banned = 1 WHERE id = 2`); err != nil {
+		t.Fatalf("ban bob: %v", err)
+	}
+	ids, err := database.GetReachableUserIDs(ctx, []int64{1, 2, 3, 99})
+	if err != nil {
+		t.Fatalf("GetReachableUserIDs: %v", err)
+	}
+	if len(ids) != 2 || ids[0] != 1 || ids[1] != 3 {
+		t.Errorf("reachable = %v, want [1 3] (banned and unknown dropped)", ids)
+	}
+	if none, err := database.GetReachableUserIDs(ctx, nil); err != nil || len(none) != 0 {
+		t.Errorf("empty = %v, %v", none, err)
+	}
+
+	role, err := database.CreateRole(ctx, "devs", nil, 0, 5, false, true)
+	if err != nil {
+		t.Fatalf("CreateRole: %v", err)
+	}
+	for _, uid := range []int64{3, 1} {
+		if _, err := database.ExecContext(ctx, `INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`, uid, role.ID); err != nil {
+			t.Fatalf("grant: %v", err)
+		}
+	}
+	// Roles 4 (everyone) and the new one overlap on users 1 and 3: each once.
+	holders, err := database.ListUserIDsByRoles(ctx, []int64{4, role.ID})
+	if err != nil {
+		t.Fatalf("ListUserIDsByRoles: %v", err)
+	}
+	if len(holders) != 3 || holders[0] != 1 || holders[1] != 2 || holders[2] != 3 {
+		t.Errorf("holders = %v, want [1 2 3] once each", holders)
+	}
+	if none, err := database.ListUserIDsByRoles(ctx, nil); err != nil || len(none) != 0 {
+		t.Errorf("empty = %v, %v", none, err)
 	}
 }
