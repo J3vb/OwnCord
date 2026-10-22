@@ -193,13 +193,13 @@ It is still a **beta and a hobby project**: don't use it for anything sensitive.
 **Server (operators)**
 
 - **Docker Compose now needs only three ports:** `8443/TCP`, `7881/TCP` and `7882/UDP`. Forward `7882/UDP` instead of `50000-60000/UDP` and close the old range. The LiveKit key and secret now live only in `.env` (letters and digits are safest, never a `'`); compose refuses to run if either is missing. An old `livekit.yaml` keeps working, but remove any `key_file:`, and a `webhook:` `api_key` must match the `.env` key.
-- **The systemd unit now keeps config and data in `/var/lib/owncord`** and the program in a root-owned `/opt/owncord`. Your installed unit keeps working until you re-copy it; if you do, follow [Migrating from the /opt/owncord data layout](docs/deployment.md#migrating-from-the-optowncord-data-layout) first. With `tls.mode: acme`, uncomment `CAP_NET_BIND_SERVICE`. Admin-panel self-update under systemd is now [opt-in](docs/deployment.md#opt-in-to-admin-panel-updates); otherwise "Update now" says to install by hand.
+- **The systemd unit now keeps config and data in `/var/lib/owncord`** and the program in a root-owned `/opt/owncord`. Your installed unit keeps working until you re-copy it; if you do, follow [Migrating from the /opt/owncord data layout](https://github.com/J3vb/OwnCord/blob/main/docs/deployment.md#migrating-from-the-optowncord-data-layout) first. With `tls.mode: acme`, uncomment `CAP_NET_BIND_SERVICE`. Admin-panel self-update under systemd is now [opt-in](https://github.com/J3vb/OwnCord/blob/main/docs/deployment.md#opt-in-to-admin-panel-updates); otherwise "Update now" says to install by hand.
 - **Restoring a backup** now stages a checked copy and swaps it in on the next start, before anything opens the database. A crash midway is picked up on the next start, and a file that fails its check is rolled back. After a restore, apps fetch everything fresh. When you move a data folder by hand, copy `.ws-seq-floor` along with the database.
 - The server keeps only the newest three pre-restore and three pre-migration safety copies. Copy any older one you want to keep before upgrading.
 - In a container, the setup wizard saves its settings in the data volume, so they survive a recreate.
 - An ordinary request stuck behind a long database write gives up after 15 seconds with "service unavailable", and a chat command after 10 seconds with "The server is busy — retry in a moment". Nothing is applied in either case, so Retry is safe.
 - Role changes are answered at once and reach members in the background, in paced batches. An admin editing a role from an out-of-date copy is told to reload instead of overwriting the other change.
-- The load test at 1,000 people online was run and published; see [Capacity](docs/capacity.md#scale-profile).
+- The load test at 1,000 people online was run and published; see [Capacity](https://github.com/J3vb/OwnCord/blob/main/docs/capacity.md#scale-profile).
 
 ### Fixed
 
