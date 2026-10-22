@@ -36,10 +36,11 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 224 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 226 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
+| GET     | `/`                                                                  |
 | GET     | `/admin/`                                                            |
 | GET     | `/admin/*`                                                           |
 | PUT     | `/admin/api/afk-channel`                                             |
@@ -243,6 +244,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/users/me/totp/enable`                                       |
 | POST    | `/api/v1/users/me/totp/recovery-codes`                               |
 | GET     | `/api/v1/ws`                                                         |
+| GET     | `/assets/*`                                                          |
 | GET     | `/health`                                                            |
 | CONNECT | `/livekit/*`                                                         |
 | DELETE  | `/livekit/*`                                                         |

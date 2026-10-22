@@ -376,8 +376,13 @@ var deadlineExempt = map[string]string{
 }
 
 // deadlineOptionalBound are bound routes that mount only under a build tag
-// (the otel Prometheus exporter), accepted when present.
-var deadlineOptionalBound = map[string]bool{"* /metrics/*": true}
+// (the otel Prometheus exporter) or a config key (the browser client portal,
+// 6.13a), accepted when present.
+var deadlineOptionalBound = map[string]bool{
+	"* /metrics/*": true,
+	"GET /":        true,
+	"* /assets/*":  true,
+}
 
 // deadlineOptionalExempt are exempt routes that mount only under a build tag
 // or configuration (the walk accepts them when present).
@@ -513,6 +518,8 @@ func TestRequestDeadline_ExemptRoutesHaveNoDeadline(t *testing.T) {
 		{http.MethodGet, "/api/v1/health", true},
 		{http.MethodGet, "/admin/api/users", true},
 		{http.MethodDelete, "/admin/api/channels/3", true},
+		{http.MethodGet, "/", true},
+		{http.MethodGet, "/assets/index-abc.js", true},
 	}
 	for _, tc := range cases {
 		gotDeadline = false

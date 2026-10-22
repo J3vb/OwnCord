@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/config"
@@ -18,10 +20,9 @@ import (
 )
 
 // BG-01's first two closure clauses: the owner opts in to browser-client
-// hosting, and the disabled state — which is the default and the only state
-// this build has — exposes no app route and no asset. The bundle, its route
-// and its own CSP are B8's; this file is the proof that until B8 lands there
-// is nothing there, and the proof B8 has to keep green when it mounts one.
+// hosting, and the disabled state, which is the default, exposes no app route
+// and no asset. With the key on, 6.13a's portal mounts exactly GET / and
+// /assets/* and nothing else (EnabledMountsExactlyPortalRoutes).
 //
 // Two checkers, because one is not enough. walkBrowserHostingRoutes reads the
 // mounted route tree, which is how a FileServer or a Mount would appear.
@@ -217,9 +218,9 @@ func TestBrowserHostingPosture_DefaultServesNoBrowserClientAsset(t *testing.T) {
 }
 
 // enabledBrowserHostingRouter builds the production router with
-// browser_client_enabled ON — the state no other test in this file exercises,
-// because until B8 lands it is a state an owner can reach and nothing else can.
-func enabledBrowserHostingRouter(t *testing.T) http.Handler {
+// browser_client_enabled ON. A nil bundle keeps the binary's embedded one,
+// which in the committed tree is the placeholder.
+func enabledBrowserHostingRouter(t *testing.T, bundle fs.FS) http.Handler {
 	t.Helper()
 
 	database, err := db.Open(":memory:")
@@ -246,59 +247,81 @@ func enabledBrowserHostingRouter(t *testing.T) http.Handler {
 	if rtErr != nil {
 		t.Fatalf("app.StartRuntime: %v", rtErr)
 	}
+	rt.WebClient = bundle
 	handler, cleanup := api.NewRouter(cfg, database, "test", nil, nil, rt)
 	t.Cleanup(cleanup)
 	return handler
 }
 
-// TestBrowserHostingPosture_EnabledReportsTrueButStillHostsNothing is B6-7's
-// half of BG-01, and the distinction the milestone turns on: /api/v1/server-info
-// REPORTS the flag, which is not the same as HOSTING a client.
+// portalRouteHits is exactly what the walk may report once the key is on
+// (6.13a): the index at / and the hashed asset subtree, nothing else.
+var portalRouteHits = []string{"* /assets/*", "GET /"}
+
+// TestBrowserHostingPosture_EnabledMountsExactlyPortalRoutes is B6-7's half
+// of BG-01 as 6.13a changes it. /api/v1/server-info REPORTS the flag, and the
+// flag now mounts the portal: exactly GET / and /assets/*, never a fallback
+// that answers the other paths a browser client could occupy.
 //
-// Both halves are asserted in one test on purpose. Split across two, a future
-// change that starts serving a bundle the moment the flag flips would leave the
-// reporting test green and only break a test in another file — and the two
-// would never be read together. Here the claim is one sentence: it says true,
-// and there is still nothing there.
-//
-// When B8 mounts a real bundle this test is the one that must change, and
-// changing it should require saying so out loud.
-func TestBrowserHostingPosture_EnabledReportsTrueButStillHostsNothing(t *testing.T) {
-	h := enabledBrowserHostingRouter(t)
+// Both builds are asserted. The placeholder build (the committed tree) mounts
+// the two routes and serves nothing from them; a build carrying a bundle
+// serves / and its real assets, and every other candidate path still answers
+// as an unmounted route.
+func TestBrowserHostingPosture_EnabledMountsExactlyPortalRoutes(t *testing.T) {
+	bundle := fstest.MapFS{
+		"index.html":           {Data: []byte("<!doctype html><div id=root>")},
+		"assets/index-abc.js":  {Data: []byte("// bundle")},
+		"favicon.ico":          {Data: []byte("\x00\x00\x01\x00")},
+		"service-worker.js":    {Data: []byte("// not served")},
+		"manifest.webmanifest": {Data: []byte("{}")},
+	}
+	for _, tc := range []struct {
+		name     string
+		bundle   fs.FS
+		wantWire []string
+	}{
+		{"placeholder build", nil, []string{}},
+		{"bundled build", bundle, []string{"/"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := enabledBrowserHostingRouter(t, tc.bundle)
 
-	// It reports the flag.
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/server-info", nil)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /api/v1/server-info status = %d, want 200", rec.Code)
-	}
-	var body map[string]any
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("JSON decode error: %v", err)
-	}
-	if body["browser_client_enabled"] != true {
-		t.Errorf("browser_client_enabled = %v, want true — the endpoint must report the owner's setting",
-			body["browser_client_enabled"])
-	}
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/server-info", nil)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("GET /api/v1/server-info status = %d, want 200", rec.Code)
+			}
+			var body map[string]any
+			if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+				t.Fatalf("JSON decode error: %v", err)
+			}
+			if body["browser_client_enabled"] != true {
+				t.Errorf("browser_client_enabled = %v, want true — the endpoint must report the owner's setting",
+					body["browser_client_enabled"])
+			}
 
-	// And it still hosts nothing: the same two checkers the default-state
-	// tests use, so enabling the flag cannot quietly widen the surface.
-	total, adminRoutes, hits := walkBrowserHostingRoutes(t, h)
-	assertWalkedTheRealTree(t, total, adminRoutes)
-	if len(hits) > 0 {
-		t.Fatalf("enabling browser_client_enabled mounted browser-client routes; B8 owns the bundle, not this flag:\n  %s",
-			strings.Join(hits, "\n  "))
-	}
+			total, adminRoutes, hits := walkBrowserHostingRoutes(t, h)
+			assertWalkedTheRealTree(t, total, adminRoutes)
+			if !slices.Equal(hits, portalRouteHits) {
+				t.Fatalf("enabling browser_client_enabled mounted %v, want exactly %v", hits, portalRouteHits)
+			}
 
-	wireHits := probeBrowserHostingWire(t, h)
-	if len(wireHits) > 0 {
-		lines := make([]string, 0, len(wireHits))
-		for _, hit := range wireHits {
-			lines = append(lines, hit.Path+" -> "+http.StatusText(hit.Status)+" ("+hit.ContentType+")")
-		}
-		t.Fatalf("enabling browser_client_enabled served browser-client assets:\n  %s",
-			strings.Join(lines, "\n  "))
+			got := []string{}
+			for _, hit := range probeBrowserHostingWire(t, h) {
+				got = append(got, hit.Path)
+			}
+			if !slices.Equal(got, tc.wantWire) {
+				t.Fatalf("paths answering as hosted = %v, want exactly %v", got, tc.wantWire)
+			}
+
+			if tc.bundle != nil {
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/index-abc.js", nil))
+				if rec.Code != http.StatusOK || rec.Body.String() != "// bundle" {
+					t.Fatalf("GET /assets/index-abc.js = %d %q, want the bundle's asset", rec.Code, rec.Body.String())
+				}
+			}
+		})
 	}
 }
 
