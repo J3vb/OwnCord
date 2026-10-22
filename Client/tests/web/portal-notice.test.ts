@@ -16,4 +16,10 @@ describe("portal incompatible notice", () => {
     button.click();
     expect(onUpdate).toHaveBeenCalledWith("chat.example");
   });
+
+  it("offers no other server to choose", () => {
+    const notice = createIncompatibleNotice({ onUpdate: vi.fn(), onLeave: vi.fn() });
+    notice.show("chat.example", 3, 4);
+    expect(notice.element.querySelector(".incompatible-notice-leave")).toBeNull();
+  });
 });

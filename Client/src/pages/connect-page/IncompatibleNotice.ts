@@ -76,16 +76,19 @@ export function createIncompatibleNotice(opts: IncompatibleNoticeOptions): Incom
       actions.appendChild(updateBtn);
     }
 
-    const leaveBtn = createElement("button", {
-      class: "incompatible-notice-leave btn-ghost",
-      type: "button",
-    });
-    setText(leaveBtn, connectText("incompatible.leave"));
-    leaveBtn.addEventListener("click", () => {
-      notice.hide();
-      opts.onLeave();
-    });
-    appendChildren(actions, leaveBtn);
+    // The portal serves one server, so there is no other server to choose.
+    if (!__OWNCORD_WEB__) {
+      const leaveBtn = createElement("button", {
+        class: "incompatible-notice-leave btn-ghost",
+        type: "button",
+      });
+      setText(leaveBtn, connectText("incompatible.leave"));
+      leaveBtn.addEventListener("click", () => {
+        notice.hide();
+        opts.onLeave();
+      });
+      appendChildren(actions, leaveBtn);
+    }
 
     appendChildren(element, text, actions);
   }
