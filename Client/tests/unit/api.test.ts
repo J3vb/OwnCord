@@ -1440,6 +1440,19 @@ describe("API Client", () => {
       expect(result.name).toBe("renamed");
     });
 
+    it("adminUpdateForumSettings calls PUT /api/v1/moderation/channels/{id}/forum", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ id: 9, name: "feedback", type: "forum" }));
+      const body = {
+        tags: [{ id: 1, name: "Bug", emoji: "🐛" }, { name: "Idea" }],
+        require_tag: true,
+        default_auto_archive_minutes: 1440,
+      } as const;
+      await api.adminUpdateForumSettings(9, body);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/moderation/channels/9/forum");
+      expect(fetchCallOpts().method).toBe("PUT");
+      expect(JSON.parse(fetchCallOpts().body as string)).toEqual(body);
+    });
+
     it("adminDeleteChannel calls DELETE /api/v1/moderation/channels/{id}", async () => {
       mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
       await api.adminDeleteChannel(5);

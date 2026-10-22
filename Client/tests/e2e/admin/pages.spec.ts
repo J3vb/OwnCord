@@ -58,6 +58,98 @@ test("Members: a pending applicant is approved through the Pending tab", async (
   await expect(page.locator(".members-tbl tbody tr", { hasText: "applicant" })).toBeVisible();
 });
 
+test("Channels: a forum is created and its tags and settings are saved", async ({
+  page,
+  seededAdminServer,
+}) => {
+  const owner = seededAdminServer.owner;
+  if (!owner) throw new Error("seeded server has no owner");
+  // WP 6.9d-b2. With FORUM_SHOTS_DIR set, the create dialog and the settings
+  // are also written there as PNGs for the PR.
+  const shot = async (name: string): Promise<void> => {
+    const dir = process.env["FORUM_SHOTS_DIR"];
+    if (dir !== undefined) await page.screenshot({ path: `${dir}/${name}.png` });
+  };
+  const forumOf = async () => {
+    const channels = (await seededAdminServer.api(
+      "/admin/api/channels",
+      undefined,
+      owner.token,
+    )) as {
+      name: string;
+      type: string;
+      forum?: {
+        tags: { id: number; name: string; emoji?: string; position: number }[];
+        require_tag: boolean;
+        default_auto_archive_minutes: number;
+      };
+    }[];
+    return channels.find((c) => c.name === "feedback");
+  };
+
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await signInAsOwner(page, seededAdminServer);
+  await navigate(page, "Channels");
+
+  await page.getByRole("button", { name: "Create Channel" }).click();
+  await page.locator("#chName").fill("feedback");
+  await page.locator("#chType").selectOption("forum");
+  await page.locator("#chTopic").fill("Be kind. Search before you post.");
+  await expect(page.locator("#chTopicHint")).toBeVisible();
+  await shot("09-admin-create-forum-dialog");
+  await page.locator(".modal-footer .btn-accent", { hasText: "Create" }).click();
+
+  const row = page.locator("tr[data-channel]", { hasText: "feedback" });
+  await expect(row).toBeVisible();
+  await expect(row.locator(".ch-type .sr-only")).toHaveText("Forum channel");
+  expect((await forumOf())?.type).toBe("forum");
+
+  // Tags, the toggle and the period are written with PUT /channels/{id}/forum.
+  await row.getByRole("button", { name: "Edit #feedback" }).click();
+  await expect(page.locator("#forumSettings")).toBeVisible();
+  await page.getByRole("button", { name: "Add tag" }).click();
+  await page.locator("#fsTags .fs-name").last().fill("Bug");
+  await page.locator("#fsTags .fs-emoji").last().fill("🐛");
+  await page.getByRole("button", { name: "Add tag" }).click();
+  await page.locator("#fsTags .fs-name").last().fill("Idea");
+  await page.getByRole("button", { name: "Add tag" }).click();
+  await page.locator("#fsTags .fs-name").last().fill("Question");
+  await page.locator("#fsRequire").click();
+  await page.locator("#fsArchive").selectOption("10080");
+  await page.locator("#forumSettings").scrollIntoViewIfNeeded();
+  await shot("10-admin-forum-settings");
+  await page.locator("#fsSave").click();
+  await expect(page.locator("#modal.visible")).toHaveCount(0);
+
+  const saved = (await forumOf())?.forum;
+  expect(saved?.tags.map((t) => [t.name, t.emoji ?? ""])).toEqual([
+    ["Bug", "🐛"],
+    ["Idea", ""],
+    ["Question", ""],
+  ]);
+  expect(saved?.require_tag).toBe(true);
+  expect(saved?.default_auto_archive_minutes).toBe(10080);
+  const ids = saved?.tags.map((t) => t.id) ?? [];
+
+  // A rename and a move keep the tags' ids, so posts keep their tags; a name the
+  // server would refuse is stopped before the request.
+  await row.getByRole("button", { name: "Edit #feedback" }).click();
+  await page.locator("#fsTags .fs-name").first().fill("Defect");
+  await page.getByRole("button", { name: "Move Idea down" }).click();
+  await page.locator("#fsTags .fs-name").nth(2).fill("defect");
+  await page.locator("#fsSave").click();
+  await expect(page.locator(".toast", { hasText: "Tag names must be different" })).toBeVisible();
+  await page.locator("#fsTags .fs-name").nth(2).fill("Idea");
+  await page.locator("#fsSave").click();
+  await expect(page.locator("#modal.visible")).toHaveCount(0);
+  const renamed = (await forumOf())?.forum;
+  expect(renamed?.tags.map((t) => [t.id, t.name])).toEqual([
+    [ids[0], "Defect"],
+    [ids[2], "Question"],
+    [ids[1], "Idea"],
+  ]);
+});
+
 test("Roles: a created role appears on the rank ladder", async ({ page, seededAdminServer }) => {
   await signInAsOwner(page, seededAdminServer);
   await navigate(page, "Roles & permissions");

@@ -274,10 +274,12 @@ function buildReadyPayload(overrides?: {
   dm_channels?: unknown[];
   notices?: unknown[];
   categories?: unknown[];
+  capabilities?: Record<string, boolean>;
 }): unknown {
   return {
     type: "ready",
     payload: {
+      ...(overrides?.capabilities === undefined ? {} : { capabilities: overrides.capabilities }),
       ...(overrides?.categories === undefined ? {} : { categories: overrides.categories }),
       channels: overrides?.channels ?? MOCK_CHANNELS,
       members: overrides?.members ?? MOCK_READY_PAYLOAD.payload.members,
@@ -534,6 +536,8 @@ export function buildTauriMockScript(opts: {
     notices?: unknown[];
     /** The manager's category list (WP 6.5a); omitted = the key is absent from ready. */
     categories?: unknown[];
+    /** The server capability flags of `ready` (for example `{ forums: true }`); omitted = absent. */
+    capabilities?: Record<string, boolean>;
   };
   /** Functions run after the mock installs `__TAURI_INTERNALS__`, inside the
    *  same init script, because Playwright does not order separate

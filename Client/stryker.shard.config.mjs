@@ -265,6 +265,8 @@ export const shards = {
     "src/features/forums/view.ts",
     "src/features/forums/ForumView.ts",
     "src/features/forums/NewPostDialog.ts",
+    "src/features/forums/forumSettingsModel.ts",
+    "src/features/forums/ForumSettingsSection.ts",
   ], // the 6.5b category calls and the collapsed-name migration (about 100 lines together) joined the smallest shard; the WP 6.9d forum view and New Post dialog (about 700 lines) joined it too, its icons.ts mutants being static and skipped
   "stores-1": [
     "src/stores/auth.store.ts",

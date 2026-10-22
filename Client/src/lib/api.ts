@@ -28,6 +28,7 @@ import type {
   ApiError,
   ChannelType,
   ChannelResponse,
+  ForumSettingsBody,
   ChannelCategory,
   EmojiResponse,
   InviteResponse,
@@ -1846,6 +1847,19 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       signal?: AbortSignal,
     ): Promise<ChannelResponse> {
       return channelRequest<ChannelResponse>("PATCH", `/${id}`, data, signal);
+    },
+
+    /**
+     * Replace a forum's tags and settings (WP 6.9d): the whole list, tags with
+     * their ids so a rename keeps a tag on its posts. The server answers with
+     * the channel and broadcasts `channel_update`, which is how the app learns.
+     */
+    adminUpdateForumSettings(
+      id: number,
+      data: ForumSettingsBody,
+      signal?: AbortSignal,
+    ): Promise<ChannelResponse> {
+      return channelRequest<ChannelResponse>("PUT", `/${id}/forum`, data, signal);
     },
 
     adminDeleteChannel(id: number, signal?: AbortSignal): Promise<void> {

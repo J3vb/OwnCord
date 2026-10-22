@@ -39,6 +39,17 @@ export interface ForumSettings {
   readonly default_auto_archive_minutes: 60 | 1440 | 4320 | 10080;
 }
 
+/** The body of `PUT .../channels/{id}/forum`: the whole settings; a tag without `id` is created (WP 6.9d). */
+export interface ForumSettingsBody {
+  readonly tags: readonly {
+    readonly id?: number;
+    readonly name: string;
+    readonly emoji?: string;
+  }[];
+  readonly require_tag: boolean;
+  readonly default_auto_archive_minutes: ThreadAutoArchiveMinutes;
+}
+
 /**
  * True for channel types that carry a message history and a chat pane —
  * "text" and "announcement". The server treats both identically for ready's
