@@ -165,3 +165,26 @@ func TestThreadFollow_StoreWithoutFollowSliceIsInternal(t *testing.T) {
 }
 
 var _ ThreadFollowStore = (*db.DB)(nil)
+
+// mark_read and mark_unread move a thread's read pointer through the parent's
+// access (WP 6.9c): the panel and the sidebar row mark a thread read, while
+// channel_focus still refuses a thread id (TestThreadNotFocusable).
+func TestMoveReadPointer_ThreadAdmittedThroughParent(t *testing.T) {
+	f := newThreadFixture(t)
+	ctx := context.Background()
+	th := f.start(t, thrOwner, "read")
+	last := f.post(t, th.ID, thrOwner, "in the thread")
+
+	rs, err := f.msgs.MoveReadPointer(ctx, thrOther, th.ID, db.ReadAtLatest, 0)
+	if err != nil || rs.LastReadMessageID != last {
+		t.Fatalf("MoveReadPointer(thread) = %+v, %v; want last read %d", rs, err, last)
+	}
+
+	if err := f.database.UpsertChannelOverride(ctx, thrParent, permissions.MemberRoleID, 0, permissions.ReadMessages); err != nil {
+		t.Fatalf("UpsertChannelOverride: %v", err)
+	}
+	f.perms.InvalidateAll()
+	if _, err := f.msgs.MoveReadPointer(ctx, thrOther, th.ID, db.ReadAtLatest, 0); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("MoveReadPointer(thread, parent denied) = %v, want ErrForbidden", err)
+	}
+}
