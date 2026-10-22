@@ -202,6 +202,7 @@ keeps it until one authenticates.
       "username": "alex",
       "avatar": "/api/v1/files/5f2c...",
       "role": "admin",
+      "role_ids": [1, 4],
       "display_name": "Alex A.",
       "about": "A short bio.",
       "custom_status": "shipping phase 6",
@@ -509,7 +510,7 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
 
 ### Payload Fields
 
-**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true, "user_notes": true, "profile_banners": true, "dm_privacy": true, "polls": true, "threads": true }`. `polls` means the server understands `poll_create`, `poll_vote` and `poll_end` and sends `poll_update`; a client that does not see it hides the Poll button. `threads` means the server supports the thread frames and `GET /api/v1/channels/{id}/threads` (see Threads); a client that does not see it shows no thread controls. `ready` never lists thread rows. `dm_privacy` means the server stores the two direct message privacy settings (`GET` and `PUT /api/v1/users/me/privacy`, body `{ "allow_member_dms": bool, "message_requests": bool }`, both required); a client that does not see it shows no privacy controls. The server applies them to direct messages (see `dm_request`). `profile_banners` means the server supports profile banners (`POST` and `DELETE /api/v1/users/me/banner`, `banner_color` on `PATCH /api/v1/users/me`); a client that does not see it shows no banner controls. `user_notes` means the server stores private profile notes (`GET` and `PUT /api/v1/users/me/notes/{userId}`); a client that does not see it keeps notes in local storage. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
+**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true, "user_notes": true, "profile_banners": true, "dm_privacy": true, "polls": true, "threads": true, "multi_role": true }`. `multi_role` means a member can hold several roles: `role_ids` rides `members[]`, `auth_ok.user`, `member_join.user` and `member_update`, `roles[]` carry `hoist` and `mentionable`, and `PUT` / `DELETE {base}/{id}/roles/{roleId}` add and remove one role (see `docs/api.md`, Member actions). A client that does not see it treats `role` as the only role. `polls` means the server understands `poll_create`, `poll_vote` and `poll_end` and sends `poll_update`; a client that does not see it hides the Poll button. `threads` means the server supports the thread frames and `GET /api/v1/channels/{id}/threads` (see Threads); a client that does not see it shows no thread controls. `ready` never lists thread rows. `dm_privacy` means the server stores the two direct message privacy settings (`GET` and `PUT /api/v1/users/me/privacy`, body `{ "allow_member_dms": bool, "message_requests": bool }`, both required); a client that does not see it shows no privacy controls. The server applies them to direct messages (see `dm_request`). `profile_banners` means the server supports profile banners (`POST` and `DELETE /api/v1/users/me/banner`, `banner_color` on `PATCH /api/v1/users/me`); a client that does not see it shows no banner controls. `user_notes` means the server stores private profile notes (`GET` and `PUT /api/v1/users/me/notes/{userId}`); a client that does not see it keeps notes in local storage. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
 These fields advertise retry-safe `chat_send` support. Older servers omit them;
 clients must not infer support from the protocol epoch or silently retry a
 durable pending message against a server that no longer advertises support.
@@ -639,7 +640,7 @@ carries. It used to be absent here, so a DM mention badge silently reset to 0 on
 every reconnect; the ready payload now ships the stored value. A DM's
 `unread_count` is capped at 100 under the same rule as `channels[]` above.
 
-**members[]:** All registered users with `id`, `username`, `avatar`, `role` (lowercase name), `status`, `display_name` (`null` when unset — render it instead of `username`), `about` (the About Me bio, `null` when unset; sent for every member, invisible ones included), `created_at` (the account creation instant, RFC 3339 UTC like `2026-10-15T13:04:05Z`; for an approval-mode account this is the application time), `custom_status` (`null` when unset), `identity_public_key` (base64 long-term E2EE identity key, omitted when the user has not published one — see voice E2EE TOFU), `banner` (the profile banner image path `/api/v1/files/{id}`) and `banner_color` (`#rgb` or `#rrggbb`, lower-case); both are omitted when unset, so absent means no banner
+**members[]:** All registered users with `id`, `username`, `avatar`, `role` (lowercase name of the member's top role), `role_ids` (every role the member holds, top role first, always an array with at least one id; absent on an older server, where `role` is the only role), `status`, `display_name` (`null` when unset — render it instead of `username`), `about` (the About Me bio, `null` when unset; sent for every member, invisible ones included), `created_at` (the account creation instant, RFC 3339 UTC like `2026-10-15T13:04:05Z`; for an approval-mode account this is the application time), `custom_status` (`null` when unset), `identity_public_key` (base64 long-term E2EE identity key, omitted when the user has not published one — see voice E2EE TOFU), `banner` (the profile banner image path `/api/v1/files/{id}`) and `banner_color` (`#rgb` or `#rrggbb`, lower-case); both are omitted when unset, so absent means no banner
 
 **member_timeouts[]:** The active timeouts this viewer may see, as `{user_id, expires_at}` (RFC 3339 UTC); always an array, `[]` when there are none. A viewer who holds `MODERATE_MEMBERS` or `ADMINISTRATOR` gets every unexpired timeout, sorted by `user_id`; everyone else gets only their own entry, because a timeout is a sanction and other members are not told of it. It is the last field before `members` in the payload. An absent key means an older server: show no timeout icons. See [member_timeouts](#member_timeouts-server---client).
 
@@ -658,7 +659,7 @@ to reconstruct them:
 
 **voice_states[]:** All users currently in any voice channel: `channel_id`, `user_id`, `username`, `muted`, `deafened`, `server_muted`, `server_deafened`, `speaking`, `camera`, `screenshare`
 
-**roles[]:** All server roles with `id`, `name`, `color`, `permissions` (bitfield), `position`, `is_default`
+**roles[]:** All server roles with `id`, `name`, `color`, `permissions` (bitfield), `position`, `is_default`, `hoist` (the role is its own member-list group; every role that existed before multi-role support starts `true`, a new role `false`) and `mentionable` (any member may ping the role). An absent `hoist` means an older server: treat every role as hoisted.
 
 ---
 
@@ -2033,6 +2034,7 @@ reconnect before the unban).
       "username": "newuser",
       "avatar": null,
       "role": "member",
+      "role_ids": [4],
       "display_name": "New User",
       "about": "Hello there",
       "created_at": "2026-10-15T13:04:05Z",
@@ -2045,7 +2047,8 @@ reconnect before the unban).
 }
 ```
 
-`display_name` is the nickname to render instead of `username`; omitted when
+`role_ids` lists every role the user holds, top role first, like
+`ready.members[]`; `role` is the top role's name. `display_name` is the nickname to render instead of `username`; omitted when
 unset. `about` is the About Me bio (`null` when unset) and `created_at` the
 account creation instant (RFC 3339 UTC); both match the same fields of
 `ready.members[]`, and neither appears on `chat_message.user`. `banner` and
@@ -2060,7 +2063,7 @@ arrived.
 
 ### member_update (Server -> Client, broadcast)
 
-Triggered when an admin changes a user's role.
+Triggered when a user's roles change: an admin replaces, adds or removes a role, a role is renamed or deleted, or a role reorder moves a role the user holds. A reorder sends one frame to every member who holds a moved role together with another role, not only to those whose top role changed.
 
 ```json
 {
@@ -2068,10 +2071,18 @@ Triggered when an admin changes a user's role.
   "type": "member_update",
   "payload": {
     "user_id": 5,
-    "role": "moderator"
+    "role": "moderator",
+    "role_ids": [3, 4]
   }
 }
 ```
+
+`role` is the name of the member's top role (highest `position`, lowest id on a
+tie) and `role_ids` every role they hold. `role_ids[0]` is the top role; order
+the rest by `roles[].position`, because a roster cached before a reorder may
+keep an older order for the tail. `role_ids` is absent when
+the server could not read the holder list for this frame and on an older
+server; keep the member's previous roles then.
 
 ### member_ban (Server -> Client, broadcast)
 
@@ -2103,7 +2114,9 @@ dropped intermediate event can never leave a deleted role on screen.
         "color": "#E74C3C",
         "permissions": 2147483647,
         "position": 100,
-        "is_default": false
+        "is_default": false,
+        "hoist": true,
+        "mentionable": false
       },
       {
         "id": 4,
@@ -2111,7 +2124,9 @@ dropped intermediate event can never leave a deleted role on screen.
         "color": null,
         "permissions": 1635,
         "position": 40,
-        "is_default": true
+        "is_default": true,
+        "hoist": true,
+        "mentionable": false
       }
     ]
   }

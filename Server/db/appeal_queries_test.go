@@ -452,7 +452,7 @@ func TestDecideAppealTx_DeciderDemotedBeforeTxRefusesOverturn(t *testing.T) {
 
 	// A role equal to the target's Member position (40) but still holding
 	// MODERATE_MEMBERS: rank alone must be what refuses the overturn.
-	equalRankMod, err := database.CreateRole(ctx, "equal-rank-mod", nil, permissions.ModerateMembers, 40)
+	equalRankMod, err := database.CreateRole(ctx, "equal-rank-mod", nil, permissions.ModerateMembers, 40, false, false)
 	if err != nil {
 		t.Fatalf("CreateRole: %v", err)
 	}
@@ -513,7 +513,7 @@ func TestAssignAppealForced_BitRevokedBeforeTxRefuses(t *testing.T) {
 	ctx := context.Background()
 
 	// A role that outranks the Member role (position 40) but holds no bit.
-	unprivilegedButHighRank, err := database.CreateRole(ctx, "unprivileged-high-rank", nil, 0, 70)
+	unprivilegedButHighRank, err := database.CreateRole(ctx, "unprivileged-high-rank", nil, 0, 70, false, false)
 	if err != nil {
 		t.Fatalf("CreateRole: %v", err)
 	}

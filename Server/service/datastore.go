@@ -221,9 +221,9 @@ type Store interface {
 	ListRoles(ctx context.Context) ([]*db.Role, error)
 	GetRoleByName(ctx context.Context, name string) (*db.Role, error)
 	GetDefaultRole(ctx context.Context) (*db.Role, error)
-	CreateRole(ctx context.Context, name string, color *string, perms int64, position int) (*db.Role, error)
-	UpdateRole(ctx context.Context, id int64, name string, color *string, perms int64, position int) error
-	SetRolePositions(ctx context.Context, positions map[int64]int) error
+	CreateRole(ctx context.Context, name string, color *string, perms int64, position int, hoist, mentionable bool) (*db.Role, error)
+	UpdateRole(ctx context.Context, id int64, name string, color *string, perms int64, position int, hoist, mentionable bool) ([]int64, error)
+	SetRolePositions(ctx context.Context, positions map[int64]int) ([]int64, error)
 	DeleteRoleReassigning(ctx context.Context, roleID, fallbackRoleID int64) ([]int64, error)
 	ListUserIDsByRole(ctx context.Context, roleID int64) ([]int64, error)
 	CountRoleMembers(ctx context.Context) (map[int64]int, error)

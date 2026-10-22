@@ -270,7 +270,7 @@ func (h *Hub) PubSubForTest() *PubSub {
 // Defaults to replay_source="none" since most callers test the fresh-connect
 // path; tests that care about the resume tier can call buildAuthOK directly.
 func (h *Hub) BuildAuthOKForTest(user *db.User, roleName string) []byte {
-	return h.buildAuthOK(context.Background(), user, roleName, "none")
+	return h.buildAuthOK(context.Background(), user, roleName, nil, "none")
 }
 
 // RunMentionCountsInlineForTest makes the hub's MessageService apply mention

@@ -485,7 +485,7 @@ func (h *Hub) reconnectWriteReplay(
 	// is included in the payload so the client can attribute reconnect
 	// behaviour without separate metric scraping.
 	slog.Info("ws sending auth_ok (reconnect)", "user_id", c.userID, "username", c.user.Username, "role", c.roleName, "replay_source", replaySource)
-	if err := handshakeWrite(ctx, conn, h.buildAuthOK(ctx, c.user, c.roleName, replaySource)); err != nil {
+	if err := handshakeWrite(ctx, conn, h.buildAuthOK(ctx, c.user, c.roleName, c.roleIDs, replaySource)); err != nil {
 		slog.Warn("ws: failed to send auth_ok (reconnect)", "user_id", c.userID, "err", err)
 		h.unregisterFailedHandshake(ctx, c)
 		_ = conn.Close(websocket.StatusInternalError, "handshake failed")

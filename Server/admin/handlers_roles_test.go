@@ -471,3 +471,35 @@ func TestAdminAPI_PatchRole_StaleExpectedPermissionsIs409(t *testing.T) {
 		t.Fatalf("matching: status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
 }
+
+// WP 6.3c: POST and PATCH /roles carry the hoist and mentionable flags. An
+// absent flag is false on create and left alone on update.
+func TestAdminAPI_Roles_HoistAndMentionable(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler, _, _, token := newRolesHandler(t, database)
+
+	w := doRequest(t, handler, http.MethodPost, "/roles", token, map[string]any{
+		"name": "Pingers", "position": 50, "hoist": true, "mentionable": true,
+	})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create status = %d; body: %s", w.Code, w.Body.String())
+	}
+	role := decodeRole(t, w.Body.Bytes())
+	if !role.Hoist || !role.Mentionable {
+		t.Fatalf("created role = %+v, want hoist and mentionable", role)
+	}
+
+	w = doRequest(t, handler, http.MethodPatch, "/roles/"+itoa(role.ID), token, map[string]any{"hoist": false})
+	if w.Code != http.StatusOK {
+		t.Fatalf("patch status = %d; body: %s", w.Code, w.Body.String())
+	}
+	patched := decodeRole(t, w.Body.Bytes())
+	if patched.Hoist || !patched.Mentionable {
+		t.Fatalf("patched role = %+v, want hoist cleared and mentionable kept", patched)
+	}
+
+	w = doRequest(t, handler, http.MethodPost, "/roles", token, map[string]any{"name": "Quiet", "position": 45})
+	if plain := decodeRole(t, w.Body.Bytes()); plain.Hoist || plain.Mentionable {
+		t.Fatalf("role created without the flags = %+v, want both false", plain)
+	}
+}

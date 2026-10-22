@@ -15,9 +15,9 @@ func TestEncodeRoster_SplicesWithBanner(t *testing.T) {
 	custom := "busy"
 	banner, color := "/api/v1/files/abc", "#112233"
 	members := []db.MemberSummary{
-		{ID: 1, Username: "alice", Status: db.StatusOnline, Role: "member", About: &about,
+		{ID: 1, Username: "alice", Status: db.StatusOnline, MemberRoleSet: &db.MemberRoleSet{Role: "member"}, About: &about,
 			CreatedAt: "2026-10-15T13:04:05Z", MemberBanner: &db.MemberBanner{Banner: &banner, BannerColor: &color}, CustomStatus: &custom},
-		{ID: 2, Username: "bob", Status: db.StatusOnline, Role: "member", CreatedAt: "2026-10-15T13:04:05Z"},
+		{ID: 2, Username: "bob", Status: db.StatusOnline, MemberRoleSet: &db.MemberRoleSet{Role: "member"}, CreatedAt: "2026-10-15T13:04:05Z"},
 	}
 	roster, err := encodeRoster(members)
 	if err != nil {
@@ -54,7 +54,7 @@ func TestEncodeRoster_SplicesWithBanner(t *testing.T) {
 
 func TestBuildMemberJoin_BannerOmittedWhenUnset(t *testing.T) {
 	decode := func(u *db.User) map[string]any {
-		raw := buildMemberJoin(u, "member")
+		raw := buildMemberJoin(u, "member", nil)
 		var env struct {
 			Payload struct {
 				User map[string]any `json:"user"`

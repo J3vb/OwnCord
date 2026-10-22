@@ -49,7 +49,8 @@ func mountUserRoutes(r chi.Router, owner *ownerOnlyRegistry, svc *service.Servic
 }
 
 // mountMemberActionRoutes registers the member-list actions the desktop client
-// uses: list, ban/unban and role change (PATCH) and force-logout. They are
+// uses: list, ban/unban, role change (PATCH), add/remove one role (PUT/DELETE
+// roles/{roleId}) and force-logout. They are
 // mounted twice, under /admin/api/users for the panel and under
 // /api/v1/moderation/members (NewMemberAPI) for the client, so both run the
 // same handlers and the same ModerationService rank checks. The list sits at
@@ -61,6 +62,10 @@ func mountMemberActionRoutes(r chi.Router, base string, svc *service.Services, h
 	}
 	r.Get(list, handleListUsers(svc.Users))
 	r.Patch(base+"/{id}", handlePatchUser(svc.Users, hub, mod))
+	// Add or remove one role of a member (WP 6.3c). Authorized in
+	// ModerationService, so perimeter-level like PATCH.
+	r.Put(base+"/{id}/roles/{roleId}", handleMemberRole(mod, true))
+	r.Delete(base+"/{id}/roles/{roleId}", handleMemberRole(mod, false))
 	r.With(requirePerm(permissions.KickMembers)).
 		Delete(base+"/{id}/sessions", handleForceLogout(mod))
 }

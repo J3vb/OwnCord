@@ -45,7 +45,7 @@ func TestReconnect_ReplaysOwnVoiceLeaveAfterTeardownWithNoOldClient(t *testing.T
 	}
 	// A role with no permissions at all: VisibleChannelIDs returns nothing, so
 	// the voice room the user was live in cannot be in allowedChannelIDs.
-	noPerms, err := database.CreateRole(ctx, "voice-only-teardown", nil, 0, 1)
+	noPerms, err := database.CreateRole(ctx, "voice-only-teardown", nil, 0, 1, false, false)
 	if err != nil || noPerms == nil {
 		t.Fatalf("CreateRole: %v", err)
 	}
