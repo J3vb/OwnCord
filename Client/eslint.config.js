@@ -256,6 +256,6 @@ export default tseslint.config(
     },
   },
   {
-    ignores: ["dist/", "src-tauri/", "node_modules/", "public/", "*.js", "*.cjs"],
+    ignores: ["dist/", "dist-web/", "src-tauri/", "node_modules/", "public/", "*.js", "*.cjs"],
   },
 );

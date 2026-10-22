@@ -318,3 +318,40 @@ describe("view-file store ban (5.4e)", () => {
     ).toEqual([]);
   }, 60_000);
 });
+
+// 6.13b: the browser platform must stay free of native imports. The ban in
+// eslint.config.js exempts only src/platform/desktop, so it already covers
+// src/platform/browser; these cases fail if that exemption ever widens.
+describe("browser platform native-import ban (6.13b)", () => {
+  const BROWSER = "src/platform/browser/index.ts";
+  const DESKTOP = "src/platform/desktop/appMetadata.ts";
+
+  async function restricted(code: string, filePath: string): Promise<string[]> {
+    const [result] = await eslint.lintText(code, { filePath: path.join(clientRoot, filePath) });
+    return (result?.messages ?? [])
+      .map((m) => m.ruleId)
+      .filter((id) => id === "no-restricted-imports" || id === "no-restricted-syntax")
+      .map(String);
+  }
+
+  it("flags a static @tauri-apps import in the browser platform", async () => {
+    expect(
+      await restricted(
+        `import { invoke } from "@tauri-apps/api/core";\nexport const x = invoke;`,
+        BROWSER,
+      ),
+    ).toContain("no-restricted-imports");
+  }, 60_000);
+
+  it("flags a dynamic @tauri-apps import in the browser platform", async () => {
+    expect(
+      await restricted(`export const f = () => import("@tauri-apps/api/app");`, BROWSER),
+    ).toContain("no-restricted-syntax");
+  }, 60_000);
+
+  it("still allows the desktop platform to import it", async () => {
+    expect(
+      await restricted(`export const f = () => import("@tauri-apps/api/app");`, DESKTOP),
+    ).toEqual([]);
+  }, 60_000);
+});

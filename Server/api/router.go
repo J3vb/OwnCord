@@ -425,6 +425,7 @@ func routerDMRoutes(r chi.Router, svc *service.Services, hub *ws.Hub, limiter *a
 func routerChannelRoutes(r chi.Router, svc *service.Services, limiter *auth.RateLimiter, cfg *config.Config, hub *ws.Hub) {
 	MountChannelRoutes(r, svc, limiter, cfg.Server.TrustedProxies, hub)
 	MountNSFWRoutes(r, svc, hub)
+	MountThreadRoutes(r, svc)
 }
 
 // routerReportRoutes mounts report intake, the reporter's own status view,

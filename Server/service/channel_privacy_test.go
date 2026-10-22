@@ -31,8 +31,8 @@ func TestChannelPrivacyService(t *testing.T) {
 		t.Fatalf("Snapshot: %v", err)
 	}
 	for id, want := range map[int64]bool{pub: false, locked: true, allowed: false, 9999: false} {
-		if got := snap.Private(id); got != want {
-			t.Errorf("snapshot.Private(%d) = %v, want %v", id, got, want)
+		if got := snap.private(id); got != want {
+			t.Errorf("snapshot.private(%d) = %v, want %v", id, got, want)
 		}
 		single, err := svc.ChannelIsPrivate(ctx, id)
 		if err != nil {
@@ -56,10 +56,35 @@ func TestChannelPrivacyService(t *testing.T) {
 		t.Fatalf("clear default: %v", err)
 	}
 	snap, err = svc.Snapshot(ctx)
-	if err != nil || snap.Private(locked) {
-		t.Errorf("no default role snapshot: private=%v err=%v, want false, nil", snap.Private(locked), err)
+	if err != nil || snap.private(locked) {
+		t.Errorf("no default role snapshot: private=%v err=%v, want false, nil", snap.private(locked), err)
 	}
 	if got, err := svc.ChannelIsPrivate(ctx, locked); got || err != nil {
 		t.Errorf("no default role: ChannelIsPrivate = %v, %v; want false, nil", got, err)
+	}
+}
+
+// A thread is private exactly when its parent is: the exported verdict resolves
+// the thread to its parent instead of judging the thread id on base permissions.
+func TestChannelPrivacySnapshot_PrivateOfThread(t *testing.T) {
+	f := newThreadFixture(t)
+	if err := f.database.UpsertChannelOverride(bg(), thrParent, permissions.MemberRoleID, 0, permissions.ReadMessages); err != nil {
+		t.Fatalf("override: %v", err)
+	}
+	starter := f.post(t, thrParent, thrMod, "s")
+	info, _, err := f.threads.Create(bg(), CreateThreadParams{UserID: thrMod, ChannelID: thrParent, MessageID: starter, Name: "t"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	snap, err := NewChannelPrivacyService(f.database).Snapshot(bg())
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	th, err := f.database.GetChannel(bg(), info.ID)
+	if err != nil || th == nil {
+		t.Fatalf("GetChannel: %v", err)
+	}
+	if !snap.PrivateOf(th) {
+		t.Error("thread of a private parent reported public")
 	}
 }

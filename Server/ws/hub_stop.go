@@ -26,6 +26,7 @@ func (h *Hub) initLife() {
 // run under stopOnce.
 func (h *Hub) closeStop() {
 	close(h.stop)
+	h.stopThreadFeed()
 	if h.stopLife != nil {
 		h.stopLife()
 	}

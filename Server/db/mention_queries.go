@@ -91,6 +91,9 @@ func (d *DB) CreateMessageWithMentions(ctx context.Context, channelID, userID in
 		return nil, err
 	}
 	advanceAuthorReadState(ctx, d.q.WithTx(tx), userID, channelID, m.ID)
+	if err := touchThreadOnPost(ctx, d.q.WithTx(tx), channelID); err != nil {
+		return nil, fmt.Errorf("CreateMessageWithMentions: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("CreateMessageWithMentions commit: %w", err)
 	}

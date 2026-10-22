@@ -52,6 +52,7 @@
               "polls": true,
               "profile_banners": true,
               "read_pointer": true,
+              "threads": true,
               "user_notes": true
             },
             "channels": [
@@ -316,6 +317,7 @@
               "polls": true,
               "profile_banners": true,
               "read_pointer": true,
+              "threads": true,
               "user_notes": true
             },
             "channels": [

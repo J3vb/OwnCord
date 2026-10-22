@@ -15,6 +15,7 @@
 import { Track, TrackEvent, type Room, type LocalAudioTrack } from "livekit-client";
 import { loadPref, savePref } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
+import { publicAssetUrl } from "@lib/publicAssets";
 import {
   createMicProcessor,
   GATE_LOOKAHEAD_S,
@@ -198,7 +199,7 @@ export function startVadDetector(
   };
 
   ctx.audioWorklet
-    .addModule("/vad-worklet.js")
+    .addModule(publicAssetUrl("vad-worklet.js"))
     .then(() => {
       if (stopped) return;
       try {

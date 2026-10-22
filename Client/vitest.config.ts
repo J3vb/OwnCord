@@ -33,6 +33,7 @@ if (!(process.env.NODE_OPTIONS ?? "").includes(WEBSTORAGE_OFF)) {
 
 export default defineConfig({
   plugins: [changelogModule()],
+  define: { __OWNCORD_WEB__: false },
   resolve: {
     alias: {
       "@lib": resolve(import.meta.dirname, "src/lib"),

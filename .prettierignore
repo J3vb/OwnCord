@@ -38,6 +38,7 @@ Server/admin/static/
 # alone drops ~850 formattable files into src-tauri/target/.
 # Mirrors Client/.gitignore, .serena/.gitignore and .superpowers/sdd/.gitignore.
 Client/dist/
+Client/dist-web/
 Client/dist-budget/
 Client/coverage/
 Client/playwright-report/

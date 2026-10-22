@@ -60,7 +60,7 @@ func readyChannelPayloads(visibleChannels []db.Channel, grants permissions.Membe
 			// The server's one AFK voice channel (migration 068, WP 6.10a):
 			// listen-only, and what the idle sweep moves members into.
 			"afk":     visibleChannels[i].AFK,
-			"private": privacy.Private(visibleChannels[i].ID), // 3D-6, channel-level
+			"private": privacy.PrivateOf(&visibleChannels[i]), // 3D-6, channel-level
 			// Whether THIS caller has acknowledged the label (B5-7). Always
 			// present, like nsfw itself — false for an unlabelled channel,
 			// where it means nothing but must not be omitted (two different

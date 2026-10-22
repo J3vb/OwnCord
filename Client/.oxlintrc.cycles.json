@@ -4,5 +4,5 @@
   "rules": {
     "import/no-cycle": "warn"
   },
-  "ignorePatterns": ["dist", "node_modules", "public"]
+  "ignorePatterns": ["dist", "dist-web", "node_modules", "public"]
 }

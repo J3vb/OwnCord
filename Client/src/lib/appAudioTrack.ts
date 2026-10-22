@@ -10,13 +10,14 @@
  */
 
 import { createLogger } from "./logger";
+import { publicAssetUrl } from "./publicAssets";
 
 const log = createLogger("appAudioTrack");
 
 /** One host frame: 480 stereo f32 samples. */
 export const APP_AUDIO_FRAME_BYTES = 3840;
 export const APP_AUDIO_SAMPLE_RATE = 48000;
-export const APP_AUDIO_WORKLET_URL = "/app-audio-worklet.js";
+export const APP_AUDIO_WORKLET_URL = publicAssetUrl("app-audio-worklet.js");
 export const APP_AUDIO_PROCESSOR = "app-audio-processor";
 /** The socket is on this machine: it opens at once or not at all. */
 const OPEN_TIMEOUT_MS = 3000;
