@@ -80,6 +80,10 @@ func TestAdminAPI_ListUsers_SearchFilterAndBanned(t *testing.T) {
 		if r["role_position"] != float64(100) {
 			t.Errorf("owner role_position = %v, want 100", r["role_position"])
 		}
+		// ... and every held role, top first (WP 6.3g), for the role chips.
+		if ids, ok := r["role_ids"].([]any); !ok || len(ids) == 0 || ids[0] != float64(1) {
+			t.Errorf("owner role_ids = %v, want a list led by the Owner role", r["role_ids"])
+		}
 	}
 
 	if w := doRequest(t, handler, http.MethodGet, "/users?q="+strings.Repeat("a", 65), ownerToken, nil); w.Code != http.StatusBadRequest {

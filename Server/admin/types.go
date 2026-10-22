@@ -82,13 +82,15 @@ type adminUserResponse struct {
 	RoleName string  `json:"role_name"`
 	// RolePosition is the role's hierarchy position; only the users list
 	// sets it.
-	RolePosition *int    `json:"role_position,omitempty"`
-	Status       string  `json:"status"`
-	CreatedAt    string  `json:"created_at"`
-	LastSeen     *string `json:"last_seen,omitempty"`
-	Banned       bool    `json:"banned"`
-	BanReason    *string `json:"ban_reason,omitempty"`
-	BanExpires   *string `json:"ban_expires,omitempty"`
+	RolePosition *int `json:"role_position,omitempty"`
+	// RoleIDs is every held role, top role first; only the users list sets it.
+	RoleIDs    []int64 `json:"role_ids,omitempty"`
+	Status     string  `json:"status"`
+	CreatedAt  string  `json:"created_at"`
+	LastSeen   *string `json:"last_seen,omitempty"`
+	Banned     bool    `json:"banned"`
+	BanReason  *string `json:"ban_reason,omitempty"`
+	BanExpires *string `json:"ban_expires,omitempty"`
 }
 
 // ─── adminMeResponse ────────────────────────────────────────────────────────

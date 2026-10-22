@@ -459,4 +459,122 @@ describe("Server/admin/static — Members (AO-4)", () => {
     expect(rows()).toHaveLength(50);
     expect(prev().disabled).toBe(true);
   });
+
+  // WP 6.3g: a member can hold several roles. The row lists every one, and the
+  // Manage dialog adds and removes them one at a time (PUT/DELETE
+  // /users/{id}/roles/{roleId}) instead of replacing the whole set.
+  describe("role chips (WP 6.3g)", () => {
+    const ME = {
+      id: 1,
+      permissions: ADMINISTRATOR | MANAGE_ROLES,
+      role_position: 80,
+      is_owner: false,
+    };
+    const manage = async (
+      env: Awaited<ReturnType<typeof boot>>,
+      id: number,
+    ): Promise<HTMLElement> => {
+      (
+        env.doc.querySelector(`[data-action="openEditUser"][data-args^="[${id},"]`) as HTMLElement
+      ).click();
+      await env.settle();
+      return env.doc.getElementById("modalInner")!;
+    };
+    const chips = (el: Element) =>
+      [...el.querySelectorAll(".role-chip .role-chip-name")].map((c) => c.textContent);
+
+    it("lists every held role in the row and adds one with PUT", async () => {
+      const calls: string[] = [];
+      let held = [4];
+      const env = await boot(calls, (p, method) => {
+        if (p.startsWith("/users?"))
+          return [
+            { id: 4, username: "member", role_id: held[0], role_ids: held, role_position: 40 },
+          ];
+        if (p === "/roles") return ROLES;
+        if (method === "PUT") held = [3, 4];
+        return {};
+      });
+      await env.show(ME);
+      expect(env.doc.querySelector("tbody tr td.col-role")!.textContent).toBe("Member");
+
+      const body = await manage(env, 4);
+      expect(chips(body)).toEqual(["Member"]);
+      // Only roles below the actor's own (80) and not already held are offered.
+      const sel = body.querySelector("#editRoleSelect") as HTMLSelectElement;
+      expect([...sel.options].map((o) => o.textContent)).toEqual(["Moderator"]);
+      sel.value = "3";
+      (body.querySelector('[data-action="addMemberRole"]') as HTMLElement).click();
+      await env.settle();
+      expect(calls).toContain("PUT /users/4/roles/3");
+      expect(chips(env.doc.getElementById("modalInner")!)).toEqual(["Moderator", "Member"]);
+    });
+
+    it("names the top role from the list row on a fresh load with no role list", async () => {
+      const env = await boot([], (p) => {
+        if (p.startsWith("/users?"))
+          return [
+            {
+              id: 4,
+              username: "member",
+              role_id: 7,
+              role_name: "Helper",
+              role_ids: [7, 4],
+              role_position: 50,
+            },
+          ];
+        return {};
+      });
+      await env.show({ id: 1, permissions: BAN_MEMBERS, role_position: 80, is_owner: false });
+      expect(env.bridge.state.roleList?.length ?? 0).toBe(0);
+      expect(chips(env.doc.querySelector("tbody tr td.col-role")!)).toEqual(["Helper", "Member"]);
+    });
+
+    it("removes a chip with DELETE, and the last chip has no remove button", async () => {
+      const calls: string[] = [];
+      let held = [3, 4];
+      const env = await boot(calls, (p, method) => {
+        if (p.startsWith("/users?"))
+          return [
+            { id: 4, username: "member", role_id: held[0], role_ids: held, role_position: 40 },
+          ];
+        if (p === "/roles") return ROLES;
+        if (method === "DELETE") held = [4];
+        return {};
+      });
+      await env.show(ME);
+      expect(env.doc.querySelector("tbody tr td.col-role")!.textContent).toBe("ModeratorMember");
+
+      let body = await manage(env, 4);
+      expect(body.querySelectorAll('[data-action="removeMemberRole"]')).toHaveLength(2);
+      (
+        body.querySelector('[data-action="removeMemberRole"][data-args="[4,3]"]') as HTMLElement
+      ).click();
+      await env.settle();
+      expect(calls).toContain("DELETE /users/4/roles/3");
+
+      body = env.doc.getElementById("modalInner")!;
+      expect(chips(body)).toEqual(["Member"]);
+      // Edge case 2: the last role cannot be removed from the panel.
+      expect(body.querySelectorAll('[data-action="removeMemberRole"]')).toHaveLength(0);
+      expect(body.textContent).toContain("must keep at least one role");
+    });
+
+    it("shows a role the actor cannot assign but does not let it be removed", async () => {
+      // Edge case 1: Admin (80) sits at the actor's own rank, so it is shown
+      // as a chip with no remove button while the lower role stays removable.
+      const env = await boot([], (p) => {
+        if (p.startsWith("/users?"))
+          return [{ id: 4, username: "member", role_id: 4, role_ids: [2, 4], role_position: 40 }];
+        if (p === "/roles") return ROLES;
+        return {};
+      });
+      await env.show(ME);
+      const body = await manage(env, 4);
+      expect(chips(body)).toEqual(["Admin", "Member"]);
+      const removers = [...body.querySelectorAll('[data-action="removeMemberRole"]')];
+      expect(removers.map((b) => b.getAttribute("data-args"))).toEqual(["[4,4]"]);
+      expect(body.querySelector(".role-chip")!.getAttribute("title")).toMatch(/cannot/);
+    });
+  });
 });

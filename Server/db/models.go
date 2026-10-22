@@ -432,6 +432,8 @@ type UserWithRole struct {
 	User
 	RoleName     string `json:"role_name"`
 	RolePosition int    `json:"role_position"`
+	// RoleIDs is every held role, top role first; never nil from ListAllUsers.
+	RoleIDs []int64
 }
 
 // AuditEntry represents a single row from the audit_log table joined with the

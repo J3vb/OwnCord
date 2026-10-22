@@ -76,6 +76,7 @@ func handleListUsers(users *service.UserService) http.HandlerFunc {
 			// The panel compares it with its own role_position from /me to
 			// offer only the actions the server's outrank rule allows.
 			safe[i].RolePosition = &page[i].RolePosition
+			safe[i].RoleIDs = page[i].RoleIDs
 		}
 		writeJSON(w, http.StatusOK, safe)
 	}

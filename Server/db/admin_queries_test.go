@@ -343,6 +343,68 @@ func TestListAllUsers_Filter(t *testing.T) {
 	}
 }
 
+// WP 6.3g: the role filter means "holds" -- a member who holds the role as a
+// secondary role is listed, not only one whose top role it is -- and each row
+// carries every held role, top role first.
+func TestListUsers_RoleFilterMatchesAnyHeldRole(t *testing.T) {
+	ctx := context.Background()
+	database := newSchemaTestDB(t, adminTestSchema)
+	ids := make([]int64, 0, 3)
+	for _, n := range []string{"alice", "bob", "carol"} {
+		id, err := database.CreateUser(ctx, n, "hash", 4)
+		if err != nil {
+			t.Fatalf("CreateUser(%s): %v", n, err)
+		}
+		ids = append(ids, id)
+	}
+	// alice also holds Moderator (3); bob also holds Admin (2) and Moderator.
+	for _, g := range [][2]int64{{ids[0], 3}, {ids[1], 2}, {ids[1], 3}} {
+		if err := database.AddUserRole(ctx, g[0], g[1]); err != nil {
+			t.Fatalf("AddUserRole(%v): %v", g, err)
+		}
+	}
+	names := func(roleID int64) string {
+		t.Helper()
+		rows, err := database.ListAllUsers(ctx, db.UserListFilter{RoleID: roleID}, 50, 0)
+		if err != nil {
+			t.Fatalf("ListAllUsers(role %d): %v", roleID, err)
+		}
+		out := make([]string, len(rows))
+		for i, r := range rows {
+			out[i] = r.Username
+		}
+		return strings.Join(out, ",")
+	}
+	for _, tc := range []struct {
+		role int64
+		want string
+	}{
+		{0, "alice,bob,carol"},
+		{4, "alice,bob,carol"},
+		{3, "alice,bob"},
+		{2, "bob"},
+		{1, ""},
+	} {
+		if got := names(tc.role); got != tc.want {
+			t.Errorf("role filter %d = %q, want %q", tc.role, got, tc.want)
+		}
+	}
+
+	rows, err := database.ListAllUsers(ctx, db.UserListFilter{}, 50, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][]int64{"alice": {3, 4}, "bob": {2, 3, 4}, "carol": {4}}
+	for _, r := range rows {
+		if fmt.Sprint(r.RoleIDs) != fmt.Sprint(want[r.Username]) {
+			t.Errorf("%s RoleIDs = %v, want %v (top role first)", r.Username, r.RoleIDs, want[r.Username])
+		}
+	}
+	if empty, err := database.ListAllUsers(ctx, db.UserListFilter{Query: "zzz"}, 50, 0); err != nil || len(empty) != 0 {
+		t.Fatalf("empty page = %v, %v", empty, err)
+	}
+}
+
 // ─── UpdateUserRole ────────────────────────────────────────────────────────────
 
 func TestUpdateUserRole(t *testing.T) {
