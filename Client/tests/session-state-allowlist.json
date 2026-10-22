@@ -284,6 +284,30 @@
       "reason": "WeakMap keyed by the live recover context"
     },
     {
+      "file": "platform/browser/fileSave.ts",
+      "binding": "releases",
+      "category": "transient",
+      "reason": "Pending blob-URL release timers of local downloads; each removes itself when it fires"
+    },
+    {
+      "file": "platform/browser/logFiles.ts",
+      "binding": "ring",
+      "category": "app-lifetime",
+      "reason": "Client log lines, not server data; bounded to the ring capacity"
+    },
+    {
+      "file": "platform/browser/notifications.ts",
+      "binding": "activationHandlers",
+      "category": "app-lifetime",
+      "reason": "Subscribers of notification clicks, each released by its own unsubscribe"
+    },
+    {
+      "file": "platform/browser/notifications.ts",
+      "binding": "ringing",
+      "category": "transient",
+      "reason": "The open ringing-call notification per channel; removed when the ring ends (clearCall) or the user clicks it"
+    },
+    {
       "file": "platform/desktop/logFiles.ts",
       "binding": "buffer",
       "category": "app-lifetime",

@@ -2,9 +2,15 @@
 // Transport, storage and identity are real browser adapters (6.13c), one file
 // each, used only in a secure context: on a page that is not one, they stay
 // inert, so the app reaches no host and stores nothing rather than half-work.
-// Every other member is still inert (6.13d): it either refuses (a rejected
-// promise, or the typed "unavailable" answer its contract defines) or does
-// nothing, exactly as its contract allows. The web vite config sends the
+// The rest is 6.13d: notifications (Web Notification API, also secure-context
+// only), file save (a download), logs (a memory ring), invite deep links
+// (`?invite=`) and external content (refused) are browser adapters, one file
+// each; every other member either refuses (a rejected promise, or the typed
+// "unavailable" answer its contract defines) or does nothing, exactly as its
+// contract allows, and the four contracts a Settings control sits on say so
+// through `available: false`. Push-to-talk stays unsupported: an in-tab key
+// cannot gate the mic while the tab is in the background, which is the point of
+// the feature. The web vite config sends the
 // native registry's import here (`vite.config.web.ts`), which is why the
 // registry is also exported under the name callers import. This tree must never import a native host package or
 // anything from the native implementation tree (eslint and the registry test
@@ -16,14 +22,10 @@ import type {
   AppUpdater,
   Autostart,
   CredentialStore,
-  DeepLinks,
   DevTools,
-  ExternalContentBroker,
-  FileSaver,
   GlobalShortcuts,
   HttpClient,
   IdentityStore,
-  LogFiles,
   NativeProxies,
   Notifier,
   PendingMessageStore,
@@ -40,10 +42,15 @@ import type {
 } from "../contracts";
 import type { SocketConnection } from "../contracts/socket";
 import { credentials as browserCredentials } from "./credentials";
+import { deepLinks } from "./deepLinks";
+import { externalContent } from "./externalContent";
+import { fileSaver } from "./fileSave";
 import { http as browserHttp } from "./http";
 import { identity as browserIdentity } from "./identity";
+import { logFiles } from "./logFiles";
 import { nativeProxies as browserNativeProxies } from "./nativeProxies";
 import { nativeVoice } from "./nativeVoice";
+import { notifier as browserNotifier } from "./notifications";
 import { pendingMessages as browserPendingMessages } from "./pendingMessages";
 import { settings as browserSettings } from "./settings";
 import { socket as browserSocket } from "./socket";
@@ -60,11 +67,15 @@ const appMetadata: AppMetadata = {
 };
 
 const appProcess: AppProcess = {
-  relaunch: async () => undefined,
+  // A page relaunches by reloading itself.
+  relaunch: async () => {
+    window.location.reload();
+  },
   reportReady: async () => undefined,
 };
 
 const autostart: Autostart = {
+  available: false,
   isEnabled: async () => false,
   enable: () => refuse(),
   disable: async () => undefined,
@@ -77,22 +88,9 @@ const inertCredentials: CredentialStore = {
   loginWithSavedPassword: async () => null,
 };
 
-const deepLinks: DeepLinks = {
-  init: async () => undefined,
-};
-
 const devTools: DevTools = {
+  available: false,
   open: async () => undefined,
-};
-
-const externalContent: ExternalContentBroker = {
-  preview: async () => ({ ok: false, failure: "unavailable" }),
-  image: async () => ({ ok: false, failure: "unavailable" }),
-};
-
-const fileSaver: FileSaver = {
-  pickSaveLocation: async () => null,
-  writeFile: () => refuse(),
 };
 
 const globalShortcuts: GlobalShortcuts = {
@@ -124,17 +122,6 @@ const inertIdentity: IdentityStore = {
   getPin: async () => ({ status: "unavailable" }),
 };
 
-const logFiles: LogFiles = {
-  init: async () => () => undefined,
-  flush: async () => undefined,
-  clearPending: async () => undefined,
-  getDir: () => null,
-  clearAll: async () => undefined,
-  readAll: async () => [],
-  readNative: async () => [],
-  openFolder: async () => ({ ok: false, error: "log files are unavailable in the browser" }), // i18n-exempt: diagnostic
-};
-
 const inertNativeProxies: NativeProxies = {
   ensureHttpProxy: () => refuse(),
   setLiveKitServerHost: () => undefined,
@@ -143,7 +130,7 @@ const inertNativeProxies: NativeProxies = {
   stopLiveKitProxy: () => undefined,
 };
 
-const notifier: Notifier = {
+const inertNotifier: Notifier = {
   readsOsPermission: false,
   permissionGranted: async () => false,
   requestPermission: async () => false,
@@ -200,6 +187,7 @@ interface SecureMembers {
   readonly credentials: CredentialStore;
   readonly http: HttpClient;
   readonly identity: IdentityStore;
+  readonly notifier: Notifier;
   readonly nativeProxies: NativeProxies;
   readonly pendingMessages: PendingMessageStore;
   readonly settings: SettingsStore;
@@ -217,6 +205,7 @@ const secureMembers: SecureMembers = isSecurePage()
       credentials: browserCredentials,
       http: browserHttp,
       identity: browserIdentity,
+      notifier: browserNotifier,
       nativeProxies: browserNativeProxies,
       pendingMessages: browserPendingMessages,
       settings: browserSettings,
@@ -226,6 +215,7 @@ const secureMembers: SecureMembers = isSecurePage()
       credentials: inertCredentials,
       http: inertHttp,
       identity: inertIdentity,
+      notifier: inertNotifier,
       nativeProxies: inertNativeProxies,
       pendingMessages: inertPendingMessages,
       settings: inertSettings,
@@ -241,6 +231,7 @@ const trayStatus: TrayStatus = {
 };
 
 const updater: AppUpdater = {
+  available: false,
   checkForUpdate: async () => ({
     available: false,
     version: null,
@@ -256,6 +247,7 @@ const urlOpener: UrlOpener = {
 };
 
 const windowControl: WindowControl = {
+  available: false,
   isMaximized: async () => false,
   availableMonitors: async () => [],
   outerPosition: async () => ({ x: 0, y: 0 }),
@@ -282,7 +274,6 @@ export const browser: Platform = {
   fileSaver,
   logFiles,
   nativeVoice,
-  notifier,
   pushToTalk,
   globalShortcuts,
   serverScope,

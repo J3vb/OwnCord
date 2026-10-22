@@ -31,9 +31,16 @@ const bytes = new Uint8Array([0x4f, 0x77, 0x6e, 0x43, 0x6f, 0x72, 0x64]);
 
 export function describeFileSaverSuite(
   makeSubject: () => Promise<FileSaveSubject>,
-  options?: { expectEveryTestToFail?: boolean },
+  options?: {
+    expectEveryTestToFail?: boolean;
+    /** False for a platform whose save is a browser download (the browser):
+     *  there is no dialog and no chosen path, so the dialog and path tests are
+     *  skipped and that platform's own test pins the download. */
+    nativeDialog?: boolean;
+  },
 ): void {
   const check = options?.expectEveryTestToFail ? test.fails : test;
+  const checkDialog = options?.nativeDialog === false ? test.skip : check;
   describe("FileSaver", () => {
     let ctx: FileSaveSubject;
     beforeEach(async () => {
@@ -41,33 +48,33 @@ export function describeFileSaverSuite(
     });
 
     describe("pickSaveLocation", () => {
-      check("resolves the location the native dialog chose", async () => {
+      checkDialog("resolves the location the native dialog chose", async () => {
         ctx.native.dialogResolves("/home/alice/report.pdf");
         await expect(ctx.subject.pickSaveLocation("report.pdf")).resolves.toBe(
           "/home/alice/report.pdf",
         );
       });
 
-      check("resolves null when the user dismisses the dialog", async () => {
+      checkDialog("resolves null when the user dismisses the dialog", async () => {
         ctx.native.dialogResolves(null);
         await expect(ctx.subject.pickSaveLocation("report.pdf")).resolves.toBeNull();
       });
 
       // Pinned as-is (B7-4): a dialog failure is not a cancellation — it
       // propagates, so the caller can tell "no thanks" from "something broke".
-      check("rejects when the native dialog errors", async () => {
+      checkDialog("rejects when the native dialog errors", async () => {
         ctx.native.dialogFailsWith(new Error("no display"));
         await expect(ctx.subject.pickSaveLocation("report.pdf")).rejects.toThrow();
       });
     });
 
     describe("writeFile", () => {
-      check("writes the caller's bytes to the chosen path", async () => {
+      checkDialog("writes the caller's bytes to the chosen path", async () => {
         await ctx.subject.writeFile("/home/alice/report.pdf", bytes);
         expect(ctx.native.written()).toEqual([{ path: "/home/alice/report.pdf", data: bytes }]);
       });
 
-      check("writes each file to its own path, in call order", async () => {
+      checkDialog("writes each file to its own path, in call order", async () => {
         await ctx.subject.writeFile("/home/alice/a.bin", bytes);
         await ctx.subject.writeFile("/home/alice/b.bin", new Uint8Array([1]));
         expect(ctx.native.written().map((entry) => entry.path)).toEqual([

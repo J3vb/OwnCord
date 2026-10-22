@@ -9,6 +9,7 @@ import { createLogger } from "@lib/logger";
 const log = createLogger("window");
 
 export const windowControl: WindowControl = {
+  available: true,
   async isMaximized() {
     return (await import("@tauri-apps/api/window")).getCurrentWindow().isMaximized();
   },

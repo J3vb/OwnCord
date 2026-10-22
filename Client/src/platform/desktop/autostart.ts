@@ -7,6 +7,7 @@
 import type { Autostart } from "../contracts/updater";
 
 export const autostart: Autostart = {
+  available: true,
   async isEnabled(): Promise<boolean> {
     const { isEnabled } = await import("@tauri-apps/plugin-autostart");
     return isEnabled();

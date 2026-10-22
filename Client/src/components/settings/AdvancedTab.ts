@@ -42,15 +42,18 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
   appendToggleRows(section, toggles, signal);
 
   // Launch on login — OS-level state via the autostart plugin, not a stored pref.
-  section.appendChild(buildAutostartRow(signal));
+  // Not drawn where the platform has no autostart (the web build).
+  if (desktop.autostart.available) section.appendChild(buildAutostartRow(signal));
 
   // Close to tray / Start minimized — owned by the native host, which reads
-  // both before the webview exists.
-  for (const row of buildWindowPrefRows(signal)) section.appendChild(row);
+  // both before the webview exists. Not drawn where there is no host window.
+  if (desktop.window.available) {
+    for (const row of buildWindowPrefRows(signal)) section.appendChild(row);
+  }
 
   // ---- Debug section (dev builds only: its one row is DevTools) --------------
 
-  if (import.meta.env.DEV) {
+  if (import.meta.env.DEV && desktop.devTools.available) {
     section.appendChild(createElement("div", { class: "settings-separator" }));
     section.appendChild(
       createElement("div", { class: "settings-section-title" }, t("advanced.debug")),

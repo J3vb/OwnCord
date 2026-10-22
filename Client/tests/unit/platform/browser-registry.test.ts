@@ -120,8 +120,8 @@ describe("browser platform registry", () => {
     expect(await b.logFiles.readAll()).toEqual([]);
     expect(await b.logFiles.readNative()).toEqual([]);
     expect(await b.logFiles.openFolder()).toMatchObject({ ok: false });
-    expect(await b.fileSaver.pickSaveLocation("a.txt")).toBeNull();
-    await expect(b.fileSaver.writeFile("p", new Uint8Array())).rejects.toThrow();
+    // A save is a browser download (6.13d): no dialog, so the name stands in.
+    expect(await b.fileSaver.pickSaveLocation("a.txt")).toBe("a.txt");
     expect(await b.window.isMaximized()).toBe(false);
     expect(await b.window.availableMonitors()).toEqual([]);
     expect(await b.window.outerPosition()).toEqual({ x: 0, y: 0 });
@@ -130,12 +130,26 @@ describe("browser platform registry", () => {
     await expect(b.window.setFullscreen(true)).resolves.toBeUndefined();
     expect(await b.window.setZoom(1)).toBe(false);
     await expect(b.appProcess.reportReady()).resolves.toBeUndefined();
-    await expect(b.appProcess.relaunch()).resolves.toBeUndefined();
+    const reload = vi.fn();
+    vi.stubGlobal("location", { ...window.location, reload });
+    try {
+      // A page relaunches by reloading itself.
+      await expect(b.appProcess.relaunch()).resolves.toBeUndefined();
+      expect(reload).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
     await expect(b.devTools.open()).resolves.toBeUndefined();
     await expect(b.appMetadata.getVersion()).rejects.toThrow();
     await expect(b.urlOpener.open("https://example.invalid/")).rejects.toThrow();
     expect(await b.systemIdle.idleMs()).toBeNull();
     expect(() => b.trayStatus.onStatusChange(() => undefined)()).not.toThrow();
+
+    // The four contracts a Settings control sits on say they are unavailable.
+    expect(b.updater.available).toBe(false);
+    expect(b.autostart.available).toBe(false);
+    expect(b.window.available).toBe(false);
+    expect(b.devTools.available).toBe(false);
 
     // Updates, shortcuts, links.
     expect(await b.updater.checkForUpdate("https://s")).toMatchObject({ available: false });
@@ -269,7 +283,7 @@ describe("browser platform registry", () => {
   });
 });
 
-// 6.13c: transport, storage and identity are real browser adapters, used only
+// 6.13c/d: transport, storage, identity and notifications are real browser adapters, used only
 // in a secure context.
 describe("browser platform registry: secure-context guard", () => {
   afterEach(() => {
@@ -286,6 +300,7 @@ describe("browser platform registry: secure-context guard", () => {
       credentials: (await import("../../../src/platform/browser/credentials")).credentials,
       http: (await import("../../../src/platform/browser/http")).http,
       identity: (await import("../../../src/platform/browser/identity")).identity,
+      notifier: (await import("../../../src/platform/browser/notifications")).notifier,
       nativeProxies: (await import("../../../src/platform/browser/nativeProxies")).nativeProxies,
       pendingMessages: (await import("../../../src/platform/browser/pendingMessages"))
         .pendingMessages,
@@ -300,8 +315,6 @@ describe("browser platform registry: secure-context guard", () => {
     for (const [member, adapter] of Object.entries(adapters)) {
       expect(platform[member as keyof typeof adapters], member).toBe(adapter);
     }
-    // The members 6.13d replaces stay inert.
-    expect(await platform.notifier.permissionGranted()).toBe(false);
     expect(platform.serverScope).toEqual({ fixedHost: null });
   });
 
@@ -315,5 +328,7 @@ describe("browser platform registry: secure-context guard", () => {
       platform.socket.create().connect({ url: "wss://x", token: "t" }),
     ).rejects.toThrow();
     expect(await platform.credentials.save("h", "u", "t")).toBe(false);
+    // The notifier is inert too: the Notification API needs a secure context.
+    expect(await platform.notifier.permissionGranted()).toBe(false);
   });
 });

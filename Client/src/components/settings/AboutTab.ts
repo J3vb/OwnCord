@@ -12,6 +12,7 @@ import { createDisclosure } from "../../features/settings/status";
 import { buildUpdateCheckRow, installInProgressText } from "../../features/updates/UpdateCheckRow";
 import { subscribeAvailableUpdate } from "../../features/updates/availableUpdate";
 import type { AvailableUpdate } from "../../features/updates/availableUpdate";
+import { desktop } from "../../platform/desktop";
 import { downloadAndInstallUpdate, subscribeToUpdateInstall } from "@lib/updater";
 import type { UpdateInstallState } from "@lib/updater";
 import {
@@ -170,8 +171,12 @@ export function buildAboutTab(signal: AbortSignal): HTMLDivElement {
   section.appendChild(header);
 
   const versionRead = readAppVersion();
-  section.appendChild(buildUpdateCard(signal, versionRead));
-  section.appendChild(buildUpdateCheckRow(signal));
+  // The update offer and the check are the desktop updater's; a platform with
+  // none (the web build) does not draw them.
+  if (desktop.updater.available) {
+    section.appendChild(buildUpdateCard(signal, versionRead));
+    section.appendChild(buildUpdateCheckRow(signal));
+  }
 
   const notesTitle = createElement("h3", { class: "setting-group-title" });
   // Focusable so the keyboard can scroll long notes, as in the What's new window.

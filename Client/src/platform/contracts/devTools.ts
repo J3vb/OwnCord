@@ -5,5 +5,8 @@
  * moved it to `platform/desktop/devTools.ts`.
  */
 export interface DevTools {
+  /** Whether this platform can do this at all. False on the web build, where a
+   *  Settings control for it is not drawn rather than drawn to fail. */
+  readonly available: boolean;
   open(): Promise<void>;
 }

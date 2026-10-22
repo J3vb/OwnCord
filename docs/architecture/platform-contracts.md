@@ -84,6 +84,13 @@ Two consequences worth stating now, because they shape the interface design:
 - **A browser adapter is allowed to refuse.** Three capabilities below have no
   web equivalent. The contract must let an adapter say "unsupported" and let the
   app degrade, rather than force a fake implementation that fails at runtime.
+  The four contracts a Settings control sits on (`AppUpdater`, `Autostart`,
+  `WindowControl`, `DevTools`) carry a readonly `available` flag: desktop sets
+  it `true`, the browser `false`, and the control is not drawn rather than drawn
+  to fail (WP 6.13d). Elsewhere a browser adapter is a real Web-API adapter
+  (`notifications.ts`, `fileSave.ts`, `deepLinks.ts`, `logFiles.ts`), or refuses
+  in the contract's own terms (`externalContent.ts` answers every request
+  `unavailable` and fetches nothing).
 
 ## What exists today
 
