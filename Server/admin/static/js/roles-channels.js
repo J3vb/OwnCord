@@ -943,8 +943,8 @@ async function saveRole(id){
     color:noColor?'':document.getElementById('roleColor').value,
     permissions:collectRolePerms(),
     position:position,
-    hoist:document.getElementById('roleHoist').checked,
-    mentionable:document.getElementById('roleMentionable').checked,
+    hoist:/** @type {HTMLInputElement} */(document.getElementById('roleHoist')).checked,
+    mentionable:/** @type {HTMLInputElement} */(document.getElementById('roleMentionable')).checked,
   };
   try{
     if(id===null)await api('POST','/roles',body);

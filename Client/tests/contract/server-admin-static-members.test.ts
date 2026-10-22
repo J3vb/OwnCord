@@ -510,6 +510,26 @@ describe("Server/admin/static — Members (AO-4)", () => {
       expect(chips(env.doc.getElementById("modalInner")!)).toEqual(["Moderator", "Member"]);
     });
 
+    it("names the top role from the list row on a fresh load with no role list", async () => {
+      const env = await boot([], (p) => {
+        if (p.startsWith("/users?"))
+          return [
+            {
+              id: 4,
+              username: "member",
+              role_id: 7,
+              role_name: "Helper",
+              role_ids: [7, 4],
+              role_position: 50,
+            },
+          ];
+        return {};
+      });
+      await env.show({ id: 1, permissions: BAN_MEMBERS, role_position: 80, is_owner: false });
+      expect(env.bridge.state.roleList?.length ?? 0).toBe(0);
+      expect(chips(env.doc.querySelector("tbody tr td.col-role")!)).toEqual(["Helper", "Member"]);
+    });
+
     it("removes a chip with DELETE, and the last chip has no remove button", async () => {
       const calls: string[] = [];
       let held = [3, 4];

@@ -318,7 +318,7 @@ function roleChipHtml(rid,fallback,removeFor){
 }
 function memberChipsHtml(u,removeFor){
   const ids=memberRoleIds(u);
-  return'<span class="role-chips">'+ids.map((rid,i)=>roleChipHtml(rid,i===0&&ids.length===1?(u.role_name||u.RoleName):'',removeFor)).join('')+'</span>';
+  return'<span class="role-chips">'+ids.map(rid=>roleChipHtml(rid,rid===(u.role_id||u.RoleID)?(u.role_name||u.RoleName):'',removeFor)).join('')+'</span>';
 }
 
 /* Manage: who the member is, and the role picker when the caller may change
@@ -363,8 +363,12 @@ async function openEditUser(uid,uname,currentRole){
 /* Add or remove one role. The server is the authority (MANAGE_ROLES, outrank,
    below-own-rank, 409 LAST_ROLE): its message is shown as is on a refusal. */
 async function changeMemberRole(uid,rid,add){
+  /* Lock the dialog's buttons while the request is in flight so a second
+     click cannot send it twice; a refusal re-enables them. */
+  const btns=/** @type {HTMLButtonElement[]} */([...document.querySelectorAll('#modalInner [data-action="addMemberRole"],#modalInner [data-action="removeMemberRole"]')]);
+  btns.forEach(b=>{b.disabled=true});
   try{await api(add?'PUT':'DELETE','/users/'+uid+'/roles/'+rid)}
-  catch(e){showToast(e.message,'error');return}
+  catch(e){btns.forEach(b=>{b.disabled=false});showToast(e.message,'error');return}
   const u=membersRows[uid];
   if(u){
     const cur=memberRoleIds(u).filter(x=>x!==rid);
@@ -372,13 +376,13 @@ async function changeMemberRole(uid,rid,add){
       const pos=x=>{const r=roleFromCache(x);return r?r.position:-1};
       cur.push(rid);cur.sort((a,b)=>pos(b)-pos(a));
     }
-    u.role_ids=cur;u.role_id=cur[0];
+    u.role_ids=cur;u.role_id=cur[0];u.role_name=(roleFromCache(cur[0])||{}).name||'';
   }
   showToast(add?'Role added':'Role removed');
   openEditUser(uid,u?u.username:'',u?u.role_id:rid);
 }
 function addMemberRole(uid){
-  const sel=document.getElementById('editRoleSelect');if(!sel||!sel.value)return;
+  const sel=/** @type {HTMLSelectElement|null} */(document.getElementById('editRoleSelect'));if(!sel||!sel.value)return;
   return changeMemberRole(uid,parseInt(sel.value,10),true);
 }
 function removeMemberRole(uid,rid){return changeMemberRole(uid,rid,false)}
