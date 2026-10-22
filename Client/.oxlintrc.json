@@ -11,9 +11,9 @@
       "warn",
       {
         "allowAfterThis": true,
-        "allow": ["__owncord"]
+        "allow": ["__owncord", "__OWNCORD_WEB__"]
       }
     ]
   },
-  "ignorePatterns": ["dist", "node_modules", "public"]
+  "ignorePatterns": ["dist", "dist-web", "node_modules", "public"]
 }

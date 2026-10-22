@@ -96,6 +96,7 @@ export const shards = {
   ], // ~513 mutants (estimated); 664 lines + virtualRange.ts and memberModel.ts (new); ~1240 lines now
   "audio-media-3": [
     "src/lib/noise-suppression.ts",
+    "src/lib/publicAssets.ts",
     "src/lib/deviceManager.ts",
     "src/lib/ptt.ts",
     "src/lib/voiceTokenManager.ts",
