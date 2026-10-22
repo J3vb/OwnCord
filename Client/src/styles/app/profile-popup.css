@@ -25,6 +25,7 @@
   /* A long "about me" scrolls inside the card instead of growing it off the
      bottom of the screen. */
   max-height: calc(100vh - 16px);
+  max-height: calc(100dvh - 16px);
   opacity: 0;
   transform: scale(0.95);
   transform-origin: top left;

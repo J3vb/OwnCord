@@ -4,6 +4,7 @@
 .connect-page {
   display: flex;
   height: 100vh;
+  height: 100dvh;
   position: relative;
   overflow: hidden;
 }

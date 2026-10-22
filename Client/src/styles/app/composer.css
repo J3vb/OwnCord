@@ -362,3 +362,10 @@
   font-size: 20px;
   overflow-wrap: anywhere;
 }
+
+@media (pointer: coarse) {
+  .input-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}

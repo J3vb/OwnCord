@@ -508,7 +508,10 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
         options.onScreenshareToggle,
       ),
     };
-    appendChildren(bar, controls.mute!, controls.deafen!, controls.camera!, controls.share!);
+    appendChildren(bar, controls.mute!, controls.deafen!, controls.camera!);
+    if (!(__OWNCORD_WEB__ && typeof navigator.mediaDevices?.getDisplayMedia !== "function")) {
+      bar.appendChild(controls.share!);
+    }
     if (!compact)
       bar.appendChild(createElement("span", { class: "dcp-sep", "aria-hidden": "true" }));
     bar.appendChild(

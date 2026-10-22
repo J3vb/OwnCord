@@ -3,6 +3,9 @@
   display: flex;
   flex: 1;
   min-height: 0;
+  /* Notch and home-indicator insets; 0 on desktop. */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
 }
 
 /* ── SVG Icon base ── */

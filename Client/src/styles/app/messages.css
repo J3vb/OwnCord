@@ -2083,3 +2083,10 @@ ul.md-list-nested {
   font-size: inherit;
   cursor: pointer;
 }
+
+@media (pointer: coarse) {
+  .msg-actions-bar button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
