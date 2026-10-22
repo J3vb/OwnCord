@@ -179,6 +179,9 @@ func accessorOK(ev Event) bool {
 	case classActivity:
 		_, ok := ev.(ActivityEvent)
 		return ok
+	case classThreadNote:
+		_, ok := ev.(ThreadNoteEvent)
+		return ok
 	case classInvalid:
 		return false
 	}

@@ -22,6 +22,7 @@ func fullV2Registry() *HandlerRegistry {
 	r.RegisterV2(MsgTypeChatCommand, handleChatCommandV2, PluginDeps{})
 	registerVoiceControlsV2(r, VoiceDeps{})
 	registerCallHandlers(r, CallDeps{})
+	registerThreadHandlers(r, ThreadDeps{})
 	return r
 }
 
@@ -144,6 +145,10 @@ func TestHandlerRegistry_AllExpectedTypesRegistered(t *testing.T) {
 		"voice_token_refresh",
 		"call_ring",
 		"call_decline",
+		"thread_create",
+		"thread_update",
+		"thread_delete",
+		"thread_focus",
 	}
 
 	registered := r.RegisteredV2Types()
@@ -236,6 +241,10 @@ func TestAllV2Types_SmokeDispatch(t *testing.T) {
 		MsgTypeVoiceTokenRefresh: VoiceTokenRefreshCmd{userID: 1},
 		MsgTypeCallRing:          CallRingCmd{userID: 1, ChannelID: 1},
 		MsgTypeCallDecline:       CallDeclineCmd{userID: 1, ChannelID: 1},
+		MsgTypeThreadCreate:      ThreadCreateCmd{userID: 1, ChannelID: 1, MessageID: 1, Name: "t"},
+		MsgTypeThreadUpdate:      ThreadUpdateCmd{userID: 1, ThreadID: 1},
+		MsgTypeThreadDelete:      ThreadDeleteCmd{userID: 1, ThreadID: 1},
+		MsgTypeThreadFocus:       ThreadFocusCmd{userID: 1, ThreadID: 1},
 	}
 
 	for _, typ := range r.RegisteredV2Types() {

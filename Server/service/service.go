@@ -110,6 +110,12 @@ type Services struct {
 	// CallLog writes the call log rows of DM calls from voice presence (WP
 	// 3B-9). The hub installs its sink; the composition root starts it.
 	CallLog *CallLogService
+	// Threads owns thread create, update, delete and listing (WP 6.9c). The
+	// archiver and the hub share it.
+	Threads *ThreadService
+	// ThreadArchiver archives idle threads (WP 6.9c). The composition root
+	// installs its notifier and runs it.
+	ThreadArchiver *ThreadArchiver
 }
 
 // New creates all domain services wired together.
@@ -167,6 +173,8 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 		Channels:        channels,
 		StatusExpiry:    statusExpiry,
 		PollExpiry:      pollExpiry,
+		Threads:         NewThreadService(st, permSvc, limiter),
+		ThreadArchiver:  NewThreadArchiver(st),
 		Permissions:     permSvc,
 		Users:           NewUserService(st),
 		DMs:             dms,

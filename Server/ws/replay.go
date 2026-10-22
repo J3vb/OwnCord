@@ -2,7 +2,6 @@ package ws
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"sync/atomic"
 	"time"
@@ -248,35 +247,6 @@ func (h *Hub) reconnectPrecheck(
 		return nil, nil, false
 	}
 	return allowedChannelIDs, nsfwReadableChannelIDs, true
-}
-
-// computeReadableChannels narrows allowed (the visible set) to B5-7's
-// readable set: every visible channel that is either not labelled, or
-// labelled and acknowledged by user. Bounded by how many labelled channels
-// sit in the visible set (typically zero), not by the full channel list.
-func (h *Hub) computeReadableChannels(ctx context.Context, database VisibilityReader, user *db.User, allowed map[int64]bool) (map[int64]bool, error) {
-	channels, err := database.ListChannels(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("computeReadableChannels ListChannels: %w", err)
-	}
-	readable := make(map[int64]bool, len(allowed))
-	for id := range allowed {
-		readable[id] = true
-	}
-	for i := range channels {
-		ch := &channels[i]
-		if !ch.NSFW || !allowed[ch.ID] {
-			continue
-		}
-		ok, ackErr := database.HasNSFWAcknowledgement(ctx, user.ID, ch.ID)
-		if ackErr != nil {
-			return nil, fmt.Errorf("computeReadableChannels HasNSFWAcknowledgement: %w", ackErr)
-		}
-		if !ok {
-			delete(readable, ch.ID)
-		}
-	}
-	return readable, nil
 }
 
 // reconnectSelectReplay picks the tier that serves this resume — the ring

@@ -24,3 +24,7 @@ func (c *Channel) AuthorityID() int64 {
 	}
 	return c.ID
 }
+
+// IsThreadParentType reports whether a channel of type t can hold threads. It
+// is the one place that answers it: forums will widen it later.
+func IsThreadParentType(t string) bool { return t == "text" }

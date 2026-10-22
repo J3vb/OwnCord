@@ -25,6 +25,10 @@ export const ServerMessageType = {
   POLL_CREATE_OK: "poll_create_ok",
   POLL_VOTE_OK: "poll_vote_ok",
   POLL_END_OK: "poll_end_ok",
+  THREAD_CREATE_OK: "thread_create_ok",
+  THREAD_UPDATE_OK: "thread_update_ok",
+  THREAD_CHANGED: "thread_changed", // WP 6.9c: a thread was created, renamed, archived, locked or took a message; absolute ThreadInfo, sequenced on the parent channel, at most one per thread per 2 s
+  THREAD_DELETED: "thread_deleted", // WP 6.9c: a thread was deleted; {channel_id (parent), thread_id}, sequenced on the parent channel
   CHAT_EDITED: "chat_edited",
   CHAT_DELETED: "chat_deleted",
   CHAT_PINNED: "chat_pinned", // a message was pinned or unpinned in a channel the recipient can read
@@ -87,6 +91,10 @@ export const ClientMessageType = {
   POLL_CREATE: "poll_create", // post a poll as a message (WP 6.9b)
   POLL_VOTE: "poll_vote", // set the sender's whole selection on a poll, [] removes the vote (WP 6.9b)
   POLL_END: "poll_end", // end a poll now: its author, or anyone who may delete the message (WP 6.9b)
+  THREAD_CREATE: "thread_create", // start a thread on a text-channel message (WP 6.9c)
+  THREAD_UPDATE: "thread_update",
+  THREAD_DELETE: "thread_delete",
+  THREAD_FOCUS: "thread_focus", // the second subscription slot: the thread open beside the focused channel, or null to close it (WP 6.9c)
   CHAT_EDIT: "chat_edit",
   CHAT_DELETE: "chat_delete",
   REACTION_ADD: "reaction_add",

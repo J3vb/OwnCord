@@ -338,6 +338,14 @@ func (s *ChannelService) HandleChannelFocus(ctx context.Context, userID, channel
 	if ch.Type == db.ForumTypeName {
 		return ch, nil
 	}
+	s.markFocusedRead(ctx, userID, channelID)
+	slog.Debug("channel_focus", "user_id", userID, "channel_id", channelID)
+	return ch, nil
+}
+
+// markFocusedRead marks channelID read at its latest message for userID, the
+// write half of channel_focus and thread_focus.
+func (s *ChannelService) markFocusedRead(ctx context.Context, userID, channelID int64) {
 	// Mark channel as read. latestID == 0 (no undeleted messages) still
 	// writes: the upsert is what zeroes mention_count, and a last_read of 0 is
 	// correct then — any future message id is larger, so unread counts hold.
@@ -354,7 +362,7 @@ func (s *ChannelService) HandleChannelFocus(ctx context.Context, userID, channel
 		if rsErr == nil && found && lastRead == latestID && mentions == 0 {
 			slog.Debug("channel_focus: read state already current, skipping write",
 				"user_id", userID, "channel_id", channelID)
-			return ch, nil
+			return
 		}
 	}
 	// The write recomputes the watermark itself rather than taking latestID:
@@ -372,9 +380,6 @@ func (s *ChannelService) HandleChannelFocus(ctx context.Context, userID, channel
 		slog.Warn("channel_focus: read-state write failed",
 			"user_id", userID, "channel_id", channelID, "err", wErr)
 	}
-
-	slog.Debug("channel_focus", "user_id", userID, "channel_id", channelID)
-	return ch, nil
 }
 
 // admitReadState is the gate every read-state operation shares (channel_focus,
@@ -389,9 +394,9 @@ func admitReadState(ctx context.Context, st Store, perms *PermissionService, use
 		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
 	if ch.IsThread() {
-		// A thread is never a socket's focused channel (6.9c): a parent's
-		// visibility refresh revokes the parent topic only, so a thread
-		// topic held here would outlive the parent's revocation.
+		// A thread is never a socket's focused channel (6.9c): it rides the
+		// second slot (thread_focus, AdmitThreadFocus), which a parent's
+		// visibility refresh also revokes.
 		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
 	sub, subErr := channelSubject(ctx, st, perms, userID, ch, false)

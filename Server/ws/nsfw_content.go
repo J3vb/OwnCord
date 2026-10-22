@@ -100,6 +100,7 @@ var contentBearingKinds = map[string]bool{
 	MsgTypeReactionUpdate:  true,
 	MsgTypePollUpdate:      true, // names a message and carries its tallies, as reaction_update does
 	MsgTypePluginBroadcast: true, // plugin-authored content posted into a channel
+	MsgTypeThreadChanged:   true, // a thread's name, discloses what the parent's unacknowledged members may not read (WP 6.9c)
 
 	// ── metadata: no message body ──
 	MsgTypeAuthOK:              false,
@@ -111,6 +112,9 @@ var contentBearingKinds = map[string]bool{
 	MsgTypePollVoteOK:          false, // direct to the sender; ids only
 	MsgTypePollEndOK:           false, // direct to the sender; ids only
 	MsgTypeChatDeleted:         false, // ids only
+	MsgTypeThreadCreateOK:      false, // direct to the sender, who just named the thread
+	MsgTypeThreadUpdateOK:      false, // direct to the sender; the thread id only
+	MsgTypeThreadDeleted:       false, // ids only
 	MsgTypeChatBulkDeleted:     false, // ids only
 	MsgTypeChatPinned:          false, // ids + flag only, no message body
 	MsgTypeTyping:              false,
