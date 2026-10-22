@@ -375,18 +375,18 @@ func TestThreadList_PaginationAndGate(t *testing.T) {
 	if _, err := f.threads.Update(bg(), UpdateThreadParams{UserID: thrMod, ThreadID: ids[0], Archived: &yes}); err != nil {
 		t.Fatal(err)
 	}
-	page, next, more, err := f.threads.List(bg(), thrOther, thrParent, false, ThreadCursor{}, 1)
+	page, next, more, err := f.threads.List(bg(), thrOther, thrParent, ThreadListParams{}, ThreadCursor{}, 1)
 	if err != nil || !more || len(page) != 1 || page[0].ID != ids[2] {
 		t.Fatalf("page 1 = %+v more=%v err=%v, want newest %d", page, more, err, ids[2])
 	}
 	// Activity in the cursor thread between pages must not move the page: the
 	// cursor is a value, not a thread to look up again.
 	setActivity(t, f, ids[2], base.Add(-24*time.Hour))
-	page, _, _, err = f.threads.List(bg(), thrOther, thrParent, false, next, 1)
+	page, _, _, err = f.threads.List(bg(), thrOther, thrParent, ThreadListParams{}, next, 1)
 	if err != nil || len(page) != 1 || page[0].ID != ids[1] {
 		t.Fatalf("page 2 = %+v err=%v, want %d", page, err, ids[1])
 	}
-	arch, _, _, err := f.threads.List(bg(), thrOther, thrParent, true, ThreadCursor{}, 10)
+	arch, _, _, err := f.threads.List(bg(), thrOther, thrParent, ThreadListParams{Archived: true}, ThreadCursor{}, 10)
 	if err != nil || len(arch) != 1 || arch[0].ID != ids[0] {
 		t.Fatalf("archived = %+v err=%v", arch, err)
 	}
@@ -394,11 +394,11 @@ func TestThreadList_PaginationAndGate(t *testing.T) {
 	// The parent's read gate applies.
 	seedChannelOverride(t, f.database, permissions.MemberRoleID, thrParent, 0, permissions.ReadMessages)
 	f.perms.InvalidateAll()
-	if _, _, _, err := f.threads.List(bg(), thrOther, thrParent, false, ThreadCursor{}, 10); err == nil {
+	if _, _, _, err := f.threads.List(bg(), thrOther, thrParent, ThreadListParams{}, ThreadCursor{}, 10); err == nil {
 		t.Fatal("a member who cannot read the parent listed its threads")
 	}
 	// A thread id is not a parent.
-	if _, _, _, err := f.threads.List(bg(), thrMod, ids[1], false, ThreadCursor{}, 10); !errors.Is(err, ErrNotFound) {
+	if _, _, _, err := f.threads.List(bg(), thrMod, ids[1], ThreadListParams{}, ThreadCursor{}, 10); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("listing a thread's threads err = %v", err)
 	}
 }

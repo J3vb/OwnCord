@@ -25,7 +25,7 @@ func (s failingThreadStore) CreateThread(context.Context, db.NewThread) (*db.Thr
 func (s failingThreadStore) GetThread(context.Context, int64) (*db.ThreadInfo, error) {
 	return nil, s.err
 }
-func (s failingThreadStore) ListThreads(context.Context, int64, bool, db.ThreadCursor, int) ([]db.ThreadListRow, error) {
+func (s failingThreadStore) ListThreadsBy(context.Context, int64, bool, db.ThreadListOptions, db.ThreadCursor, int) ([]db.ThreadListRow, error) {
 	return nil, s.err
 }
 func (s failingThreadStore) UpdateThread(context.Context, int64, db.ThreadPatch, bool) (*db.ThreadInfo, error) {
@@ -56,7 +56,7 @@ func TestThreadService_WithoutThreadStorageAnswersInternal(t *testing.T) {
 		"delete": func() error { _, err := svc.Delete(bg(), thrMod, 1); return err },
 		"get":    func() error { _, err := svc.Get(bg(), 1); return err },
 		"list": func() error {
-			_, _, _, err := svc.List(bg(), thrOwner, thrParent, false, ThreadCursor{}, 5)
+			_, _, _, err := svc.List(bg(), thrOwner, thrParent, ThreadListParams{}, ThreadCursor{}, 5)
 			return err
 		},
 	}
@@ -87,7 +87,7 @@ func TestThreadService_StoreFailuresAreInternalNotLeaked(t *testing.T) {
 		"delete": func() error { _, err := svc.Delete(bg(), thrMod, 1); return err },
 		"get":    func() error { _, err := svc.Get(bg(), 1); return err },
 		"list": func() error {
-			_, _, _, err := svc.List(bg(), thrOwner, thrParent, false, ThreadCursor{}, 5)
+			_, _, _, err := svc.List(bg(), thrOwner, thrParent, ThreadListParams{}, ThreadCursor{}, 5)
 			return err
 		},
 	}
@@ -253,22 +253,22 @@ func TestThreadList_LimitsAndGates(t *testing.T) {
 	}
 	// A zero or negative limit means the default; an oversized one is capped.
 	for _, limit := range []int{0, -5, 100000} {
-		page, _, more, err := f.threads.List(bg(), thrOther, thrParent, false, ThreadCursor{}, limit)
+		page, _, more, err := f.threads.List(bg(), thrOther, thrParent, ThreadListParams{}, ThreadCursor{}, limit)
 		if err != nil || len(page) != 3 || more {
 			t.Errorf("limit %d = %d threads, more=%v, err=%v, want all 3", limit, len(page), more, err)
 		}
 	}
-	page, next, more, err := f.threads.List(bg(), thrOther, thrParent, false, ThreadCursor{}, 3)
+	page, next, more, err := f.threads.List(bg(), thrOther, thrParent, ThreadListParams{}, ThreadCursor{}, 3)
 	if err != nil || more || len(page) != 3 || next.ID != page[2].ID {
 		t.Errorf("exact page = %d, next %+v, more %v, err %v", len(page), next, more, err)
 	}
-	if _, _, _, err := f.threads.List(bg(), thrOther, 0, false, ThreadCursor{}, 5); !errors.Is(err, ErrBadRequest) {
+	if _, _, _, err := f.threads.List(bg(), thrOther, 0, ThreadListParams{}, ThreadCursor{}, 5); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("parent 0 = %v, want ErrBadRequest", err)
 	}
-	if _, _, _, err := f.threads.List(bg(), thrOther, 987654, false, ThreadCursor{}, 5); !errors.Is(err, ErrNotFound) {
+	if _, _, _, err := f.threads.List(bg(), thrOther, 987654, ThreadListParams{}, ThreadCursor{}, 5); !errors.Is(err, ErrNotFound) {
 		t.Errorf("unknown parent = %v, want ErrNotFound", err)
 	}
-	empty, next, more, err := f.threads.List(bg(), thrOther, thrParent, true, ThreadCursor{}, 5)
+	empty, next, more, err := f.threads.List(bg(), thrOther, thrParent, ThreadListParams{Archived: true}, ThreadCursor{}, 5)
 	if err != nil || len(empty) != 0 || more || next != (ThreadCursor{}) {
 		t.Errorf("no archived threads = %+v %+v %v %v", empty, next, more, err)
 	}
@@ -508,5 +508,26 @@ func TestThreadArchiver_SleepOrDoneReturnsOnCancel(t *testing.T) {
 	a.sleepOrDone(bg(), 5*time.Millisecond)
 	if time.Since(start) < 4*time.Millisecond {
 		t.Error("sleepOrDone returned before its delay")
+	}
+}
+
+func TestThreadCursorFor_CreatedSortIsIDOnly(t *testing.T) {
+	c, err := ParseThreadCursorFor(ThreadSortCreated, "42")
+	if err != nil || c.ID != 42 || c.Activity != "" {
+		t.Fatalf("parse created = %+v, %v", c, err)
+	}
+	if got := FormatThreadCursorFor(ThreadSortCreated, c); got != "42" {
+		t.Errorf("format created = %q", got)
+	}
+	if c, err := ParseThreadCursorFor(ThreadSortCreated, ""); err != nil || c.ID != 0 {
+		t.Errorf("empty created cursor = %+v, %v", c, err)
+	}
+	for _, bad := range []string{"0", "-1", "x", "2026-01-01T00:00:00Z_5"} {
+		if _, err := ParseThreadCursorFor(ThreadSortCreated, bad); !errors.Is(err, ErrBadRequest) {
+			t.Errorf("created cursor %q: err = %v", bad, err)
+		}
+	}
+	if _, err := ParseThreadCursorFor(ThreadSortActivity, "42"); !errors.Is(err, ErrBadRequest) {
+		t.Errorf("a created cursor must not parse under activity: %v", err)
 	}
 }

@@ -1467,7 +1467,7 @@ Returns `{ "messages": [...], "has_more": false }`, most recently pinned first (
 
 ### GET /api/v1/channels/{id}/threads
 
-List the threads of a text channel, newest activity first.
+List the threads of a text channel or the posts of a forum, newest activity first by default. A forum's items carry the `post` block (tags and opening message preview).
 
 **Auth:** Required
 **Permission:** `READ_MESSAGES` on the channel
@@ -1477,10 +1477,12 @@ List the threads of a text channel, newest activity first.
 | `archived` | `0` (default) for open threads, `1` for archived ones                         |
 | `before`   | The previous page's `next_before` (an opaque cursor); omit for the first page |
 | `limit`    | Page size, default 50, at most 100                                            |
+| `sort`     | `activity` (default) or `created`, both newest first                          |
+| `tag`      | A forum tag id, repeatable up to 5 times, any-of; forums only                 |
 
 #### Response 200 OK
 
-`{ "threads": [ThreadInfo, ...], "has_more": bool, "next_before": string }`; `next_before` is the cursor for the following page and is `""` when `has_more` is false. The cursor carries the last row's activity time and id, so activity in that thread between requests does not shift the paging; see [Threads](protocol.md#threads) for `ThreadInfo`. `400 BAD_REQUEST` for a malformed query, `403 FORBIDDEN` without read, `404 NOT_FOUND` for an unknown channel or a thread id.
+`{ "threads": [ThreadInfo, ...], "has_more": bool, "next_before": string }`; `next_before` is the cursor for the following page and is `""` when `has_more` is false. The cursor carries the last row's activity time and id, so activity in that thread between requests does not shift the paging; see [Threads](protocol.md#threads) for `ThreadInfo`. Order is `thread_last_activity_at DESC, id DESC` (activity has one-second resolution, so `id` breaks ties) or `id DESC` for `sort=created`; the cursor is the sort's own, so a `next_before` from one sort is refused under the other. A post that gains a reply while a viewer pages moves to the top: rows already past the cursor are never repeated, but a post that was still below it jumps above the cursor and is not returned by later pages, so a client merges live `thread_changed` frames into the list and dedupes by id. A forum parent uses the same `limit` bounds as a text channel. `400 BAD_REQUEST` for a malformed query, an unknown `sort`, a `tag` that is not a tag of this forum, more than 5 tags, a `tag` on a non-forum channel, or a cursor from the other sort, `403 FORBIDDEN` without read, `404 NOT_FOUND` for an unknown channel or a thread id.
 
 ---
 

@@ -218,40 +218,6 @@ type ThreadListRow struct {
 // Cursor is the position just after this row.
 func (r ThreadListRow) Cursor() ThreadCursor { return ThreadCursor{Activity: r.Activity, ID: r.ID} }
 
-// ListThreads returns a parent's threads with the given archived state, newest
-// activity first, continuing after cursor. The cursor is a value, not a thread
-// id to look up, so activity in the cursor thread does not move the page.
-func (d *DB) ListThreads(ctx context.Context, parentID int64, archived bool, after ThreadCursor, limit int) ([]ThreadListRow, error) {
-	rows, err := d.q.ListThreadInfosByParent(ctx, dbgen.ListThreadInfosByParentParams{
-		ParentID: &parentID, Archived: b2i64(archived), BeforeID: after.ID,
-		BeforeActivity: after.Activity, RowLimit: int64(limit),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("ListThreads: %w", err)
-	}
-	out := make([]ThreadListRow, 0, len(rows))
-	for i := range rows {
-		r := rows[i]
-		out = append(out, ThreadListRow{
-			ThreadInfo: threadFromFields(threadFields{
-				ID: r.ID, ParentID: r.ParentID, Name: r.Name, ThreadOwnerID: r.ThreadOwnerID,
-				ThreadStarterMessageID: r.ThreadStarterMessageID, ThreadArchived: r.ThreadArchived,
-				ThreadLocked: r.ThreadLocked, ThreadAutoArchiveMinutes: r.ThreadAutoArchiveMinutes,
-				MessageCount: r.MessageCount, LastMessageAt: r.LastMessageAt, CreatedAt: r.CreatedAt,
-			}),
-			Activity: r.ActivityAt,
-		})
-	}
-	ts := make([]*ThreadInfo, len(out))
-	for i := range out {
-		ts[i] = &out[i].ThreadInfo
-	}
-	if err := attachPosts(ctx, d.q, ts); err != nil {
-		return nil, fmt.Errorf("ListThreads: %w", err)
-	}
-	return out, nil
-}
-
 // ThreadPatch is the set of thread fields one update changes; nil leaves a
 // field as it is.
 type ThreadPatch struct {
