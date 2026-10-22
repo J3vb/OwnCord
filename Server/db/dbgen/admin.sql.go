@@ -219,7 +219,9 @@ FROM users u
 LEFT JOIN roles r ON r.id = u.role_id
 WHERE u.registration_status = 'active'
   AND instr(lower(u.username), lower(?1)) > 0
-  AND (CAST(?2 AS INTEGER) = 0 OR u.role_id = ?2)
+  AND (CAST(?2 AS INTEGER) = 0
+       OR EXISTS (SELECT 1 FROM user_roles ur
+                  WHERE ur.user_id = u.id AND ur.role_id = ?2))
   AND (CAST(?3 AS INTEGER) = 0
        OR (u.banned != 0 AND (u.ban_expires IS NULL
            OR replace(u.ban_expires, ' ', 'T') > strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))))
@@ -252,8 +254,9 @@ type ListAllUsersRow struct {
 
 // The admin Members page. query is a case-insensitive username substring
 // (instr, so no wildcard escaping; empty matches everyone). role_id 0 means any
-// role. banned_only 1 keeps only effective bans: the negation of
-// db.notBannedClause, so a lapsed temporary ban is not listed as banned.
+// role; otherwise it keeps every member who HOLDS that role (user_roles), not
+// only those whose top role it is. banned_only 1 keeps only effective bans:
+// the negation of db.notBannedClause, so a lapsed temporary ban is not listed as banned.
 func (q *Queries) ListAllUsers(ctx context.Context, arg ListAllUsersParams) ([]ListAllUsersRow, error) {
 	rows, err := q.db.QueryContext(ctx, listAllUsers,
 		arg.Query,

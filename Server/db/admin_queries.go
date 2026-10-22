@@ -95,6 +95,20 @@ func (d *DB) ListAllUsers(ctx context.Context, f UserListFilter, limit, offset i
 	if err != nil {
 		return nil, fmt.Errorf("ListAllUsers: %w", err)
 	}
+	userIDs := make([]int64, len(rows))
+	for i := range rows {
+		userIDs[i] = rows[i].ID
+	}
+	byUser := make(map[int64][]int64, len(rows))
+	if len(userIDs) > 0 {
+		held, err := d.q.ListUserRoleIDsForUsers(ctx, userIDs)
+		if err != nil {
+			return nil, fmt.Errorf("ListAllUsers role ids: %w", err)
+		}
+		for _, h := range held {
+			byUser[h.UserID] = append(byUser[h.UserID], h.RoleID)
+		}
+	}
 	result := make([]UserWithRole, 0, len(rows))
 	for i := range rows {
 		r := &rows[i]
@@ -111,6 +125,7 @@ func (d *DB) ListAllUsers(ctx context.Context, f UserListFilter, limit, offset i
 			BanExpires:   r.BanExpires,
 			RoleName:     r.RoleName,
 			RolePosition: int(r.RolePosition),
+			RoleIDs:      memberRoleIDs(byUser[r.ID]),
 		})
 	}
 	return result, nil

@@ -912,6 +912,9 @@ function openRoleModal(id){
       +'<input class="form-input" id="rolePos" type="number" min="0" max="'+Math.max(0,myPosition()-1)+'" value="'+position+'" aria-describedby="rolePosHint rolePlacement" data-input-action="renderRolePlacement">'
       +'<div class="rc-hint" id="rolePosHint">Higher numbers rank higher. It must be below your own rank of '+myPosition()+'.</div>'
       +'<div id="rolePlacement" class="rank-placement" aria-live="polite"></div></div>'
+    +'<div class="form-group"><div class="form-label">Display</div>'
+      +'<label class="perm-item" for="roleHoist"><input type="checkbox" id="roleHoist" '+(role&&role.hoist?'checked':'')+'><span class="perm-text"><span class="perm-name">Show members separately</span><span class="perm-desc">List members with this as their top role in their own group in the member list.</span></span></label>'
+      +'<label class="perm-item" for="roleMentionable"><input type="checkbox" id="roleMentionable" '+(role&&role.mentionable?'checked':'')+'><span class="perm-text"><span class="perm-name">Allow anyone to @mention this role</span><span class="perm-desc">Without it, only members who can mention everyone can ping this role.</span></span></label></div>'
     +'<div class="form-group"><div class="form-label">Permissions</div>'+grid+'</div>'
     +'</div>'
     +'<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-accent" data-action="saveRole" data-args="'+actArgs(role?role.id:null)+'">'+(role?'Save':'Create')+'</button></div>');
@@ -940,6 +943,8 @@ async function saveRole(id){
     color:noColor?'':document.getElementById('roleColor').value,
     permissions:collectRolePerms(),
     position:position,
+    hoist:document.getElementById('roleHoist').checked,
+    mentionable:document.getElementById('roleMentionable').checked,
   };
   try{
     if(id===null)await api('POST','/roles',body);

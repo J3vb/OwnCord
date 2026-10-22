@@ -63,6 +63,14 @@ FROM user_roles ur
 JOIN roles r ON r.id = ur.role_id
 ORDER BY ur.user_id ASC, r.position DESC, r.id ASC;
 
+-- name: ListUserRoleIDsForUsers :many
+-- Held role ids of the given members, top role first within a member.
+SELECT ur.user_id, ur.role_id
+FROM user_roles ur
+JOIN roles r ON r.id = ur.role_id
+WHERE ur.user_id IN (sqlc.slice('user_ids'))
+ORDER BY ur.user_id ASC, r.position DESC, r.id ASC;
+
 -- name: SetRolePosition :exec
 UPDATE roles SET position = ? WHERE id = ?;
 

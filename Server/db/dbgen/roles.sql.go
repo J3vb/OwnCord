@@ -7,6 +7,7 @@ package dbgen
 
 import (
 	"context"
+	"strings"
 )
 
 const addUserRole = `-- name: AddUserRole :exec
@@ -403,6 +404,48 @@ func (q *Queries) ListUserIDsByRole(ctx context.Context, roleID int64) ([]int64,
 			return nil, err
 		}
 		items = append(items, user_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUserRoleIDsForUsers = `-- name: ListUserRoleIDsForUsers :many
+SELECT ur.user_id, ur.role_id
+FROM user_roles ur
+JOIN roles r ON r.id = ur.role_id
+WHERE ur.user_id IN (/*SLICE:user_ids*/?)
+ORDER BY ur.user_id ASC, r.position DESC, r.id ASC
+`
+
+// Held role ids of the given members, top role first within a member.
+func (q *Queries) ListUserRoleIDsForUsers(ctx context.Context, userIds []int64) ([]UserRole, error) {
+	query := listUserRoleIDsForUsers
+	var queryParams []interface{}
+	if len(userIds) > 0 {
+		for _, v := range userIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:user_ids*/?", strings.Repeat(",?", len(userIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:user_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []UserRole{}
+	for rows.Next() {
+		var i UserRole
+		if err := rows.Scan(&i.UserID, &i.RoleID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err

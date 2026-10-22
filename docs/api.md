@@ -4328,7 +4328,7 @@ the query, so they narrow every page, not just the one returned.
 **Auth:** Admin perimeter
 **Query params:** `limit` (default 50, min 1, max 500), `offset` (default 0),
 `q` (case-insensitive username substring, at most 64 characters; longer is
-`400`), `role_id` (one role; omitted or `0` means any), `banned=1` (only
+`400`), `role_id` (members who hold this role; omitted or `0` means any), `banned=1` (only
 effective bans: a lapsed temporary ban is not listed)
 
 #### Response 200 OK
@@ -4343,6 +4343,7 @@ Array of:
 | `role_id`       | int     |                                                                                                                                                                                                 |
 | `role_name`     | string  |                                                                                                                                                                                                 |
 | `role_position` | int     | the role's hierarchy position; the server refuses role changes and moderation on a member whose position is at or above the caller's (`/me` `role_position`), and the panel hides those actions |
+| `role_ids`      | int[]   | every role the member holds, highest-ranked first (`role_id` is the first); the `role_id` query filter keeps members who hold that role, not only those whose top role it is                    |
 | `status`        | string  | presence status                                                                                                                                                                                 |
 | `created_at`    | string  |                                                                                                                                                                                                 |
 | `last_seen`     | string? | omitted when never seen                                                                                                                                                                         |

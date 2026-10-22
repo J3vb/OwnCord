@@ -145,7 +145,63 @@ describe("Server/admin/static — Roles and Channels (AO-5)", () => {
     expect(calls[0]).toEqual({
       method: "POST",
       path: "/roles",
-      body: { name: "Helper", color: "", permissions: 0, position: 70 },
+      body: {
+        name: "Helper",
+        color: "",
+        permissions: 0,
+        position: 70,
+        hoist: false,
+        mentionable: false,
+      },
+    });
+  });
+
+  it("offers hoist and mentionable on the create form and sends both (WP 6.3g)", async () => {
+    const calls: FetchCall[] = [];
+    const booted = await boot(calls);
+    dom = booted.dom;
+    const { bridge, doc } = booted;
+
+    bridge.openRoleModal(null);
+    const hoist = doc.getElementById("roleHoist") as HTMLInputElement;
+    const mention = doc.getElementById("roleMentionable") as HTMLInputElement;
+    expect(hoist.type).toBe("checkbox");
+    expect(mention.type).toBe("checkbox");
+    expect(hoist.checked).toBe(false);
+    expect(mention.checked).toBe(false);
+    expect(doc.querySelector('label[for="roleHoist"]')!.textContent).toContain("separately");
+    expect(doc.querySelector('label[for="roleMentionable"]')!.textContent).toContain("@mention");
+
+    (doc.getElementById("roleName") as HTMLInputElement).value = "Helper";
+    hoist.checked = true;
+    mention.checked = true;
+    await bridge.saveRole(null);
+    expect(calls[0]).toMatchObject({
+      method: "POST",
+      path: "/roles",
+      body: { hoist: true, mentionable: true },
+    });
+  });
+
+  it("loads each flag into the edit form and sends the changed one (WP 6.3g)", async () => {
+    const calls: FetchCall[] = [];
+    const booted = await boot(calls);
+    dom = booted.dom;
+    const { bridge, doc } = booted;
+    bridge.state.roleList[2].hoist = true; // Moderator is hoisted, not mentionable
+
+    bridge.openRoleModal(3);
+    const hoist = doc.getElementById("roleHoist") as HTMLInputElement;
+    const mention = doc.getElementById("roleMentionable") as HTMLInputElement;
+    expect(hoist.checked).toBe(true);
+    expect(mention.checked).toBe(false);
+
+    mention.checked = true;
+    await bridge.saveRole(3);
+    expect(calls[0]).toMatchObject({
+      method: "PATCH",
+      path: "/roles/3",
+      body: { hoist: true, mentionable: true },
     });
   });
 
