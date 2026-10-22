@@ -148,6 +148,9 @@ function fakeCtrl(channelId: number | null, scrollResult = true) {
       destroy: vi.fn(),
       openFilePicker: vi.fn(),
       togglePicker: vi.fn(),
+      openThread: vi.fn(),
+      openThreadId: null,
+      toggleThreadList: vi.fn(),
     },
     scrollToMessage,
   };

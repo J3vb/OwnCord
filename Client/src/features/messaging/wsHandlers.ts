@@ -45,6 +45,8 @@ import { connectText } from "../../i18n/connect";
 import { readingAnchor } from "./readingAnchor";
 import { isForwardRequest } from "./forwardRequests";
 import { isPollRequest } from "./pollRequests";
+import { handleThreadState } from "./threadFrames";
+import { loadedThreadsStore } from "../../stores/threadsLoader";
 import { isChannelAway, noteAwayUnread } from "@lib/read-state";
 import {
   activatePendingMessages,
@@ -69,6 +71,10 @@ import { log } from "../connection/dispatchContext";
  */
 const REPLAY_GATE_WINDOW_MS = 5_000;
 
+// Thread frames (WP 6.9c): the dispatcher reaches them through this module.
+export { handleThreadDeleted, handleThreadState } from "./threadFrames";
+export { resumeThreadFocus } from "../../stores/threadsLoader";
+
 export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_message">): void {
   if (payload.user.id === authStore.getState().user?.id) {
     acknowledgePendingMessage(payload.client_message_id);
@@ -83,6 +89,7 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
   // state), and scoped to this channel + this sender so other typers stay.
   clearTyping(payload.channel_id, payload.user.id);
   addMessage(payload);
+  handleThreadState(payload);
   const activeId = channelsStore.select((s) => s.activeChannelId);
 
   // Check if this is a DM channel and whether the message is from self.
@@ -200,7 +207,14 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
   // skew's damage — see REPLAY_GATE_WINDOW_MS. (isReplayFrame itself is
   // computed above, alongside isMention, which needs it too.)
   if (!isReplayFrame) {
-    notifyIncomingMessage(payload);
+    // A reply in a thread is judged by its parent channel: the parent's mute and
+    // notification level apply, its name labels the popup, and a thread the
+    // reader is watching beside the active channel is not worth a chime.
+    const surface =
+      loadedThreadsStore()?.authorityChannelId(payload.channel_id) ?? payload.channel_id;
+    notifyIncomingMessage(
+      surface === payload.channel_id ? payload : { ...payload, channel_id: surface },
+    );
     // Refresh the skew estimate from this accepted-as-live frame so it
     // stays current for the next reconnect.
     clock.serverClockSkewMs = Date.now() - parseTimestamp(payload.timestamp).getTime();

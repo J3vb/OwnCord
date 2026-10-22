@@ -17,6 +17,7 @@ export interface ReadyCapabilityFlags {
   readonly profile_banners?: boolean;
   readonly dm_privacy?: boolean;
   readonly polls?: boolean;
+  readonly threads?: boolean;
 }
 
 /** The last full `ready`'s capabilities; null until one arrives. */
@@ -82,4 +83,13 @@ export function dmPrivacyEnabled(): boolean {
  */
 export function pollsEnabled(): boolean {
   return caps?.polls === true;
+}
+
+/**
+ * Whether the server supports threads (WP 6.9c): the `thread_*` frames and `GET
+ * /channels/{id}/threads`. False hides Create Thread, the header's Threads
+ * button and the chip.
+ */
+export function threadsEnabled(): boolean {
+  return caps?.threads === true;
 }

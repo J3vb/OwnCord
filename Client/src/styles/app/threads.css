@@ -1,0 +1,269 @@
+/* ── Threads (WP 6.9c) ── */
+
+.msg-thread-name,
+.thread-panel-name,
+.thread-popover-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.thread-panel-parent,
+.thread-panel-status,
+.thread-popover-head,
+.thread-popover-meta,
+.thread-popover-empty,
+.thread-popover-status {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.thread-panel-btn,
+.thread-popover-open,
+.thread-popover-more {
+  border-radius: var(--radius-sm);
+}
+.thread-panel-btn:hover,
+.thread-popover-open:hover,
+button.msg-thread-chip:hover {
+  background: var(--bg-hover);
+}
+.thread-panel-rename-input,
+.create-thread-form input,
+.create-thread-form select {
+  padding: 4px 8px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-normal);
+}
+.thread-panel-header,
+.thread-panel-rename,
+.thread-panel-actions,
+.thread-starter-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The chip under a thread's starter message. */
+.msg-thread-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin-top: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  text-align: left;
+}
+button.msg-thread-chip {
+  cursor: pointer;
+}
+button.msg-thread-chip:hover {
+  color: var(--text-normal);
+}
+.msg-thread-name {
+  min-width: 0;
+  color: var(--accent-text);
+}
+.msg-thread-count,
+.msg-thread-ago {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.msg-thread-chip.archived {
+  opacity: 0.8;
+}
+
+/* The side panel beside the chat column; on a narrow window it replaces it. */
+.thread-panel-slot {
+  display: none;
+}
+.thread-panel-slot.open {
+  display: flex;
+}
+.thread-panel {
+  width: 380px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  border-left: 1px solid var(--border);
+}
+.thread-panel-header {
+  min-height: 48px;
+  padding: 0 8px 0 16px;
+  border-bottom: 1px solid var(--border);
+}
+.thread-panel-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.thread-panel-name {
+  color: var(--header-primary);
+}
+.thread-panel-actions {
+  gap: 2px;
+}
+.thread-panel-btn {
+  min-width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--interactive-normal);
+}
+.thread-panel-btn:hover {
+  color: var(--interactive-hover);
+}
+.thread-panel-btn.danger:hover {
+  color: var(--text-danger);
+}
+.thread-panel-rename[hidden],
+.thread-panel-btn[hidden] {
+  display: none;
+}
+.thread-panel-rename {
+  flex: 1;
+}
+.thread-panel-rename-input {
+  flex: 1;
+  min-width: 0;
+}
+.thread-starter {
+  display: flex;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+.thread-starter-main {
+  min-width: 0;
+  flex: 1;
+}
+.thread-starter-note {
+  color: var(--text-muted);
+  font-style: italic;
+}
+.thread-panel-messages {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+@media (max-width: 800px) {
+  .thread-open > .chat-area {
+    display: none;
+  }
+  .thread-panel-slot.open {
+    flex: 1;
+  }
+  .thread-panel {
+    width: 100%;
+    border-left: none;
+  }
+}
+
+/* The channel's thread list under the header button. */
+.thread-popover {
+  position: fixed;
+  z-index: 60;
+  width: min(360px, calc(100vw - 16px));
+  max-height: min(70vh, 480px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  box-shadow: var(--shadow-md);
+}
+.thread-popover-body {
+  overflow-y: auto;
+  padding: 8px;
+}
+.thread-popover-head {
+  padding: 6px 8px 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.thread-popover-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.thread-popover-open {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  background: transparent;
+  color: var(--text-normal);
+  text-align: left;
+}
+.thread-popover-meta {
+  grid-column: 2;
+}
+.thread-popover-empty,
+.thread-popover-status {
+  padding: 8px;
+}
+.thread-popover-more {
+  margin: 4px 8px;
+  padding: 4px 10px;
+  background: var(--bg-hover);
+  color: var(--text-normal);
+}
+
+/* The Create Thread dialog. */
+.create-thread-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.create-thread-form input,
+.create-thread-form select {
+  padding: 8px;
+}
+.create-thread-error {
+  margin: 0;
+  color: var(--text-danger);
+}
+
+/* The starter's avatar (the list's own rule is scoped to .message rows). */
+.thread-starter-avatar {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-circle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: var(--on-fill);
+  overflow: hidden;
+}
+
+/* The panel composer: one line, and a locked one shows no controls or focus ring. */
+.thread-panel .msg-textarea::placeholder {
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.thread-panel .composer-disabled :is(.emoji-btn, .gif-btn, .send-btn) {
+  display: none;
+}
+.thread-panel .composer-disabled .message-input-box:has(.msg-textarea:focus-visible),
+.thread-panel .composer-disabled .msg-textarea:focus-visible {
+  outline: none;
+  box-shadow: none;
+}

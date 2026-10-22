@@ -69,6 +69,8 @@ export interface ChatAreaResult {
   readonly closePinnedPanel: () => void;
   /** Open the pinned-messages panel; a no-op when it is already open. */
   readonly openPinnedPanel: () => Promise<void>;
+  /** Where a thread's side panel mounts, beside the chat area (WP 6.9c). */
+  readonly threadSlot: HTMLDivElement;
   /** Slot for the DM profile sidebar (right panel, sibling of chat area). */
   readonly dmProfileSlot: HTMLDivElement;
   /** All child MountableComponents for cleanup. */
@@ -162,6 +164,7 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     onTogglePins: () => {
       void pinnedCtrl.toggle();
     },
+    onToggleThreads: (anchor) => getChannelCtrl()?.toggleThreadList(anchor),
     onSearchFocus: () => {
       searchCtrl.open();
     },
@@ -213,6 +216,12 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
 
   appendChildren(chatArea, callPanelSlot, messagesSlot, typingSlot, inputSlot, videoGridSlot);
 
+  // --- Thread panel slot (sibling of chatArea; hidden until a thread is open) ---
+  const threadSlot = createElement("div", {
+    class: "thread-panel-slot",
+    "data-testid": "thread-panel-slot",
+  });
+
   // --- DM profile sidebar slot (sits beside chatArea in the .app flex row) ---
   const dmProfileSlot = createElement("div", {
     class: "dm-profile-slot",
@@ -230,6 +239,7 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     searchCtrl,
     closePinnedPanel: pinnedCtrl.cleanup,
     openPinnedPanel: pinnedCtrl.open,
+    threadSlot,
     dmProfileSlot,
     children,
     unsubscribers,

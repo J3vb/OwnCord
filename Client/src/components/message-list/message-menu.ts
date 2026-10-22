@@ -1,6 +1,6 @@
 /**
  * The message right-click menu: quick reactions, Add Reaction, Edit, Reply, Forward,
- * Copy / Copy Text, Pin, Copy Message Link, Delete, Report and (in developer
+ * Create Thread, Copy / Copy Text, Pin, Copy Message Link, Delete, Report and (in developer
  * mode) Copy Message ID, with Copy Link / Open Link first on a link.
  *
  * Which actions show, and which are locked, comes from `messageActionGates`
@@ -227,6 +227,19 @@ function buildItems(
       onClick: act((m) => {
         // The socket may have dropped since the menu opened.
         if (deleteLockReason() === null) onForward(m.id);
+      }),
+    });
+  }
+  const onCreateThread = opts.onCreateThreadClick;
+  if (gates.createThread.shown && onCreateThread !== undefined) {
+    items.push({
+      label: messageMenuText("createThread"),
+      testId: "msg-menu-create-thread",
+      disabled: gates.createThread.disabled,
+      ...(gates.createThread.reason !== null ? { title: gates.createThread.reason } : {}),
+      onClick: act((m) => {
+        // The socket may have dropped since the menu opened.
+        if (deleteLockReason() === null) onCreateThread(m.id);
       }),
     });
   }
