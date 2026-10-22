@@ -89,7 +89,7 @@ import type { NativeControl as WindowControlNativeControl } from "./window.suite
 
 const failEveryTest = { expectEveryTestToFail: true };
 
-describeCredentialStoreSuite(async () => {
+const nullCredentialStore = async () => {
   const subject = {
     save: async () => undefined,
     load: async () => undefined,
@@ -102,9 +102,10 @@ describeCredentialStoreSuite(async () => {
     unavailable: () => undefined,
   };
   return { subject, native };
-}, failEveryTest);
+};
+describeCredentialStoreSuite(nullCredentialStore, failEveryTest);
 
-describeIdentityStoreSuite(async () => {
+const nullIdentityStore = async () => {
   const subject = {
     saveKey: async () => undefined,
     loadKey: async () => undefined,
@@ -118,7 +119,8 @@ describeIdentityStoreSuite(async () => {
     unavailable: () => undefined,
   };
   return { subject, native };
-}, failEveryTest);
+};
+describeIdentityStoreSuite(nullIdentityStore, failEveryTest);
 
 describeSettingsStoreSuite(async () => {
   const subject = {
@@ -215,7 +217,7 @@ describeHttpClientSuite(async () => {
   return { subject, native };
 }, failEveryTest);
 
-describeSocketTransportSuite(async () => {
+const nullSocketTransport = async () => {
   const subject = {
     connect: async () => undefined,
     disconnect: async () => undefined,
@@ -242,9 +244,10 @@ describeSocketTransportSuite(async () => {
     accepted: () => [],
   };
   return { transport, subject, native };
-}, failEveryTest);
+};
+describeSocketTransportSuite(nullSocketTransport, failEveryTest);
 
-describePendingMessagesSuite(async () => {
+const nullPendingMessages = async () => {
   const subject = {
     load: async () => undefined,
     save: async () => undefined,
@@ -258,7 +261,8 @@ describePendingMessagesSuite(async () => {
     deleted: () => [],
   };
   return { subject, native };
-}, failEveryTest);
+};
+describePendingMessagesSuite(nullPendingMessages, failEveryTest);
 
 describeFileSaverSuite(async () => {
   const subject = {
@@ -496,3 +500,15 @@ describeExternalContentSuite(async () => {
   };
   return { subject, native };
 }, failEveryTest);
+
+// The browser bindings (6.13c) run four suites with a declared capability
+// difference: a token-only credential store, an identity store for which a
+// missing store is a failure, a transport whose host keeps certificate trust
+// itself, and a memory-only draft store. Each variant swaps some cases for
+// others, so each must fail against the null subject too. The http and
+// settings bindings run their suites unchanged, which the runs above already
+// cover.
+describeCredentialStoreSuite(nullCredentialStore, { ...failEveryTest, savedPasswords: false });
+describeIdentityStoreSuite(nullIdentityStore, { ...failEveryTest, missingStoreIsError: true });
+describeSocketTransportSuite(nullSocketTransport, { ...failEveryTest, certificates: false });
+describePendingMessagesSuite(nullPendingMessages, { ...failEveryTest, memoryOnly: true });

@@ -26,9 +26,19 @@ export interface CredentialStoreSubject {
 
 export function describeCredentialStoreSuite(
   makeSubject: () => Promise<CredentialStoreSubject>,
-  options?: { expectEveryTestToFail?: boolean },
+  options?: {
+    expectEveryTestToFail?: boolean;
+    /** False for a store that keeps the token only (the browser): it never
+     *  reports a saved password and has no saved-password login. The
+     *  saved-password cases are then skipped, and cases pinning the token-only
+     *  answers run instead. Default true. */
+    savedPasswords?: boolean;
+  },
 ): void {
   const check = options?.expectEveryTestToFail ? test.fails : test;
+  const savedPasswords = options?.savedPasswords ?? true;
+  const checkPassword = savedPasswords ? check : test.skip;
+  const checkTokenOnly = savedPasswords ? test.skip : check;
   describe("CredentialStore", () => {
     let ctx: CredentialStoreSubject;
     beforeEach(async () => {
@@ -55,12 +65,24 @@ export function describeCredentialStoreSuite(
     });
 
     describe("load", () => {
-      check("resolves the stored credential, mapping has_password to hasPassword", async () => {
+      checkPassword(
+        "resolves the stored credential, mapping has_password to hasPassword",
+        async () => {
+          ctx.native.succeedWith({ username: "alice", token: "tok", has_password: true });
+          await expect(ctx.subject.load("host")).resolves.toEqual({
+            username: "alice",
+            token: "tok",
+            hasPassword: true,
+          });
+        },
+      );
+
+      checkTokenOnly("resolves the stored credential, never with a saved password", async () => {
         ctx.native.succeedWith({ username: "alice", token: "tok", has_password: true });
         await expect(ctx.subject.load("host")).resolves.toEqual({
           username: "alice",
           token: "tok",
-          hasPassword: true,
+          hasPassword: false,
         });
       });
 
@@ -100,7 +122,7 @@ export function describeCredentialStoreSuite(
     });
 
     describe("loginWithSavedPassword", () => {
-      check("resolves the relayed status and body on success", async () => {
+      checkPassword("resolves the relayed status and body on success", async () => {
         ctx.native.succeedWith({ status: 200, body: '{"token":"tok"}' });
         await expect(ctx.subject.loginWithSavedPassword("host", "alice")).resolves.toEqual({
           status: 200,
@@ -108,18 +130,28 @@ export function describeCredentialStoreSuite(
         });
       });
 
-      check("resolves null when the result has an unexpected shape", async () => {
+      checkPassword("resolves null when the result has an unexpected shape", async () => {
         ctx.native.succeedWith({ nonsense: true });
         await expect(ctx.subject.loginWithSavedPassword("host", "alice")).resolves.toBeNull();
       });
 
-      check("rejects when the native command errors", async () => {
+      checkPassword("rejects when the native command errors", async () => {
         ctx.native.failWith(new Error("no saved password"));
         await expect(ctx.subject.loginWithSavedPassword("host", "alice")).rejects.toThrow();
       });
 
       check("resolves null when the native host is unavailable", async () => {
         ctx.native.unavailable();
+        await expect(ctx.subject.loginWithSavedPassword("host", "alice")).resolves.toBeNull();
+      });
+
+      checkTokenOnly("resolves null even when the store holds a credential", async () => {
+        ctx.native.succeedWith({ username: "alice", token: "tok", has_password: true });
+        await expect(ctx.subject.loginWithSavedPassword("host", "alice")).resolves.toBeNull();
+      });
+
+      checkTokenOnly("resolves null, not a rejection, when the store errors", async () => {
+        ctx.native.failWith(new Error("storage blocked"));
         await expect(ctx.subject.loginWithSavedPassword("host", "alice")).resolves.toBeNull();
       });
     });

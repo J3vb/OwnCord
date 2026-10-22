@@ -18,9 +18,20 @@ export interface IdentityStoreSubject {
 
 export function describeIdentityStoreSuite(
   makeSubject: () => Promise<IdentityStoreSubject>,
-  options?: { expectEveryTestToFail?: boolean },
+  options?: {
+    expectEveryTestToFail?: boolean;
+    /** True for a store that only runs where a store is expected (the
+     *  browser): a missing host there is a store failure, so a read rejects or
+     *  answers "unavailable" and a pin write answers "failed". The "no native
+     *  host" cases that pin the no-store answers are then skipped, and cases
+     *  pinning the failure answers run instead. Default false. */
+    missingStoreIsError?: boolean;
+  },
 ): void {
   const check = options?.expectEveryTestToFail ? test.fails : test;
+  const missingStoreIsError = options?.missingStoreIsError ?? false;
+  const checkNoStore = missingStoreIsError ? test.skip : check;
+  const checkMissingIsError = missingStoreIsError ? check : test.skip;
   describe("IdentityStore", () => {
     let ctx: IdentityStoreSubject;
     beforeEach(async () => {
@@ -62,9 +73,14 @@ export function describeIdentityStoreSuite(
         await expect(ctx.subject.loadKey("host")).rejects.toThrow();
       });
 
-      check("resolves null when the native host is unavailable", async () => {
+      checkNoStore("resolves null when the native host is unavailable", async () => {
         ctx.native.unavailable();
         await expect(ctx.subject.loadKey("host")).resolves.toBeNull();
+      });
+
+      checkMissingIsError("rejects when the store is missing", async () => {
+        ctx.native.unavailable();
+        await expect(ctx.subject.loadKey("host")).rejects.toThrow();
       });
     });
 
@@ -96,9 +112,14 @@ export function describeIdentityStoreSuite(
         await expect(ctx.subject.storePin("host", "1", "pin")).resolves.toBe("failed");
       });
 
-      check('resolves "no-store" when the native host is unavailable', async () => {
+      checkNoStore('resolves "no-store" when the native host is unavailable', async () => {
         ctx.native.unavailable();
         await expect(ctx.subject.storePin("host", "1", "pin")).resolves.toBe("no-store");
+      });
+
+      checkMissingIsError('resolves "failed" when the store is missing', async () => {
+        ctx.native.unavailable();
+        await expect(ctx.subject.storePin("host", "1", "pin")).resolves.toBe("failed");
       });
     });
 
@@ -123,10 +144,21 @@ export function describeIdentityStoreSuite(
         await expect(ctx.subject.getPin("host", "1")).resolves.toEqual({ status: "unavailable" });
       });
 
-      check('resolves { status: "unpinned" } when the native host is unavailable', async () => {
-        ctx.native.unavailable();
-        await expect(ctx.subject.getPin("host", "1")).resolves.toEqual({ status: "unpinned" });
-      });
+      checkNoStore(
+        'resolves { status: "unpinned" } when the native host is unavailable',
+        async () => {
+          ctx.native.unavailable();
+          await expect(ctx.subject.getPin("host", "1")).resolves.toEqual({ status: "unpinned" });
+        },
+      );
+
+      checkMissingIsError(
+        'resolves { status: "unavailable" } when the store is missing',
+        async () => {
+          ctx.native.unavailable();
+          await expect(ctx.subject.getPin("host", "1")).resolves.toEqual({ status: "unavailable" });
+        },
+      );
     });
   });
 }
