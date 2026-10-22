@@ -57,9 +57,18 @@ const connectOptions = { url: "wss://chat.example:8443/api/v1/ws", token: "tok" 
 
 export function describeSocketTransportSuite(
   makeSubject: () => Promise<SocketSubject>,
-  options?: { expectEveryTestToFail?: boolean },
+  options?: {
+    expectEveryTestToFail?: boolean;
+    /** False for a transport whose host keeps certificate trust itself (the
+     *  browser): it never reports a certificate event and refuses
+     *  `acceptCertificate`. The certificate cases are then skipped, and one
+     *  case pins the refusal instead. Default true. */
+    certificates?: boolean;
+  },
 ): void {
   const check = options?.expectEveryTestToFail ? test.fails : test;
+  const certificates = options?.certificates ?? true;
+  const checkCert = certificates ? check : test.skip;
   describe("SocketTransport", () => {
     let ctx: SocketSubject;
     beforeEach(async () => {
@@ -160,7 +169,7 @@ export function describeSocketTransportSuite(
     });
 
     describe("certificates", () => {
-      check("routes a first-use certificate to the first-use subscribers", async () => {
+      checkCert("routes a first-use certificate to the first-use subscribers", async () => {
         const events: SocketCertEvent[] = [];
         ctx.subject.onCertFirstUse((event) => events.push(event));
         await ctx.native.emitsCert("first_use");
@@ -168,7 +177,7 @@ export function describeSocketTransportSuite(
         expect(events[0]!.status).toBe("first_use");
       });
 
-      check(
+      checkCert(
         "routes a mismatch to the mismatch subscribers, and not the first-use ones",
         async () => {
           const firstUse: SocketCertEvent[] = [];
@@ -181,7 +190,7 @@ export function describeSocketTransportSuite(
         },
       );
 
-      check("resolves acceptCertificate once the native side has stored it", async () => {
+      checkCert("resolves acceptCertificate once the native side has stored it", async () => {
         await expect(
           ctx.subject.acceptCertificate("chat.example", "sha256:abc"),
         ).resolves.toBeUndefined();
@@ -189,6 +198,14 @@ export function describeSocketTransportSuite(
           { host: "chat.example", fingerprint: "sha256:abc" },
         ]);
       });
+
+      if (!certificates) {
+        check("rejects acceptCertificate: the host keeps certificate trust itself", async () => {
+          await expect(
+            ctx.subject.acceptCertificate("chat.example", "sha256:abc"),
+          ).rejects.toThrow();
+        });
+      }
 
       check("rejects acceptCertificate when there is no native host", async () => {
         ctx.native.unavailable();

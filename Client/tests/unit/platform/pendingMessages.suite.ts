@@ -41,13 +41,47 @@ const stored = '[{"clientMessageId":"1758355200000:3f2a1e4c-5b6d-4f80-9a1b-2c3d4
 
 export function describePendingMessagesSuite(
   makeSubject: () => Promise<PendingMessagesSubject>,
-  options?: { expectEveryTestToFail?: boolean },
+  options?: {
+    expectEveryTestToFail?: boolean;
+    /** True for a store that keeps drafts in the page's memory only (the
+     *  browser): there is no native store to observe, fail or be missing, so
+     *  the native-store cases are skipped and round-trip cases run instead —
+     *  what a caller reads back is the only effect such a store has. */
+    memoryOnly?: boolean;
+  },
 ): void {
-  const check = options?.expectEveryTestToFail ? test.fails : test;
+  const memoryOnly = options?.memoryOnly ?? false;
+  const check = memoryOnly ? test.skip : options?.expectEveryTestToFail ? test.fails : test;
+  const checkMemory = !memoryOnly ? test.skip : options?.expectEveryTestToFail ? test.fails : test;
   describe("PendingMessageStore", () => {
     let ctx: PendingMessagesSubject;
     beforeEach(async () => {
       ctx = await makeSubject();
+    });
+
+    describe("in memory", () => {
+      checkMemory("resolves null when nothing was saved for the owner", async () => {
+        await expect(ctx.subject.load(owner)).resolves.toBeNull();
+      });
+
+      checkMemory("reads back what was saved for the same owner", async () => {
+        await ctx.subject.save(owner, stored);
+        await expect(ctx.subject.load(owner)).resolves.toBe(stored);
+      });
+
+      checkMemory("keeps each owner's drafts apart", async () => {
+        await ctx.subject.save(owner, stored);
+        await expect(ctx.subject.load(otherOwner)).resolves.toBeNull();
+        await expect(ctx.subject.load(owner)).resolves.toBe(stored);
+      });
+
+      checkMemory("forgets the owner's drafts on delete, and only that owner's", async () => {
+        await ctx.subject.save(owner, stored);
+        await ctx.subject.save(otherOwner, stored);
+        await ctx.subject.delete(owner);
+        await expect(ctx.subject.load(owner)).resolves.toBeNull();
+        await expect(ctx.subject.load(otherOwner)).resolves.toBe(stored);
+      });
     });
 
     describe("load", () => {

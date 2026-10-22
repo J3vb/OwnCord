@@ -1,11 +1,12 @@
-// The browser platform implementation (WP 6.13b): every `Platform` member, each
-// inert. A member either refuses (a rejected promise, or the typed
-// "unavailable" answer its contract defines) or does nothing, exactly as its
-// contract allows. 6.13c/d swap in real browser adapters for transport,
-// storage and identity; until then a web build links and boots but reaches no
-// host. The web vite config sends the native registry's import here
-// (`vite.config.web.ts`), which is why the registry is also exported under the
-// name callers import. This tree must never import a native host package or
+// The browser platform implementation (WP 6.13b): every `Platform` member.
+// Transport, storage and identity are real browser adapters (6.13c), one file
+// each, used only in a secure context: on a page that is not one, they stay
+// inert, so the app reaches no host and stores nothing rather than half-work.
+// Every other member is still inert (6.13d): it either refuses (a rejected
+// promise, or the typed "unavailable" answer its contract defines) or does
+// nothing, exactly as its contract allows. The web vite config sends the
+// native registry's import here (`vite.config.web.ts`), which is why the
+// registry is also exported under the name callers import. This tree must never import a native host package or
 // anything from the native implementation tree (eslint and the registry test
 // enforce it).
 import type {
@@ -38,7 +39,14 @@ import type {
   WindowPrefs,
 } from "../contracts";
 import type { SocketConnection } from "../contracts/socket";
+import { credentials as browserCredentials } from "./credentials";
+import { http as browserHttp } from "./http";
+import { identity as browserIdentity } from "./identity";
+import { nativeProxies as browserNativeProxies } from "./nativeProxies";
 import { nativeVoice } from "./nativeVoice";
+import { pendingMessages as browserPendingMessages } from "./pendingMessages";
+import { settings as browserSettings } from "./settings";
+import { socket as browserSocket } from "./socket";
 import { inertUnsubscribe, refuse, UnsupportedKeysError } from "./unavailable";
 
 const appAudio: AppAudio = {
@@ -62,7 +70,7 @@ const autostart: Autostart = {
   disable: async () => undefined,
 };
 
-const credentials: CredentialStore = {
+const inertCredentials: CredentialStore = {
   save: async () => false,
   load: async () => null,
   delete: async () => false,
@@ -103,12 +111,12 @@ const globalShortcuts: GlobalShortcuts = {
   onShortcut: inertUnsubscribe,
 };
 
-const http: HttpClient = {
+const inertHttp: HttpClient = {
   fetch: () => refuse(),
   onUploadProgress: inertUnsubscribe,
 };
 
-const identity: IdentityStore = {
+const inertIdentity: IdentityStore = {
   saveKey: async () => false,
   loadKey: async () => null,
   deleteKey: async () => false,
@@ -127,7 +135,7 @@ const logFiles: LogFiles = {
   openFolder: async () => ({ ok: false, error: "log files are unavailable in the browser" }), // i18n-exempt: diagnostic
 };
 
-const nativeProxies: NativeProxies = {
+const inertNativeProxies: NativeProxies = {
   ensureHttpProxy: () => refuse(),
   setLiveKitServerHost: () => undefined,
   resolveLiveKitUrl: (_proxyPath, directUrl) =>
@@ -149,7 +157,7 @@ const notifier: Notifier = {
   setUnreadBadge: async () => undefined,
 };
 
-const pendingMessages: PendingMessageStore = {
+const inertPendingMessages: PendingMessageStore = {
   load: async () => null,
   save: async () => undefined,
   delete: async () => undefined,
@@ -166,7 +174,7 @@ const pushToTalk: PushToTalk = {
 // 6.13e sets `fixedHost` from the portal; until then the browser is unscoped.
 const serverScope: ServerScope = { fixedHost: null };
 
-const settings: SettingsStore = {
+const inertSettings: SettingsStore = {
   load: async () => null,
   save: async () => undefined,
 };
@@ -185,7 +193,44 @@ function createConnection(): SocketConnection {
   };
 }
 
-const socket: SocketTransport = { create: createConnection };
+const inertSocket: SocketTransport = { create: createConnection };
+
+/** The members that run only in a secure context. */
+interface SecureMembers {
+  readonly credentials: CredentialStore;
+  readonly http: HttpClient;
+  readonly identity: IdentityStore;
+  readonly nativeProxies: NativeProxies;
+  readonly pendingMessages: PendingMessageStore;
+  readonly settings: SettingsStore;
+  readonly socket: SocketTransport;
+}
+
+/** True only on a page the browser counts as a secure context (https, or a
+ *  loopback host). Read once: a page cannot change it. */
+function isSecurePage(): boolean {
+  return globalThis.isSecureContext === true;
+}
+
+const secureMembers: SecureMembers = isSecurePage()
+  ? {
+      credentials: browserCredentials,
+      http: browserHttp,
+      identity: browserIdentity,
+      nativeProxies: browserNativeProxies,
+      pendingMessages: browserPendingMessages,
+      settings: browserSettings,
+      socket: browserSocket,
+    }
+  : {
+      credentials: inertCredentials,
+      http: inertHttp,
+      identity: inertIdentity,
+      nativeProxies: inertNativeProxies,
+      pendingMessages: inertPendingMessages,
+      settings: inertSettings,
+      socket: inertSocket,
+    };
 
 const systemIdle: SystemIdle = {
   idleMs: async () => null,
@@ -226,27 +271,21 @@ const windowPrefs: WindowPrefs = {
 };
 
 export const browser: Platform = {
+  ...secureMembers,
   appAudio,
   appMetadata,
   appProcess,
   autostart,
-  credentials,
   deepLinks,
   devTools,
   externalContent,
   fileSaver,
-  http,
-  identity,
   logFiles,
-  nativeProxies,
   nativeVoice,
   notifier,
-  pendingMessages,
   pushToTalk,
   globalShortcuts,
   serverScope,
-  settings,
-  socket,
   systemIdle,
   trayStatus,
   updater,

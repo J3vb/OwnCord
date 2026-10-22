@@ -23,12 +23,19 @@ export interface SavedLoginResponse {
 }
 
 export interface CredentialStore {
+  /**
+   * `sessionOnly` (6.13c) asks a store that can tell the difference to keep
+   * the credential for this browsing session only, not across restarts;
+   * omitted, it keeps the credential where it already is. The desktop store
+   * has one kind of storage and ignores it; no caller passes it yet.
+   */
   save(
     host: string,
     username: string,
     token: string,
     password?: string,
     clearPassword?: boolean,
+    sessionOnly?: boolean,
   ): Promise<boolean>;
   load(host: string): Promise<SavedCredential | null>;
   delete(host: string): Promise<boolean>;

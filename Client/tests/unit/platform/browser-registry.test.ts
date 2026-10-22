@@ -3,7 +3,7 @@
 // each member refuses or does nothing exactly as its contract allows.
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Platform } from "../../../src/platform/contracts";
 import { browser, desktop } from "../../../src/platform/browser";
 
@@ -65,6 +65,9 @@ describe("browser platform registry", () => {
 
   it("refuses or does nothing on every capability", async () => {
     const b = browser;
+    // jsdom's page is not a secure context, so transport, storage and
+    // identity are inert here too (6.13c).
+    expect(globalThis.isSecureContext).not.toBe(true);
     // Storage and identity: nothing stored, nothing found.
     expect(await b.credentials.save("h", "u", "t")).toBe(false);
     expect(await b.credentials.load("h")).toBeNull();
@@ -263,5 +266,54 @@ describe("browser platform registry", () => {
     for (const subscribe of [v.onMicTestEvent, v.watchDevices, v.onEvent]) {
       expect(() => subscribe(() => undefined)()).not.toThrow();
     }
+  });
+});
+
+// 6.13c: transport, storage and identity are real browser adapters, used only
+// in a secure context.
+describe("browser platform registry: secure-context guard", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  /** A fresh registry and fresh adapter modules, from the same module graph. */
+  async function load(secure: boolean) {
+    vi.resetModules();
+    vi.stubGlobal("isSecureContext", secure);
+    const { browser: platform } = await import("../../../src/platform/browser");
+    const adapters = {
+      credentials: (await import("../../../src/platform/browser/credentials")).credentials,
+      http: (await import("../../../src/platform/browser/http")).http,
+      identity: (await import("../../../src/platform/browser/identity")).identity,
+      nativeProxies: (await import("../../../src/platform/browser/nativeProxies")).nativeProxies,
+      pendingMessages: (await import("../../../src/platform/browser/pendingMessages"))
+        .pendingMessages,
+      settings: (await import("../../../src/platform/browser/settings")).settings,
+      socket: (await import("../../../src/platform/browser/socket")).socket,
+    };
+    return { platform, adapters };
+  }
+
+  it("uses the browser adapters in a secure context", async () => {
+    const { platform, adapters } = await load(true);
+    for (const [member, adapter] of Object.entries(adapters)) {
+      expect(platform[member as keyof typeof adapters], member).toBe(adapter);
+    }
+    // The members 6.13d replaces stay inert.
+    expect(await platform.notifier.permissionGranted()).toBe(false);
+    expect(platform.serverScope).toEqual({ fixedHost: null });
+  });
+
+  it("keeps them inert on a page that is not a secure context", async () => {
+    const { platform, adapters } = await load(false);
+    for (const [member, adapter] of Object.entries(adapters)) {
+      expect(platform[member as keyof typeof adapters], member).not.toBe(adapter);
+    }
+    await expect(platform.http.fetch("/api/v1/health")).rejects.toThrow();
+    await expect(
+      platform.socket.create().connect({ url: "wss://x", token: "t" }),
+    ).rejects.toThrow();
+    expect(await platform.credentials.save("h", "u", "t")).toBe(false);
   });
 });
