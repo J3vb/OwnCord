@@ -341,6 +341,7 @@ export const shards = {
     "src/features/message-requests/wsHandlers.ts",
     "src/features/moderation/AppealDetail.ts",
     "src/features/moderation/BanDialog.ts",
+    "src/features/moderation/NicknameDialog.ts",
     "src/features/moderation/Evidence.ts",
     "src/features/moderation/Workflow.ts",
     "src/features/moderation/roleAssignment.ts",
