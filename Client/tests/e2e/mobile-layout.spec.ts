@@ -1,4 +1,7 @@
 /**
+ * Touch input (WP 6.13f2): long-press opens the message and channel menus and a
+ * tap shows a message's action bar.
+ *
  * Phone layout (WP 6.13f1): no horizontal scroll, a reachable drawer, a
  * full-width member overlay and 44 px touch targets in the user bar. Both
  * profiles run on Chromium (the iPhone profile's default WebKit is dropped).
@@ -20,6 +23,19 @@ const PROFILES = [
   { name: "Pixel 7", use: pixel7 },
   { name: "iPhone 14", use: iphone14 },
 ];
+
+/** A finger held on `selector`'s centre for `holdMs`, through CDP touch input. */
+async function holdFinger(page: Page, selector: string, holdMs: number): Promise<void> {
+  const box = await page.locator(selector).first().boundingBox();
+  if (box === null) throw new Error(`no box for ${selector}`);
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+  await page.waitForTimeout(holdMs);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await cdp.detach();
+}
 
 async function noHorizontalScroll(page: Page): Promise<void> {
   const overflow = await page.evaluate(() => {
@@ -129,6 +145,43 @@ for (const profile of PROFILES) {
       await page.locator("button[aria-label='Settings']").click();
       await expect(page.locator("[data-testid='settings-overlay']")).toHaveClass(/open/);
       await noHorizontalScroll(page);
+    });
+
+    test("long-press on a message opens the message menu, and only one", async ({ page }) => {
+      await signIn(page);
+      const row = "[data-testid='message-101'] .msg-text";
+      await holdFinger(page, row, 800);
+      await expect(page.locator(".message-context-menu")).toHaveCount(1);
+      await expect(page.locator(".message-context-menu")).toBeVisible();
+    });
+
+    test("a short press on a message opens no menu", async ({ page }) => {
+      await signIn(page);
+      await holdFinger(page, "[data-testid='message-101']", 150);
+      await page.waitForTimeout(700);
+      await expect(page.locator(".message-context-menu")).toHaveCount(0);
+    });
+
+    test("long-press on a channel row opens the channel menu", async ({ page }) => {
+      await signIn(page);
+      await page.locator("[data-testid='sidebar-toggle']").click();
+      await expect(page.locator("[data-testid='unified-sidebar']")).toHaveClass(/drawer-open/);
+      await holdFinger(page, ".channel-list .channel-item", 800);
+      await expect(page.locator("[data-testid='channel-context-menu']")).toBeVisible();
+    });
+
+    test("a tap on a message shows its action bar and a tap elsewhere hides it", async ({
+      page,
+    }) => {
+      await signIn(page);
+      const message = page.locator("[data-testid='message-101']");
+      const bar = message.locator(".msg-actions-bar");
+      await expect(bar).toHaveCSS("opacity", "0");
+      await message.locator(".msg-text").first().tap();
+      await expect(message).toHaveClass(/msg-touch-active/);
+      await expect(bar).toHaveCSS("opacity", "1");
+      await page.locator("[data-testid='chat-header-name']").tap();
+      await expect(message).not.toHaveClass(/msg-touch-active/);
     });
   });
 }

@@ -1923,7 +1923,8 @@ ul.md-list-nested {
   z-index: 5;
 }
 .message:hover .msg-actions-bar,
-.message:focus-within .msg-actions-bar {
+.message:focus-within .msg-actions-bar,
+.message.msg-touch-active .msg-actions-bar {
   opacity: 1;
   pointer-events: auto;
   animation: actionBarPop 0.1s ease;
@@ -2085,6 +2086,15 @@ ul.md-list-nested {
 }
 
 @media (pointer: coarse) {
+  /* Our long-press menu replaces the iOS callout and text selection on rows. */
+  .message {
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
+  .message :is(input, textarea, [contenteditable]) {
+    -webkit-touch-callout: default;
+    user-select: text;
+  }
   .msg-actions-bar button {
     min-width: 44px;
     min-height: 44px;

@@ -326,3 +326,10 @@
     width: 100% !important;
   }
 }
+
+@media (pointer: coarse) {
+  .member-item {
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
+}
