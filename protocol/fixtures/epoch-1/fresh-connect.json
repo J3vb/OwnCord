@@ -46,6 +46,7 @@
           "payload": {
             "capabilities": {
               "dm_privacy": true,
+              "manage_nicknames": true,
               "message_deduplication": true,
               "message_retry_floor_ms": 0,
               "message_retry_window_seconds": 86400,
@@ -160,7 +161,7 @@
                 "id": "<id:number>",
                 "is_default": false,
                 "name": "Moderator",
-                "permissions": 7340031,
+                "permissions": 15728639,
                 "position": 60
               },
               {
@@ -311,6 +312,7 @@
           "payload": {
             "capabilities": {
               "dm_privacy": true,
+              "manage_nicknames": true,
               "message_deduplication": true,
               "message_retry_floor_ms": 0,
               "message_retry_window_seconds": 86400,
@@ -425,7 +427,7 @@
                 "id": "<id:number>",
                 "is_default": false,
                 "name": "Moderator",
-                "permissions": 7340031,
+                "permissions": 15728639,
                 "position": 60
               },
               {

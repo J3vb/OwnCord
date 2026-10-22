@@ -134,6 +134,7 @@ CREATE TABLE IF NOT EXISTS schema_versions (
 | `075_forums.sql`                               | Adds the forum channel type (WP 6.9d). `channels` gains `forum_require_tag`, `forum_default_auto_archive_minutes` (60, 1440, 4320 or 10080) and `thread_post_message_id` (`ON DELETE SET NULL`). Adds `forum_tags` (unique per forum ignoring case), `thread_tags` and index `idx_channels_thread_list_activity`. Widens the type and thread shape triggers: a thread's parent may be a text channel or a forum, a post has no starter, its opening-message pointer is set once, and a type change to or from `forum` is refused. `trg_messages_not_in_forum` refuses a message in a forum, and tag triggers keep tags on their forum.            |
 | `076_category_permissions.sql`                 | Adds `category_overrides(category_id, role_id, allow, deny)` and `category_user_overrides(category_id, user_id, allow, deny)` (both `UNIQUE` per pair and cascading on both parents, index `idx_category_user_overrides_user` for account erasure), and `channels.permissions_synced INTEGER NOT NULL DEFAULT 0`. The category rows are a template that is **copied** onto the channels synced to the category; `permissions.EffectiveChannelPerms` never reads them. The backfill syncs nothing, so an upgraded server keeps exactly the overrides it had. (WP 6.5d)                                                                             |
 | `077_user_roles_reconcile.sql`                 | Data only. Resets `user_roles` to exactly the role `users.role_id` names for every member whose rows had drifted (a demoted member still holding the old role, or a member left with no row), and moves a member whose role was missing onto the default role. (WP 6.3b)                                                                                                                                                                                                                                                                                                                                                                          |
+| `078_manage_nicknames.sql`                     | Data only. Grants the new `MANAGE_NICKNAMES` bit (23) to the untouched seeded Moderator role (`0x6FFFFF` becomes `0xEFFFFF`) and clears the bit from every role except the Owner, the untouched Admin and that Moderator. No column: the nickname is `users.display_name`. (WP 6.4a)                                                                                                                                                                                                                                                                                                                                                              |
 
 ---
 
@@ -334,14 +335,14 @@ created empty for later role pings.
 
 **Default roles** — current values after the full migration set (001 seeds
 different masks: 005/007 raise Member's, 022 grants `MENTION_EVERYONE` to
-Owner/Admin/Moderator). Not fixed at runtime — see _Role semantics_ below:
+Owner/Admin/Moderator, 048 and 078 grant the Moderator `MODERATE_MEMBERS` and `MANAGE_NICKNAMES`). Not fixed at runtime — see _Role semantics_ below:
 
-| id  | name      | color     | permissions  | position | Notes                                                 |
-| --- | --------- | --------- | ------------ | -------- | ----------------------------------------------------- |
-| 1   | Owner     | `#E74C3C` | `0x7FFFFFFF` | 100      | All 31 permission bits set                            |
-| 2   | Admin     | `#F39C12` | `0x3FFFFFFF` | 80       | Everything except ADMINISTRATOR                       |
-| 3   | Moderator | `#3498DB` | `0x002FFFFF` | 60       | All message + voice + moderation + mention-everyone   |
-| 4   | Member    | NULL      | `0x1E63`     | 40       | Send, read, attach, react, voice, video, screen share |
+| id  | name      | color     | permissions  | position | Notes                                                                                   |
+| --- | --------- | --------- | ------------ | -------- | --------------------------------------------------------------------------------------- |
+| 1   | Owner     | `#E74C3C` | `0x7FFFFFFF` | 100      | All 31 permission bits set                                                              |
+| 2   | Admin     | `#F39C12` | `0x3FFFFFFF` | 80       | Everything except ADMINISTRATOR                                                         |
+| 3   | Moderator | `#3498DB` | `0x00EFFFFF` | 60       | All message + voice + moderation + mention-everyone, moderate-members, manage-nicknames |
+| 4   | Member    | NULL      | `0x1E63`     | 40       | Send, read, attach, react, voice, video, screen share                                   |
 
 **Role semantics:**
 
@@ -1175,13 +1176,14 @@ Permissions are stored as an integer bitfield (31 bits used) in
 | 20  | `0x100000`   | `MUTE_MEMBERS`     | Server-side mute/deafen, move and disconnect in voice (`voice_mod_mute`/`_deafen`/`_move`/`_kick`), via the channel-scoped `permissions.AuthorizeVoiceModerator`; also admits to the admin perimeter                          |
 | 21  | `0x200000`   | `MENTION_EVERYONE` | Give `@everyone`/`@here` real mention semantics (highlight + mention badge). Without it the token stays plain text                                                                                                            |
 | 22  | `0x400000`   | `MODERATE_MEMBERS` | Warn and time out members (B5-9), and read/work the report queue (`GET/POST /api/v1/moderation/queue…`, B5-8). Deliberately outside the admin perimeter                                                                       |
+| 23  | `0x800000`   | `MANAGE_NICKNAMES` | Set or clear another member's nickname (`PUT /api/v1/moderation/users/{id}/nickname`, WP 6.4), for a member the actor outranks. Server-wide, deliberately outside the admin perimeter                                         |
 | 24  | `0x1000000`  | `MANAGE_ROLES`     | Assign a role below the actor's own rank to a lower-ranked user (`PATCH /admin/api/users/{id}`, or `PATCH /api/v1/moderation/members/{id}`), and create/edit/delete/reorder roles below the actor's own (`/admin/api/roles…`) |
 | 25  | `0x2000000`  | `MANAGE_SERVER`    | Read and modify server settings (`/admin/api/settings`)                                                                                                                                                                       |
 | 26  | `0x4000000`  | `MANAGE_INVITES`   | Create and revoke invite codes                                                                                                                                                                                                |
 | 27  | `0x8000000`  | `VIEW_AUDIT_LOG`   | Read the audit log (`GET /admin/api/audit-log`)                                                                                                                                                                               |
 | 30  | `0x40000000` | `ADMINISTRATOR`    | Bypasses ALL permission checks; gates the log stream and account erasure (`DELETE /admin/api/users/{id}`)                                                                                                                     |
 
-Bits 2-4, 7-8, 13-15, 23, 28-29, 31 are reserved.
+Bits 2-4, 7-8, 13-15, 28-29, 31 are reserved.
 
 ### Permission groups
 
@@ -1192,12 +1194,12 @@ It carries no semantics, but the two must stay in step: every defined bit
 belongs to exactly one group, and a bit missing from the grouping is a bit no
 operator can grant through the panel.
 
-| Group      | Bits                                                                                                                        |
-| ---------- | --------------------------------------------------------------------------------------------------------------------------- |
-| General    | `MANAGE_CHANNELS`, `MANAGE_ROLES`, `MANAGE_INVITES`, `MANAGE_SERVER`, `VIEW_AUDIT_LOG`, `MODERATE_MEMBERS`, `ADMINISTRATOR` |
-| Text       | `READ_MESSAGES`, `SEND_MESSAGES`, `ATTACH_FILES`, `ADD_REACTIONS`, `MENTION_EVERYONE`, `MANAGE_MESSAGES`                    |
-| Voice      | `CONNECT_VOICE`, `SPEAK_VOICE`, `USE_VIDEO`, `SHARE_SCREEN`                                                                 |
-| Moderation | `KICK_MEMBERS`, `BAN_MEMBERS`, `MUTE_MEMBERS`                                                                               |
+| Group      | Bits                                                                                                                                            |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| General    | `MANAGE_CHANNELS`, `MANAGE_ROLES`, `MANAGE_INVITES`, `MANAGE_SERVER`, `VIEW_AUDIT_LOG`, `MODERATE_MEMBERS`, `MANAGE_NICKNAMES`, `ADMINISTRATOR` |
+| Text       | `READ_MESSAGES`, `SEND_MESSAGES`, `ATTACH_FILES`, `ADD_REACTIONS`, `MENTION_EVERYONE`, `MANAGE_MESSAGES`                                        |
+| Voice      | `CONNECT_VOICE`, `SPEAK_VOICE`, `USE_VIDEO`, `SHARE_SCREEN`                                                                                     |
+| Moderation | `KICK_MEMBERS`, `BAN_MEMBERS`, `MUTE_MEMBERS`                                                                                                   |
 
 ### Admin perimeter
 
@@ -1257,9 +1259,9 @@ DM channels bypass role permissions entirely and use participant-based authoriza
 
 ### Default Role Permission Values
 
-| Role      | Hex          | Permissions                                                                          |
-| --------- | ------------ | ------------------------------------------------------------------------------------ |
-| Owner     | `0x7FFFFFFF` | Everything including ADMINISTRATOR                                                   |
-| Admin     | `0x3FFFFFFF` | Everything except ADMINISTRATOR                                                      |
-| Moderator | `0x002FFFFF` | All message + voice + moderation, plus `MENTION_EVERYONE` (granted by migration 022) |
-| Member    | `0x1E63`     | Send, read, attach, react, voice, video, screen share                                |
+| Role      | Hex          | Permissions                                                                                                                      |
+| --------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| Owner     | `0x7FFFFFFF` | Everything including ADMINISTRATOR                                                                                               |
+| Admin     | `0x3FFFFFFF` | Everything except ADMINISTRATOR                                                                                                  |
+| Moderator | `0x00EFFFFF` | All message + voice + moderation, plus `MENTION_EVERYONE` (migration 022), `MODERATE_MEMBERS` (048) and `MANAGE_NICKNAMES` (078) |
+| Member    | `0x1E63`     | Send, read, attach, react, voice, video, screen share                                                                            |

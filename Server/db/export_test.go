@@ -108,3 +108,14 @@ func TakeRestoreResult(dbPath string) (res RestoreResult, found bool, err error)
 	_ = ClearRestoreResult(dbPath)
 	return res, found, err
 }
+
+// SetNicknamePreCheckHookForTest installs (or, with nil, clears) the barrier
+// SetDisplayNameAsModerator runs inside its transaction before it re-reads the
+// actor's authority. Exported for db_test; production code never calls this.
+func SetNicknamePreCheckHookForTest(fn func()) {
+	nicknamePreCheckHook = fn
+}
+
+// ManageNicknamesOrAdminForTest exposes the literal SetDisplayNameAsModerator
+// masks role permissions with, so db_test can pin it to the permissions package.
+const ManageNicknamesOrAdminForTest = manageNicknamesOrAdmin

@@ -51,7 +51,7 @@ func buildModQueueActRouter(t *testing.T) (http.Handler, *db.DB, *recordingModQu
 	svc := service.New(database, auth.NewRateLimiter())
 	api.MountReportRoutes(r, svc, broadcaster)
 	api.MountModerationQueueRoutes(r, svc, broadcaster)
-	api.MountModerationRoutes(r, svc)
+	api.MountModerationRoutes(r, svc, nil)
 	return r, database, broadcaster
 }
 

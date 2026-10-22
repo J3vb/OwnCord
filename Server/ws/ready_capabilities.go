@@ -16,5 +16,6 @@ func readyCapabilities(retryFloorMS int64, threads bool) map[string]any {
 		"dm_privacy":                   true,
 		"polls":                        true,
 		"threads":                      threads, // WP 6.9c: thread_* commands and frames
+		"manage_nicknames":             true,    // WP 6.4: PUT /api/v1/moderation/users/{id}/nickname
 	}
 }

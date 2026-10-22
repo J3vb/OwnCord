@@ -89,7 +89,10 @@ is shared by every member who can see a channel in it, so it adds no data class.
 channel outlives its category (`ON DELETE SET NULL`). **Amended 2026-10-21 (role reconcile):** `077_user_roles_reconcile.sql` rewrites
 `user_roles` rows so they match the role `users.role_id` already names (WP 6.3b).
 It moves no personal data and adds no data class here; the rows keep going with
-their user or role by cascade. Other historical
+their user or role by cascade. **Amended 2026-10-22 (nicknames):** `078_manage_nicknames.sql`
+updates `roles.permissions` only, to give the default Moderator the Manage Nicknames bit (WP 6.4a).
+It adds no table or column and no data class: the nickname it governs is the existing
+`users.display_name`. Other historical
 status statements retain their `cbebd37c` baseline.
 **Amended 2026-10-21 (polls):** `073_polls.sql` adds `polls`, `poll_answers` and
 `poll_votes` (WP 6.9b). A poll is an ordinary message of its author whose text is a
