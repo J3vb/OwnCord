@@ -817,7 +817,10 @@ function renderReports(
   }
 
   const unsubs = [
-    authStore.subscribeSelector((s) => s.user?.role ?? "", reoffer),
+    authStore.subscribeSelector(
+      (s) => `${s.user?.role ?? ""}|${s.user?.role_ids?.join(",") ?? ""}`,
+      reoffer,
+    ),
     channelsStore.subscribeSelector((s) => s.roles, reoffer),
     // mod_queue carries no report data: read the queue (and the open report) again.
     modQueueStore.subscribe(() => loadList(false, true)),

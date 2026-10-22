@@ -98,6 +98,12 @@
       "reason": "WeakMap keyed by Member objects; entries go with the objects"
     },
     {
+      "file": "features/members/memberModel.ts",
+      "binding": "factsCache",
+      "category": "dom-owned",
+      "reason": "WeakMap keyed by the roles array; entries go with the array"
+    },
+    {
       "file": "features/messaging/emojiCatalog.ts",
       "binding": "byName",
       "category": "app-lifetime",

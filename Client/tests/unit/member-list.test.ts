@@ -17,6 +17,7 @@ import { claimComposer } from "../../src/features/messaging/activeComposer";
 import { Permission, type UserStatus } from "../../src/lib/types";
 import { pickAvatarColor } from "@components/message-list/avatar";
 import { applyThemeByName } from "@lib/themes";
+import { applyReadyCapabilities, resetServerCapabilities } from "../../src/lib/serverCapabilities";
 import { openUserProfilePopup } from "../../src/features/profiles/openUserProfilePopup";
 
 /**
@@ -580,6 +581,17 @@ describe("MemberList", () => {
       expect(labels).toContain("Change Role");
       expect(labels).toContain("Force Logout");
       expect(labels).not.toContain("Ban");
+    });
+
+    it("hides the single Change Role on a multi_role server (the profile chips manage roles)", async () => {
+      applyReadyCapabilities({ multi_role: true });
+      try {
+        const labels = await openMenuAs("staff", Permission.MANAGE_ROLES | Permission.KICK_MEMBERS);
+        expect(labels).not.toContain("Change Role");
+        expect(labels).toContain("Force Logout");
+      } finally {
+        resetServerCapabilities();
+      }
     });
 
     it("shows every moderation item for the ADMINISTRATOR bit", async () => {

@@ -20,6 +20,18 @@ export function installGlobalGuards(): void {
     if (!wantsNativeMenu(e.target)) e.preventDefault();
   });
 
+  // Long-press menus, tap-to-show message actions and the keyboard-aware app
+  // height live in a chunk loaded only where a touch pointer exists.
+  if (
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(any-pointer: coarse)").matches
+  ) {
+    import("@lib/touchInput").then(
+      (m) => m.installTouchInput(new Disposable().signal),
+      (err: unknown) => log.warn("touch input failed to load", err),
+    );
+  }
+
   // F12 or Ctrl+Shift+I opens WebView2 DevTools in development builds only.
   // F5 and Ctrl+R are blocked to prevent accidental page reloads which cause
   // ghost voice state (user appears in channel with no LiveKit connection).

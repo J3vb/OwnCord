@@ -1005,7 +1005,9 @@ export function createVideoGrid(): VideoGridComponent {
         bar.appendChild(pick);
       }
     }
-    if (cc.onScreenshareToggle !== undefined) {
+    if (__OWNCORD_WEB__ && typeof navigator.mediaDevices?.getDisplayMedia !== "function") {
+      // No getDisplayMedia (phones): the call bar offers no screen share.
+    } else if (cc.onScreenshareToggle !== undefined) {
       const toggle = cc.onScreenshareToggle;
       // Starting a share opens its picker in the app window: the call comes
       // back there first, so the picker is in view.

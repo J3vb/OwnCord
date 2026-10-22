@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -63,7 +61,7 @@ type ThreadStore interface {
 	GetThreadByStarter(ctx context.Context, starterID int64) (*db.ThreadInfo, error)
 	CreateThread(ctx context.Context, n db.NewThread) (info *db.ThreadInfo, created bool, err error)
 	GetThread(ctx context.Context, id int64) (*db.ThreadInfo, error)
-	ListThreads(ctx context.Context, parentID int64, archived bool, after db.ThreadCursor, limit int) ([]db.ThreadListRow, error)
+	ListThreadsBy(ctx context.Context, parentID int64, archived bool, opts db.ThreadListOptions, after db.ThreadCursor, limit int) ([]db.ThreadListRow, error)
 	UpdateThread(ctx context.Context, id int64, patch db.ThreadPatch, byModerator bool) (*db.ThreadInfo, error)
 	DeleteThread(ctx context.Context, id int64) (bool, error)
 	NextThreadArchiveDue(ctx context.Context) (time.Time, bool, error)
@@ -373,76 +371,6 @@ func (s *ThreadService) Get(ctx context.Context, threadID int64) (*db.ThreadInfo
 		return nil, fmt.Errorf("%w: load thread: %w", ErrInternal, err)
 	}
 	return info, nil
-}
-
-// List returns a text channel's threads with the given archived state, newest
-// activity first, gated by the parent's read. hasMore reports another page.
-func (s *ThreadService) List(ctx context.Context, userID, parentID int64, archived bool, after ThreadCursor, limit int) (threads []db.ThreadInfo, next ThreadCursor, hasMore bool, err error) {
-	ts, err := s.store()
-	if err != nil {
-		return nil, ThreadCursor{}, false, err
-	}
-	if parentID <= 0 {
-		return nil, ThreadCursor{}, false, fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
-	}
-	ch, err := s.st.GetChannel(ctx, parentID)
-	if err != nil || ch == nil {
-		return nil, ThreadCursor{}, false, fmt.Errorf("%w: channel not found", ErrNotFound)
-	}
-	if ch.IsThread() {
-		return nil, ThreadCursor{}, false, fmt.Errorf("%w: channel not found", ErrNotFound)
-	}
-	if err := readContentDenial(permissions.CanReadContent(readSubject(ctx, s.st, s.perms, userID, ch))); err != nil {
-		return nil, ThreadCursor{}, false, err
-	}
-	if limit <= 0 {
-		limit = ThreadListDefaultLimit
-	}
-	limit = min(limit, ThreadListMaxLimit)
-	rows, err := ts.ListThreads(ctx, parentID, archived, after, limit+1)
-	if err != nil {
-		return nil, ThreadCursor{}, false, fmt.Errorf("%w: list threads: %w", ErrInternal, err)
-	}
-	hasMore = len(rows) > limit
-	if hasMore {
-		rows = rows[:limit]
-	}
-	threads = make([]db.ThreadInfo, 0, len(rows))
-	for _, r := range rows {
-		threads = append(threads, r.ThreadInfo)
-	}
-	if len(rows) > 0 {
-		next = rows[len(rows)-1].Cursor()
-	}
-	return threads, next, hasMore, nil
-}
-
-// ThreadCursor is the position a thread list page stops at (db.ThreadCursor).
-type ThreadCursor = db.ThreadCursor
-
-// FormatThreadCursor renders a cursor as the opaque `before` value of the list
-// route: the activity time and the id of the page's last row, joined by "_".
-func FormatThreadCursor(c ThreadCursor) string {
-	return c.Activity + "_" + strconv.FormatInt(c.ID, 10)
-}
-
-// ParseThreadCursor reads a `before` value; "" is the first page.
-func ParseThreadCursor(raw string) (ThreadCursor, error) {
-	if raw == "" {
-		return ThreadCursor{}, nil
-	}
-	activity, idText, found := strings.CutLast(raw, "_")
-	if !found {
-		return ThreadCursor{}, fmt.Errorf("%w: before is not a thread cursor", ErrBadRequest)
-	}
-	id, err := strconv.ParseInt(idText, 10, 64)
-	if err != nil || id < 1 {
-		return ThreadCursor{}, fmt.Errorf("%w: before is not a thread cursor", ErrBadRequest)
-	}
-	if _, perr := time.Parse(db.ThreadActivityLayout, activity); perr != nil && activity != "" {
-		return ThreadCursor{}, fmt.Errorf("%w: before is not a thread cursor", ErrBadRequest)
-	}
-	return ThreadCursor{Activity: activity, ID: id}, nil
 }
 
 // mapThreadErr turns a db thread error into the service's error kinds.

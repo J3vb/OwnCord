@@ -308,3 +308,9 @@ select[hidden] + .vw-stream-stop {
 .vw-stat-arrow {
   color: var(--text-muted);
 }
+
+@media (pointer: coarse) {
+  .vw-controls button {
+    min-height: 44px;
+  }
+}

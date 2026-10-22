@@ -25,6 +25,7 @@
   /* A long "about me" scrolls inside the card instead of growing it off the
      bottom of the screen. */
   max-height: calc(100vh - 16px);
+  max-height: calc(100dvh - 16px);
   opacity: 0;
   transform: scale(0.95);
   transform-origin: top left;
@@ -107,6 +108,40 @@
 .upp-role-btn:hover,
 .upp-role-btn[aria-expanded="true"] {
   border-color: var(--border);
+}
+/* Multi-role chips (WP 6.3d): each held role is a pill with an x, and the "+"
+   pill opens the same list below as the single-role picker. */
+.upp-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.upp-chips .upp-role-badge {
+  margin-top: 4px;
+}
+.upp-chip-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-circle);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  line-height: 1;
+  cursor: pointer;
+}
+.upp-chip-x:hover,
+.upp-chip-x:focus-visible {
+  background: var(--bg-active);
+  color: var(--header-primary);
+}
+.upp-chip-add {
+  color: var(--text-muted);
 }
 .upp-role-menu {
   display: flex;

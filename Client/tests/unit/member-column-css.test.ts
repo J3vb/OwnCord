@@ -85,7 +85,10 @@ describe("member column CSS (3C-6b)", () => {
     const block =
       /@media \(max-width: 899px\)\s*\{\s*\.member-column\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
     expect(block).toMatch(/position:\s*fixed/);
-    expect(block).toMatch(/top:\s*var\(--header-height, 48px\)/);
+    // Plus the notch inset the shell now pads above the header (6.13f1).
+    expect(block).toMatch(
+      /top:\s*calc\(var\(--header-height, 48px\) \+ env\(safe-area-inset-top\)\)/,
+    );
   });
 
   it("the pinned panel drops below the chat header, so the pin button can close it", () => {

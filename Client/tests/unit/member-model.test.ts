@@ -226,3 +226,91 @@ describe("memberModel", () => {
     expect(headers.every((h) => h.kind === "header" && /\d/.test(h.text))).toBe(true);
   });
 });
+
+describe("memberModel with several roles (WP 6.3d)", () => {
+  const MULTI: readonly ReadyRole[] = [
+    { id: 1, name: "Owner", color: "#e74c3c", permissions: 0, position: 40, hoist: true },
+    { id: 2, name: "Staff", color: "#3498db", permissions: 0, position: 30, hoist: true },
+    { id: 3, name: "Helper", color: "#2ecc71", permissions: 0, position: 20, hoist: false },
+    { id: 4, name: "Member", color: null, permissions: 0, position: 10, hoist: false },
+  ];
+  const keys = (members: Map<number, Member>, roles = MULTI): string[] =>
+    buildItems(members, roles, "").map((i) => i.key);
+
+  it("groups by highest hoisted role", () => {
+    const members = mapOf([
+      member(1, { role: "helper", roleIds: [3, 2, 4] }),
+      member(2, { role: "owner", roleIds: [4, 1] }),
+      member(3, { role: "staff", roleIds: [2, 4] }),
+    ]);
+    // role_ids order is not trusted past the head: position decides.
+    expect(keys(members)).toEqual(["g:owner", "u:2", "g:staff", "u:1", "u:3"]);
+  });
+
+  it("non-hoisted online members go to Online, between the role groups and Offline", () => {
+    const members = mapOf([
+      member(1, { role: "staff", roleIds: [2] }),
+      member(2, { role: "helper", roleIds: [3, 4] }),
+      member(3, { role: "member", roleIds: [4], status: "offline" }),
+      member(4, { role: "member", roleIds: [4], status: "idle" }),
+    ]);
+    const items = buildItems(members, MULTI, "");
+    expect(items.map((i) => i.key)).toEqual([
+      "g:staff",
+      "u:1",
+      "online",
+      "u:2",
+      "u:4",
+      "offline",
+      "u:3",
+    ]);
+    const online = items.find((i) => i.key === "online");
+    expect(online?.kind === "header" && online.text).toBe("ONLINE — 2");
+    expect(online?.kind === "header" && online.offline).toBe(false);
+  });
+
+  it("no hoist field keeps per-role groups", () => {
+    const old: readonly ReadyRole[] = [
+      { id: 1, name: "Owner", color: null, permissions: 0, position: 30 },
+      { id: 3, name: "Member", color: null, permissions: 0, position: 10 },
+    ];
+    const members = mapOf([
+      member(1, { role: "owner" }),
+      member(2, { role: "member" }),
+      member(3, { role: "member", roleIds: [3] }),
+    ]);
+    expect(keys(members, old)).toEqual(["g:owner", "u:1", "g:member", "u:2", "u:3"]);
+  });
+
+  it("colour from highest coloured role", () => {
+    const members = mapOf([
+      // Member has no colour, Helper (20) beats nothing above it that is held.
+      member(1, { role: "helper", roleIds: [3, 4] }),
+      // Held [Member, Owner]: Owner has the highest position.
+      member(2, { role: "owner", roleIds: [4, 1] }),
+      // Only an uncoloured role: today's fallback colour.
+      member(3, { role: "member", roleIds: [4] }),
+    ]);
+    const colors = new Map(
+      buildItems(members, MULTI, "").flatMap((i) =>
+        i.kind === "row" ? [[i.key, i.colorVar]] : [],
+      ),
+    );
+    expect(colors.get("u:1")).toBe("#2ecc71");
+    expect(colors.get("u:2")).toBe("#e74c3c");
+    expect(colors.get("u:3")).toBe("var(--role-member, #949ba4)");
+  });
+
+  it("an incremental update that drops the hoisted role moves the row and equals a full build", () => {
+    const before = mapOf([member(1, { role: "staff", roleIds: [2, 4] }), member(2)]);
+    const prev = buildModel(before, MULTI);
+    const after = new Map(before);
+    after.set(1, { ...before.get(1)!, role: "member", roleIds: [4] });
+    const next = updateModel(prev, after, MULTI);
+    expect(flattenModel(next, "").map((i) => i.key)).toEqual(
+      buildItems(after, MULTI, "").map((i) => i.key),
+    );
+    expect(flattenModel(prev, "").map((i) => i.key)).toContain("g:staff");
+    expect(flattenModel(next, "").map((i) => i.key)).not.toContain("g:staff");
+  });
+});

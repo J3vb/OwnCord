@@ -186,7 +186,7 @@ export function createThreadPanelHost(options: ThreadPanelHostOptions): ThreadPa
   }
   const permissionKey = (): string => {
     const ch = channelsStore.getState().channels.get(authorityChannelId(openId ?? 0));
-    return `${ch?.canSend}|${ch?.canDeleteOthers}|${ch?.canReact}|${authStore.getState().user?.role}`;
+    return `${ch?.canSend}|${ch?.canDeleteOthers}|${ch?.canReact}|${authStore.getState().user?.role}|${authStore.getState().user?.role_ids?.join(",")}`;
   };
   const unsubscribeRights = [
     safetyStore.subscribeSelector(

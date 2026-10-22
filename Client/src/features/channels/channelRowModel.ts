@@ -14,7 +14,11 @@
 import { categoryGroups, groupLabel } from "../../stores/channels.store";
 import type { Channel, ChannelsState } from "../../stores/channels.store";
 import { mutedRowHidden } from "../../lib/hide-muted-channels";
-import { hasPermission, permissionsForRoleIn, roleHasPermissionIn } from "../../lib/permissions";
+import {
+  hasPermission,
+  memberHasPermissionIn,
+  permissionsForMemberIn,
+} from "../../lib/permissions";
 import { Permission } from "../../lib/types";
 import type { CategoryGroupModel, ChannelAccess, TextChannelRowModel } from "./channelRow.view";
 import type { VoiceRowInputs } from "./voiceRowModel";
@@ -28,6 +32,9 @@ export interface ChannelListInputs {
   readonly activeChannelId: number | null;
   /** The signed-in user's role name; "" when signed out. */
   readonly selfRole: string;
+  /** Every role the signed-in user holds (identity); undefined on an older
+   *  server, where `selfRole` is the only role. Permissions are their OR. */
+  readonly selfRoleIds?: readonly number[] | undefined;
   /** The role list from `ready` (identity). */
   readonly roles: ChannelsState["roles"];
   /** `channelsStore.categories` (identity): the manager's list, empty for everyone else. */
@@ -91,21 +98,24 @@ type Occupancy = Pick<VoiceRowInputs, "voiceUsers" | "currentChannelId">;
 
 /** The role's channel permissions. `manageMessages` has no legacy owner/admin
  *  fallback, exactly as the Purge gate has always read it; the other two do. */
-export function channelAccess(list: Pick<ChannelListInputs, "roles" | "selfRole">): ChannelAccess {
+export function channelAccess(
+  list: Pick<ChannelListInputs, "roles" | "selfRole" | "selfRoleIds">,
+): ChannelAccess {
+  const { roles, selfRole, selfRoleIds } = list;
   return {
-    manageChannels: roleHasPermissionIn(list.roles, list.selfRole, Permission.MANAGE_CHANNELS),
+    manageChannels: memberHasPermissionIn(roles, selfRoleIds, selfRole, Permission.MANAGE_CHANNELS),
     manageMessages: hasPermission(
-      permissionsForRoleIn(list.roles, list.selfRole) ?? 0,
+      permissionsForMemberIn(roles, selfRoleIds, selfRole) ?? 0,
       Permission.MANAGE_MESSAGES,
     ),
-    manageInvites: roleHasPermissionIn(list.roles, list.selfRole, Permission.MANAGE_INVITES),
+    manageInvites: memberHasPermissionIn(roles, selfRoleIds, selfRole, Permission.MANAGE_INVITES),
   };
 }
 
 /** One entry per group, in sidebar order (D7); the null key is the uncategorized
  *  group. A manager's empty categories are groups with no channels. */
 export function channelGroups(
-  list: Pick<ChannelListInputs, "channels" | "categories" | "roles" | "selfRole">,
+  list: Pick<ChannelListInputs, "channels" | "categories" | "roles" | "selfRole" | "selfRoleIds">,
 ): ChannelGroup[] {
   // The list is the managers'; a viewer who lost MANAGE_CHANNELS mid-session
   // still holds it in the store, so it only counts while the role has the bit.
