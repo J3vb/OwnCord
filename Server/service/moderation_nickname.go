@@ -61,10 +61,8 @@ func (s *ModerationService) SetNickname(ctx context.Context, actorID, targetID i
 	if err := s.requireOutranksRole(ctx, actorRole, targetID); err != nil {
 		return nil, err
 	}
-	if s.users != nil && displayNameChanged(target.DisplayName, cleaned) {
-		if err := s.users.checkDisplayNameCollision(ctx, targetID, cleaned); err != nil {
-			return nil, err
-		}
+	if err := s.checkNicknameCollision(ctx, target, cleaned); err != nil {
+		return nil, err
 	}
 	if s.limiter != nil && !s.limiter.Allow(auth.Key("nickname_change", actorID), nicknameRateLimit, nicknameRateWindow) {
 		return nil, ErrRateLimited
@@ -87,4 +85,13 @@ func (s *ModerationService) SetNickname(ctx context.Context, actorID, targetID i
 		}
 	}
 	return user, nil
+}
+
+// checkNicknameCollision applies the self edit's username collision rule to a
+// moderator's change (WP 6.4b); an unchanged name is not re-checked.
+func (s *ModerationService) checkNicknameCollision(ctx context.Context, target *db.User, cleaned string) error {
+	if s.users == nil || !displayNameChanged(target.DisplayName, cleaned) {
+		return nil
+	}
+	return s.users.checkDisplayNameCollision(ctx, target.ID, cleaned)
 }

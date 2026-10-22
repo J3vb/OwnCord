@@ -7,6 +7,18 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
+// checkProfileByteBounds is UpdateProfile's raw byte guard (OC-0192, see the
+// comment at its call site), split out to keep UpdateProfile within funlen.
+func checkProfileByteBounds(patch ProfilePatch) error {
+	if patch.DisplayName != nil && len(*patch.DisplayName) > MaxDisplayNameLen*4 {
+		return fmt.Errorf("%w: display_name must be at most %d characters", ErrBadRequest, MaxDisplayNameLen)
+	}
+	if patch.About != nil && len(*patch.About) > MaxAboutLen*4 {
+		return fmt.Errorf("%w: about must be at most %d characters", ErrBadRequest, MaxAboutLen)
+	}
+	return nil
+}
+
 // displayNameChanged reports whether setting a display name to next changes
 // what the row holds, treating nil and "" as the same "unset".
 func displayNameChanged(current *string, next string) bool {

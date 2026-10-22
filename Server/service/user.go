@@ -175,11 +175,8 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 	// legitimate UTF-8 value at the rune bound. UpdateProfile is the one
 	// function every transport reaches (see ProfilePatch's doc comment), so
 	// the guard belongs here rather than only in the REST handler.
-	if patch.DisplayName != nil && len(*patch.DisplayName) > MaxDisplayNameLen*4 {
-		return nil, fmt.Errorf("%w: display_name must be at most %d characters", ErrBadRequest, MaxDisplayNameLen)
-	}
-	if patch.About != nil && len(*patch.About) > MaxAboutLen*4 {
-		return nil, fmt.Errorf("%w: about must be at most %d characters", ErrBadRequest, MaxAboutLen)
+	if err := checkProfileByteBounds(patch); err != nil {
+		return nil, err
 	}
 
 	// Display name is single-line visible text: collapse, character-check and
