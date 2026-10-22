@@ -216,6 +216,9 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 	if err != nil || current == nil {
 		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
 	}
+	if err := s.checkDisplayNameEdit(ctx, userID, current, cleanDisplayName); err != nil {
+		return nil, err
+	}
 	// An empty Username means "unspecified", the same as a nil
 	// DisplayName/About pointer — merged against the current row rather
 	// than written verbatim. This is what lets an avatar-only caller
@@ -276,7 +279,7 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 	}
 	// Audit rows must survive a request canceled after the write committed.
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "profile_update", "user", userID,
-		fmt.Sprintf("username=%s", username))
+		fmt.Sprintf("username=%s", username)+displayNameAuditSuffix(current.DisplayName, displayName))
 	slog.Info("profile updated", "user_id", userID, "username", username)
 	return user, nil
 }

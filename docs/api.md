@@ -883,6 +883,12 @@ Omitting a field leaves it unchanged; sending `""` clears the nullable ones.
 `display_name` and `about` are HTML-sanitized and trimmed server-side, and the
 length caps count characters, not bytes.
 
+A `display_name` that differs from your current one is refused with `403`
+`TIMED_OUT` while a moderator timeout is active on your account (resending the
+current value, and changing anything else, still works), and with `400` when it
+equals, ignoring case, another account's username. Your own username is
+allowed.
+
 #### Response 200 OK
 
 Returns the updated user object (same shape as `GET /api/v1/auth/me`).
@@ -3250,6 +3256,9 @@ in the admin panel's role grid.
 `display_name` must be present. The value goes through the same cleaning and
 checks as the member's own edit (spaces collapsed; no control characters, line
 breaks, invisible fillers or more than two stacked combining marks).
+
+A name that equals, ignoring case, another account's username is refused with
+`400`; the member's own username is allowed.
 
 #### Response 200 OK
 
