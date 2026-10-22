@@ -25,6 +25,10 @@ type chatMessagePayload struct {
 	// these instead of re-parsing the content.
 	Mentions         []int64 `json:"mentions"`
 	MentionsEveryone bool    `json:"mentions_everyone"`
+	// MentionRoles lists the roles whose <@&id> token cleared the role-mention
+	// gate (mentionable, or MENTION_EVERYONE). A client counts a role mention
+	// only when the server lists the role here. Always present, empty for none.
+	MentionRoles []int64 `json:"mention_roles"`
 	// MentionsHere reports that MentionsEveryone came from @here rather than
 	// @everyone (never both). Mention fan-out (service/mentions.go,
 	// mentionEntries) skips the mention-count bump for an @here reader with no
@@ -91,6 +95,7 @@ type chatMessageArgs struct {
 	ReplyTo           *int64
 	Attachments       []map[string]any
 	Mentions          []int64
+	MentionRoles      []int64
 	MentionsEveryone  bool
 	MentionsHere      bool
 	ReferencedMessage *service.ReferencedMessage
@@ -116,6 +121,10 @@ func buildChatMessage(a chatMessageArgs) []byte {
 	if mentions == nil {
 		mentions = []int64{}
 	}
+	mentionRoles := a.MentionRoles
+	if mentionRoles == nil {
+		mentionRoles = []int64{}
+	}
 	return buildJSON(wsMsg{
 		Type: MsgTypeChatMessage,
 		Payload: chatMessagePayload{
@@ -136,6 +145,7 @@ func buildChatMessage(a chatMessageArgs) []byte {
 			Reactions:         []any{},
 			Pinned:            false,
 			Mentions:          mentions,
+			MentionRoles:      mentionRoles,
 			MentionsEveryone:  a.MentionsEveryone,
 			MentionsHere:      a.MentionsHere,
 			ReferencedMessage: a.ReferencedMessage,

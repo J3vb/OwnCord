@@ -64,6 +64,7 @@ type activityNote struct {
 	msgID     int64
 	authorID  int64
 	mentions  []int64
+	roleUsers []int64
 	everyone  bool
 	hereOnly  bool
 	// readBy, when set, makes the note a read mark for that user instead of a
@@ -79,6 +80,7 @@ type activityMention struct {
 	msgID    int64
 	authorID int64
 	ids      []int64
+	idSet    map[int64]struct{} // built at resolve time, after any forget
 	everyone bool
 	hereOnly bool
 }
@@ -135,9 +137,9 @@ func (a *activityState) note(n activityNote) {
 	if n.msgID > pc.latestID {
 		pc.latestID, pc.latestAuthorID = n.msgID, n.authorID
 	}
-	if len(n.mentions) > 0 || n.everyone {
+	if len(n.mentions) > 0 || len(n.roleUsers) > 0 || n.everyone {
 		pc.mentions = append(pc.mentions, activityMention{
-			msgID: n.msgID, authorID: n.authorID, ids: slices.Clone(n.mentions),
+			msgID: n.msgID, authorID: n.authorID, ids: slices.Concat(n.mentions, n.roleUsers),
 			everyone: n.everyone, hereOnly: n.hereOnly,
 		})
 		if len(pc.mentions) > activityMaxMentions {
@@ -411,7 +413,7 @@ func (h *Hub) activityUserEntries(
 		if m.everyone && m.hereOnly && !haveStatus {
 			status, haveStatus = h.LiveStatus(uid), true
 		}
-		direct, broad := service.MentionReach(m.ids, m.everyone, m.hereOnly, uid, status)
+		direct, broad := service.MentionReachSet(m.idSet, m.everyone, m.hereOnly, uid, status)
 		if direct || broad {
 			entries = append(entries, activityEntry(chID, m.msgID, m.authorID, direct, broad, withhold))
 			break
@@ -460,6 +462,7 @@ func activityMentions(ctx context.Context, vis VisibilityReader, in []activityMe
 			blockers[m.authorID] = set
 		}
 		if set != nil {
+			m.idSet = service.MentionIDSet(m.ids)
 			out = append(out, m)
 		}
 	}

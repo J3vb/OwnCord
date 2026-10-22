@@ -73,7 +73,10 @@ type EditMessageResult struct {
 	ParticipantIDs []int64
 
 	// Mentions/MentionsEveryone are re-resolved from the edited content.
+	// MentionRoles lists the roles whose @role token cleared the gate; an edit
+	// never raises a badge for them or anyone else.
 	Mentions         []int64
+	MentionRoles     []int64
 	MentionsEveryone bool
 	// MentionsHere: see SendMessageResult.MentionsHere.
 	MentionsHere bool
@@ -117,6 +120,9 @@ type MessageService struct {
 	st      Store
 	perms   *PermissionService
 	limiter *auth.RateLimiter
+	// mentionIDs backs the <@id> and <@&id> mention forms; nil when the store
+	// lacks it, which leaves those tokens as plain text.
+	mentionIDs MentionIDStore
 	// bg runs the deferred bookkeeping that has no dedicated worker off the send
 	// path: Web Push dispatch, and the fallback mention write used when no
 	// mention worker is running. It runs on bg, the lifecycle-owned group the
@@ -235,6 +241,7 @@ func NewMessageService(st Store, perms *PermissionService, limiter *auth.RateLim
 	s.forward.store, _ = st.(ForwardStore)
 	s.poll.store, _ = st.(PollStore)
 	s.threads, _ = st.(ThreadStore)
+	s.mentionIDs, _ = st.(MentionIDStore)
 	return s
 }
 

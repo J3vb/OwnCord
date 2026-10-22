@@ -168,15 +168,15 @@ func TestSearchFiltered_MentionsExcludesReplyPingAndEveryone(t *testing.T) {
 	author, bob, cat := seedUser(t, database, "ma"), seedUser(t, database, "mb"), seedUser(t, database, "mc")
 	ch := seedChannel(t, database, "mentions")
 
-	text, err := database.CreateMessageWithMentions(ctx, ch, author, "hi bob", nil, []int64{bob}, 0, false)
+	text, err := database.CreateMessageWithMentions(ctx, ch, author, "hi bob", nil, []int64{bob}, 0, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	both, _ := database.CreateMessageWithMentions(ctx, ch, author, "hi bob and cat", nil, []int64{bob, cat}, 0, false)
+	both, _ := database.CreateMessageWithMentions(ctx, ch, author, "hi bob and cat", nil, []int64{bob, cat}, 0, false, nil)
 	// Only a reply ping to bob: a notification, not a mention in the text.
-	ping, _ := database.CreateMessageWithMentions(ctx, ch, author, "replying", nil, nil, bob, false)
+	ping, _ := database.CreateMessageWithMentions(ctx, ch, author, "replying", nil, nil, bob, false, nil)
 	// @everyone stores no per-user row.
-	_, _ = database.CreateMessageWithMentions(ctx, ch, author, "@everyone", nil, nil, 0, true)
+	_, _ = database.CreateMessageWithMentions(ctx, ch, author, "@everyone", nil, nil, 0, true, nil)
 
 	got := searchIDs(t, database, db.SearchQuery{ChannelIDs: []int64{ch}, MentionIDs: []int64{bob}})
 	if want := []int64{text.ID, both.ID}; !slices.Equal(got, want) {
@@ -196,17 +196,17 @@ func TestSearchFiltered_MentionsFollowsEdit(t *testing.T) {
 	author, bob := seedUser(t, database, "ea"), seedUser(t, database, "eb")
 	ch := seedChannel(t, database, "mentionedit")
 
-	msg, err := database.CreateMessageWithMentions(ctx, ch, author, "hello bob", nil, []int64{bob}, 0, false)
+	msg, err := database.CreateMessageWithMentions(ctx, ch, author, "hello bob", nil, []int64{bob}, 0, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// A pure reply ping: bob is not named in the text.
-	pingOnly, err := database.CreateMessageWithMentions(ctx, ch, author, "hello again", nil, nil, bob, false)
+	pingOnly, err := database.CreateMessageWithMentions(ctx, ch, author, "hello again", nil, nil, bob, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Pings bob and names him: stored as one reply_ping row, still a mention.
-	pinged, err := database.CreateMessageWithMentions(ctx, ch, author, "hey @EB look", nil, []int64{bob}, bob, false)
+	pinged, err := database.CreateMessageWithMentions(ctx, ch, author, "hey @EB look", nil, []int64{bob}, bob, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestSearchFiltered_MentionsFollowsEdit(t *testing.T) {
 		if _, err := database.EditMessage(ctx, id, author, "hello nobody"); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := database.ReplaceMessageMentions(ctx, id, nil, false); err != nil {
+		if _, err := database.ReplaceMessageMentions(ctx, id, nil, false, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -229,7 +229,7 @@ func TestSearchFiltered_MentionsFollowsEdit(t *testing.T) {
 	}
 
 	// Re-adding the mention in an edit matches again.
-	if _, err := database.ReplaceMessageMentions(ctx, msg.ID, []int64{bob}, false); err != nil {
+	if _, err := database.ReplaceMessageMentions(ctx, msg.ID, []int64{bob}, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := searchIDs(t, database, q); !slices.Equal(got, []int64{msg.ID}) {

@@ -201,7 +201,7 @@ func TestEraseAccount_ReversesMentionCounts(t *testing.T) {
 	bob := seedUser(t, database, "bob-mention")
 	chID := seedChannel(t, database, "general-mention")
 
-	msg, err := database.CreateMessageWithMentions(ctx, chID, alice, "hi @bob", nil, []int64{bob}, 0, false)
+	msg, err := database.CreateMessageWithMentions(ctx, chID, alice, "hi @bob", nil, []int64{bob}, 0, false, nil)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestEraseAccount_MentionCounts_PreservesOthersContribution(t *testing.T) {
 	bob := seedUser(t, database, "bob-mention2")
 	chID := seedChannel(t, database, "general-mention2")
 
-	msgAlice, err := database.CreateMessageWithMentions(ctx, chID, alice, "hi @bob", nil, []int64{bob}, 0, false)
+	msgAlice, err := database.CreateMessageWithMentions(ctx, chID, alice, "hi @bob", nil, []int64{bob}, 0, false, nil)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions(alice): %v", err)
 	}
@@ -242,7 +242,7 @@ func TestEraseAccount_MentionCounts_PreservesOthersContribution(t *testing.T) {
 		t.Fatalf("IncrementMentionCounts(alice): %v", err)
 	}
 
-	msgCarol, err := database.CreateMessageWithMentions(ctx, chID, carol, "hey @bob too", nil, []int64{bob}, 0, false)
+	msgCarol, err := database.CreateMessageWithMentions(ctx, chID, carol, "hey @bob too", nil, []int64{bob}, 0, false, nil)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions(carol): %v", err)
 	}

@@ -39,6 +39,9 @@ type MessageDeliveryParams struct {
 	ReplyTo           *int64
 	AttachmentIDs     []string
 	MentionedUserIDs  []int64
+	// MentionedRoleIDs are the roles whose @role tokens cleared the mention
+	// gate; stored as message_role_mentions rows with the message.
+	MentionedRoleIDs []int64
 	// ReplyPingUserID is the replied-to author a reply_ping adds to the mention
 	// set, 0 for none. It is stored as a message_mentions row flagged reply_ping.
 	ReplyPingUserID  int64
@@ -146,7 +149,7 @@ func (d *DB) CreateMessageDelivery(ctx context.Context, p MessageDeliveryParams)
 	if err != nil {
 		return nil, fmt.Errorf("message delivery insert: %w", err)
 	}
-	if err := insertMentionRows(ctx, tx, r.ID, p.MentionedUserIDs, p.ReplyPingUserID); err != nil {
+	if err := insertAllMentionRows(ctx, tx, r.ID, p.MentionedUserIDs, p.ReplyPingUserID, p.MentionedRoleIDs, false); err != nil {
 		return nil, err
 	}
 	linked, err := linkAttachmentsToMessage(ctx, tx, r.ID, p.UserID, p.AttachmentIDs)

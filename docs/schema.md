@@ -332,8 +332,10 @@ CREATE INDEX idx_user_roles_role ON user_roles(role_id, user_id);
 The trigger `user_roles_on_user_insert` gives every newly inserted user a row
 for their `role_id`, whichever writer inserted it. The `member_generation_*`
 triggers bump the member generation on a `user_roles` insert or delete and on a
-`roles` hoist or color edit. `message_role_mentions(message_id, role_id)` is
-created empty for later role pings.
+`roles` hoist or color edit. `message_role_mentions(message_id, role_id)` holds
+the roles whose `<@&id>` ping cleared the role-mention gate, written with the
+message's `message_mentions` rows and rewritten on edit; it cascades with the
+message.
 
 **Default roles** — current values after the full migration set (001 seeds
 different masks: 005/007 raise Member's, 022 grants `MENTION_EVERYONE` to

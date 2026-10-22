@@ -879,15 +879,9 @@ func (d *DB) scanAndEnrichMessages(ctx context.Context, rows *sql.Rows, requesti
 		}
 	}
 
-	// Batch-fetch resolved mentions for all message IDs.
-	mentionMap, err := d.GetMentionsByMessageIDs(ctx, msgIDs)
-	if err != nil {
+	// Batch-fetch resolved user and role mentions for all message IDs.
+	if err := d.attachMentions(ctx, msgs, msgIDs); err != nil {
 		return nil, fmt.Errorf("scanAndEnrichMessages mentions: %w", err)
-	}
-	for i := range msgs {
-		if mIDs, ok := mentionMap[msgs[i].ID]; ok {
-			msgs[i].Mentions = mIDs
-		}
 	}
 
 	if err := d.attachCalls(ctx, msgs); err != nil {
