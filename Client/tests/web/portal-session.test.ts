@@ -27,7 +27,12 @@ import { createApiClient } from "@lib/api";
 import type { WsClient } from "@lib/ws";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { setTransientError, uiStore } from "@stores/ui.store";
-import { abandonInFlight, configureSession, startSession } from "../../src/app/session";
+import {
+  abandonInFlight,
+  configureSession,
+  installLogoutTeardown,
+  startSession,
+} from "../../src/app/session";
 import { connectText } from "../../src/i18n/connect";
 
 const HOST = location.host;
@@ -113,6 +118,30 @@ describe("portal session credential save", () => {
     await flush();
     expect(stored(localStorage)).toEqual({ username: "casey", token: "fresh" });
     expect(sessionStorage.getItem(KEY)).toBeNull();
+  });
+
+  it("a resume save leaves the other area's different token alone", async () => {
+    sessionStorage.setItem(KEY, JSON.stringify({ username: "casey", token: "T1" }));
+    localStorage.setItem(KEY, JSON.stringify({ username: "casey", token: "T2" }));
+    startSession(HOST, "T1b", "casey", undefined, false, false, undefined, true);
+    await flush();
+    expect(stored(sessionStorage)?.token).toBe("T1b");
+    expect(stored(localStorage)?.token).toBe("T2");
+  });
+
+  it("a sign-out in one tab leaves a different token stored by another tab", async () => {
+    installLogoutTeardown();
+    login(false, "T1");
+    await flush();
+    // Another tab signs in and keeps its own token.
+    localStorage.setItem(KEY, JSON.stringify({ username: "casey", token: "T2" }));
+    configureSession(api, ws, document.getElementById("app")!, () => "main", vi.fn());
+    authStore.setState((prev) => ({ ...prev, isAuthenticated: true }));
+    await flush();
+    clearAuth();
+    await flush();
+    expect(sessionStorage.getItem(KEY)).toBeNull();
+    expect(stored(localStorage)?.token).toBe("T2");
   });
 
   it("failed save surfaces error", async () => {

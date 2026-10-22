@@ -56,11 +56,13 @@ let owner: SessionScope;
 let session: SessionScope;
 let page: Record<string, ReturnType<typeof vi.fn>>;
 let startup: () => void;
+let ensureProfileExists: ReturnType<typeof vi.fn>;
+let apiToken: string | undefined;
 
 const api = {
   getSession: () => session,
   setConfig: vi.fn(),
-  getConfig: () => ({ host: HOST }),
+  getConfig: () => ({ host: HOST, token: apiToken }),
   endSession: vi.fn(),
 };
 
@@ -73,6 +75,8 @@ beforeEach(() => {
   sessionStorage.clear();
   for (const m of Object.values(hoisted)) m.mockReset();
   profiles = [];
+  apiToken = undefined;
+  ensureProfileExists = vi.fn();
   owner = new SessionScope({ host: "", generation: 0 });
   session = new SessionScope({ host: "", generation: 0 });
   page = {
@@ -93,7 +97,7 @@ beforeEach(() => {
     manager,
     owner,
     page as never,
-    vi.fn() as never,
+    ensureProfileExists as never,
     () => profiles,
   );
 });
@@ -110,12 +114,22 @@ describe("portal resume", () => {
     sessionStorage.setItem(KEY, CRED);
     startup();
     await flush();
-    expect(page.selectServer).toHaveBeenCalledWith(HOST, "casey", true, false);
+    expect(page.selectServer).toHaveBeenCalledWith(HOST, "casey", false, false);
     expect(page.showAutoConnecting).toHaveBeenCalled();
     expect(hoisted.startSession).toHaveBeenCalledTimes(1);
     const args = hoisted.startSession.mock.calls[0]!;
     expect(args.slice(0, 6)).toEqual([HOST, "tok", "casey", undefined, false, false]);
-    expect(args[7]).toBe(true);
+  });
+
+  it("a stand-in resume does not persist stay-signed-in", async () => {
+    // The user unticked the box, so only a session-only token exists and no
+    // profile does. Resuming it must not write "autoConnect: true" anywhere.
+    sessionStorage.setItem(KEY, CRED);
+    startup();
+    await flush();
+    expect(hoisted.startSession).toHaveBeenCalledTimes(1);
+    expect(hoisted.startSession.mock.calls[0]?.[7]).toBe(false);
+    for (const call of ensureProfileExists.mock.calls) expect(call[3]).toBe(false);
   });
 
   it("resumes a saved profile whose flags are both off", async () => {
@@ -181,6 +195,17 @@ describe("portal resume", () => {
 });
 
 describe("portal auth_error on a resume", () => {
+  it("a sign-out or auth_error in one tab leaves a different token stored by another tab", async () => {
+    // This tab's attempt sent T1 (session-only); another tab has since kept T2.
+    apiToken = "T1";
+    sessionStorage.setItem(KEY, JSON.stringify({ username: "casey", token: "T1" }));
+    localStorage.setItem(KEY, JSON.stringify({ username: "casey", token: "T2" }));
+    handleAuthError(api as never, { message: "invalid token" });
+    await flush();
+    expect(sessionStorage.getItem(KEY)).toBeNull();
+    expect(JSON.parse(localStorage.getItem(KEY)!).token).toBe("T2");
+  });
+
   it("auth_error on resume deletes both copies", async () => {
     localStorage.setItem(KEY, CRED);
     sessionStorage.setItem(KEY, CRED);

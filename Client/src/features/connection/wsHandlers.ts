@@ -95,8 +95,11 @@ export function handleAuthError(
   // flips and the logout teardown never deletes the token: a stale one would
   // come back on every reload. Delete it now (both copies).
   if (__OWNCORD_WEB__ && !epochRefusal) {
-    const host = api?.getConfig?.().host;
-    if (host) void deleteCredential(host);
+    // Only the token this attempt sent (the api config's, set by
+    // startSession for this very connection): a different token another tab
+    // has saved since must survive.
+    const config = api?.getConfig?.();
+    if (config?.host) void deleteCredential(config.host, config.token);
   }
   // A protocol refusal is not a bad token: say so, so main.ts keeps the
   // stored credential for the relaunch after the update.

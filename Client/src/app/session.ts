@@ -418,6 +418,9 @@ export function installLogoutTeardown(): void {
         connectedOverlay?.destroy();
         connectedOverlay = null;
         ws.disconnect();
+        // The token this session ran on, for the web's delete: another tab may
+        // have saved a different one since, and that one must survive.
+        const sessionToken = lastConnectToken;
         lastConnectToken = "";
         lastConnectHost = "";
         // Clear stored credential on logout. (A server restart never gets
@@ -431,8 +434,10 @@ export function installLogoutTeardown(): void {
           // skip flag below — does not survive that relaunch).
           // A quick switch keeps it as well: switching back resumes with it
           // (B7-13), and the departed session is left for that return.
-          if (reason !== "protocol_epoch" && reason !== "server_switch")
-            void deleteCredential(host);
+          if (reason !== "protocol_epoch" && reason !== "server_switch") {
+            if (__OWNCORD_WEB__) void deleteCredential(host, sessionToken || undefined);
+            else void deleteCredential(host);
+          }
           // Whenever this session must not turn around and auto-login with the
           // credential (removed, or just refused), say so.
           sessionStorage.setItem("owncord:skip-auto-login", "1");

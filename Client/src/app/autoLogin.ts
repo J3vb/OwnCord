@@ -233,7 +233,10 @@ export function createAutoLogin(
           ? (profileManager.getAll().find((p) => p.host === fixedHost) ?? {
               name: fixedHost,
               host: fixedHost,
-              autoConnect: true,
+              // Not true: `ensureProfileExists` would persist it and tick
+              // "Stay signed in" for a user who unticked it. The resume runs
+              // anyway, because the web skips the opt-out check.
+              autoConnect: false,
               rememberPassword: false,
             })
           : profileManager.getAutoConnectProfile();

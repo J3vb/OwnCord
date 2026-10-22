@@ -54,9 +54,12 @@ export function createUserUpdateCredentialSaver(
     if (!currentToken) return;
     const saved = saveCredential(host, payload.username, currentToken);
     if (__OWNCORD_WEB__ && onSaveFailed !== undefined) {
-      void saved.then((ok) => {
-        if (!ok) onSaveFailed();
-      });
+      void saved.then(
+        (ok) => {
+          if (!ok) onSaveFailed();
+        },
+        () => onSaveFailed(),
+      );
     }
   };
 }
@@ -128,6 +131,8 @@ export async function loadCredential(host: string): Promise<SavedCredential | nu
 }
 
 /** Delete the credential stored for `host`. */
-export async function deleteCredential(host: string): Promise<boolean> {
-  return desktop.credentials.delete(host);
+export async function deleteCredential(host: string, token?: string): Promise<boolean> {
+  return __OWNCORD_WEB__
+    ? desktop.credentials.delete(host, token)
+    : desktop.credentials.delete(host);
 }

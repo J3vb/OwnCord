@@ -2,9 +2,19 @@
 // Storage, keyed by host. A kept token lives in `localStorage`; a
 // session-only one in `sessionStorage`, which the browser drops with the tab.
 // A save that does not say which keeps the token where it already is (kept,
-// when it is nowhere yet), so a refresh never moves it. Each save leaves
-// exactly one copy, `delete` removes both, and no password is
-// ever stored, so there is no saved-password login.
+// when it is nowhere yet), so a refresh never moves it.
+//
+// Tabs share `localStorage`, so one tab must not destroy a token another tab
+// saved. The rules (6.13e review):
+//  - A save that names its area (an explicit sign-in) writes that area and
+//    removes the other area's copy: a fresh sign-in supersedes this browser's
+//    earlier one, so one copy is left.
+//  - A save that does not say (a resume, a profile re-save) writes only the
+//    area the token lives in and never removes the other area's copy.
+//  - `delete(host)` removes both copies; `delete(host, token)` removes a copy
+//    only while it still holds that token, so a sign-out or a refused token in
+//    one tab leaves a different token another tab saved.
+// No password is ever stored, so there is no saved-password login.
 //
 // The contract's outcomes hold as on desktop: a failed write or delete answers
 // `false`, an unreadable store rejects a load, and a page with no Web Storage
@@ -60,7 +70,11 @@ export const credentials: CredentialStore = {
     const sessionOnly = sessionOnlyArg ?? heldForSession(host);
     const target = area(sessionOnly ? "sessionStorage" : "localStorage");
     if (target === null) return false;
-    const other = area(sessionOnly ? "localStorage" : "sessionStorage");
+    // A save that does not say (a resume, a profile re-save) rewrites the token
+    // where it already is and never touches the other area: that copy may be a
+    // different token another tab saved.
+    const other =
+      sessionOnlyArg === undefined ? null : area(sessionOnly ? "localStorage" : "sessionStorage");
     try {
       // The other copy goes first, so a failed save never leaves two.
       other?.removeItem(keyFor(host));
@@ -85,7 +99,7 @@ export const credentials: CredentialStore = {
     return null;
   },
 
-  async delete(host) {
+  async delete(host, token) {
     const areas = [area("localStorage"), area("sessionStorage")].filter(
       (found): found is Storage => found !== null,
     );
@@ -93,6 +107,13 @@ export const credentials: CredentialStore = {
     let removed = true;
     for (const found of areas) {
       try {
+        if (token !== undefined) {
+          // Only the caller's own token: localStorage is shared with every
+          // other tab of this origin, so a different one is not ours to drop.
+          const raw = found.getItem(keyFor(host));
+          const stored = raw === null ? null : parseCredential(raw);
+          if (stored?.token !== token) continue;
+        }
         found.removeItem(keyFor(host));
       } catch {
         removed = false;
