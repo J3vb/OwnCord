@@ -217,6 +217,7 @@ export const connectText = defineCatalog("connect", {
   "error.storageLowDisk": "The server is low on disk space — try again later.",
   "error.storageError": "The server could not store that. Try again.",
   "error.gifDisabled": "GIF search is not configured on this server.",
+  "error.lastRole": "A member must keep at least one role.",
   "error.pushDisabled": "Notifications are not enabled on this server.",
   "session.passwordRemoveFailed": "Could not remove the saved password — it is still stored",
   "session.credentialsSaveFailed": "Could not save credentials — auto-login won't work",

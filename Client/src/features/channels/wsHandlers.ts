@@ -1,7 +1,7 @@
 // Channel, role, member, presence and emoji WebSocket handlers — extracted
 // from lib/dispatcher.ts, which keeps every socket subscription and calls
 // these plain functions.
-import { authStore, setAuth, updateUser } from "../../stores/auth.store";
+import { authStore, setAuth } from "../../stores/auth.store";
 import {
   channelsStore,
   setChannels,
@@ -523,10 +523,16 @@ export function handleMemberUpdate(payload: Payload<"member_update">): void {
   const me = authStore.getState().user;
   if (me && payload.user_id === me.id) {
     // role_ids rides along so the held-role gates follow the echo too.
-    updateUser({
-      role: payload.role,
-      ...(payload.role_ids === undefined ? {} : { role_ids: payload.role_ids }),
-    });
+    // An absent list drops the old one, as updateMemberRole does.
+    const { role_ids: _old, ...withoutIds } = me;
+    authStore.setState((prev) => ({
+      ...prev,
+      user: {
+        ...withoutIds,
+        role: payload.role,
+        ...(payload.role_ids === undefined ? {} : { role_ids: payload.role_ids }),
+      },
+    }));
   }
 }
 

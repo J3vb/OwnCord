@@ -100,7 +100,7 @@ export function isLegacyAdminRole(roleName: string): boolean {
  * This is the single derivation every moderation affordance uses for the
  * permission bits, so the member-list gates and the voice moderation menu
  * cannot drift apart. The member list also mirrors the rank rule through
- * `positionForRole`; the voice moderation menu does not. Drives affordances
+ * `topPositionFor`; the voice moderation menu does not. Drives affordances
  * only — the server is still the authority on every action and on rank.
  */
 export function roleHasPermission(roleName: string, perm: Permission): boolean {

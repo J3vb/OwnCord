@@ -412,3 +412,12 @@ describe("addMemberRole / removeMemberRole", () => {
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("Unknown role"), "error");
   });
 });
+
+describe("LAST_ROLE refusal text", () => {
+  it("reads as a sentence, not a raw code", async () => {
+    const { serverErrorText } = await import("@lib/api");
+    expect(serverErrorText("LAST_ROLE", "cannot remove last role", "x")).toBe(
+      "A member must keep at least one role.",
+    );
+  });
+});

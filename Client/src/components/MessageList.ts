@@ -66,9 +66,8 @@ import {
   formatBadgeCount,
   formatClockTime,
   formatMessageTimestamp,
-  getUserRole,
   resolveAuthor,
-  roleColorVar,
+  userRoleColorVar,
 } from "@lib/formatting";
 import {
   isAudioMime,
@@ -2789,7 +2788,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       } else {
         resyncMentions(el);
       }
-      const roleColor = roleColorVar(getUserRole(msg.user.id));
+      const roleColor = userRoleColorVar(msg.user.id);
       const author = resolveAuthor(msg.user);
       const key = authorAvatarKey(author, roleColor);
       if (key === el.dataset["authorKey"]) continue;
@@ -2828,7 +2827,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       const parent = replyParents.find((m) => m.id === replyTo);
       if (parent === undefined || parent.deleted) continue;
       if (bar.classList.contains("msg-reply-ref--blocked")) continue;
-      const roleColor = roleColorVar(getUserRole(parent.user.id));
+      const roleColor = userRoleColorVar(parent.user.id);
       const author = resolveAuthor(parent.user);
       const key = authorAvatarKey(author, roleColor);
       if (key === bar.dataset["authorKey"]) continue;

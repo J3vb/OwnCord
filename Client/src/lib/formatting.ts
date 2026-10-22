@@ -206,6 +206,28 @@ export function getUserRole(userId: number): string {
 }
 
 /**
+ * Name colour for a member: the highest-position held role that has a colour
+ * (WP 6.3d), the same rule as the member list, so chat and list agree. Without
+ * `roleIds` (an older server), or when none of them carries a colour, it is
+ * `roleColorVar` of the single role name, as before.
+ */
+export function userRoleColorVar(userId: number): string {
+  const member = membersStore.getState().members.get(userId);
+  const role = member?.role ?? "member";
+  const ids = member?.roleIds;
+  if (roleColorsEnabled && ids !== undefined && ids.length > 1) {
+    let best: { position: number; color: string } | undefined;
+    for (const r of channelsStore.getState().roles) {
+      if (!ids.includes(r.id) || r.color == null || r.color === "") continue;
+      const position = r.position ?? 0;
+      if (best === undefined || position > best.position) best = { position, color: r.color };
+    }
+    if (best !== undefined) return best.color;
+  }
+  return roleColorVar(role);
+}
+
+/**
  * The author identity to render for a message, resolved against the member
  * store first and the message payload second.
  *

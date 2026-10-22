@@ -251,6 +251,8 @@ export function serverErrorCopy(code: string, message: string): string | null {
       return connectText("error.storageError");
     case "GIF_DISABLED":
       return connectText("error.gifDisabled");
+    case "LAST_ROLE":
+      return connectText("error.lastRole");
     case "PUSH_DISABLED":
       return connectText("error.pushDisabled");
     default:

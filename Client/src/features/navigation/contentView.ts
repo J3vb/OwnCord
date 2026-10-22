@@ -205,7 +205,11 @@ export function createContentNavigator(opts: ContentNavigatorOptions): ContentNa
   const recheck = (): void => {
     if (current?.id === "moderation" && !canModerateMembers()) close();
   };
-  page.onStoreChange(authStore, (s) => s.user?.role ?? null, recheck);
+  page.onStoreChange(
+    authStore,
+    (s) => `${s.user?.role ?? ""}|${s.user?.role_ids?.join(",") ?? ""}`,
+    recheck,
+  );
   page.onStoreChange(channelsStore, (s) => s.roles, recheck);
 
   // A profile switch or logout clears the view before the page unmounts.

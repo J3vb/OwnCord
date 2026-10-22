@@ -58,7 +58,7 @@ import {
   parseTimestamp,
 } from "@lib/formatting";
 import { formatFullDateTime } from "../../features/messaging/discordTimestamp";
-import { getUserRole, resolveAuthor, roleColorVar } from "@lib/formatting";
+import { resolveAuthor, userRoleColorVar } from "@lib/formatting";
 import { createAvatarElement, pickAvatarColor } from "./avatar";
 import { resolveDisplayName } from "@lib/avatar";
 import { renderMentions, renderMessageContent } from "./content-parser";
@@ -280,9 +280,8 @@ function renderReplyRef(
     // A message that is only an attachment (or only a spoiler) has no plain
     // text; show a placeholder rather than an empty preview (F24).
     const preview = plain === "" ? messagingText("reply.attachment") : plain;
-    const role = getUserRole(ref.user.id);
     const author = resolveAuthor(ref.user);
-    const roleColor = roleColorVar(role);
+    const roleColor = userRoleColorVar(ref.user.id);
     // Tag the quoted author so a rename/role change repaints it in place,
     // without rebuilding the row (P4-02).
     bar.dataset["authorKey"] = authorAvatarKey(author, roleColor);
@@ -298,7 +297,7 @@ function renderReplyRef(
     );
   } else if (referenced?.user) {
     const author = resolveAuthor(referenced.user);
-    const roleColor = roleColorVar(getUserRole(referenced.user.id));
+    const roleColor = userRoleColorVar(referenced.user.id);
     bar.dataset["authorKey"] = authorAvatarKey(author, roleColor);
     const plain = markdownToPlainText(referenced.content, messagingText("spoiler.revealed"));
     appendChildren(
@@ -584,11 +583,10 @@ export function renderMessage(
     "data-testid": `message-${msg.id}`,
   });
 
-  const role = getUserRole(msg.user.id);
   // The author's current identity, not the one frozen into the payload: a
   // rename or a new avatar has to show up on the messages already on screen.
   const author = resolveAuthor(msg.user);
-  const roleColor = roleColorVar(role);
+  const roleColor = userRoleColorVar(msg.user.id);
   // Tag the row with the identity it was drawn from, so MessageList can repaint
   // only the rows whose author actually changed on a roleRevision bump (P4-02).
   el.dataset["authorKey"] = authorAvatarKey(author, roleColor);

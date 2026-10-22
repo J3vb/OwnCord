@@ -374,7 +374,10 @@ export function createUserProfilePopup(
       } finally {
         roleBusy = false;
       }
-      if (isOpen()) closeRoleMenu(true);
+      if (!isOpen()) return;
+      closeRoleMenu(true);
+      // The last addable role went, so "+" is gone and focus would fall to the page.
+      if (popup !== null && !roleHolder.contains(document.activeElement)) popup.focus();
     };
 
     const removeRole = async (roleId: number): Promise<void> => {

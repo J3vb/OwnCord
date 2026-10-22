@@ -27,6 +27,7 @@ import { canMention, mentionInComposer } from "../features/messaging/activeCompo
 import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup";
 import { openMenuOnKeyboard } from "@lib/context-menu";
 import { Permission, type ReadyRole } from "@lib/types";
+import { multiRoleEnabled } from "@lib/serverCapabilities";
 import { memberHasPermissionIn, topPositionFor } from "@lib/permissions";
 import {
   MEMBER_PATCH_FIELDS,
@@ -408,7 +409,9 @@ function createMemberItem(
         showAdminActions,
         canKick: gates.canKick,
         canBan: gates.canBan,
-        canManageRoles: gates.canManageRoles,
+        // PATCH role_id replaces every role, so a multi-role server manages
+        // roles from the profile popup's chips instead.
+        canManageRoles: gates.canManageRoles && !multiRoleEnabled(),
         canTimeout: gates.canTimeout,
         isSelf,
         isBlocked,

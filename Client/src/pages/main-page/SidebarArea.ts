@@ -411,7 +411,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // list, so both have to be watched.
   unsubscribers.push(
     authStore.subscribeSelector(
-      (s) => s.user?.role ?? null,
+      (s) => `${s.user?.role ?? ""}|${s.user?.role_ids?.join(",") ?? ""}`,
       () => syncAuditBtn(),
     ),
   );

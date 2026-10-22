@@ -139,7 +139,10 @@ export function openUserProfilePopup(options: OpenUserProfilePopupOptions): () =
     subscribe: (listener) => {
       const unsubs = [
         membersStore.subscribeSelector((st) => st.members.get(userId)?.role, listener),
-        authStore.subscribeSelector((st) => st.user?.role, listener),
+        authStore.subscribeSelector(
+          (st) => `${st.user?.role ?? ""}|${st.user?.role_ids?.join(",") ?? ""}`,
+          listener,
+        ),
         channelsStore.subscribeSelector((st) => st.roles, listener),
       ];
       return () => {
@@ -170,7 +173,10 @@ export function openUserProfilePopup(options: OpenUserProfilePopupOptions): () =
                 (st) => st.members.get(userId)?.roleIds ?? st.members.get(userId)?.role,
                 listener,
               ),
-              authStore.subscribeSelector((st) => st.user?.role_ids ?? st.user?.role, listener),
+              authStore.subscribeSelector(
+                (st) => `${st.user?.role ?? ""}|${st.user?.role_ids?.join(",") ?? ""}`,
+                listener,
+              ),
               channelsStore.subscribeSelector((st) => st.roles, listener),
             ];
             return () => {

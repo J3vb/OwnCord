@@ -20,7 +20,7 @@ import { createElement, setText } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { createIcon, type IconName } from "@lib/icons";
 import { createModal } from "@lib/modalFactory";
-import { formatMessageTimestamp, getUserRole, resolveAuthor, roleColorVar } from "@lib/formatting";
+import { formatMessageTimestamp, resolveAuthor, userRoleColorVar } from "@lib/formatting";
 import { resolveDisplayName } from "@lib/avatar";
 import { readableRoleColor } from "@lib/themes";
 import type { MountableComponent } from "@lib/safe-render";
@@ -350,7 +350,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
       return;
     }
     const author = resolveAuthor(msg.user);
-    const color = roleColorVar(getUserRole(msg.user.id));
+    const color = userRoleColorVar(msg.user.id);
     starterEl.appendChild(
       createAvatarElement(author, {
         className: "msg-avatar thread-starter-avatar",
