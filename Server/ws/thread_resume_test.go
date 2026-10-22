@@ -25,8 +25,23 @@ func TestPayloadChannelID_ThreadChangedUsesTheParent(t *testing.T) {
 }
 
 // A thread_changed missed while disconnected is replayed on resume, like any
-// other frame of a readable parent.
+// other frame of a readable parent, and withheld under a labelled parent the
+// user has not acknowledged.
 func TestReconnect_ReplaysThreadChanged(t *testing.T) {
+	t.Run("readable parent", func(t *testing.T) {
+		if !resumeSeesThreadChanged(t, false) {
+			t.Fatal("resume dropped a thread_changed for a readable parent")
+		}
+	})
+	t.Run("unacknowledged labelled parent", func(t *testing.T) {
+		if resumeSeesThreadChanged(t, true) {
+			t.Fatal("resume replayed a thread_changed under an unacknowledged labelled parent")
+		}
+	})
+}
+
+func resumeSeesThreadChanged(t *testing.T, labelled bool) bool {
+	t.Helper()
 	database := newTeardownTestDB(t)
 	ctx := context.Background()
 
@@ -37,6 +52,11 @@ func TestReconnect_ReplaysThreadChanged(t *testing.T) {
 	parent, err := database.CreateChannel(ctx, "resume-parent", "text", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
+	}
+	if labelled {
+		if _, err := database.ExecContext(ctx, `UPDATE channels SET nsfw = 1 WHERE id = ?`, parent); err != nil {
+			t.Fatalf("label channel: %v", err)
+		}
 	}
 	token, err := auth.GenerateToken()
 	if err != nil {
@@ -64,8 +84,8 @@ func TestReconnect_ReplaysThreadChanged(t *testing.T) {
 
 	for _, evt := range dialAndResume(t, hub, token, 99) {
 		if strings.Contains(string(evt), "RENAMED-WHILE-AWAY") {
-			return
+			return true
 		}
 	}
-	t.Fatal("resume dropped a thread_changed for a readable parent")
+	return false
 }
