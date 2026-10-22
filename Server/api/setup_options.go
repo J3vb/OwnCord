@@ -25,9 +25,12 @@ func adminSetupOptions(cfg *config.Config, rt Runtime) admin.SetupOptions {
 	return admin.SetupOptions{
 		ConfigPath: config.DefaultPath,
 		RunningCfg: cfg,
-		SetupToken: rt.SetupToken,
-		LogLevel:   rt.LogLevel,
-		Background: rt.Background,
-		Shutdown:   rt.Shutdown,
+		BackupDir:  cfg.Backup.Dir,
+		// The restore handler stages beside the file the server opened.
+		DatabasePath: cfg.Database.Path,
+		SetupToken:   rt.SetupToken,
+		LogLevel:     rt.LogLevel,
+		Background:   rt.Background,
+		Shutdown:     rt.Shutdown,
 	}
 }

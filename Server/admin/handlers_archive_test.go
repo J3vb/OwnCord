@@ -72,8 +72,6 @@ func newArchiveFixture(t *testing.T, configure ...func(dir string, cfg *config.C
 	}
 
 	database := openAdminTestDB(t)
-	admin.SetDatabasePath(dbPath)
-	t.Cleanup(func() { admin.SetDatabasePath(filepath.Join("data", "chatserver.db")) })
 
 	cfg := &config.Config{
 		Server: config.ServerConfig{DataDir: dataDir},
@@ -83,10 +81,8 @@ func newArchiveFixture(t *testing.T, configure ...func(dir string, cfg *config.C
 	for _, c := range configure {
 		c(dir, cfg)
 	}
-	admin.SetBackupBaseDir(cfg.Backup.Dir)
-	t.Cleanup(func() { admin.SetBackupBaseDir(filepath.Join("data", "backups")) })
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database),
-		admin.SetupOptions{ConfigPath: configPath, RunningCfg: cfg})
+		admin.SetupOptions{ConfigPath: configPath, RunningCfg: cfg, BackupDir: cfg.Backup.Dir, DatabasePath: dbPath})
 	token := createAdminUser(t, database)
 	return archiveFixture{dir: dir, dataDir: dataDir, config: configPath, handler: handler, database: database, token: token}
 }
@@ -227,13 +223,10 @@ func TestHandleArchive_BadDataDirIs500(t *testing.T) {
 		t.Fatal(err)
 	}
 	database := openAdminTestDB(t)
-	admin.SetDatabasePath(filepath.Join(dir, "chatserver.db"))
-	t.Cleanup(func() { admin.SetDatabasePath(filepath.Join("data", "chatserver.db")) })
 	cfg := &config.Config{Server: config.ServerConfig{DataDir: filepath.Join(blocker, "nope")}}
-	admin.SetBackupBaseDir(filepath.Join(dir, "backups"))
-	t.Cleanup(func() { admin.SetBackupBaseDir(filepath.Join("data", "backups")) })
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database),
-		admin.SetupOptions{ConfigPath: filepath.Join(dir, "config.yaml"), RunningCfg: cfg})
+		admin.SetupOptions{ConfigPath: filepath.Join(dir, "config.yaml"), RunningCfg: cfg,
+			BackupDir: filepath.Join(dir, "backups"), DatabasePath: filepath.Join(dir, "chatserver.db")})
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/archive", token, nil)

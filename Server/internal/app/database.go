@@ -38,20 +38,13 @@ func openDatabase(cfg *config.Config) (*db.DB, error) {
 // migrations and clears state left over from a previous run. Extracted from
 // run.
 func initDatabase(log *slog.Logger, cfg *config.Config, database *db.DB, rc *RestartCoordinator) error {
-	// The admin "Restore backup" handler needs the real database file path:
-	// without this, it falls back to a hardcoded "data/chatserver.db" and
-	// silently no-ops on any server with a configured database.path.
-	admin.SetDatabasePath(cfg.Database.Path)
-	// Backup handlers and the scheduled-backup maintenance write to the
-	// configured backup directory (defaults to data/backups).
-	admin.SetBackupDir(cfg.Backup.Dir)
 	// Admin restart requests (update apply, backup restore, setup wizard)
 	// land in the coordinator, which drains this process and lets main()
 	// perform the handoff. Wired before the listener starts serving, so no
 	// admin request can ever hit the unwired default hook.
 	admin.SetRestartHandoff(rc.Request)
 
-	backup, err := backupBeforePendingMigrations(log, database, cfg.Database.Path)
+	backup, err := backupBeforePendingMigrations(log, database, cfg.Database.Path, admin.ResolveBackupDir(cfg.Backup.Dir))
 	if err != nil {
 		return err
 	}
@@ -92,12 +85,12 @@ func initDatabase(log *slog.Logger, cfg *config.Config, database *db.DB, rc *Res
 // moves unbacked-up. A read-only file, a full disk or a bad path is the
 // operator's to fix; booting anyway would silently trade the safety net away.
 //
-// It runs after admin.SetBackupDir so the copy lands beside the operator's
+// It writes into backupDir (backup.dir) so the copy lands beside the operator's
 // manual backups, before db.Migrate so the copy predates the schema move, and
 // before any goroutine serves — there is no context to inherit.
 //
 // It returns the backup's file name, or "" when nothing was pending.
-func backupBeforePendingMigrations(log *slog.Logger, database *db.DB, dbPath string) (string, error) {
+func backupBeforePendingMigrations(log *slog.Logger, database *db.DB, dbPath, backupDir string) (string, error) {
 	// In-memory databases (tests, tooling) have no file to copy, and a fresh
 	// database has no pending migrations — PendingMigrations returns nil for
 	// both, which is the only thing keeping BackupToSafe off those paths.
@@ -109,7 +102,6 @@ func backupBeforePendingMigrations(log *slog.Logger, database *db.DB, dbPath str
 		return "", nil
 	}
 
-	backupDir := admin.BackupDir()
 	if err := os.MkdirAll(backupDir, 0o750); err != nil {
 		return "", fmt.Errorf("pre-migration backup: creating %s: %w", backupDir, err)
 	}

@@ -28,6 +28,9 @@ type maintenance struct {
 	uploads    *service.UploadService
 	reports    *service.ReportService
 	moderation *service.ModerationService
+	// backupDir is backup.dir as configured; maintainBackups resolves it
+	// (empty = data/backups) so a hand-built maintenance keeps the default.
+	backupDir string
 	// reportRetentionDays is moderation.report_retention_days (0 = never).
 	reportRetentionDays int
 	// actionRetentionDays is moderation.action_retention_days (0 = never).
@@ -59,6 +62,7 @@ type maintenanceStep struct {
 func newMaintenance(log *slog.Logger, cfg *config.Config, database *db.DB, svc *service.Services, files *storage.Storage) *maintenance {
 	m := &maintenance{
 		log: log, database: database,
+		backupDir:           cfg.Backup.Dir,
 		reportRetentionDays: cfg.Moderation.ReportRetentionDays,
 		actionRetentionDays: cfg.Moderation.ActionRetentionDays,
 	}
@@ -305,7 +309,7 @@ func (m *maintenance) maintainBackups(ctx context.Context) error {
 	if m.settings == nil {
 		return nil
 	}
-	return admin.MaintainBackups(ctx, m.database, m.settings)
+	return admin.MaintainBackups(ctx, m.database, m.settings, admin.ResolveBackupDir(m.backupDir))
 }
 
 // sweepOrphans cleans up orphaned attachments (uploaded but never linked to

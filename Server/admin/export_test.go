@@ -20,9 +20,15 @@ func CaptureSetupLimiter(h func(*auth.RateLimiter)) (restore func()) {
 	return func() { setupLimiterHook = prev }
 }
 
-// SetBackupBaseDir overrides backupBaseDir so tests can point backup handlers
-// at a temp dir. Lives here so it stays out of the production binary.
-func SetBackupBaseDir(dir string) { backupBaseDir = dir }
+// OwnerOnlyRoutesForTest returns the routes api registered through
+// ownerOnly. Test-only surface (the route-walk test, P2-13 Codex review).
+func OwnerOnlyRoutesForTest(api *AdminAPI) []OwnerOnlyRoute { return api.ownerOnlyRoutes() }
+
+// SharesOwnerOnlyRegistryForTest reports whether a and b record owner-only
+// routes in the same registry.
+func SharesOwnerOnlyRegistryForTest(a, b *AdminAPI) bool {
+	return &a.owner == &b.owner || (len(a.owner.routes) > 0 && &a.owner.routes[0] == &b.owner.routes[0])
+}
 
 // SetArchiveBeforeSnapshotHook installs h to run synchronously between the
 // archive's first plan and its database snapshot, the window an upload that

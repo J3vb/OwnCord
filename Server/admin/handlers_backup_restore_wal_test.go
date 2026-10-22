@@ -40,8 +40,6 @@ func newFileRestoreFixture(t *testing.T) fileRestoreFixture {
 		t.Fatalf("MkdirAll backups: %v", err)
 	}
 	dbPath := filepath.Join(tmpDir, "data", "chatserver.db")
-	admin.SetDatabasePath(dbPath)
-	t.Cleanup(func() { admin.SetDatabasePath(filepath.Join("data", "chatserver.db")) })
 
 	database, err := db.Open(dbPath)
 	if err != nil {
@@ -56,7 +54,8 @@ func newFileRestoreFixture(t *testing.T) fileRestoreFixture {
 		t.Fatalf("MigrateFS: %v", err)
 	}
 	hub := &mockHub{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServices(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServices(database),
+		admin.SetupOptions{DatabasePath: dbPath})
 	token := createAdminUser(t, database)
 
 	ctx := context.Background()

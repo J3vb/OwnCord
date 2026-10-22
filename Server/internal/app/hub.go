@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/api"
@@ -222,7 +223,9 @@ func newAttention(cfg *config.Config, hub *ws.Hub, database *db.DB, settings *se
 		BackupSchedule: func(ctx context.Context) (string, error) {
 			return settings.Setting(ctx, "backup_schedule")
 		},
-		LastBackup:  admin.NewestBackup,
+		LastBackup: func() (time.Time, error) {
+			return admin.NewestBackup(admin.ResolveBackupDir(cfg.Backup.Dir))
+		},
 		Certificate: admin.ServedCertificate,
 		VoiceHealth: func(ctx context.Context) service.VoiceHealth {
 			// OwnCord-managed companion: report the supervisor's own state,

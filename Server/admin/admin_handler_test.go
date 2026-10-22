@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -198,26 +197,13 @@ func TestNewHandler_WithUpdater(t *testing.T) {
 // (position == 100) can reach backup endpoints.
 func TestOwnerOnlyMiddleware_OwnerAllowed(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	// Use a temp dir so the backup handler can create its backup directory
+	// without polluting the repo working directory.
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database),
+		admin.SetupOptions{BackupDir: filepath.Join(t.TempDir(), "backups")})
 
 	// createAdminUser creates an Owner-role user (role_id=1, position=100)
 	ownerToken := createAdminUser(t, database)
-
-	// Use a temp dir so the backup handler can create data/backups without
-	// polluting the repo working directory.
-	tmpDir := t.TempDir()
-	origDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("os.Getwd: %v", err)
-	}
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("os.Chdir: %v", err)
-	}
-	admin.SetBackupBaseDir(filepath.Join(tmpDir, "data", "backups"))
-	t.Cleanup(func() {
-		_ = os.Chdir(origDir)
-		admin.SetBackupBaseDir(filepath.Join(origDir, "data", "backups"))
-	})
 
 	w := doRequest(t, handler, http.MethodPost, "/backup", ownerToken, nil)
 

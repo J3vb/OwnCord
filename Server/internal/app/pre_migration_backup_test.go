@@ -72,7 +72,6 @@ func TestInitDatabase_BacksUpBeforeApplyingPendingMigrations(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "chatserver.db")
 	backupDir := filepath.Join(dir, "backups")
-	t.Cleanup(func() { admin.SetBackupDir(filepath.Join("data", "backups")) })
 
 	// Build a real database at a partial schema point, with a row, and close
 	// it — the state of a server one `pull` away from a schema move.
@@ -136,7 +135,6 @@ func TestInitDatabase_UpgradeAfterRollbackTakesFreshBackup(t *testing.T) {
 	dbPath := filepath.Join(dir, "chatserver.db")
 	archive := filepath.Join(dir, "archive.db")
 	backupDir := filepath.Join(dir, "backups")
-	t.Cleanup(func() { admin.SetBackupDir(filepath.Join("data", "backups")) })
 
 	seed, err := db.Open(dbPath)
 	if err != nil {
@@ -227,7 +225,6 @@ func TestInitDatabase_CrashLoopReusesPreMigrationBackup(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "chatserver.db")
 	backupDir := filepath.Join(dir, "backups")
-	t.Cleanup(func() { admin.SetBackupDir(filepath.Join("data", "backups")) })
 
 	seed, err := db.Open(dbPath)
 	if err != nil {
@@ -305,7 +302,6 @@ func TestInitDatabase_NoBackupWhenNothingIsPending(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "chatserver.db")
 	backupDir := filepath.Join(dir, "backups")
-	t.Cleanup(func() { admin.SetBackupDir(filepath.Join("data", "backups")) })
 
 	seed, err := db.Open(dbPath)
 	if err != nil {
@@ -348,7 +344,6 @@ func TestInitDatabase_NoBackupWhenNothingIsPending(t *testing.T) {
 func TestInitDatabase_RefusesToBootWhenBackupCannotBeWritten(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "chatserver.db")
-	t.Cleanup(func() { admin.SetBackupDir(filepath.Join("data", "backups")) })
 
 	seed, err := db.Open(dbPath)
 	if err != nil {
@@ -417,8 +412,6 @@ func upgradeRounds(t *testing.T, rounds int) (backupDir string, names []string, 
 	dbPath := filepath.Join(dir, "chatserver.db")
 	archive := filepath.Join(dir, "archive.db")
 	backupDir = filepath.Join(dir, "backups")
-	t.Cleanup(func() { admin.SetBackupDir(filepath.Join("data", "backups")) })
-	admin.SetBackupDir(backupDir)
 
 	seed, err := db.Open(dbPath)
 	if err != nil {
@@ -446,7 +439,7 @@ func upgradeRounds(t *testing.T, rounds int) (backupDir string, names []string, 
 		if _, err := d.CreateUser(context.Background(), "user-"+string(rune('a'+i)), "hash", 4); err != nil {
 			t.Fatalf("CreateUser: %v", err)
 		}
-		name, bErr := backupBeforePendingMigrations(log, d, dbPath)
+		name, bErr := backupBeforePendingMigrations(log, d, dbPath, backupDir)
 		if err := d.Close(); err != nil {
 			t.Fatalf("Close: %v", err)
 		}
