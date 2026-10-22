@@ -437,7 +437,7 @@ func routerChannelRoutes(r chi.Router, svc *service.Services, limiter *auth.Rate
 func routerReportRoutes(r chi.Router, svc *service.Services, hub *ws.Hub) {
 	MountReportRoutes(r, svc, hub)
 	MountModerationQueueRoutes(r, svc, hub)
-	MountModerationRoutes(r, svc)
+	MountModerationRoutes(r, svc, hub)
 	MountAppealRoutes(r, svc)
 	MountModerationAppealRoutes(r, svc)
 }

@@ -24,6 +24,9 @@ type ModerationService struct {
 	// (ActOnReport, kind="removal") — package-private, same package, not a
 	// second copy of DeleteMessage's authorization.
 	messages *MessageService
+	// users performs the moderator nickname write under the target's profile
+	// lock (SetNickname). Wired by New; nil fails SetNickname closed.
+	users *UserService
 	// notifier delivers a live mod_action frame to a connected target
 	// (B5-9): warning issued, timeout applied, or timeout lifted. *ws.Hub
 	// implements it; wired via SetNotifier from the composition root,

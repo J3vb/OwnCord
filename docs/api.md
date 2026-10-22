@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 230 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 231 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -213,6 +213,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/moderation/queue/{id}/close`                                |
 | POST    | `/api/v1/moderation/queue/{id}/notes`                                |
 | GET     | `/api/v1/moderation/users/{id}/actions`                              |
+| PUT     | `/api/v1/moderation/users/{id}/nickname`                             |
 | POST    | `/api/v1/moderation/users/{id}/timeout`                              |
 | POST    | `/api/v1/moderation/users/{id}/untimeout`                            |
 | POST    | `/api/v1/moderation/users/{id}/warn`                                 |
@@ -3220,6 +3221,56 @@ caller is the confidential SUBJECT of that report — the same guard
 `GET .../queue/{id}` applies, run per row here: holding `MODERATE_MEMBERS`
 is not enough to read a report's id about yourself just because it happens
 to be linked from your own action ledger.
+
+---
+
+### PUT /api/v1/moderation/users/{id}/nickname
+
+Set or clear another member's nickname (`users.display_name`). **Auth:**
+Required. **Permission:** `MANAGE_NICKNAMES` (the `ADMINISTRATOR` bypass
+applies to the bit, never to the hierarchy). The actor must strictly outrank
+the target by top role; the bit is read from the OR of every role the actor
+holds. Both are re-checked inside the write transaction, so an actor who loses
+the bit, or a target who is promoted, between the check and the write is
+refused with nothing changed and nothing broadcast. A member changes their
+own nickname with `PATCH /api/v1/users/me`, never this route.
+
+`MANAGE_NICKNAMES` is granted automatically only to an untouched, default
+Moderator role (the untouched Admin and the Owner already hold it). A
+Moderator or Admin role that was renamed or had its permissions edited does
+not hold it: grant "Manage Nicknames" to the role that should have it by hand,
+in the admin panel's role grid.
+
+#### Request
+
+```json
+{ "display_name": "at most 32 runes, or null / \"\" to clear" }
+```
+
+`display_name` must be present. The value goes through the same cleaning and
+checks as the member's own edit (spaces collapsed; no control characters, line
+breaks, invisible fillers or more than two stacked combining marks).
+
+#### Response 200 OK
+
+```json
+{ "user_id": 7, "display_name": "Big Bird" }
+```
+
+`display_name` is `null` when cleared. Every connected client also receives
+the usual `user_update` frame carrying the committed row. One `nickname_change`
+audit row records the actor and the old and new nickname. Rate limit: 10 per
+minute per actor, spent only after authorization.
+
+#### Errors
+
+| Status | Code            | Cause                                                                    |
+| ------ | --------------- | ------------------------------------------------------------------------ |
+| 400    | `BAD_REQUEST`   | `{id}` is not a positive integer                                         |
+| 400    | `INVALID_INPUT` | self-target, `display_name` absent or not a string/null, or name refused |
+| 403    | `FORBIDDEN`     | caller lacks `MANAGE_NICKNAMES`, or does not outrank the target          |
+| 404    | `NOT_FOUND`     | no such user, or a pending account (only after the permission check)     |
+| 429    | `RATE_LIMITED`  | over 10 changes a minute                                                 |
 
 ---
 

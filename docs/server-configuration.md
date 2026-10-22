@@ -280,6 +280,24 @@ deleted after the window.
 | `moderation.report_retention_days` | int  | `180`   | Days after a report closes before its evidence snapshot, internal notes and free-text detail are deleted; the row stays. `0` = never prune content. Open reports (not yet closed) are never touched. A negative value falls back to the default with a warning.                                     |
 | `moderation.action_retention_days` | int  | `90`    | Days after `acknowledged_at` (a warning) or `expires_at`/`lifted_at` (a timeout) before the row retires, unless an appeal references it or it still owns a voice mute. `0` = never retire. Ban, kick and removal rows are never touched. A negative value falls back to the default with a warning. |
 
+### Roles that gain a permission on upgrade
+
+A migration that adds a permission bit grants it only to the default roles
+that are still exactly as they shipped. A role that was renamed or had its
+permissions edited gets nothing, so after upgrading, grant the bit by hand in
+the admin panel's role grid to the roles that should have it:
+
+| Bit                | Granted automatically to                                    | Migration |
+| ------------------ | ----------------------------------------------------------- | --------- |
+| `MODERATE_MEMBERS` | the untouched default Moderator role                        | 048       |
+| `MANAGE_NICKNAMES` | the untouched default Moderator role (Admin already has it) | 078       |
+
+Migration 078 also clears `MANAGE_NICKNAMES` from every role other than the
+Owner, the untouched Admin and the untouched Moderator, so only the intended
+roles hold it until you grant it. A renamed Admin role loses it too, so tick
+it again on that role. "Manage Nicknames" lets a role change the
+nickname of any member it outranks.
+
 ### Admin attention panel (`attention`)
 
 Warning floors for the Dashboard's attention panel. The server samples

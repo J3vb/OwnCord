@@ -654,7 +654,7 @@ async function saveChannelPerms(){
 
 /* Permission checkboxes, grouped exactly as docs/schema.md's "Permission
    groups" section groups the bitfield. Keep the two in step: the doc is the
-   reference an operator reads next to this grid, and every one of the 19
+   reference an operator reads next to this grid, and every one of the 21
    defined bits must appear in exactly one group or it becomes ungrantable
    here. */
 const PERM_GROUPS=[
@@ -665,6 +665,7 @@ const PERM_GROUPS=[
     [0x2000000,'Manage Server','Read and change server settings'],
     [0x8000000,'View Audit Log','Read the action history'],
     [0x400000,'Moderate Members','Warn and time out members, work the report queue'],
+    [0x800000,'Manage Nicknames','Change or reset another member\'s nickname'],
     [0x40000000,'Administrator','Bypasses every permission check'],
   ]},
   {title:'Text',bits:[

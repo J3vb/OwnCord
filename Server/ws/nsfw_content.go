@@ -207,15 +207,22 @@ func (h *Hub) frameReadableNow(ctx context.Context, userID, channelID int64) (re
 }
 
 // payloadChannelID extracts payload.channel_id from a wrapped wire frame, or
-// 0 if absent/unparseable.
+// 0 if absent/unparseable. thread_changed carries no channel_id: its channel
+// is the thread's parent, payload.thread.parent_id (WP 6.9c).
 func payloadChannelID(data []byte) int64 {
 	var frame struct {
 		Payload struct {
 			ChannelID int64 `json:"channel_id"`
+			Thread    *struct {
+				ParentID int64 `json:"parent_id"`
+			} `json:"thread"`
 		} `json:"payload"`
 	}
 	if json.Unmarshal(data, &frame) != nil {
 		return 0
+	}
+	if frame.Payload.ChannelID == 0 && frame.Payload.Thread != nil {
+		return frame.Payload.Thread.ParentID
 	}
 	return frame.Payload.ChannelID
 }
