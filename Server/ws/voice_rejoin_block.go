@@ -31,7 +31,7 @@ type voiceRejoinBlock struct {
 // voiceRejoinBlockState is the userID -> latest removal map. A later removal
 // replaces the earlier one; expired entries are dropped when read.
 type voiceRejoinBlockState struct {
-	mu      syncutil.Mutex
+	mu      syncutil.Ranked[lockRankLeaf]
 	entries map[int64]voiceRejoinBlock
 }
 

@@ -20,7 +20,7 @@ import (
 // permission verdicts are resolved before it is taken, and sendMsg only
 // queues.
 type timeoutViewState struct {
-	mu syncutil.Mutex
+	mu syncutil.Ranked[lockRankFeed]
 	// gen counts role refreshes. refreshVisibilityUsers bumps it under mu on
 	// entry, and every caller (the role-refresh worker, RefreshAllChannelVisibility)
 	// has already invalidated the permission cache by then (the cache's own generation drops any population that

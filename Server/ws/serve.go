@@ -59,7 +59,7 @@ func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 	// pending is atomic only so the unlocked fast-path read below is race-free;
 	// the authoritative check-and-reserve and the release are serialized by
 	// admissionMu.
-	var admissionMu syncutil.Mutex
+	var admissionMu syncutil.Ranked[lockRankSerialiser]
 	var pending atomic.Int64
 	return func(w http.ResponseWriter, r *http.Request) {
 		reject := func() {

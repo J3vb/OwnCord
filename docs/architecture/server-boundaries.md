@@ -547,9 +547,12 @@ under a state lock), the split between serialisers and state locks, and a rank
 table naming every lock with the path that takes it. Local fragments elsewhere
 (the voice header in `ws/voice_registry.go`, summarised in
 [websocket.md](websocket.md#voice-membership)) point there, and where one
-disagrees with `lock_order.go`, the table wins. The order is read from the code,
-not checked by a test yet: the `-tags deadlock -count=10 ./ws/` pass reports an
-inversion only when one test takes the same two lock instances in both orders.
+disagrees with `lock_order.go`, the table wins. Since WP 5.6c the order is
+checked: each ranked lock is a `syncutil.Ranked[R]`/`RankedRW[R]` whose rank
+type is declared in `lock_order.go`, the `lock-rank` invariant holds the table's
+rank column to those types, and under `-tags deadlock` an acquire whose rank is
+not above every rank its goroutine holds panics with both stacks
+(`Server/syncutil/ranked_deadlock.go`). go-deadlock still runs underneath.
 
 ### Start, drain, stop — before B3-3 (`main.go` `run`, `main.go:107`)
 

@@ -30,7 +30,7 @@ import (
 // connected member's live status instead, so a cached row's status never
 // shows: a member whose connection has not stamped one yet shows as offline.
 type memberCache struct {
-	mu      syncutil.Mutex
+	mu      syncutil.Ranked[lockRankLeaf]
 	filled  bool
 	gen     int64
 	lapseAt string        // NextMemberBanLapse at the read; "" = none pending
