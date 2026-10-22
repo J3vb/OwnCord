@@ -1,0 +1,73 @@
+{
+  "journey": "chat-forum-post",
+  "connections": {
+    "a": [
+      {
+        "dir": "c2s",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "channel_id": 3,
+            "client_message_id": "<id:string>",
+            "content": "Please add a dark theme.",
+            "name": "Dark mode",
+            "tag_ids": [
+              1
+            ]
+          },
+          "type": "forum_post_create"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "client_message_id": "<id:string>",
+            "deduplicated": false,
+            "message_id": "<id:number>",
+            "thread": {
+              "archived": false,
+              "auto_archive_minutes": 1440,
+              "created_at": "<ts:string>",
+              "id": "<id:number>",
+              "last_message_at": "<ts:string>",
+              "locked": false,
+              "message_count": 1,
+              "name": "Dark mode",
+              "owner_id": "<id:number>",
+              "parent_id": "<id:number>",
+              "post": {
+                "first_message": {
+                  "author_id": "<id:number>",
+                  "deleted": false,
+                  "has_attachments": false,
+                  "id": "<id:number>",
+                  "preview": "Please add a dark theme."
+                },
+                "tag_ids": [
+                  1
+                ]
+              },
+              "starter_message_id": "<id:null>"
+            }
+          },
+          "type": "forum_post_create_ok"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ]
+  }
+}

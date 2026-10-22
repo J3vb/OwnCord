@@ -46,6 +46,9 @@ func (h *Hub) NotifyMentionCount(userID, channelID, count int64) {
 	if !h.canSeeChannelForMentionCount(userID, channelID) {
 		return
 	}
+	if h.db != nil && h.withholdForumPostBadge(userID, channelID) {
+		return
+	}
 	h.SendToUserLow(userID, buildMentionCount(channelID, count))
 }
 
@@ -68,4 +71,20 @@ func (h *Hub) canSeeChannelForMentionCount(userID, channelID int64) bool {
 		return false
 	}
 	return permissions.CanViewChannel(sub) == nil
+}
+
+// withholdForumPostBadge reports whether channelID is a forum post and userID's
+// live socket did not declare the forums feature: such a client does not know
+// the post, so the live badge frame is withheld (the stored count is not).
+func (h *Hub) withholdForumPostBadge(userID, channelID int64) bool {
+	c := h.GetClient(userID)
+	if c == nil || c.features.forums {
+		return false
+	}
+	ctx := context.Background()
+	ch, err := h.readers.Visibility.GetChannel(ctx, channelID)
+	if err != nil {
+		return true
+	}
+	return withholdsForumPost(ctx, h.readers.Visibility, c, ch)
 }

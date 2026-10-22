@@ -356,8 +356,12 @@ func (h *Hub) resolveChannelActivity(ctx context.Context, chID int64, pc *pendin
 		focused[c.userID] = true
 	}
 
+	forumScoped := isForumScoped(ctx, vis, ch) // once per channel, not per recipient
 	for _, uid := range h.channelReadAudienceFor(ctx, chID, ch, false) {
 		if focused[uid] || uid == pc.latestAuthorID {
+			continue
+		}
+		if forumScoped && lacksForums(h.GetClient(uid)) {
 			continue
 		}
 		perUser[uid] = append(perUser[uid],

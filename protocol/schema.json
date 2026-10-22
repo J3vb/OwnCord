@@ -43,6 +43,12 @@
       "ts": "THREAD_FOCUS",
       "note": "the second subscription slot: the thread open beside the focused channel, or null to close it (WP 6.9c)"
     },
+    {
+      "wire": "forum_post_create",
+      "go": "MsgTypeForumPostCreate",
+      "ts": "FORUM_POST_CREATE",
+      "note": "create a forum post and its opening message in one step, idempotent on client_message_id (WP 6.9d)"
+    },
     { "wire": "chat_edit", "go": "MsgTypeChatEdit", "ts": "CHAT_EDIT" },
     { "wire": "chat_delete", "go": "MsgTypeChatDelete", "ts": "CHAT_DELETE" },
     { "wire": "reaction_add", "go": "MsgTypeReactionAdd", "ts": "REACTION_ADD" },
@@ -97,6 +103,12 @@
     { "wire": "poll_end_ok", "go": "MsgTypePollEndOK", "ts": "POLL_END_OK" },
     { "wire": "thread_create_ok", "go": "MsgTypeThreadCreateOK", "ts": "THREAD_CREATE_OK" },
     { "wire": "thread_update_ok", "go": "MsgTypeThreadUpdateOK", "ts": "THREAD_UPDATE_OK" },
+    {
+      "wire": "forum_post_create_ok",
+      "go": "MsgTypeForumPostCreateOK",
+      "ts": "FORUM_POST_CREATE_OK",
+      "note": "WP 6.9d: the post exists; {thread, message_id, client_message_id, deduplicated}, to the sender only"
+    },
     {
       "wire": "thread_changed",
       "go": "MsgTypeThreadChanged",

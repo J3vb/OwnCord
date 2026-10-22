@@ -2,7 +2,7 @@
 // Thin composition shell that wires ServerPanel and LoginForm together.
 
 import { Disposable } from "@lib/disposable";
-import { createElement, appendChildren } from "@lib/dom";
+import { createElement, appendChildren, setText } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import { createLogger } from "@lib/logger";
 import { openSettings, closeSettings, uiStore, setTransientError } from "@stores/ui.store";
@@ -13,6 +13,7 @@ import { createServerPanel } from "./connect-page/ServerPanel";
 import { createLoginForm } from "./connect-page/LoginForm";
 import { createIncompatibleNotice } from "./connect-page/IncompatibleNotice";
 import { loadCredential } from "@lib/credentials";
+import { desktop } from "../platform/desktop";
 
 const log = createLogger("ConnectPage");
 
@@ -46,6 +47,8 @@ export interface ConnectPageCallbacks {
   getRetentionNotice?(host: string): string | null;
   /** A typed host settled in register mode; probe its `server-info` if unknown. */
   onHostSettled?(host: string): void;
+  /** The name `server-info` reported for a host, if known (the portal header, WP 6.13e). */
+  getServerName?(host: string): string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,6 +107,11 @@ export function createConnectPage(
   let container: Element | null = null;
   let root: HTMLDivElement;
 
+  // The one host a web portal signs in to (WP 6.13e). Read only behind
+  // `__OWNCORD_WEB__`: the server panel is built but not mounted, and a header
+  // names the server.
+  const fixedHost = __OWNCORD_WEB__ ? (desktop.serverScope.fixedHost ?? undefined) : undefined;
+
   // Cleanup tracking
   const disposable = new Disposable();
   const { signal } = disposable;
@@ -126,6 +134,7 @@ export function createConnectPage(
     // an opted-out profile is not overridden by the defaults. Applied once per
     // match so later edits to the boxes are the user's own.
     onHostInput: (host) => applySavedFlags(host),
+    ...(__OWNCORD_WEB__ ? { fixedHost } : {}),
   });
   let knownProfiles: readonly SimpleProfile[] = initialProfiles;
   let appliedProfileHost = "";
@@ -206,6 +215,14 @@ export function createConnectPage(
     },
     initialProfiles,
   );
+
+  // The portal header's server name: what `server-info` reported, else the host.
+  let portalName: HTMLDivElement | null = null;
+  function refreshPortalName(): void {
+    if (__OWNCORD_WEB__ && fixedHost !== undefined && portalName !== null) {
+      setText(portalName, callbacks.getServerName?.(fixedHost) ?? fixedHost);
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // DOM construction
@@ -291,9 +308,19 @@ export function createConnectPage(
     const brandTag = createElement("div", { class: "brand-tagline" }, connectText("brand.tagline"));
     appendChildren(branding, brandName, brandTag);
 
-    serverPanel.element.insertBefore(branding, serverPanel.element.firstChild);
-
-    appendChildren(root, serverPanel.element, loginForm.element);
+    if (__OWNCORD_WEB__ && fixedHost !== undefined) {
+      // One server: no list to pick from, so the branding and the server's
+      // name head the form and the panel is never mounted.
+      root.classList.add("connect-page--portal");
+      portalName = createElement("div", { class: "portal-server-name" });
+      const portalHeader = createElement("div", { class: "portal-header" });
+      appendChildren(portalHeader, branding, portalName);
+      refreshPortalName();
+      appendChildren(root, portalHeader, loginForm.element);
+    } else {
+      serverPanel.element.insertBefore(branding, serverPanel.element.firstChild);
+      appendChildren(root, serverPanel.element, loginForm.element);
+    }
 
     // The incompatible-epoch notice sits above the form so it is seen before
     // another attempt; hidden until a mismatch is selected or refused. It goes
@@ -450,6 +477,7 @@ export function createConnectPage(
     ) => {
       compatibilityByHost.set(host, { compatibility, serverEpoch });
       serverPanel.updateCompatibility(host, compatibility);
+      refreshPortalName();
       // A fresh server-info snapshot may change the host's registration mode;
       // re-derive the register affordances if it is the selected host.
       if (loginForm.getHost().trim() === host) {

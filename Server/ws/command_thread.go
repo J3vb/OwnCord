@@ -31,6 +31,8 @@ type ThreadUpdateCmd struct {
 	Archived           *bool
 	Locked             *bool
 	AutoArchiveMinutes *int
+	// TagIDs replaces a forum post's tags; nil leaves them (WP 6.9d).
+	TagIDs *[]int64
 }
 
 func (c ThreadUpdateCmd) Type() string  { return MsgTypeThreadUpdate }
@@ -96,9 +98,13 @@ func parseThreadUpdate(userID int64, _ string, raw json.RawMessage) (Command, er
 		Archived           *bool       `json:"archived"`
 		Locked             *bool       `json:"locked"`
 		AutoArchiveMinutes *int        `json:"auto_archive_minutes"`
+		TagIDs             *[]int64    `json:"tag_ids"`
 	}
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, fmt.Errorf("invalid thread_update payload: %w", err)
+	}
+	if p.TagIDs != nil && len(*p.TagIDs) > maxForumPostTagIDs {
+		return nil, fmt.Errorf("too many tag_ids")
 	}
 	id, err := positiveID(p.ThreadID, "thread_id")
 	if err != nil {
@@ -106,7 +112,7 @@ func parseThreadUpdate(userID int64, _ string, raw json.RawMessage) (Command, er
 	}
 	return ThreadUpdateCmd{
 		userID: userID, ThreadID: id, Name: p.Name, Archived: p.Archived, Locked: p.Locked,
-		AutoArchiveMinutes: p.AutoArchiveMinutes,
+		AutoArchiveMinutes: p.AutoArchiveMinutes, TagIDs: p.TagIDs,
 	}, nil
 }
 

@@ -26,6 +26,11 @@ type SendMessageParams struct {
 	// its receipt: Content stays empty at hash time, so the same poll sent
 	// twice is one retry and another poll under the same id is a conflict.
 	Poll string
+	// ForumPost is the canonical JSON of a forum_post_create's title and tag
+	// ids (WP 6.9d), "" for every other send. ChannelID is the forum, and
+	// Content and AttachmentIDs are the raw text and uploads, so the receipt
+	// hash covers the forum, the title, the tags, the text and the uploads.
+	ForumPost string
 }
 
 // ReferencedMessage is the reply-parent snippet a chat_message frame carries.

@@ -15,6 +15,7 @@ import type { ProfileManager } from "@lib/profiles";
 import type { SessionScope } from "@lib/sessionScope";
 import type { createConnectPage } from "@pages/ConnectPage";
 import { connectText } from "../i18n/connect";
+import { desktop } from "../platform/desktop";
 import { checkHealth, runHealthChecks } from "./serverHealth";
 import { startSession } from "./session";
 
@@ -50,6 +51,8 @@ export function createAutoLogin(
   ) => void,
   getProfileList: () => Parameters<ConnectPage["refreshProfiles"]>[0],
 ): readonly [() => void, () => void, (host: string) => void] {
+  // The web portal's one host (WP 6.13e); read only behind `__OWNCORD_WEB__`.
+  const fixedHost = __OWNCORD_WEB__ ? (desktop.serverScope.fixedHost ?? undefined) : undefined;
   let autoLoginCancelled = false;
   let serverWait: { readonly host: string; readonly scope: SessionScope } | null = null;
 
@@ -103,8 +106,11 @@ export function createAutoLogin(
   // again: a server that answers but never signs in gets the offline error.
   async function resumeStoredSession(profile: ResumableProfile, waitIfDown = true): Promise<void> {
     // The stored token outlives an opt-out whose delete failed, so the
-    // profile's own setting decides, not the credential's presence.
-    if (profile.rememberPassword !== true && profile.autoConnect !== true) return;
+    // profile's own setting decides, not the credential's presence. The portal
+    // skips this: its store encodes the choice, since an unticked login keeps
+    // the token session-only and it dies with the tab.
+    if (!__OWNCORD_WEB__ && profile.rememberPassword !== true && profile.autoConnect !== true)
+      return;
     const attempt = api.getSession();
     try {
       const cred = await loadCredential(profile.host);
@@ -219,7 +225,21 @@ export function createAutoLogin(
       // Auto-login: if a profile has autoConnect enabled, try to reconnect
       // using the stored token (password is no longer returned from the
       // credential store over IPC for security).
-      const autoProfile = profileManager.getAutoConnectProfile();
+      // The portal resumes its one host: the saved profile, or a stand-in when
+      // none was saved. An unticked login leaves no auto-connect profile, so
+      // `getAutoConnectProfile` would never find it.
+      const autoProfile =
+        __OWNCORD_WEB__ && fixedHost !== undefined
+          ? (profileManager.getAll().find((p) => p.host === fixedHost) ?? {
+              name: fixedHost,
+              host: fixedHost,
+              // Not true: `ensureProfileExists` would persist it and tick
+              // "Stay signed in" for a user who unticked it. The resume runs
+              // anyway, because the web skips the opt-out check.
+              autoConnect: false,
+              rememberPassword: false,
+            })
+          : profileManager.getAutoConnectProfile();
       if (autoProfile) await resumeStoredSession(autoProfile);
     })();
   }

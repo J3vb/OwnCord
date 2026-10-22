@@ -423,7 +423,6 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		slog.Error("MessageService.EditMessage ReplaceMessageMentions", "err", mErr, "msg_id", msgID)
 	}
 	mentions = mentions.withReplyPing(replyPingID)
-
 	result := &EditMessageResult{
 		MessageID:        msgID,
 		ChannelID:        msg.ChannelID,
@@ -433,6 +432,7 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		Mentions:         mentions.UserIDs,
 		MentionsEveryone: mentions.Everyone,
 		MentionsHere:     mentions.HereOnly,
+		PostOpening:      s.isPostOpening(context.WithoutCancel(ctx), ch, msgID),
 	}
 
 	if isDM {

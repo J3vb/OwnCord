@@ -23,6 +23,7 @@ import { createUpdateNotifier } from "@components/UpdateNotifier";
 import { createConnectPage } from "@pages/ConnectPage";
 import { setUpdateRequiredHost, uiStore } from "@stores/ui.store";
 import type { UpdateRequired } from "@stores/ui.store";
+import { desktop } from "../platform/desktop";
 import { connectText } from "../i18n/connect";
 import { createAutoLogin } from "./autoLogin";
 import { createConnectProfiles } from "./connectProfiles";
@@ -53,8 +54,22 @@ export function renderConnect(
   let pendingTotpUsername = "";
 
   const pageOwner = new SessionScope({ host: "", generation: 0 });
-  const [getProfileList, persistProfiles, mutateAutoLogin, ensureProfileExists] =
+  const [getSavedProfiles, persistProfiles, mutateAutoLogin, ensureProfileExists] =
     createConnectProfiles(profileManager, pageOwner);
+
+  // The web portal is bound to the server that served it (WP 6.13e): its one
+  // profile is all the page lists, so no health check probes anything else.
+  // Written literally so the desktop build drops every use.
+  const fixedHost = __OWNCORD_WEB__ ? (desktop.serverScope.fixedHost ?? undefined) : undefined;
+  const getProfileList = (): ReturnType<typeof getSavedProfiles> =>
+    __OWNCORD_WEB__ && fixedHost !== undefined
+      ? [
+          ...getSavedProfiles().filter((p) => p.host === fixedHost),
+          ...(profileManager.getAll().some((p) => p.host === fixedHost)
+            ? []
+            : [{ name: fixedHost, host: fixedHost }]),
+        ]
+      : getSavedProfiles();
 
   // Shared tail of both login paths: branch to the 2FA challenge, or wire the
   // session. Structural rather than duplicated, so the saved-password path
@@ -99,6 +114,7 @@ export function renderConnect(
         return parseRegistrationMode(info?.registration_mode);
       },
       getRetentionNotice: (host) => retentionNotice(serverInfoFor(host)),
+      ...(__OWNCORD_WEB__ ? { getServerName: (host) => serverInfoFor(host)?.name ?? null } : {}),
       // A typed host has no health row; probe it so register mode can read its mode.
       onHostSettled(host) {
         if (!serverInfoFor(host) && !serverInfoProbing(host))
@@ -266,7 +282,9 @@ export function renderConnect(
         abandonInFlight();
       },
       onUpdateClient(host) {
-        mountUpdateNotifier(host);
+        // The portal's update ships with the server: reloading fetches it.
+        if (__OWNCORD_WEB__) location.reload();
+        else mountUpdateNotifier(host);
       },
     },
     getProfileList(),
@@ -305,7 +323,11 @@ export function renderConnect(
     // Consume the fact: the next connect page must not re-offer it.
     setUpdateRequiredHost(null);
     connectPage.showIncompatible(required.host, required.serverEpoch, required.clientEpoch);
-    if (required.serverEpoch !== null && required.serverEpoch > required.clientEpoch) {
+    if (
+      !__OWNCORD_WEB__ &&
+      required.serverEpoch !== null &&
+      required.serverEpoch > required.clientEpoch
+    ) {
       mountUpdateNotifier(required.host);
     }
   };
