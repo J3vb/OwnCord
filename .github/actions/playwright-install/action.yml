@@ -1,0 +1,47 @@
+name: Install Playwright browser
+description: >
+  Restore the Playwright browser and its apt packages from cache, then run
+  scripts/ci/playwright-install.sh from Client/. The apt packages are cached
+  because the runner's apt mirror can stall for longer than the step's
+  timeout; on an exact hit they are installed with dpkg and apt never goes
+  to the network.
+
+runs:
+  using: composite
+  steps:
+    # The packages apt pulls depend on the runner image (what it already has,
+    # and at which version), so the apt cache is keyed on it.
+    - name: Runner image
+      id: image
+      shell: bash
+      run: echo "id=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
+
+    - name: Cache Playwright browser
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: ~/.cache/ms-playwright
+        key: ${{ runner.os }}-playwright-${{ hashFiles('Client/package-lock.json') }}
+
+    - name: Restore Playwright apt packages
+      id: apt-cache
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: ~/.cache/owncord-playwright-apt
+        key: playwright-apt-${{ steps.image.outputs.id }}-${{ hashFiles('Client/package-lock.json') }}
+        restore-keys: playwright-apt-${{ steps.image.outputs.id }}-
+
+    - name: Install browser and system dependencies
+      shell: bash
+      working-directory: Client/
+      env:
+        OWNCORD_PLAYWRIGHT_APT_CACHE_HIT: ${{ steps.apt-cache.outputs.cache-hit }}
+      run: OWNCORD_PLAYWRIGHT_APT_CACHE="$HOME/.cache/owncord-playwright-apt" bash ../scripts/ci/playwright-install.sh
+
+    # Saved right away, not in a post step, so a job whose tests fail later
+    # still leaves the packages for its re-run.
+    - name: Save Playwright apt packages
+      if: steps.apt-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: ~/.cache/owncord-playwright-apt
+        key: playwright-apt-${{ steps.image.outputs.id }}-${{ hashFiles('Client/package-lock.json') }}
