@@ -346,6 +346,11 @@ func (r *RateLimiter) Reset(ctx context.Context, key string) {
 // Shards are swept one at a time, so the periodic cleanup never stalls the
 // whole limiter at once.
 func (r *RateLimiter) Cleanup() {
+	r.CleanupContext(context.Background())
+}
+
+// CleanupContext is Cleanup with ctx bounding the persisted-lockout sweep.
+func (r *RateLimiter) CleanupContext(ctx context.Context) {
 	now := time.Now()
 
 	for i := range r.shards {
@@ -376,29 +381,23 @@ func (r *RateLimiter) Cleanup() {
 	}
 
 	if r.store != nil {
-		// Runs from the StartCleanup background goroutine — no request ctx.
-		if err := r.store.CleanupExpiredLockouts(context.Background()); err != nil {
+		if err := r.store.CleanupExpiredLockouts(ctx); err != nil {
 			slog.Warn("ratelimit: failed to clean up expired persisted lockouts", "err", err)
 		}
 	}
 }
 
-// StartCleanup runs Cleanup on a ticker with the given interval until the
-// stop channel is closed. It is intended to be called in a goroutine:
-//
-//	stop := make(chan struct{})
-//	go rl.StartCleanup(5*time.Minute, stop)
-//
-// Closing stop causes the goroutine to exit promptly.
-func (r *RateLimiter) StartCleanup(interval time.Duration, stop <-chan struct{}) {
+// RunCleanup blocks, running Cleanup every interval, and returns when ctx is
+// done. The app owns the context.
+func (r *RateLimiter) RunCleanup(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			r.Cleanup()
-		case <-stop:
+			r.CleanupContext(ctx)
+		case <-ctx.Done():
 			return
 		}
 	}

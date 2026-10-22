@@ -32,7 +32,7 @@ type removedIdentity struct {
 // removedIdentities is the identity -> removal record set. Entries expire
 // tokenTTL after the removal that recorded them.
 type removedIdentities struct {
-	mu      syncutil.Mutex
+	mu      syncutil.Ranked[lockRankLeaf]
 	entries map[string]removedIdentity
 	now     func() time.Time // test seam; nil means time.Now
 }

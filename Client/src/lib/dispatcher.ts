@@ -34,6 +34,7 @@ import {
   handleChannelCreate,
   handleChannelDelete,
   handleChannelUpdate,
+  handleChannelCategories,
   handleMentionCount,
   handleReadState,
   handleMarkUnreadError,
@@ -62,6 +63,8 @@ import {
   handleChatMessage,
   handleChatSendOk,
   handleMessagingError,
+  handlePollUpdate,
+  handlePollVoteOk,
   handleReactionUpdate,
   handleSendFailure,
   handleTyping,
@@ -253,6 +256,11 @@ export function wireDispatcher(
 
   unsubs.push(ws.on(S.REACTION_UPDATE, handleReactionUpdate));
 
+  // ── Polls ───────────────────────────────────────────────
+
+  unsubs.push(ws.on(S.POLL_UPDATE, handlePollUpdate));
+  unsubs.push(ws.on(S.POLL_VOTE_OK, handlePollVoteOk));
+
   // ── Typing ────────────────────────────────────────────
 
   unsubs.push(ws.on(S.TYPING, handleTyping));
@@ -267,6 +275,9 @@ export function wireDispatcher(
   unsubs.push(ws.on(S.CHANNEL_CREATE, handleChannelCreate));
 
   unsubs.push(ws.on(S.CHANNEL_UPDATE, handleChannelUpdate));
+
+  // channel_categories: the manager's category list, replaced wholesale (WP 6.5a).
+  unsubs.push(ws.on(S.CHANNEL_CATEGORIES, handleChannelCategories));
 
   unsubs.push(ws.on(S.CHANNEL_DELETE, handleChannelDelete));
 

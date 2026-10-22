@@ -13,7 +13,12 @@ import { reconcileModels, sameModel } from "@lib/reconcile";
 import { select, eventSource, type Selection } from "@lib/select";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import type { MountableComponent } from "@lib/safe-render";
-import { channelsStore } from "@stores/channels.store";
+import {
+  channelsStore,
+  NO_CATEGORY,
+  UNCATEGORIZED_VOICE_CATEGORY,
+  type CategoryRef,
+} from "@stores/channels.store";
 import { navigateToChannel } from "@lib/channel-navigation";
 import { isChannelMuted } from "@lib/channel-mutes";
 import { isHideMutedChannels } from "@lib/hide-muted-channels";
@@ -30,13 +35,13 @@ import { getUserLocalMute, getUserVolume } from "@lib/livekitSession";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import { attachCategoryContextMenu } from "./channel-sidebar/category-menu";
 import { attachChannelContextMenu, CHANNEL_MUTE_CHANGED } from "./channel-sidebar/context-menu";
-import { attachDragHandlers } from "./channel-sidebar/drag-reorder";
+import { attachCategoryDragHandlers, attachDragHandlers } from "./channel-sidebar/drag-reorder";
 import { attachVoiceUserDrag, markVoiceDropTarget } from "../features/voice/dragMove";
 import { openIdentityMismatchModal } from "../features/voice/peerVerification";
 import { createAvatarElement, pickAvatarColor } from "@components/message-list/avatar";
 import { membersStore, type Member, type MembersState } from "@stores/members.store";
 import { roleHasPermission } from "@lib/permissions";
-import { Permission } from "@lib/types";
+import { Permission, type ChannelType } from "@lib/types";
 import { shellText } from "../i18n/shell";
 import { voiceText } from "../i18n/voice";
 import { joinRetryInMs } from "../features/voice/joinBackoff";
@@ -87,6 +92,24 @@ export interface ChannelReorderData {
   readonly newPosition: number;
   /** Position before the optimistic move, so a failed save can roll back. */
   readonly previousPosition: number;
+  /**
+   * Present on the one entry of a drop that also moves the channel to another
+   * category (WP 6.5c): its PATCH then carries `category_id`, and a failed save
+   * rolls back the category as well as the position.
+   */
+  readonly category?: {
+    readonly previous: ChannelCategoryFields;
+    readonly next: ChannelCategoryFields;
+  };
+}
+
+/** The channel fields that say which category it sits under, as the store holds them. */
+export interface ChannelCategoryFields {
+  /** 0 or undefined when the channel is in no category. */
+  readonly categoryId: number | undefined;
+  /** The category's name ("" or null for none). */
+  readonly category: string | null;
+  readonly categoryPosition: number | undefined;
 }
 
 /** Moderator actions on another user's voice session. Supplied by the page,
@@ -115,14 +138,30 @@ export interface ChannelSidebarOptions {
   readonly onOpenCall: () => void;
   /** Voice moderation wiring; the moderation menu section is hidden without it. */
   readonly onVoiceModerate?: VoiceModerationCallbacks;
-  /** Called when the user clicks the "+" on a category header. */
-  readonly onCreateChannel?: (category: string) => void;
+  /**
+   * Called when the user clicks the "+" on a category header (or the empty-state
+   * button). `category` is the group's category: its id (0 on a server that sends
+   * none, or for "no category") and name ("" for none). `type` is a hint for the
+   * synthetic Voice group, whose "+" most likely means another voice channel.
+   */
+  readonly onCreateChannel?: (category: CategoryRef, type?: ChannelType) => void;
+  /** Category management (MANAGE_CHANNELS; WP 6.5b). The header menu hides an entry whose callback is absent. */
+  readonly onCreateCategory?: () => void;
+  readonly onRenameCategory?: (category: CategoryRef) => void;
+  readonly onDeleteCategory?: (category: CategoryRef) => void;
+  readonly onMoveCategory?: (category: CategoryRef, direction: -1 | 1) => void;
   /** Called when the user right-clicks a channel and selects Edit. */
   readonly onEditChannel?: (channel: Channel) => void;
   /** Called when the user right-clicks a channel and selects Delete. */
   readonly onDeleteChannel?: (channel: Channel) => void;
   /** Called when the user drags a channel to a new position. */
   readonly onReorderChannel?: (reorders: readonly ChannelReorderData[]) => void;
+  /**
+   * Called when a manager drops a category header on another category's header
+   * or group: `categoryId` goes before (or after) `targetId` (WP 6.5c). The page
+   * sends the new order; nothing is applied locally.
+   */
+  readonly onReorderCategory?: (categoryId: number, targetId: number, before: boolean) => void;
   /** Bulk-delete the newest `count` messages; gated on MANAGE_MESSAGES. */
   readonly onPurgeChannel?: (channel: Channel, count: number) => Promise<void>;
   /** Called when the user picks Invite People from a channel's menu. */
@@ -282,6 +321,7 @@ function projectSidebarInputs(
       activeChannelId: channels.activeChannelId,
       selfRole: auth.user?.role ?? "",
       roles: channels.roles,
+      categories: channels.categories,
       collapsed: ui.collapsedCategories,
       hideMuted,
       mute,
@@ -297,6 +337,7 @@ function sameListInputs(a: ChannelListInputs, b: ChannelListInputs): boolean {
     a.activeChannelId === b.activeChannelId &&
     a.selfRole === b.selfRole &&
     a.roles === b.roles &&
+    a.categories === b.categories &&
     a.collapsed === b.collapsed &&
     a.hideMuted === b.hideMuted &&
     a.mute === b.mute
@@ -318,9 +359,14 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     onVoiceJoin,
     onOpenCall,
     onCreateChannel,
+    onCreateCategory,
+    onRenameCategory,
+    onDeleteCategory,
+    onMoveCategory,
     onEditChannel,
     onDeleteChannel,
     onReorderChannel,
+    onReorderCategory,
     onWatchStream,
     onVoiceModerate,
     onPurgeChannel,
@@ -668,8 +714,10 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     isMuted: isChannelMuted,
     canCreate: onCreateChannel !== undefined,
     canReorder: onReorderChannel !== undefined,
+    canReorderCategories: onReorderCategory !== undefined,
   };
   const UNCATEGORIZED_KEY = "\u0000uncategorized";
+  const groupKeyOf = (key: string | null): string => key ?? UNCATEGORIZED_KEY;
 
   function drawChannels(): void {
     // sidebarSel exists from mount() on, which is also when channelList does.
@@ -709,7 +757,9 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
         // listeners on the factory-lifetime signal.
         const owner = new Disposable();
         ownerByEl.set(emptyState, owner);
-        createBtn.addEventListener("click", () => onCreateChannel(""), { signal: owner.signal });
+        createBtn.addEventListener("click", () => onCreateChannel(NO_CATEGORY), {
+          signal: owner.signal,
+        });
         emptyState.appendChild(createBtn);
       } else {
         emptyState.appendChild(
@@ -727,14 +777,14 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
       const rows = visibleRows(g, list, voice, listCtx);
       const byId = new Map(rows.map((c) => [c.id, c]));
       const header = container.parentElement?.querySelector(".category") ?? null;
-      const groupKey = g.name ?? UNCATEGORIZED_KEY;
+      const groupKey = groupKeyOf(g.key);
       let shown = shownRowsByGroup.get(groupKey);
       if (shown === undefined) {
         shown = [];
         shownRowsByGroup.set(groupKey, shown);
       }
       shown.splice(0, shown.length, ...rows);
-      const collapsed = g.name !== null && list.collapsed.has(g.name);
+      const collapsed = g.key !== null && list.collapsed.has(g.key);
       // A focused row a collapsed category stops showing (read, muted, emptied)
       // hands focus to the category's arrow instead of dropping it to the page.
       // The row is the container's child holding focus, so a focused
@@ -822,14 +872,14 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
       }
     }
 
-    const groupsByKey = new Map(groups.map((g) => [g.name ?? UNCATEGORIZED_KEY, g]));
+    const groupsByKey = new Map(groups.map((g) => [groupKeyOf(g.key), g]));
     reconcileModels<ChannelGroup, CategoryGroupModel>(channelList, groups, {
-      key: (g) => g.name ?? UNCATEGORIZED_KEY,
+      key: (g) => groupKeyOf(g.key),
       // A group rebuilds when its own header changes (collapse, the "+");
       // an unchanged group reuses its element and reconciles its rows in place.
       model: (g) => categoryGroupModel(g, list, listCtx),
       create: (model) => {
-        const g = groupsByKey.get(model.name ?? UNCATEGORIZED_KEY);
+        const g = groupsByKey.get(groupKeyOf(model.key));
         // i18n-exempt: developer-facing invariant error, never shown to a user
         if (g === undefined) throw new Error("category group built for a group not in the pass");
         return buildCategoryGroup(model, g, reconcileRows);
@@ -854,9 +904,10 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     const owner = new Disposable();
     ownerByEl.set(group, owner);
     const { signal } = owner;
-    const name = model.name;
+    const { key, name } = model;
 
-    if (name !== null) {
+    if (key !== null && name !== null) {
+      const category: CategoryRef = { id: model.categoryId, name };
       const header = group.querySelector<HTMLElement>(":scope > .category");
       const arrow = header?.querySelector<HTMLElement>(":scope > .category-arrow") ?? null;
       if (header !== null && arrow !== null) {
@@ -864,12 +915,41 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
           "click",
           (e) => {
             e.stopPropagation();
-            onCreateChannel?.(name);
+            // The synthetic Voice group files nothing: no category, a voice channel.
+            if (key === UNCATEGORIZED_VOICE_CATEGORY && model.categoryId === 0) {
+              onCreateChannel?.(NO_CATEGORY, "voice");
+            } else {
+              onCreateChannel?.(category);
+            }
           },
           { signal },
         );
-        header.addEventListener("click", () => toggleCategory(name), { signal });
-        attachCategoryContextMenu(header, arrow, name, signal, disposable.signal);
+        // Registered before the collapse click so its capture-phase guard and
+        // the drag's own listeners belong to the same render owner.
+        if (model.draggable) {
+          attachCategoryDragHandlers(
+            header,
+            model.categoryId,
+            signal,
+            disposable.signal,
+            onReorderCategory,
+            model.draggable,
+          );
+        }
+        header.addEventListener("click", () => toggleCategory(key), { signal });
+        attachCategoryContextMenu(
+          header,
+          arrow,
+          { key, ...category },
+          {
+            onCreateCategory,
+            onRenameCategory,
+            onDeleteCategory,
+            onMoveCategory,
+          },
+          signal,
+          disposable.signal,
+        );
       }
     }
 

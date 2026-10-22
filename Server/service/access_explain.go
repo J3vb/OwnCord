@@ -90,11 +90,12 @@ func (s *ChannelService) loadAccessMember(ctx context.Context, userID int64, ch 
 		// A member with no role holds no bits; the zero role says so.
 		role = &db.Role{ID: user.RoleID}
 	}
-	sub, err := permissions.NewChecker(s.st).Subject(ctx, heldGrants, user.ID, ch.ID)
+	sub, err := permissions.NewChecker(s.st).Subject(ctx, heldGrants, user.ID, ch.AuthorityID())
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to resolve permissions: %w", ErrInternal, err)
 	}
-	sub.Channel = permissions.ChannelRef{ID: ch.ID, Type: ch.Type, Archived: ch.Archived, NSFW: ch.NSFW}
+	sub.Channel = permissions.ChannelRef{ID: ch.ID, Type: ch.Type, Archived: ch.Archived, NSFW: ch.NSFW,
+		AuthorityID: ch.Thread.ParentID, ThreadLocked: ch.Thread.Locked}
 	if ch.NSFW {
 		if sub.NSFWAcknowledged, err = s.st.HasNSFWAcknowledgement(ctx, user.ID, ch.ID); err != nil {
 			return nil, fmt.Errorf("%w: failed to read NSFW acknowledgement: %w", ErrInternal, err)

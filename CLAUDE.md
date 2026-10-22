@@ -37,30 +37,20 @@ scratch and stays local.
 
 ## Tools for agents
 
-Optional command-line tools that make a task cheaper. Install the ones you need
-— none is required to build or test OwnCord. The last four are also CI checks
-(`.github/workflows/ci.yml`), and each fails closed on a new finding: actionlint
-runs on every PR (Repository Hygiene); zizmor runs when `.github/**`,
-`scripts/**` or another shared CI input changes; osv-scanner and cargo-deny run
-when a manifest, a lockfile, `osv-scanner.toml` or `Client/src-tauri/deny.toml`
-changes (`scripts/ci-select.mjs`), and weekly on `main`
-(`weekly-supply-chain.yml`). Workflow Security Lint and Supply-chain Scan are
-required checks on `dev`. Run the matching one locally before pushing that kind
-of change.
+Optional; none is needed to build or test. The last four are also CI checks
+that fail closed on a new finding (Workflow Security Lint and Supply-chain Scan
+are required on `dev`; triggers in `scripts/ci-select.mjs`, pinned versions in
+`.github/workflows/ci.yml`). Run the matching one before pushing that kind of
+change.
 
-| Tool                                                       | Reach for it when                                                                       | Install / run                                                                                                                              |
-| ---------------------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| [`ast-grep`](https://ast-grep.github.io/)                  | searching or rewriting a structural pattern across TS/Go/Rust, rather than grep         | `brew install ast-grep` · `sg -p 'console.log($A)' -l ts`                                                                                  |
-| [`gotestsum`](https://github.com/gotestyourself/gotestsum) | a failing Go run where you want the failures, not the wall of `ok` lines                | `go install gotest.tools/gotestsum@latest` · `cd Server && gotestsum -- -race ./...`                                                       |
-| [`lk`](https://github.com/livekit/livekit-cli)             | checking voice/video without a browser — synthetic publishers against a room            | `brew install livekit-cli` · `lk load-test --rooms 1 --publishers 2 --layout 5x5 --url <ws>`                                               |
-| [`ctx7`](https://context7.com)                             | looking up current library docs rather than trusting memory                             | `npx ctx7@latest library <name> "<question>"`                                                                                              |
-| `osv-scanner`                                              | after moving any lockfile (`Server/go.mod`, npm, Cargo)                                 | `go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest`, or the release binary; invocation and baseline in `osv-scanner.toml` |
-| `cargo-deny`                                               | after changing `Client/src-tauri/Cargo.toml`/`.lock` — advisories, licences and sources | `cargo install cargo-deny` · `cargo deny --manifest-path Client/src-tauri/Cargo.toml check`; policy in `Client/src-tauri/deny.toml`        |
-| `zizmor`                                                   | after editing anything under `.github/workflows/`                                       | `brew install zizmor` · `zizmor --offline .github/workflows/`                                                                              |
-| `actionlint`                                               | after editing a workflow — expression syntax and action inputs                          | `brew install actionlint` (CI pins 1.7.7) · `actionlint .github/workflows/*.yml`                                                           |
-
-CI installs each linter from a pinned release with a checked digest; the exact
-steps (and the versions) are in `.github/workflows/ci.yml`.
+- `ast-grep` — structural search/rewrite across TS/Go/Rust: `sg -p 'console.log($A)' -l ts`
+- `gotestsum` — only the failures of a Go run: `cd Server && gotestsum -- -race ./...`
+- `lk` (livekit-cli) — voice/video without a browser: `lk load-test --rooms 1 --publishers 2 --layout 5x5 --url <ws>`
+- `ctx7` — current library docs: `npx ctx7@latest library <name> "<question>"`
+- `osv-scanner` — after moving any lockfile; invocation and baseline in `osv-scanner.toml`
+- `cargo-deny` — after changing `Client/src-tauri/Cargo.toml`/`.lock`: `cargo deny --manifest-path Client/src-tauri/Cargo.toml check`
+- `zizmor` — after editing `.github/workflows/`: `zizmor --offline .github/workflows/`
+- `actionlint` — after editing a workflow (CI pins 1.7.7): `actionlint .github/workflows/*.yml`
 
 ## AI Quality Guardrails & Engineering Standards
 
@@ -135,7 +125,7 @@ and proceeds, so a reviewer can see what was assumed.
   shell you build from, before `cargo test`/`clippy`/`tauri build`. It uses
   `CC`/`CXX` or an installed clang >= 21, and installs clang-21 from
   apt.llvm.org only on Debian/Ubuntu. Windows and server-only work need
-  nothing. Details: [Client/CLAUDE.md](Client/CLAUDE.md),
+  nothing. Details: [docs/architecture/linux-native-voice.md](docs/architecture/linux-native-voice.md),
   [docs/contributing.md](docs/contributing.md#client-tauri-v2).
 - Security fixes ship as ordinary PRs to `dev` with neutral wording: say what
   was fixed, never the weakness. Never a public issue. Outside reporters use

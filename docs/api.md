@@ -36,10 +36,11 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 215 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 225 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
+| GET     | `/`                                                                  |
 | GET     | `/admin/`                                                            |
 | GET     | `/admin/*`                                                           |
 | PUT     | `/admin/api/afk-channel`                                             |
@@ -61,11 +62,18 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | PUT     | `/admin/api/channels/categories/order`                               |
 | DELETE  | `/admin/api/channels/categories/{id}`                                |
 | PATCH   | `/admin/api/channels/categories/{id}`                                |
+| GET     | `/admin/api/channels/categories/{id}/permissions`                    |
+| DELETE  | `/admin/api/channels/categories/{id}/permissions/{roleId}`           |
+| PUT     | `/admin/api/channels/categories/{id}/permissions/{roleId}`           |
+| DELETE  | `/admin/api/channels/categories/{id}/user-permissions/{userId}`      |
+| PUT     | `/admin/api/channels/categories/{id}/user-permissions/{userId}`      |
 | DELETE  | `/admin/api/channels/{id}`                                           |
 | PATCH   | `/admin/api/channels/{id}`                                           |
 | GET     | `/admin/api/channels/{id}/access/explain`                            |
 | POST    | `/admin/api/channels/{id}/access/preview`                            |
+| PUT     | `/admin/api/channels/{id}/forum`                                     |
 | GET     | `/admin/api/channels/{id}/permissions`                               |
+| POST    | `/admin/api/channels/{id}/permissions/sync`                          |
 | DELETE  | `/admin/api/channels/{id}/permissions/{roleId}`                      |
 | PUT     | `/admin/api/channels/{id}/permissions/{roleId}`                      |
 | DELETE  | `/admin/api/channels/{id}/retention`                                 |
@@ -189,6 +197,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | PATCH   | `/api/v1/moderation/channels/categories/{id}`                        |
 | DELETE  | `/api/v1/moderation/channels/{id}`                                   |
 | PATCH   | `/api/v1/moderation/channels/{id}`                                   |
+| PUT     | `/api/v1/moderation/channels/{id}/forum`                             |
 | GET     | `/api/v1/moderation/members/`                                        |
 | PATCH   | `/api/v1/moderation/members/{id}`                                    |
 | DELETE  | `/api/v1/moderation/members/{id}/sessions`                           |
@@ -234,6 +243,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/users/me/totp/enable`                                       |
 | POST    | `/api/v1/users/me/totp/recovery-codes`                               |
 | GET     | `/api/v1/ws`                                                         |
+| GET     | `/assets/*`                                                          |
 | GET     | `/health`                                                            |
 | CONNECT | `/livekit/*`                                                         |
 | DELETE  | `/livekit/*`                                                         |
@@ -302,6 +312,7 @@ endpoints return plain-text errors — see their section):
 | `CHANNEL_NAME_TAKEN`            | 409         | Admin channel create or rename onto a name the same type already has in that category                                                                                                                                                            |
 | `CATEGORY_NAME_TAKEN`           | 409         | Category create or rename onto a name another category already has, ignoring case                                                                                                                                                                |
 | `CATEGORY_LIST_STALE`           | 409         | `PUT .../categories/order` with an id set that is not exactly the current set of categories; nothing is written                                                                                                                                  |
+| `PERMISSIONS_CHANGED`           | 409         | A channel sync found override rows it had not checked (they changed under it); nothing is written, retry                                                                                                                                         |
 
 ### Request deadline
 
@@ -1257,6 +1268,15 @@ block, omitted for every other message: `{"source_channel_id", "source_message_i
 purged. The block has no author and no channel name, and a deleted forward carries
 none. The forward's `content` and `attachments` are its own snapshot and copies,
 and it cannot be edited.
+
+A poll message (`poll_create`, see `docs/protocol.md`) carries a `poll` block,
+omitted for every other message and for a deleted one: `{"question", "answers":
+[{"answer_id", "text", "emoji"}], "allow_multiselect", "expires_at", "ended",
+"ended_at", "results": {"version", "total_voters", "counts": [{"answer_id",
+"count"}], "me"}}`. `me` is the requesting user's own answer ids. `ended` is true
+when the poll was ended or `expires_at` has passed, even before anything marked it
+ended. The poll's `content` is a readable fallback of the question and answers. A poll
+cannot be edited or forwarded.
 
 A group DM can also hold group event rows: `kind` is `group_add`, `group_remove`,
 `group_leave`, `group_rename` or `group_icon`, with a `group_event` block
@@ -2395,10 +2415,11 @@ Idempotent. Sends the caller's other live sockets an `nsfw_ack` frame
 
 #### Errors
 
-| Status | Code        | Reason                                                     |
-| ------ | ----------- | ---------------------------------------------------------- |
-| 404    | `NOT_FOUND` | The channel does not exist or is not visible to the caller |
-| 409    | `NOT_NSFW`  | The channel is not labelled — nothing to acknowledge       |
+| Status | Code          | Reason                                                     |
+| ------ | ------------- | ---------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | The channel is a thread: its consent is its parent's       |
+| 404    | `NOT_FOUND`   | The channel does not exist or is not visible to the caller |
+| 409    | `NOT_NSFW`    | The channel is not labelled — nothing to acknowledge       |
 
 ---
 
@@ -2415,9 +2436,10 @@ with `"acknowledged": false`.
 
 #### Errors
 
-| Status | Code        | Reason                                                     |
-| ------ | ----------- | ---------------------------------------------------------- |
-| 404    | `NOT_FOUND` | The channel does not exist or is not visible to the caller |
+| Status | Code          | Reason                                                     |
+| ------ | ------------- | ---------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | The channel is a thread: its consent is its parent's       |
+| 404    | `NOT_FOUND`   | The channel does not exist or is not visible to the caller |
 
 ---
 
@@ -5346,6 +5368,18 @@ Partial update — every field is optional and an omitted one is left alone.
 Same body and same errors as `POST`, plus `404 NOT_FOUND` for a missing role.
 Editing a role at or above your own position is `403`.
 
+`expected_permissions` (optional integer) is the permission mask the editor
+loaded. When present and the role's stored mask is different, nothing is
+written and the response is `409` with code `ROLE_CONFLICT`: another admin
+changed the role since it was loaded, so reload it and apply the change again.
+Omit the field to skip the check (the admin panel always sends it). The
+comparison and the write happen under one lock, so two edits that carry the
+same `expected_permissions` cannot both succeed.
+
+| Status | Code            | When                                                       |
+| ------ | --------------- | ---------------------------------------------------------- |
+| 409    | `ROLE_CONFLICT` | `expected_permissions` differs from the role's stored mask |
+
 A permission change additionally invalidates the cached permissions of that
 role's members and re-syncs their channel visibility (the server sends targeted
 `channel_create`/`channel_delete`), because a role's mask is the base every
@@ -5468,6 +5502,49 @@ time, not a database constraint, so channels that already share a name are
 left as they are, and a `PATCH` that leaves both name and category alone still
 saves.
 
+### Category permissions (WP 6.5d)
+
+A category carries permission overrides that its channels can stay **synced**
+to. They are a template that is copied onto channels, never inherited: a
+channel's effective access is still computed from its own override rows alone.
+The routes are on `/admin/api` only, behind `MANAGE_CHANNELS` like the channel
+override routes:
+
+| Route                                                      | Body            | Result                                                                                              |
+| ---------------------------------------------------------- | --------------- | --------------------------------------------------------------------------------------------------- |
+| `GET  /admin/api/channels/categories/{id}/permissions`     | none            | `200` `{category_id, roles, users}`: every role (zero masks when it has no row), existing user rows |
+| `PUT  .../categories/{id}/permissions/{roleId}`            | `{allow, deny}` | `200` the role row. Writes the category row and the same row on every synced channel                |
+| `DELETE .../categories/{id}/permissions/{roleId}`          | none            | `204`. Removes the category row and the row on every synced channel                                 |
+| `PUT/DELETE .../categories/{id}/user-permissions/{userId}` | as above        | the same for one member                                                                             |
+| `POST /admin/api/channels/{id}/permissions/sync`           | none            | `200` `{channel_id, permissions_synced}`. Replaces the channel's rows with its category's template  |
+
+A write runs the channel override guards over everything it touches: the
+escalation guard covers the bits written, the bits already on the category row
+and the bits already on every synced channel row it overwrites (a role cannot
+set or clear a bit its own role lacks), and the hierarchy rules apply to a role
+or member target. Any refusal is `403` and nothing is written; the category row
+and the channel rows are written in one transaction, and the channel set is read
+inside it. A sync, or a `PATCH` with `sync_permissions: true`, is guarded the
+same way over the union of the rows it removes and the rows it writes, and
+answers `400` when the channel has no category. A changed set of rows under a
+sync answers `409 PERMISSIONS_CHANGED` (retry). Writes are audited
+(`category_perms_update`, `category_perms_clear`, `category_user_perms_update`,
+`category_user_perms_clear`, `channel_perms_sync`).
+
+Sync lifecycle: a channel created in a category (by `category_id` or the legacy
+name) starts as a copy of the template and synced; copying is not a grant by the
+creator, so it is not blocked by bits the creator lacks. A direct write or delete
+of a channel override, or a `PATCH` that moves the channel to another category,
+sets `permissions_synced` to false and keeps its rows, unless the `PATCH` carries
+`sync_permissions: true`, which replaces its rows with the target category's
+template and marks it synced. `sync_permissions` on a `PATCH` works on both channel
+mounts (`/admin/api/channels/{id}` and `/api/v1/moderation/channels/{id}`); combined
+with a legacy `category` name that would create a new category it answers `400`,
+because a new category has no template to sync with. Deleting a category drops its template; its
+channels keep their rows and become unsynced. `permissions_synced` is on the
+admin channel list and on `GET /admin/api/channels/{id}/permissions`; it is not
+on the websocket channel payload.
+
 ---
 
 ## Channel Permission Overrides
@@ -5492,6 +5569,10 @@ and then re-syncs connected clients with targeted `channel_create` /
 `channel_delete` messages, so sidebars converge without a reconnect.
 
 DM channels have no override surface: `400 INVALID_INPUT`.
+
+A thread has no overrides, NSFW label, archive flag or retention policy of its
+own: each is its parent channel's. Every `/admin/api/channels/{id}` route,
+retention included, answers a thread id with `400`.
 
 ### GET /admin/api/channels/{id}/permissions
 

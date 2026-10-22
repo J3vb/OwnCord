@@ -173,6 +173,12 @@ var deadlineBound = []string{
 	"PUT /api/v1/moderation/channels/categories/order",
 	"PATCH /api/v1/moderation/channels/categories/{id}",
 	"DELETE /api/v1/moderation/channels/categories/{id}",
+	"POST /admin/api/channels/{id}/permissions/sync",
+	"GET /admin/api/channels/categories/{id}/permissions",
+	"PUT /admin/api/channels/categories/{id}/permissions/{roleId}",
+	"DELETE /admin/api/channels/categories/{id}/permissions/{roleId}",
+	"PUT /admin/api/channels/categories/{id}/user-permissions/{userId}",
+	"DELETE /admin/api/channels/categories/{id}/user-permissions/{userId}",
 	"DELETE /api/v1/uploads/{id}",
 	"DELETE /admin/api/backups/{name}",
 	"DELETE /admin/api/channels/{id}",
@@ -326,6 +332,7 @@ var deadlineBound = []string{
 	"POST /api/v1/users/me/totp/enable",
 	"POST /api/v1/users/me/totp/recovery-codes",
 	"PUT /admin/api/afk-channel",
+	"PUT /admin/api/channels/{id}/forum",
 	"PUT /admin/api/channels/{id}/permissions/{roleId}",
 	"PUT /admin/api/channels/{id}/retention",
 	"PUT /admin/api/channels/{id}/user-permissions/{userId}",
@@ -333,6 +340,7 @@ var deadlineBound = []string{
 	"PUT /api/v1/channels/{id}/nsfw-acknowledgement/",
 	"PUT /api/v1/dms/{channelId}/owner",
 	"PUT /api/v1/gif/favorites",
+	"PUT /api/v1/moderation/channels/{id}/forum",
 	"PUT /api/v1/users/me/notes/{userId}",
 	"PUT /api/v1/users/me/password",
 	"PUT /api/v1/users/me/privacy",
@@ -367,8 +375,13 @@ var deadlineExempt = map[string]string{
 }
 
 // deadlineOptionalBound are bound routes that mount only under a build tag
-// (the otel Prometheus exporter), accepted when present.
-var deadlineOptionalBound = map[string]bool{"* /metrics/*": true}
+// (the otel Prometheus exporter) or a config key (the browser client portal,
+// 6.13a), accepted when present.
+var deadlineOptionalBound = map[string]bool{
+	"* /metrics/*": true,
+	"GET /":        true,
+	"* /assets/*":  true,
+}
 
 // deadlineOptionalExempt are exempt routes that mount only under a build tag
 // or configuration (the walk accepts them when present).
@@ -504,6 +517,8 @@ func TestRequestDeadline_ExemptRoutesHaveNoDeadline(t *testing.T) {
 		{http.MethodGet, "/api/v1/health", true},
 		{http.MethodGet, "/admin/api/users", true},
 		{http.MethodDelete, "/admin/api/channels/3", true},
+		{http.MethodGet, "/", true},
+		{http.MethodGet, "/assets/index-abc.js", true},
 	}
 	for _, tc := range cases {
 		gotDeadline = false

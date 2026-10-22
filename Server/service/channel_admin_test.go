@@ -121,8 +121,15 @@ func TestAdminCreateChannel_DefaultsTypeValidatesAndAudits(t *testing.T) {
 		t.Fatalf("created %q/%q, want lounge/text", ch.Name, ch.Type)
 	}
 
-	if _, _, err := svc.AdminCreateChannel(context.Background(), 7, AdminChannelCreate{Name: "x", Type: "forum"}, nil); !errors.Is(err, ErrBadRequest) {
+	if _, _, err := svc.AdminCreateChannel(context.Background(), 7, AdminChannelCreate{Name: "x", Type: "stage"}, nil); !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("bad type: err = %v, want ErrBadRequest", err)
+	}
+	forum, _, err := svc.AdminCreateChannel(context.Background(), 7, AdminChannelCreate{Name: "ideas", Type: "forum"}, nil)
+	if err != nil {
+		t.Fatalf("forum type: err = %v, want accepted", err)
+	}
+	if forum.Type != "forum" || forum.Forum == nil {
+		t.Fatalf("forum created as %q with settings %v, want a forum carrying its settings", forum.Type, forum.Forum)
 	}
 
 	entries, err := database.GetAuditLog(context.Background(), 10, 0)

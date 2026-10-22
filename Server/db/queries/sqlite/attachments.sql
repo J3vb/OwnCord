@@ -30,11 +30,15 @@ FROM attachments WHERE id = ?;
 -- c.nsfw is the channel's label (B5-7's read gate, UploadService.Authorize):
 -- NULL when the attachment is unlinked or its message/channel is gone, same
 -- as c.type, so both are read through the caller's nil-safe mapping.
+-- parent_nsfw is the parent's label when the channel is a thread (migration
+-- 074), whose own nsfw is always 0; the gate reads either one being set.
 SELECT a.id, a.message_id, a.filename, a.stored_as, a.mime_type, a.size,
-       a.uploaded_at, a.uploader_id, m.channel_id, c.type, c.nsfw
+       a.uploaded_at, a.uploader_id, m.channel_id, c.type, c.nsfw,
+       p.nsfw AS parent_nsfw
 FROM attachments a
 LEFT JOIN messages m ON m.id = a.message_id
 LEFT JOIN channels c ON c.id = m.channel_id
+LEFT JOIN channels p ON p.id = c.parent_channel_id
 WHERE a.id = ?;
 
 -- name: DeleteOrphanedAttachments :many

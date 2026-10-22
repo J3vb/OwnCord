@@ -76,6 +76,7 @@ function resetStores(): void {
     voiceStatus: "idle",
   }));
   channelsStore.setState(() => ({
+    categories: [],
     channels: new Map(),
     activeChannelId: null,
     roles: [],

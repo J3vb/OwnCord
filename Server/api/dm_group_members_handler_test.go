@@ -127,7 +127,7 @@ func dmDo(t *testing.T, router http.Handler, method, path, token string, body an
 
 func buildLimitedDMRouter(database *db.DB, bc api.DMBroadcaster, limiter *auth.RateLimiter) http.Handler {
 	r := chi.NewRouter()
-	api.MountDMRoutes(r, database, service.New(database, auth.NewRateLimiter()), bc, limiter, nil)
+	api.MountDMRoutes(r, service.New(database, auth.NewRateLimiter()), bc, limiter, nil)
 	return r
 }
 
@@ -555,7 +555,7 @@ func TestFanOut_SurvivesRequestCancelAfterCommit(t *testing.T) {
 	svc := service.New(f.database, auth.NewRateLimiter())
 	svc.DMs = service.NewDMService(&cancelAfterAddStore{DB: f.database, cancel: cancel}, svc.Permissions)
 	r := chi.NewRouter()
-	api.MountDMRoutes(r, f.database, svc, f.bc, nil, nil)
+	api.MountDMRoutes(r, svc, f.bc, nil, nil)
 
 	raw, _ := json.Marshal(map[string]any{"user_ids": []int64{4}})
 	req := httptest.NewRequest(http.MethodPost, f.path("/members"), bytes.NewReader(raw)).WithContext(reqCtx)

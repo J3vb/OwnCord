@@ -80,8 +80,8 @@ func TestMigration067_DanglingRoleSkipped(t *testing.T) {
 	execAll(t, database, `PRAGMA foreign_keys = OFF`,
 		`INSERT INTO users (id, username, password, role_id) VALUES (1, 'a', 'h', 4), (2, 'ghost', 'h', 999)`,
 		`PRAGMA foreign_keys = ON`)
-	// Stop before 073, which reconciles the dangling user onto the default role.
-	if err := db.MigrateFS(database, migrationsUpTo(t, "073_")); err != nil {
+	// Stop before 077, which reconciles the dangling user onto the default role.
+	if err := db.MigrateFS(database, migrationsUpTo(t, "077_")); err != nil {
 		t.Fatalf("Migrate must still commit: %v", err)
 	}
 	if got := userRoleIDs(t, database, 1); !slices.Equal(got, []int64{4}) {

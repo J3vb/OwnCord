@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -28,6 +29,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 	"github.com/J3vb/OwnCord/Server/telemetry"
 	"github.com/J3vb/OwnCord/Server/updater"
+	"github.com/J3vb/OwnCord/Server/webclient"
 	"github.com/J3vb/OwnCord/Server/ws"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -65,7 +67,22 @@ type Runtime struct {
 	// "windows" block (WP 4.3a). StartRuntime builds it; the app starts its
 	// sampler (App.startHub) and stops it before the hub. Nil leaves it out.
 	MetricsWindows *metrics.Windows
-	Lifecycle      // the app's job group and shutdown signal (setup_options.go)
+	// Auth is the account service, built by StartRuntime over the hub (its
+	// AuthBroadcaster) and the totp-key stage's key, and already shared with
+	// the erasure runner (WP 5.6g). NewRouter only mounts it.
+	Auth *service.AuthService
+	// Storage is the one upload file store: the routes, the maintenance
+	// sweep and the erasure replay all use this instance. Nil when the store
+	// could not be opened (logged once by app.OpenStorage); the upload,
+	// avatar and emoji routes are then not mounted.
+	Storage *storage.Storage
+	// Updater serves the admin update card and the client auto-update route.
+	Updater *updater.Updater
+	// WebClient is the browser client bundle the portal serves when
+	// server.browser_client_enabled is on (6.13a). Nil uses the one embedded
+	// in this binary (webclient.Assets); tests hand in an fstest.MapFS.
+	WebClient fs.FS
+	Lifecycle // the app's job group and shutdown signal (setup_options.go)
 }
 
 // warnOnServerConfig logs the settings that are legal but rarely what an
@@ -76,14 +93,8 @@ func warnOnServerConfig(cfg *config.Config) {
 	if slices.Contains(cfg.Server.AllowedOrigins, "*") {
 		slog.Warn("AllowedOrigins contains wildcard '*' — consider restricting to specific origins for production use")
 	}
-	// BG-01: browser-client hosting is an owner opt-in and this build ships no
-	// browser assets, so the key mounts nothing yet. Say so rather than let an
-	// operator who turned it on conclude the server is broken; the bundle, its
-	// route and its own CSP arrive with B8.
-	if cfg.Server.BrowserClientEnabled {
-		slog.Warn("server.browser_client_enabled is set, but this build hosts no browser client — " +
-			"the key has no effect yet: no route is mounted and no asset is served")
-	}
+	_, bundled := webclient.Assets()
+	warnOnBrowserClient(cfg, bundled)
 	warnOnVoiceNodeIP(cfg)
 	if cfg.Voice.LiveKitURL != "" && cfg.Voice.NodeIP != "" && cfg.Voice.AdvertiseInternalIP {
 		slog.Warn("voice.node_ip is ignored while voice.advertise_internal_ip is on — LiveKit detects its public address over STUN instead",
@@ -133,11 +144,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Install the auth rate multiplier before any route mounts read it.
 	setAuthRateScale(cfg.Security.AuthRateLimitMultiplier)
 
-	// Load (or auto-generate) the AES-256 key for TOTP secret encryption
-	// (M1). Done first, before any other setup, so a fatal failure here
-	// (below) doesn't leave background goroutines or partially-mounted
-	// routes behind.
-	totpKey := routerTOTPKey(cfg)
+	requireBuiltRuntime(rt)
 
 	r := chi.NewRouter()
 
@@ -157,11 +164,6 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// the database and survive restarts — M2 security hardening).
 	limiter := rt.Limiter
 
-	// Start background cleanup of stale rate-limiter entries to prevent
-	// unbounded memory growth. The goroutine exits when stopCh is closed.
-	limiterStopCh := make(chan struct{})
-	go limiter.StartCleanup(rateLimiterCleanupInterval, limiterStopCh)
-
 	// Versioned API routes.
 	mountPublicV1(r, cfg, healthHandler, routerServerInfoDeps(rt.Services))
 
@@ -173,18 +175,12 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// account deletion can broadcast member_ban like the admin ban path does.
 
 	// Invite management routes (require MANAGE_INVITES permission).
-	MountInviteRoutes(r, database, svc)
+	MountInviteRoutes(r, svc)
 
 	// Channel and message REST routes are mounted after hub creation (below)
 	// so the hub can fan a bulk delete out as one chat_bulk_deleted event.
 
-	// GIF proxy — keeps the Klipy API key server-side. Mounted unconditionally;
-	// with no key configured the endpoints answer 503 GIF_DISABLED so the
-	// client can hide the picker rather than discover a 404.
-	MountGIFRoutes(r, svc.Sessions, limiter, cfg, svc.GIFFavorites)
-	if cfg.GIF.APIKey == "" {
-		slog.Info("gif.api_key not set — GIF picker disabled (clients will hide it)")
-	}
+	mountGIF(r, cfg, svc, limiter)
 
 	// Web Push subscription storage (B5-4) — nothing dispatches yet.
 	// Mounted unconditionally; with push.enabled false every route answers
@@ -195,7 +191,8 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// be passed as a DMBroadcaster for real-time close events.
 
 	// File upload and serving routes.
-	store, storeErr := routerUploadRoutes(r, svc.Sessions, limiter, cfg, svc.Uploads)
+	store := rt.Storage
+	routerUploadRoutes(r, svc.Sessions, limiter, cfg, svc.Uploads, store)
 
 	// WebSocket hub — built, wired and started by internal/app; WS does its
 	// own in-band auth, so no AuthMiddleware here.
@@ -203,13 +200,11 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	getOnlineUsers = func() int { return hub.ClientCount() }
 	hubAlive = func() bool { return hub.DispatchAlive() }
 
-	// Auth routes. The service is built after the hub, with the hub as its
-	// AuthBroadcaster, so DELETE /api/v1/auth/account fans out member_ban and
+	// Auth routes. StartRuntime built the service over the hub (its
+	// AuthBroadcaster), so DELETE /api/v1/auth/account fans out member_ban and
 	// force-disconnects the deleted user's own socket exactly like the admin
 	// ban path does for the same DB state.
-	authSvc := service.NewAuthService(database, limiter, totpKey, hub)
-	wireAuth(svc, authSvc, store, hub)
-	MountAuthRoutes(r, authSvc, AuthMiddleware(svc.Sessions), limiter, cfg.Server.TrustedProxies)
+	MountAuthRoutes(r, rt.Auth, AuthMiddleware(svc.Sessions), limiter, cfg.Server.TrustedProxies)
 
 	// Voice: webhook, LiveKit health and signalling-proxy routes. The client
 	// and the companion process are built by internal/app, which reports
@@ -218,33 +213,33 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	// Profile routes: update profile, change password, session management.
 	// Mounted after hub creation so the hub can broadcast user_update events.
-	// A storage failure leaves store unusable, so the avatar-upload route is
+	// A storage failure leaves store nil, so the avatar-upload route is
 	// simply not registered; the rest of the profile surface is unaffected.
 	// Built as a FileStore interface value from scratch — assigning the typed
 	// nil pointer would produce a non-nil interface and defeat the mount-time
 	// nil check.
 	var profileStore FileStore
-	if storeErr == nil {
+	if store != nil {
 		profileStore = store
 	}
-	MountProfileRoutes(r, database, svc, profileStore, limiter, cfg.Server.TrustedProxies, hub, cfg)
+	MountProfileRoutes(r, svc, profileStore, limiter, cfg.Server.TrustedProxies, hub, cfg)
 
 	// DM (direct message) REST routes, and the message request inbox (B5-6)
 	// beside them — mounted after hub creation so real-time
 	// dm_channel_close/dm_channel_open/dm_request events reach WebSocket
 	// clients.
-	routerDMRoutes(r, database, svc, hub, limiter, profileStore)
+	routerDMRoutes(r, svc, hub, limiter, profileStore)
 
 	// Channel, message and NSFW-acknowledgement REST routes — mounted after hub
 	// creation so a message purge or an nsfw_ack can broadcast through it.
-	routerChannelRoutes(r, database, svc, limiter, cfg, hub)
+	routerChannelRoutes(r, svc, limiter, cfg, hub)
 
 	// Custom emoji REST routes — mounted after hub creation so an upload or a
 	// delete can fan the new set out as an emoji_update. Requires the same file
 	// storage the attachment routes use; without it the emoji endpoints are not
 	// mounted at all (a 404 the client reads as "this server has no emoji").
-	if storeErr == nil {
-		MountEmojiRoutes(r, database, svc, store, limiter, hub)
+	if store != nil {
+		MountEmojiRoutes(r, svc, store, limiter, hub)
 	}
 
 	// Report intake, moderator actions and appeals (B5-8/B5-9/B5-10) —
@@ -267,7 +262,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	// Admin panel: static files + REST API (Phase 6).
 	// Restrict /admin to configured CIDRs (default: private networks only).
-	u := updater.NewUpdater(ver, cfg.GitHub.Token, cfg.GitHub.Owner, cfg.GitHub.Repo)
+	u := rt.Updater
 	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions, svc,
 		adminSetupOptions(cfg, rt))
 	// The client's member actions, reachable without the /admin prefix (see
@@ -277,6 +272,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	r.Mount("/api/v1/moderation/members", admin.NewMemberAPI(svc, hub, svc.Permissions))
 	// Channel create, edit and delete, mounted the same way for the same reason.
 	r.Mount("/api/v1/moderation/channels", admin.NewChannelAPI(svc, hub))
+	mountBrowserClient(r, cfg, rt.WebClient)
 	r.Group(func(r chi.Router) {
 		r.Use(AdminIPRestrict("server.admin_allowed_cidrs", cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies))
 		r.Mount("/admin", adminHandler)
@@ -307,40 +303,33 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	warnOnServerConfig(cfg)
 
-	cleanup := func() {
-		close(limiterStopCh)
-	}
-
-	return r, cleanup
+	return r, func() {}
 }
 
-// routerTOTPKey loads (or auto-generates) the AES-256 key NewRouter hands to the
-// auth routes for TOTP secret encryption (M1).
-func routerTOTPKey(cfg *config.Config) []byte {
-	totpKey, totpKeyErr := auth.LoadOrGenerateTOTPKey(cfg.Server.DataDir)
-	if totpKeyErr != nil {
-		if cfg.Server.DataDir != "" {
-			// A configured data directory means this is a real deployment —
-			// main.go creates cfg.Server.DataDir before calling NewRouter, so
-			// by this point LoadOrGenerateTOTPKey only fails for a malformed
-			// OWNCORD_TOTP_KEY or a corrupt/truncated totp.key file, never for
-			// a missing directory. (The zero-value "" DataDir used by handler
-			// tests that never touch TOTP crypto is exempted below so the
-			// existing test suite keeps passing.)
-			//
-			// Continuing here would leave totpKey nil: every AES call in
-			// auth.EncryptTOTPSecret/DecryptTOTPSecret then hits
-			// aes.NewCipher(nil) and 500s, so every 2FA-enabled account
-			// (including the owner) would be locked out of login and unable
-			// to re-enroll, forever, while /health kept reporting OK. Refuse
-			// to start instead.
-			panic(fmt.Sprintf("api: failed to load TOTP encryption key: %v", totpKeyErr))
-		}
-		slog.Error("failed to load TOTP encryption key", "error", totpKeyErr)
-		// Fall through — only reachable when DataDir is unset; TOTP handlers
-		// cannot encrypt/decrypt until a data directory is configured.
+// requireBuiltRuntime refuses a Runtime that StartRuntime did not build: the
+// router only mounts (WP 5.6g), so a missing collaborator is a wiring bug to
+// fail on at start-up rather than something NewRouter quietly constructs for
+// itself. Storage is not checked — nil is the degraded "no file storage" state.
+func requireBuiltRuntime(rt Runtime) {
+	var missing []string
+	if rt.Hub == nil {
+		missing = append(missing, "Hub")
 	}
-	return totpKey
+	if rt.Limiter == nil {
+		missing = append(missing, "Limiter")
+	}
+	if rt.Services == nil {
+		missing = append(missing, "Services")
+	}
+	if rt.Auth == nil {
+		missing = append(missing, "Auth")
+	}
+	if rt.Updater == nil {
+		missing = append(missing, "Updater")
+	}
+	if len(missing) > 0 {
+		panic(fmt.Sprintf("api: NewRouter needs a runtime built by app.StartRuntime; missing %v", missing))
+	}
 }
 
 // routerHealthDeps builds the liveness probes behind the shared /health
@@ -413,93 +402,28 @@ func routerMiddleware(r chi.Router, cfg *config.Config) {
 	}
 }
 
-// wireAuth shares the auth service with the bundle (the admin panel's
-// owner-only recovery issuance, B4-6, uses it) and gives the bundle's erasure
-// runner (B4-9) the upload storage the routes serve from — it is what
-// removes an erased account's files — and the hub, which broadcasts the
-// member_ban and purges the replay pipeline behind an erasure; then makes
-// the self-service route run through that same runner, as the admin route
-// and the maintenance loop's resume already do. A nil store (upload storage failed to open) leaves the
-// file half journaled for the maintenance loop's fallback storage. svc.Erasure
-// and svc.Retention are guarded independently — one being absent from the
-// bundle must not also leave the other unwired — and a missing svc.Erasure is
-// logged rather than left for AuthService's private per-instance runner to
-// swallow quietly (see UseErasure).
-func wireAuth(svc *service.Services, authSvc *service.AuthService, store *storage.Storage, hub *ws.Hub) {
-	svc.Auth = authSvc
-	if store != nil {
-		if svc.Erasure != nil {
-			svc.Erasure.SetFiles(store)
-		}
-		if svc.Retention != nil {
-			svc.Retention.SetFiles(store)
-		}
-		if svc.Uploads != nil {
-			svc.Uploads.SetFileCloner(store) // forwarded files (WP 6.9a)
-		}
-	}
-	if hub != nil {
-		if svc.Erasure != nil {
-			svc.Erasure.SetHub(hub)
-		}
-		if svc.Retention != nil {
-			svc.Retention.SetHub(hub)
-		}
-		if svc.Moderation != nil {
-			// B5-9: a live target gets the mod_action frame, and a timeout's
-			// voice half applies through the same mechanism voice_mod_mute
-			// uses.
-			svc.Moderation.SetNotifier(hub)
-			svc.Moderation.SetVoiceMuter(hub)
-		}
-		if svc.Appeals != nil {
-			// B5-10: a live appellant gets the appeal_status frame on
-			// assignment, decision and withdrawal. F4 review: the mod_queue
-			// broadcaster is wired here too, so Assign/Decide/Withdraw issue
-			// BOTH live frames themselves, under the same per-appeal lock —
-			// the handler no longer calls BroadcastAppealQueue for these
-			// three after the fact, once the lock has already been released.
-			svc.Appeals.SetNotifier(hub)
-			svc.Appeals.SetQueueBroadcaster(hub)
-			// OC-0486: an overturned ban must re-add the member to every
-			// connected roster, exactly as the admin unban path does. The
-			// decision commits in the DB layer; this is its transport half.
-			svc.Appeals.SetUnbanBroadcaster(hub)
-		}
-	}
-	if svc.Erasure != nil {
-		authSvc.UseErasure(svc.Erasure)
-	} else {
-		slog.Error("wireAuth: bundle has no erasure runner; account deletion will run through AuthService's private runner, which records no deletion marker — a restore can resurrect an erased account")
-	}
-}
-
-// routerUploadRoutes mounts the file upload and serving routes and returns the
-// shared file storage (and its construction error) for the profile-avatar and
-// emoji mounts, which reuse the same store.
-func routerUploadRoutes(r chi.Router, sessions *service.SessionService, limiter *auth.RateLimiter, cfg *config.Config, uploads *service.UploadService) (*storage.Storage, error) {
+// routerUploadRoutes mounts the file upload and serving routes over the one
+// store StartRuntime opened. A nil store (it failed to open, and was logged
+// there) leaves them unmounted.
+func routerUploadRoutes(r chi.Router, sessions *service.SessionService, limiter *auth.RateLimiter, cfg *config.Config, uploads *service.UploadService, store *storage.Storage) {
 	if cfg.Upload.MaxSizeMB == 0 {
 		slog.Warn("upload.max_size_mb is 0, uploads are disabled")
 	}
-	store, storeErr := storage.New(cfg.Upload.StorageDir, cfg.Upload.MaxSizeMB)
-	if storeErr != nil {
-		slog.Error("failed to create file storage", "error", storeErr)
-	} else {
+	if store != nil {
 		MountUploadRoutes(r, sessions, store, limiter, cfg.Server.AllowedOrigins, uploads)
 	}
-	return store, storeErr
 }
 
 // routerChannelRoutes mounts the channel/message REST surface and B5-7's NSFW
 // acknowledgement toggle beside it — both need the hub to fan out real-time
 // events (chat_bulk_deleted, nsfw_ack).
-func routerDMRoutes(r chi.Router, database *db.DB, svc *service.Services, hub *ws.Hub, limiter *auth.RateLimiter, store FileStore) {
-	MountDMRoutes(r, database, svc, hub, limiter, store)
+func routerDMRoutes(r chi.Router, svc *service.Services, hub *ws.Hub, limiter *auth.RateLimiter, store FileStore) {
+	MountDMRoutes(r, svc, hub, limiter, store)
 	MountDMRequestRoutes(r, svc, hub)
 }
 
-func routerChannelRoutes(r chi.Router, database *db.DB, svc *service.Services, limiter *auth.RateLimiter, cfg *config.Config, hub *ws.Hub) {
-	MountChannelRoutes(r, database, svc, limiter, cfg.Server.TrustedProxies, hub)
+func routerChannelRoutes(r chi.Router, svc *service.Services, limiter *auth.RateLimiter, cfg *config.Config, hub *ws.Hub) {
+	MountChannelRoutes(r, svc, limiter, cfg.Server.TrustedProxies, hub)
 	MountNSFWRoutes(r, svc, hub)
 }
 

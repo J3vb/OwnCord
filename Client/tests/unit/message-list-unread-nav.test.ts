@@ -66,7 +66,12 @@ function resetStores(): void {
     detachedChannels: new Set(),
   }));
   membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
-  channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  channelsStore.setState(() => ({
+    channels: new Map(),
+    activeChannelId: null,
+    roles: [],
+    categories: [],
+  }));
 }
 
 /** Authors alternate between two other users so no row is ever grouped, and

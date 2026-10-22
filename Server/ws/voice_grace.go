@@ -51,7 +51,7 @@ type voiceGraceEntry struct {
 // the first is still parked replaces the entry (and stops its timer), so a
 // user can never have two windows pending.
 type voiceGraceState struct {
-	mu      syncutil.Mutex
+	mu      syncutil.Ranked[lockRankLeaf]
 	entries map[int64]*voiceGraceEntry
 	closed  bool // set by close at shutdown: put arms nothing from then on
 	// expiring counts expiry teardowns past takeForExpiry, so close can wait

@@ -217,6 +217,15 @@ type ChannelUpdate struct {
 	// would make the value depend on a type that can never change anyway.
 	VoiceMaxUsers int
 	VoiceMaxVideo int
+	// SyncGuard, when non-nil, asks for the channel's override rows to be
+	// replaced by the template of the category it ends up in, and for it to be
+	// marked synced (WP 6.5d). It runs in the same transaction as the update,
+	// so a refusal leaves the channel where it was. ErrUncategorized when the
+	// update leaves the channel with no category. Without it, a move to
+	// another category keeps the channel's rows and unsyncs it.
+	SyncGuard ChannelSyncGuard
+	// SyncPlan, when non-nil and SyncGuard ran, receives the rows replaced.
+	SyncPlan *ChannelSyncPlan
 }
 
 // AdminUpdateChannel updates all mutable channel fields, category included.
@@ -249,6 +258,16 @@ func (d *DB) adminUpdateChannel(ctx context.Context, id int64, u ChannelUpdate, 
 		if u.CreatedCategory != nil && created != 0 {
 			*u.CreatedCategory = created
 		}
+		before, err := q.GetChannelCategoryID(ctx, id)
+		moved := false
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			// The channel is gone: the update below touches nothing.
+		case err != nil:
+			return err
+		default:
+			moved = !sameCategory(before, catID)
+		}
 		if err := q.AdminUpdateChannel(ctx, dbgen.AdminUpdateChannelParams{
 			Name:          u.Name,
 			Topic:         strToNullPtr(u.Topic),
@@ -263,11 +282,46 @@ func (d *DB) adminUpdateChannel(ctx context.Context, id int64, u ChannelUpdate, 
 		}); err != nil {
 			return err
 		}
+		if err := applyPermissionSyncTx(ctx, q, id, catID, moved, u); err != nil {
+			return err
+		}
 		if clearNSFW {
 			return q.DeleteNSFWAcknowledgementsForChannel(ctx, id)
 		}
 		return nil
 	})
+}
+
+func sameCategory(a, b *int64) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+// applyPermissionSyncTx applies the sync rules of a channel update inside its
+// transaction. Moving the channel to another category unsyncs it and keeps its
+// own override rows; an update that asked for a sync instead replaces the rows
+// with the target category's template and marks the channel synced. moved was
+// read in this transaction, not from a snapshot the caller took earlier.
+func applyPermissionSyncTx(ctx context.Context, q *dbgen.Queries, id int64, catID *int64, moved bool, u ChannelUpdate) error {
+	if u.SyncGuard != nil {
+		if catID == nil {
+			return ErrUncategorized
+		}
+		plan, err := replaceWithTemplateTx(ctx, q, id, *catID, u.SyncGuard)
+		if err != nil {
+			return err
+		}
+		if u.SyncPlan != nil {
+			*u.SyncPlan = plan
+		}
+		return nil
+	}
+	if moved {
+		return q.UnsyncChannelPermissions(ctx, id)
+	}
+	return nil
 }
 
 // AdminDeleteChannel removes a channel by ID (cascades to messages, etc.).

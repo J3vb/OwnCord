@@ -75,6 +75,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Desktop UI**
 
+- Channel categories are now real: right-click a category header (with Manage Channels) for **Create Category**, **Rename Category**, **Move Category Up/Down** and **Delete Category** (its channels move to no category, nothing is deleted). **Create Category** is also in the server menu, a category with no channels stays visible to people who can manage channels, and a collapsed category stays collapsed after a rename. Create and Edit Channel now pick the category from a list. This needs a server with categories; on an older one the sidebar still groups by name, though the Voice and uncategorized groups now sort ahead of those.
 - Opening a voice call now opens the voice channel's text chat beside the video grid (stacked under it in a narrow window); leaving the call keeps the chat, and moving to another voice channel follows to its chat. A **Hide chat** / **Show chat** button in the header (shown during a call on that channel) keeps the grid full width, and a voice channel now shows a speaker in its header instead of `#`.
 - A voice channel in the sidebar now shows a red mention badge when someone mentions you in its chat, and right-clicking it offers **Open chat** to read that chat without joining the call; clicking the row still joins. "Mark all read" no longer appears for unread voice chat that no row shows.
 - Opening a voice call now opens the voice channel's text chat beside the video grid (stacked under it in a narrow window); leaving the call keeps the chat, and moving to another voice channel follows to its chat.
@@ -270,6 +271,12 @@ and only when it changes something a contributor or fork holder must do
 **Accounts & admin**
 
 - The server now keeps only the newest 3 pre-restore and 3 pre-migration safety copies, so repeated upgrades and restores no longer fill the backup disk. Copy any older one you want to keep before upgrading.
+
+**Server (operators)**
+
+- The shipped systemd unit (`deploy/owncord.service`) now runs a root-owned `/opt/owncord/chatserver` with config and data in `/var/lib/owncord` (`StateDirectory=`), so the service can no longer rewrite its own program file. Your installed unit keeps working until you re-copy it; if you do, follow [Migrating from the /opt/owncord data layout](docs/deployment.md#migrating-from-the-optowncord-data-layout) first, because the unit refuses to start while `/opt/owncord/data` exists.
+- `CAP_NET_BIND_SERVICE` is now commented out in the unit. If you use `tls.mode: acme`, uncomment the line, or the server cannot bind port 80 and logs `ACME HTTP server error`.
+- Admin-panel self-update under systemd is now opt-in: with the new unit, "Update now" shows that the server cannot replace its own program file. [Opt in to admin-panel updates](docs/deployment.md#opt-in-to-admin-panel-updates) with a two-line drop-in and a `chown`, or install new releases by hand.
 
 ### Fixed
 

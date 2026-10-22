@@ -24,6 +24,9 @@ import (
 type RoleService struct {
 	st    Store
 	perms *PermissionService
+	// notifier receives each committed mutation's fan-out (WP 5.1a). Set once
+	// before the server serves; nil is a no-op. Always called outside mu.
+	notifier PermissionChangeNotifier
 	// mu serializes the read-check-write mutations: position uniqueness and
 	// the role cap are enforced against a ListRoles snapshot, not by a DB
 	// constraint, so two interleaved mutations can both see the same free
@@ -60,6 +63,10 @@ type RoleInput struct {
 	Color       *string // points at "" to clear the color
 	Permissions *int64
 	Position    *int
+	// ExpectedPermissions is the mask the caller loaded before editing. Only
+	// UpdateRole reads it: when set and the stored mask differs, the edit is
+	// refused with ErrConflict and nothing is written. Nil skips the check.
+	ExpectedPermissions *int64
 }
 
 // RoleWithMembers is a role plus how many users currently hold it. The count
@@ -184,8 +191,8 @@ func (s *RoleService) ListRoles(ctx context.Context, actorID int64) ([]RoleWithM
 	return out, nil
 }
 
-// CreateRole creates a role strictly below the actor's own rank.
-func (s *RoleService) CreateRole(ctx context.Context, actorID int64, in RoleInput) (*db.Role, error) {
+// createRoleLocked creates a role strictly below the actor's own rank.
+func (s *RoleService) createRoleLocked(ctx context.Context, actorID int64, in RoleInput) (*db.Role, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	actor, err := s.actorRole(ctx, actorID)
@@ -287,9 +294,18 @@ type RoleUpdateResult struct {
 	Renamed bool
 }
 
-// UpdateRole applies a partial change to a role below the actor's rank.
+// checkExpectedPermissions refuses an edit made from a stale copy: nil skips
+// the check, anything else must equal the stored mask.
+func checkExpectedPermissions(expected *int64, role *db.Role) error {
+	if expected != nil && *expected != role.Permissions {
+		return fmt.Errorf("%w: role permissions changed since it was loaded", ErrConflict)
+	}
+	return nil
+}
+
+// updateRoleLocked applies a partial change to a role below the actor's rank.
 // Returns the updated role and what the change actually moved.
-func (s *RoleService) UpdateRole(ctx context.Context, actorID, roleID int64, in RoleInput) (updated *db.Role, res RoleUpdateResult, err error) {
+func (s *RoleService) updateRoleLocked(ctx context.Context, actorID, roleID int64, in RoleInput) (updated *db.Role, res RoleUpdateResult, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	actor, err := s.actorRole(ctx, actorID)
@@ -304,6 +320,11 @@ func (s *RoleService) UpdateRole(ctx context.Context, actorID, roleID int64, in 
 		return nil, RoleUpdateResult{}, fmt.Errorf("%w: role not found", ErrNotFound)
 	}
 	if err := requireBelowActor(actor, role); err != nil {
+		return nil, RoleUpdateResult{}, err
+	}
+	// Compared under s.mu against the row just read, so two editors holding
+	// the same copy cannot both win: the second sees the first's mask.
+	if err := checkExpectedPermissions(in.ExpectedPermissions, role); err != nil {
 		return nil, RoleUpdateResult{}, err
 	}
 
@@ -382,10 +403,10 @@ func (s *RoleService) AllRoles(ctx context.Context) ([]*db.Role, error) {
 	return roles, nil
 }
 
-// DeleteRole removes a role below the actor's rank, moving its members onto the
+// deleteRoleLocked removes a role below the actor's rank, moving its members onto the
 // default role. Returns the deleted role, the fallback its members landed on,
 // and the ids of those members so the caller can invalidate and re-sync them.
-func (s *RoleService) DeleteRole(ctx context.Context, actorID, roleID int64) (deleted, fallback *db.Role, movedUserIDs []int64, err error) {
+func (s *RoleService) deleteRoleLocked(ctx context.Context, actorID, roleID int64) (deleted, fallback *db.Role, movedUserIDs []int64, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	actor, err := s.actorRole(ctx, actorID)
@@ -441,7 +462,7 @@ func (s *RoleService) DeleteRole(ctx context.Context, actorID, roleID int64) (de
 	return role, fallback, movedUserIDs, nil
 }
 
-// ReorderRoles rewrites the positions of every role the actor may manage.
+// reorderRolesLocked rewrites the positions of every role the actor may manage.
 // orderedIDs is highest-rank-first and must name exactly the set of roles
 // strictly below the actor — a partial list is refused rather than silently
 // leaving the omitted roles wherever they were, which is how positions
@@ -450,7 +471,7 @@ func (s *RoleService) DeleteRole(ctx context.Context, actorID, roleID int64) (de
 // Positions are normalized to N..1, so they stay unique, stay strictly below
 // the actor (N < actor.Position, enforced by maxRoles), and never collide with
 // the untouched roles above the actor.
-func (s *RoleService) ReorderRoles(ctx context.Context, actorID int64, orderedIDs []int64) ([]*db.Role, error) {
+func (s *RoleService) reorderRolesLocked(ctx context.Context, actorID int64, orderedIDs []int64) ([]*db.Role, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	actor, err := s.actorRole(ctx, actorID)

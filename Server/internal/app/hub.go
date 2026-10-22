@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/api"
@@ -14,6 +15,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/plugin"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/storage"
+	"github.com/J3vb/OwnCord/Server/updater"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
@@ -35,10 +37,17 @@ import (
 // lockouts and the service layer holds the permission cache the hub
 // invalidates, so a second copy of either would silently split that state.
 //
+// WP 5.6g: it also builds the AuthService (over the hub, which is its
+// AuthBroadcaster, and the totp-key stage's key) and the Updater, takes the one
+// storage.Storage the maintenance loop and the erasure replay share, and runs
+// wireAuth — every service setter that needs the hub or the store — before
+// the dispatch goroutine starts, so no setter runs after Run and a restart
+// (a fresh runtime) never runs one twice. api.NewRouter only mounts.
+//
 // It starts the hub, so every caller must stop it — App.Close does, through
 // the "hub" close step; api's tests rely on the goleak ignore for
 // ws.(*Hub).Run.func1 exactly as they did when NewRouter started it.
-func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Registry) (api.Runtime, error) {
+func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Registry, in RuntimeInputs) (api.Runtime, error) {
 	// Lockouts are persisted to the database so they survive restarts (M2).
 	limiter := auth.NewPersistentRateLimiter(database)
 	// B4-4: the one admission budget for expensive authentication work lives
@@ -118,6 +127,12 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 
 	svc.Attention = newAttention(cfg, hub, database, svc.Settings)
 
+	authSvc := service.NewAuthService(database, limiter, in.TOTPKey, hub)
+	wireAuth(svc, authSvc, in.Storage, hub)
+
+	if beforeHubRun != nil {
+		beforeHubRun(svc)
+	}
 	go hub.Run()
 	hub.RearmTimeoutExpiries()
 	// Load the active-timeout mirror up front; on failure Subject retries
@@ -126,7 +141,11 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 		slog.Error("boot: load active timeouts", "err", err)
 	}
 
-	return api.Runtime{Hub: hub, Limiter: limiter, Services: svc, VoiceEnabled: voiceEnabled, MetricsWindows: windows}, nil
+	return api.Runtime{
+		Hub: hub, Limiter: limiter, Services: svc, VoiceEnabled: voiceEnabled, MetricsWindows: windows,
+		Auth: authSvc, Storage: in.Storage,
+		Updater: updater.NewUpdater(in.Version, cfg.GitHub.Token, cfg.GitHub.Owner, cfg.GitHub.Repo),
+	}, nil
 }
 
 // storageLimits is B5-2's two bounds on the upload service: the per-user
@@ -204,7 +223,9 @@ func newAttention(cfg *config.Config, hub *ws.Hub, database *db.DB, settings *se
 		BackupSchedule: func(ctx context.Context) (string, error) {
 			return settings.Setting(ctx, "backup_schedule")
 		},
-		LastBackup:  admin.NewestBackup,
+		LastBackup: func() (time.Time, error) {
+			return admin.NewestBackup(admin.ResolveBackupDir(cfg.Backup.Dir))
+		},
 		Certificate: admin.ServedCertificate,
 		VoiceHealth: func(ctx context.Context) service.VoiceHealth {
 			// OwnCord-managed companion: report the supervisor's own state,

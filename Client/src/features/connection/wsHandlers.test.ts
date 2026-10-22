@@ -27,7 +27,12 @@ function socketStub() {
 beforeEach(() => {
   authStore.setState((prev) => ({ ...prev, token: "tok", user, isAuthenticated: true }));
   uiStore.setState((prev) => ({ ...prev, sessionReplaced: false, updateRequiredHost: null }));
-  channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  channelsStore.setState(() => ({
+    channels: new Map(),
+    activeChannelId: null,
+    roles: [],
+    categories: [],
+  }));
   messagesStore.setState((prev) => ({ ...prev, detachedChannels: new Set() }));
 });
 

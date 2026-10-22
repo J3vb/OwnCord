@@ -145,7 +145,17 @@ func (s *MessageService) checkSendPermission(ctx context.Context, userID int64, 
 	if err != nil {
 		return err
 	}
-	return denial(permissions.CanSendMessage(sub))
+	if err := denial(permissions.CanSendMessage(sub)); err != nil {
+		return err
+	}
+	// A forum holds no messages: its posts are threads, and a post is created
+	// through the forum post path. Refused after the permission verdict so a
+	// caller who cannot read the forum learns nothing about its type; the
+	// messages trigger (migration 075) is the schema-level backstop.
+	if ch.Type == db.ForumTypeName {
+		return fmt.Errorf("%w: a forum holds no messages, post in one of its posts", ErrBadRequest)
+	}
+	return nil
 }
 
 // channelSubject resolves what the channel predicates need for userID in ch:
@@ -166,7 +176,8 @@ func channelSubject(ctx context.Context, st Store, perms *PermissionService, use
 	if err != nil {
 		return permissions.Subject{}, fmt.Errorf("%w: failed to resolve permissions: %w", ErrInternal, err)
 	}
-	sub.Channel = permissions.ChannelRef{ID: ch.ID, Type: ch.Type, Archived: ch.Archived}
+	sub.Channel = permissions.ChannelRef{ID: ch.ID, Type: ch.Type, Archived: ch.Archived,
+		AuthorityID: ch.Thread.ParentID, ThreadLocked: ch.Thread.Locked}
 	if ch.Type != "dm" {
 		return sub, nil
 	}
@@ -244,7 +255,7 @@ func readSubject(ctx context.Context, st Store, perms *PermissionService, userID
 	if err != nil {
 		sub = permissions.Subject{}
 	}
-	sub.Channel = permissions.ChannelRef{ID: ch.ID, Type: ch.Type, NSFW: ch.NSFW}
+	sub.Channel = permissions.ChannelRef{ID: ch.ID, Type: ch.Type, NSFW: ch.NSFW, AuthorityID: ch.Thread.ParentID}
 	switch {
 	case ch.Type == "dm":
 		ok, dmErr := st.IsDMParticipant(ctx, userID, ch.ID)

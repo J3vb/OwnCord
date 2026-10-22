@@ -1691,12 +1691,27 @@ CREATE TABLE IF NOT EXISTS channel_categories (
     created_at TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_categories_name ON channel_categories(name COLLATE NOCASE);
+CREATE TABLE IF NOT EXISTS category_overrides (
+    category_id INTEGER NOT NULL REFERENCES channel_categories(id) ON DELETE CASCADE,
+    role_id     INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    allow       INTEGER NOT NULL DEFAULT 0,
+    deny        INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(category_id, role_id)
+);
+CREATE TABLE IF NOT EXISTS category_user_overrides (
+    category_id INTEGER NOT NULL REFERENCES channel_categories(id) ON DELETE CASCADE,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    allow       INTEGER NOT NULL DEFAULT 0,
+    deny        INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(category_id, user_id)
+);
 
 CREATE TABLE IF NOT EXISTS channels (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     name             TEXT    NOT NULL,
     type             TEXT    NOT NULL DEFAULT 'text',
     category_id INTEGER REFERENCES channel_categories(id) ON DELETE SET NULL,
+    permissions_synced INTEGER NOT NULL DEFAULT 0,
     topic            TEXT,
     position         INTEGER NOT NULL DEFAULT 0,
     slow_mode        INTEGER NOT NULL DEFAULT 0,
@@ -1708,6 +1723,15 @@ CREATE TABLE IF NOT EXISTS channels (
     voice_max_video  INTEGER NOT NULL DEFAULT 0,
     nsfw             INTEGER NOT NULL DEFAULT 0,
     afk             INTEGER NOT NULL DEFAULT 0,
+    parent_channel_id INTEGER REFERENCES channels(id) ON DELETE CASCADE,
+    thread_starter_message_id INTEGER,
+    thread_owner_id INTEGER,
+    thread_archived INTEGER NOT NULL DEFAULT 0,
+    thread_locked INTEGER NOT NULL DEFAULT 0,
+    thread_auto_archive_minutes INTEGER NOT NULL DEFAULT 1440,
+    thread_last_activity_at TEXT,
+    forum_require_tag INTEGER NOT NULL DEFAULT 0,
+    forum_default_auto_archive_minutes INTEGER NOT NULL DEFAULT 4320,
     is_group         INTEGER NOT NULL DEFAULT 0
 );
 
@@ -1885,7 +1909,7 @@ CREATE TABLE IF NOT EXISTS attachments (
     width       INTEGER,
     height      INTEGER
 );
-`), mustMigration("057_member_generation.sql"), mustMigration("061_member_generation_about.sql"), mustMigration("062_custom_status_expiry.sql"), mustMigration("063_mention_receipts.sql"), mustMigration("064_call_log.sql"), mustMigration("065_group_dm_owner.sql"), mustMigration("066_group_dm_icon.sql"), mustMigration("069_profile_notes_banners.sql"), mustMigration("071_message_forwards.sql")))
+`), mustMigration("057_member_generation.sql"), mustMigration("061_member_generation_about.sql"), mustMigration("062_custom_status_expiry.sql"), mustMigration("063_mention_receipts.sql"), mustMigration("064_call_log.sql"), mustMigration("065_group_dm_owner.sql"), mustMigration("066_group_dm_icon.sql"), mustMigration("069_profile_notes_banners.sql"), mustMigration("071_message_forwards.sql"), mustMigration("073_polls.sql")))
 
 // mustMigration returns a shipped migration file's SQL.
 func mustMigration(name string) []byte {

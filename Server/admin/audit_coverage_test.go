@@ -28,11 +28,11 @@ func TestAuditCoverage_AdminMutations(t *testing.T) {
 
 	// fixture returns a handler, an owner token and a channel id, with the
 	// recorder installed after seeding.
-	fixture := func(t *testing.T) (http.Handler, *db.DB, string, int64) {
+	fixture := func(t *testing.T, opts ...admin.SetupOptions) (http.Handler, *db.DB, string, int64) {
 		t.Helper()
 		database := openAdminTestDB(t)
 		handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, &mockPermInvalidator{},
-			newTestServices(database))
+			newTestServices(database), opts...)
 		token := createAdminUser(t, database)
 		chID, err := database.CreateChannel(context.Background(), "secret", "text", "", "", 0)
 		if err != nil {
@@ -175,12 +175,10 @@ func TestAuditCoverage_AdminMutations(t *testing.T) {
 		}},
 		{"backup download", "backup_download", func(t *testing.T) (*audittest.Recorder, []string) {
 			dir := t.TempDir()
-			admin.SetBackupBaseDir(dir)
-			t.Cleanup(func() { admin.SetBackupBaseDir(filepath.Join("data", "backups")) })
 			if err := os.WriteFile(filepath.Join(dir, "b.db"), []byte("backup"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			handler, database, token, _ := fixture(t)
+			handler, database, token, _ := fixture(t, admin.SetupOptions{BackupDir: dir})
 			rec := audittest.Install(t, database)
 			w := doRequest(t, handler, http.MethodPost, "/backups/b.db/link", token, map[string]any{})
 			if w.Code != http.StatusOK {

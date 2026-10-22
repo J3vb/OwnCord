@@ -40,6 +40,11 @@ func (s *NSFWService) checkVisible(ctx context.Context, userID, channelID int64)
 	if err != nil || ch == nil {
 		return fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
+	if ch.IsThread() {
+		// A thread's label and consent are its parent's (6.9c): the
+		// acknowledgement rows are keyed by the parent only.
+		return fmt.Errorf("acknowledge the thread's parent channel%.0w", ErrBadRequest)
+	}
 	sub, err := channelSubject(ctx, s.st, s.perms, userID, ch, false)
 	if err != nil {
 		// channelSubject already classifies the failure as ErrInternal.

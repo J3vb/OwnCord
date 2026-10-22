@@ -100,7 +100,7 @@ func newNSFWGateFixture(t *testing.T) *nsfwGateFixture {
 	if _, err := svc.Messages.SetMessagePinned(ctx, authorID, labelledID, sent.MessageID, true); err != nil {
 		t.Fatalf("SetMessagePinned: %v", err)
 	}
-	if _, err := svc.Messages.AddReaction(ctx, authorID, sent.MessageID, "👍"); err != nil {
+	if err := database.AddReaction(ctx, sent.MessageID, authorID, "👍"); err != nil {
 		t.Fatalf("AddReaction: %v", err)
 	}
 	const attID = "nsfw-gate-attachment"

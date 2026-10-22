@@ -62,7 +62,7 @@ func UserTopic(userID int64) Topic {
 //
 // Thread-safe: all methods may be called from any goroutine.
 type PubSub struct {
-	mu syncutil.RWMutex
+	mu syncutil.RankedRW[lockRankPubSub]
 
 	// Forward index: topic → (userID → *Client)
 	topics map[Topic]map[int64]*Client

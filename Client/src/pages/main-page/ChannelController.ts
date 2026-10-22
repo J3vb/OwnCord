@@ -26,6 +26,7 @@ import type {
   ReplyTarget,
   SentAttachment,
 } from "@components/MessageInput";
+import { endPoll, votePoll } from "../../features/messaging/pollSend";
 import { loadSendQueue, preloadSendQueue } from "../../features/messaging/sendQueue-loader";
 import type { SendQueueModule } from "../../features/messaging/sendQueue-loader";
 import type { QueuedSend, QueueDeps } from "../../features/messaging/sendQueue";
@@ -1516,6 +1517,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           () => showToast(messagingText("forward.loadFailed"), "error"),
         );
       },
+      // Voting and ending are plain requests on this channel's socket; the counts
+      // come back as poll_update through the dispatcher (WP 6.9b).
+      onPollVote: (messageId, answerIds) => votePoll(ws, messageId, answerIds, signal),
+      onPollEnd: (messageId) => endPoll(ws, messageId, signal),
       onRetry: (correlationId: string) => retrySend(correlationId),
       onDeleteDraft: (correlationId: string) => deleteDraft(correlationId),
       renderUploadStrip: (correlationId, stripSignal) => {
@@ -1576,6 +1581,20 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         }
       },
       onDraftChange: scheduleDraftSave,
+      onCreatePoll: () => {
+        import("../../components/PollComposer").then(
+          ({ openPollComposer }) => {
+            if (signal.aborted) return;
+            openPollComposer({
+              ws,
+              channelId,
+              signal,
+              fallbackFocus: () => slots.inputSlot.querySelector<HTMLElement>("textarea"),
+            });
+          },
+          () => showToast(messagingText("poll.loadFailed"), "error"),
+        );
+      },
     });
     messageInput.mount(slots.inputSlot);
 

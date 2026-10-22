@@ -32,6 +32,9 @@ type ModerationService struct {
 	// next connect (ready's notices) or a timeout on their next attempted
 	// send (the predicates).
 	notifier ModActionNotifier
+	// permNotifier receives a committed role assignment's live fan-out (WP
+	// 5.1a); a separate port from the mod_action notifier. Nil is a no-op.
+	permNotifier PermissionChangeNotifier
 	// voiceMuter applies or lifts the voice half of a timeout on a
 	// currently-connected target, through the exact SFU mechanism
 	// voice_mod_mute uses (decision 6: timeout's voice half defers to
@@ -761,6 +764,7 @@ func (s *ModerationService) ChangeUserRole(ctx context.Context, actorID, targetI
 		fmt.Sprintf("changed %s role to %s", target.Username, newRole.Name))
 
 	slog.Info("role changed", "actor_id", actorID, "target_id", targetID, "new_role_id", newRoleID)
+	s.roleAssigned(targetID)
 	return newRole, nil
 }
 

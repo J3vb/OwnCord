@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   applyReadyActiveChannel,
+  applyReadyChannels,
+  handleChannelCategories,
   handleChannelDelete,
   handleMemberBan,
   handleMemberUpdate,
@@ -74,12 +76,58 @@ afterEach(() => {
   hasFocus.mockRestore();
 });
 
+describe("channel categories (WP 6.5a)", () => {
+  beforeEach(() => resetChannelsStore());
+
+  it("ready carries the managers' list into the store, and its absence empties it", () => {
+    const withList = {
+      channels: [],
+      members: [],
+      roles: [],
+      categories: [
+        { id: 2, name: "B", position: 1 },
+        { id: 1, name: "A", position: 0 },
+      ],
+    } as unknown as Payload<"ready">;
+    applyReadyChannels(withList);
+    expect(channelsStore.getState().categories.map((c) => c.id)).toEqual([1, 2]);
+
+    // A non-manager's (or an older server's) ready has no key at all.
+    applyReadyChannels({ channels: [], members: [], roles: [] } as unknown as Payload<"ready">);
+    expect(channelsStore.getState().categories).toEqual([]);
+  });
+
+  it("channel_categories replaces the list wholesale", () => {
+    handleChannelCategories({ categories: [{ id: 1, name: "A", position: 0 }] });
+    handleChannelCategories({ categories: [{ id: 5, name: "E", position: 0 }] });
+    expect(channelsStore.getState().categories).toEqual([{ id: 5, name: "E", position: 0 }]);
+  });
+});
+
 describe("applyReadyActiveChannel", () => {
   it("auto-selects the first text channel when none is active, and marks nothing read", () => {
     const seen = applyReadyActiveChannel(ready([channel(1, "voice", 0), channel(2, "text", 1)]));
 
     expect(channelsStore.getState().activeChannelId).toBe(2);
     expect(seen).toBeNull();
+  });
+
+  it("auto-selects the first text channel in sidebar order, not payload order (6.5)", () => {
+    const inCategory = (id: number, catId: number, catPos: number, pos: number): ReadyChannel => ({
+      ...channel(id, "text", pos),
+      category_id: catId,
+      category_position: catPos,
+    });
+    // Payload order is by position; the sidebar puts uncategorized rows first,
+    // then categories by category position.
+    applyReadyActiveChannel(
+      ready([inCategory(1, 7, 1, 0), inCategory(2, 8, 0, 1), channel(3, "text", 2)]),
+    );
+    expect(channelsStore.getState().activeChannelId).toBe(3);
+
+    resetChannelsStore();
+    applyReadyActiveChannel(ready([inCategory(1, 7, 1, 0), inCategory(2, 8, 0, 1)]));
+    expect(channelsStore.getState().activeChannelId).toBe(2);
   });
 
   it("clears an active channel the snapshot no longer has, and marks nothing read", () => {

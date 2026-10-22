@@ -18,6 +18,10 @@ import (
 // channel. History stays readable, so read paths do not consult it.
 var ErrArchived = errors.New("channel is archived")
 
+// ErrThreadLocked is returned for a post or reaction in a locked thread by a
+// member without MANAGE_MESSAGES (6.9c).
+var ErrThreadLocked = errors.New("thread is locked")
+
 // ErrBlocked is returned when either DM party has blocked the other.
 var ErrBlocked = errors.New("user is blocked")
 
@@ -179,6 +183,9 @@ func CanSendMessage(s Subject) error {
 	if s.Channel.Archived {
 		return ErrArchived
 	}
+	if s.Channel.ThreadLocked && !s.Has(ManageMessages) {
+		return ErrThreadLocked
+	}
 	return nil
 }
 
@@ -207,6 +214,9 @@ func CanAddReaction(s Subject) error {
 	}
 	if !s.Has(ReadMessages | AddReactions) {
 		return missing(AddReactions)
+	}
+	if s.Channel.ThreadLocked && !s.Has(ManageMessages) {
+		return ErrThreadLocked
 	}
 	return nil
 }

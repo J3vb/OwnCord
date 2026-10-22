@@ -49,7 +49,12 @@ describe("per-user volume menu during its load", () => {
   const menus = (): NodeListOf<Element> => document.querySelectorAll(".user-vol-menu");
 
   beforeEach(() => {
-    channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+    channelsStore.setState(() => ({
+      channels: new Map(),
+      activeChannelId: null,
+      roles: [],
+      categories: [],
+    }));
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: null, voiceUsers: new Map() }));
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" as const }));
     authStore.setState(() => ({

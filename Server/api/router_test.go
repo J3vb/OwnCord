@@ -51,7 +51,7 @@ func setupRouterWithServices(t *testing.T, configure func(*service.Services, *db
 		},
 	}
 
-	rt, rtErr := app.StartRuntime(cfg, database, nil)
+	rt, rtErr := app.StartRuntime(cfg, database, nil, testRuntimeInputs(cfg))
 	if rtErr != nil {
 		t.Fatalf("app.StartRuntime: %v", rtErr)
 	}
@@ -515,7 +515,7 @@ func TestAPIV1ServerInfoIsCached(t *testing.T) {
 		t.Fatalf("blank server_name: %v", err)
 	}
 	cfg := &config.Config{Server: config.ServerConfig{Name: "First Name", Port: 8443}}
-	rt, rtErr := app.StartRuntime(cfg, database, nil)
+	rt, rtErr := app.StartRuntime(cfg, database, nil, testRuntimeInputs(cfg))
 	if rtErr != nil {
 		t.Fatalf("app.StartRuntime: %v", rtErr)
 	}
@@ -782,4 +782,41 @@ func TestWSUpgradeRoute_RateLimitedPerIP(t *testing.T) {
 		}
 	}
 	t.Fatal("500 upgrade requests from one IP were never refused with 429")
+}
+
+// TestWarnOnBrowserClient covers 6.13a's two start-up warnings: the portal on
+// in a build without the bundle, and the portal on behind a self-signed
+// certificate. Off, neither fires whatever the build.
+func TestWarnOnBrowserClient(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		enabled, bundled bool
+		tlsMode          string
+		wantMissing      bool
+		wantSelfSigned   bool
+	}{
+		{"off, placeholder build", false, false, "self_signed", false, false},
+		{"on, placeholder build", true, false, "acme", true, false},
+		{"on, bundled, trusted certificate", true, true, "acme", false, false},
+		{"on, bundled, self-signed", true, true, "self_signed", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+			t.Cleanup(func() { slog.SetDefault(prev) })
+
+			api.WarnOnBrowserClientForTest(&config.Config{
+				Server: config.ServerConfig{BrowserClientEnabled: tc.enabled},
+				TLS:    config.TLSConfig{Mode: tc.tlsMode},
+			}, tc.bundled)
+
+			if got := strings.Contains(buf.String(), "does not include the browser client"); got != tc.wantMissing {
+				t.Errorf("missing-bundle warning = %v, want %v; log:\n%s", got, tc.wantMissing, buf.String())
+			}
+			if got := strings.Contains(buf.String(), "tls.mode self_signed"); got != tc.wantSelfSigned {
+				t.Errorf("self-signed warning = %v, want %v; log:\n%s", got, tc.wantSelfSigned, buf.String())
+			}
+		})
+	}
 }

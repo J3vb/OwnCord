@@ -23,7 +23,7 @@ func buildBannerRouter(database *db.DB, store *storage.Storage, spy *userUpdateS
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
-	api.MountProfileRoutes(r, database, svc, store, limiter, nil, spy, nil)
+	api.MountProfileRoutes(r, svc, store, limiter, nil, spy, nil)
 	api.MountUploadRoutes(r, service.NewSessionService(database), store, limiter, nil, svc.Uploads)
 	return r
 }
@@ -232,7 +232,7 @@ func TestPatchBannerColor_ValidatesAndClears(t *testing.T) {
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
 	spy := &userUpdateSpy{}
-	api.MountProfileRoutes(r, database, service.New(database, limiter), nil, limiter, nil, spy, nil)
+	api.MountProfileRoutes(r, service.New(database, limiter), nil, limiter, nil, spy, nil)
 	token := profileCreateToken(t, database, "color_user", 4)
 	patch := func(color string) *httptest.ResponseRecorder {
 		return patchJSON(t, r, "/api/v1/users/me", token, map[string]any{"username": "color_user", "banner_color": color})
@@ -286,7 +286,7 @@ func TestPatchProfile_IgnoresBannerURL(t *testing.T) {
 	database := newAuthTestDB(t)
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
-	api.MountProfileRoutes(r, database, service.New(database, limiter), nil, limiter, nil, &userUpdateSpy{}, nil)
+	api.MountProfileRoutes(r, service.New(database, limiter), nil, limiter, nil, &userUpdateSpy{}, nil)
 	token := profileCreateToken(t, database, "no_banner_url", 4)
 
 	rr := patchJSON(t, r, "/api/v1/users/me", token, map[string]any{

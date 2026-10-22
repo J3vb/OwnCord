@@ -14,6 +14,7 @@ require (
 	github.com/livekit/protocol v1.50.4
 	github.com/livekit/server-sdk-go/v2 v2.18.1
 	github.com/microcosm-cc/bluemonday v1.0.27
+	github.com/petermattis/goid v0.0.0-20250813065127-a731cc31b4fe
 	github.com/pion/webrtc/v4 v4.2.22
 	github.com/prometheus/client_golang v1.24.1
 	github.com/sasha-s/go-deadlock v0.3.9
@@ -88,7 +89,6 @@ require (
 	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/petar-dambovaliev/aho-corasick v0.0.0-20250424160509-463d218d4745 // indirect
-	github.com/petermattis/goid v0.0.0-20250813065127-a731cc31b4fe // indirect
 	github.com/pion/datachannel v1.6.3 // indirect
 	github.com/pion/dtls/v3 v3.1.9 // indirect
 	github.com/pion/ice/v4 v4.4.4 // indirect

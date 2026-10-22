@@ -31,12 +31,9 @@ func chdirTemp(t *testing.T) string {
 	if err := os.Chdir(tmpDir); err != nil {
 		t.Fatalf("os.Chdir(%q): %v", tmpDir, err)
 	}
-	// Update the package-level backup dir to match the new CWD (L14).
-	admin.SetBackupBaseDir(filepath.Join(tmpDir, "data", "backups"))
-	t.Cleanup(func() {
-		_ = os.Chdir(origDir)
-		admin.SetBackupBaseDir(filepath.Join(origDir, "data", "backups"))
-	})
+	// Build the API after this returns: an empty SetupOptions.BackupDir
+	// resolves data/backups against the new CWD when the API is built (L14).
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
 	return tmpDir
 }
 
@@ -437,7 +434,6 @@ func TestHandleRestoreBackup_AbortsWithoutSafetyBackup(t *testing.T) {
 	// already exists. The name is pre_restore_<UTC seconds>.db, so occupy the
 	// next two minutes' worth of candidates — a 4-second window flaked on slow
 	// Windows CI runners where the request itself outlived it.
-	admin.SetBackupBaseDir(backupDir)
 	for i := range 120 {
 		name := "pre_restore_" + time.Now().UTC().Add(time.Duration(i)*time.Second).Format("20060102_150405") + ".db"
 		if err := os.WriteFile(filepath.Join(backupDir, name), []byte("occupied"), 0o644); err != nil {
@@ -464,13 +460,12 @@ func TestHandleRestoreBackup_AbortsWithoutSafetyBackup(t *testing.T) {
 
 // TestHandleRestoreBackup_UsesConfiguredDatabasePath verifies that the
 // restore handler stages beside the SQLite file the server was actually
-// configured to use (SetDatabasePath), not a hardcoded "data/chatserver.db".
+// configured to use (SetupOptions.DatabasePath), not a hardcoded "data/chatserver.db".
 // A server with database.path set to anything else must not have its real
 // database silently left untouched by a "successful" restore (OC-0097).
 func TestHandleRestoreBackup_UsesConfiguredDatabasePath(t *testing.T) {
 	tmpDir := chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 
 	backupDir := filepath.Join(tmpDir, "data", "backups")
@@ -487,8 +482,8 @@ func TestHandleRestoreBackup_UsesConfiguredDatabasePath(t *testing.T) {
 	if err := os.WriteFile(customDBPath, []byte("original live contents"), 0o644); err != nil {
 		t.Fatalf("WriteFile custom db: %v", err)
 	}
-	admin.SetDatabasePath(customDBPath)
-	t.Cleanup(func() { admin.SetDatabasePath(filepath.Join("data", "chatserver.db")) })
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database),
+		admin.SetupOptions{DatabasePath: customDBPath})
 
 	backupName := "chatserver_20240101_120000.db"
 	backupPath := filepath.Join(backupDir, backupName)
@@ -666,7 +661,6 @@ func restorePruneFixture(t *testing.T) (handler http.Handler, token, backupDir s
 	if err := os.WriteFile(filepath.Join(backupDir, "chatserver_20200101_000000.db"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	admin.SetBackupBaseDir(backupDir)
 	return handler, token, backupDir, olds
 }
 

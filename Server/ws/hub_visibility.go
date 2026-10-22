@@ -264,8 +264,9 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 	// buildReady / REST ListVisibleChannels — resolved per user from their
 	// CURRENT role (c.user is a connect-time snapshot). With a
 	// PermissionService the subject comes from the per-user cache — safe
-	// because the admin handlers invalidate (InvalidateAll on override
-	// change, InvalidateUser on role change) before calling into the hub, so
+	// because the role, channel and moderation services invalidate the
+	// affected users (InvalidateAll when that list is unreadable) before
+	// calling into the hub (WP 5.1a), so
 	// the lookups below repopulate from post-change data; the 30s TTL is only
 	// a backstop and the F6 gen-counter guard keeps a racing populate from
 	// caching stale rows. Without a service (bare test hubs) each client is
@@ -309,6 +310,12 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 		}
 
 		if visible {
+			// A socket without the forums feature is sent no forum row
+			// (client_features.go). Nothing is allocated for the skipped send:
+			// this frame is per recipient and unsequenced.
+			if !live.sendsChannel(ch.Type) {
+				continue
+			}
 			// Idempotent add on the client; also refreshes channel metadata.
 			// Addressed per client so it can carry this recipient's own
 			// affordance verdicts — the whole point of this fan-out is that

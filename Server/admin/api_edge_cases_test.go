@@ -630,7 +630,7 @@ func TestAdminAPI_PatchUser_BanWithoutReason(t *testing.T) {
 func TestAdminAPI_PatchUser_RoleChangeBroadcast(t *testing.T) {
 	database := openAdminTestDB(t)
 	hub := &mockHub{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServices(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServicesFor(database, hub, nil))
 	token := createAdminUser(t, database)
 
 	targetUID, _ := database.CreateUser(context.Background(), "rolebroadcast", "hash", 3)

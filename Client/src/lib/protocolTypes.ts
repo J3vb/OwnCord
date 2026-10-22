@@ -22,11 +22,15 @@ export const ServerMessageType = {
   CHAT_MESSAGE: "chat_message",
   CHAT_SEND_OK: "chat_send_ok",
   CHAT_FORWARD_OK: "chat_forward_ok",
+  POLL_CREATE_OK: "poll_create_ok",
+  POLL_VOTE_OK: "poll_vote_ok",
+  POLL_END_OK: "poll_end_ok",
   CHAT_EDITED: "chat_edited",
   CHAT_DELETED: "chat_deleted",
   CHAT_PINNED: "chat_pinned", // a message was pinned or unpinned in a channel the recipient can read
   CHAT_BULK_DELETED: "chat_bulk_deleted",
   REACTION_UPDATE: "reaction_update",
+  POLL_UPDATE: "poll_update", // a poll's full counts and version after a vote or its end (WP 6.9b)
   TYPING: "typing",
   PRESENCE: "presence",
   PRESENCE_BATCH: "presence_batch", // many users' presence in one frame: the connect/disconnect coalescing window, or a full snapshot for a client whose queue dropped presence
@@ -80,6 +84,9 @@ export const ClientMessageType = {
   AUTH: "auth",
   CHAT_SEND: "chat_send",
   CHAT_FORWARD: "chat_forward", // forward one message to one target channel or DM (WP 6.9a)
+  POLL_CREATE: "poll_create", // post a poll as a message (WP 6.9b)
+  POLL_VOTE: "poll_vote", // set the sender's whole selection on a poll, [] removes the vote (WP 6.9b)
+  POLL_END: "poll_end", // end a poll now: its author, or anyone who may delete the message (WP 6.9b)
   CHAT_EDIT: "chat_edit",
   CHAT_DELETE: "chat_delete",
   REACTION_ADD: "reaction_add",

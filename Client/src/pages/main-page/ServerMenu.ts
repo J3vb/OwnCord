@@ -29,6 +29,8 @@ export interface ServerMenuActions {
   readonly onNotificationSettings: () => void;
   /** Create a channel outside any category. */
   readonly onCreateChannel: () => void;
+  /** Create a category (MANAGE_CHANNELS). */
+  readonly onCreateCategory: () => void;
   /** Open the admin panel (the header's Audit Log entry, without a section). */
   readonly onServerSettings: () => void;
 }
@@ -77,6 +79,11 @@ export function buildServerMenuItems(actions: ServerMenuActions): MenuRow[] {
       label: shellText("serverMenu.createChannel"),
       testId: "server-menu-create-channel",
       onClick: actions.onCreateChannel,
+    });
+    manage.push({
+      label: shellText("serverMenu.createCategory"),
+      testId: "server-menu-create-category",
+      onClick: actions.onCreateCategory,
     });
   }
   if (canViewAuditLog()) {

@@ -11,7 +11,6 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
-	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // buildAuthOK constructs the auth_ok server→client message.
@@ -163,7 +162,7 @@ func presentDMStatuses(dmChannels []db.DMChannelInfo, viewerID int64, liveStatus
 func channelRefs(channels []db.Channel) []permissions.ChannelRef {
 	refs := make([]permissions.ChannelRef, len(channels))
 	for i := range channels {
-		refs[i] = permissions.ChannelRef{ID: channels[i].ID, Type: channels[i].Type, Archived: channels[i].Archived}
+		refs[i] = channelRef(&channels[i])
 	}
 	return refs
 }
@@ -174,7 +173,7 @@ func channelRefs(channels []db.Channel) []permissions.ChannelRef {
 // once per payload via subjectFor, administrators exempt), then asks
 // affordancesFor. Zero grants fail closed to all false.
 func readyAffordances(grants permissions.MemberGrants, ch *db.Channel, timedOut bool) channelAffordances {
-	sub := grants.Subject(ch.ID)
+	sub := grants.Subject(ch.AuthorityID())
 	sub.Channel = channelRef(ch)
 	sub.TimedOut = timedOut
 	return affordancesFor(sub)
@@ -194,7 +193,8 @@ func channelCanModerateVoice(grants permissions.MemberGrants, chanType string) b
 
 // channelRef maps one db channel to the predicates' db-agnostic ChannelRef.
 func channelRef(ch *db.Channel) permissions.ChannelRef {
-	return permissions.ChannelRef{ID: ch.ID, Type: ch.Type, Archived: ch.Archived, NSFW: ch.NSFW}
+	return permissions.ChannelRef{ID: ch.ID, Type: ch.Type, Archived: ch.Archived, NSFW: ch.NSFW,
+		AuthorityID: ch.Thread.ParentID, ThreadLocked: ch.Thread.Locked}
 }
 
 // readyVisibleChannels resolves the channels the user may see for the ready
@@ -321,7 +321,7 @@ func readyNSFWAcknowledgements(ctx context.Context, database VisibilityReader, u
 // Per docs/protocol.md, channels include unread_count and last_message_id per
 // user plus the channelPayloadFrom fields (slow_mode, nsfw, voice_* caps);
 // archived is the one stored field deliberately not shipped.
-func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userID int64, role *db.Role) (*readyFields, error) {
+func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userID int64, role *db.Role, feat clientFeatures) (*readyFields, error) {
 	channels, err := database.ListChannels(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("buildReady ListChannels: %w", err)
@@ -375,7 +375,7 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 	// The lock is cosmetic: a failed read must not fail ready (nothing is
 	// private then, as on the single-channel frames).
 	privacy := h.privacySnapshot(ctx)
-	channelPayloads := readyChannelPayloads(visibleChannels, grants, unreadMap, ackMap, sub.TimedOut, privacy)
+	channelPayloads := readyChannelPayloads(feat.filterChannels(visibleChannels), grants, unreadMap, ackMap, sub.TimedOut, privacy)
 
 	// Load open DM channels for this user. Hoisted above the voice-state
 	// filter below so DM channel IDs can seed visibleSet — permissions.Checker
@@ -400,18 +400,10 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 	}
 	return &readyFields{
 		head: readyHead{
-			Capabilities: map[string]any{
-				"message_deduplication":        true,
-				"message_retry_window_seconds": int64(service.MessageRetryWindow.Seconds()),
-				"message_retry_floor_ms":       retryFloorMS,
-				"read_pointer":                 true,
-				"user_notes":                   true,
-				"profile_banners":              true,
-				"dm_privacy":                   true,
-			},
-			Categories: categories,
-			Channels:   channelPayloads,
-			DMChannels: dmChannels,
+			Capabilities: readyCapabilities(retryFloorMS),
+			Categories:   categories,
+			Channels:     channelPayloads,
+			DMChannels:   dmChannels,
 
 			MemberTimeouts: timeouts.entries,
 		},

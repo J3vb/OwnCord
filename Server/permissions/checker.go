@@ -38,6 +38,20 @@ type ChannelRef struct {
 	// NSFW is consulted only by CanReadContent (B5-7); every other predicate
 	// ignores it. Always false for a DM — DMs cannot be labelled.
 	NSFW bool
+	// AuthorityID is the parent of a thread (6.9c), whose overrides are the
+	// thread's; 0 means the channel is its own authority. A thread's Archived
+	// and NSFW are already its parent's (the channel queries merge them).
+	AuthorityID int64
+	// ThreadLocked is a locked thread: only MANAGE_MESSAGES may post or react.
+	ThreadLocked bool
+}
+
+// OverrideKey is the channel id whose overrides govern this channel.
+func (c ChannelRef) OverrideKey() int64 {
+	if c.AuthorityID != 0 {
+		return c.AuthorityID
+	}
+	return c.ID
 }
 
 // DB is the minimal database interface the Checker needs.
@@ -158,8 +172,10 @@ func (ck *Checker) Subject(ctx context.Context, held []RoleGrant, userID, channe
 
 // HasChannelPermBatch reports whether the member has the given permission on
 // the channel using pre-fetched grants (build them with db.GetMemberGrants).
-// This avoids N+1 queries when filtering many channels in bulk. A channel with
-// no entry in grants is correct -- it means no override exists at either layer.
+// The grants are keyed by override authority, so a thread's id must be resolved
+// to its parent's first (service.PermissionService does). This avoids N+1
+// queries when filtering many channels in bulk. A channel with no entry in
+// grants is correct -- it means no override exists at either layer.
 func (ck *Checker) HasChannelPermBatch(grants MemberGrants, channelID, perm int64) bool {
 	return grants.Subject(channelID).Has(perm)
 }
@@ -181,7 +197,7 @@ func (ck *Checker) VisibleChannelIDs(grants MemberGrants, channels []ChannelRef)
 		// CanViewChannel hides archived channels from every client surface
 		// (admins included) — they stay manageable from the admin panel,
 		// which lists channels without this predicate.
-		sub := grants.Subject(ch.ID)
+		sub := grants.Subject(ch.OverrideKey())
 		sub.Channel = ch
 		if CanViewChannel(sub) == nil {
 			visible[ch.ID] = true

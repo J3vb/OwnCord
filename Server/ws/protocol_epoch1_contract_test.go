@@ -719,6 +719,7 @@ func TestEpoch1Fixtures(t *testing.T) {
 		{"call-ring-decline", journeyCallRingDecline},
 		{"voice-mod-denied", journeyVoiceModDenied},
 		{"chat-forward-pin", journeyChatForwardPin},
+		{"chat-poll", journeyChatPoll},
 		{"chat-bulk-delete", journeyChatBulkDelete},
 		{"mention-count-nsfw-ack", journeyMentionCountNSFWAck},
 		{"chat-command-unknown", journeyChatCommandUnknown},
@@ -1708,9 +1709,9 @@ type restRig struct {
 func (r *epochRig) mountREST(t *testing.T) *restRig {
 	t.Helper()
 	router := chi.NewRouter()
-	api.MountDMRoutes(router, r.db, r.svc, r.hub, nil, nil)
+	api.MountDMRoutes(router, r.svc, r.hub, nil, nil)
 	api.MountNSFWRoutes(router, r.svc, r.hub)
-	api.MountProfileRoutes(router, r.db, r.svc, nil, auth.NewRateLimiter(), nil, r.hub, nil)
+	api.MountProfileRoutes(router, r.svc, nil, auth.NewRateLimiter(), nil, r.hub, nil)
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
 	return &restRig{url: srv.URL}
@@ -1805,6 +1806,58 @@ func journeyChatForwardPin(t *testing.T, r *epochRig) {
 		a.expect("chat_pinned")
 		b.expect("chat_pinned")
 	}
+	a.barrier()
+	b.barrier()
+}
+
+// journeyChatPoll records a poll's life: a creates it, b votes, removes the
+// vote and votes again, and a ends it. Every vote and the end reach both
+// focused sockets as a sequenced poll_update with the full counts and the
+// version, and the voter alone gets poll_vote_ok.
+func journeyChatPoll(t *testing.T, r *epochRig) {
+	_, _, aliceTok, bobTok := r.seedBaseline(t)
+	a, b := r.dial(t, "a"), r.dial(t, "b")
+	a.authenticate(aliceTok)
+	b.authenticate(bobTok)
+	a.drain("member_join", "presence_batch")
+	a.focus(textChannelID, false)
+	b.focus(textChannelID, true)
+
+	a.record, b.record = true, true
+	a.send(map[string]any{
+		"type": "poll_create",
+		"id":   "req-poll-create-1",
+		"payload": map[string]any{
+			"client_message_id": fmt.Sprintf("%d:%s", time.Now().UnixMilli(), fixtureClientMessageUUID),
+			"channel_id":        textChannelID,
+			"question":          "Lunch?",
+			"answers":           []map[string]any{{"text": "Pizza", "emoji": "🍕"}, {"text": "Sushi"}},
+			"duration_hours":    24,
+			"allow_multiselect": false,
+		},
+	})
+	created := a.expect("poll_create_ok")
+	a.expect("chat_message")
+	b.expect("chat_message")
+	pollID, err := created["payload"].(map[string]any)["message_id"].(json.Number).Int64()
+	if err != nil {
+		t.Fatalf("poll_create_ok message_id: %v", err)
+	}
+
+	for i, ids := range [][]int{{1}, {}, {2}} {
+		b.send(map[string]any{
+			"type":    "poll_vote",
+			"id":      fmt.Sprintf("req-poll-vote-%d", i+1),
+			"payload": map[string]any{"message_id": pollID, "answer_ids": ids},
+		})
+		b.expect("poll_vote_ok")
+		a.expect("poll_update")
+		b.expect("poll_update")
+	}
+	a.send(map[string]any{"type": "poll_end", "id": "req-poll-end-1", "payload": map[string]any{"message_id": pollID}})
+	a.expect("poll_end_ok")
+	a.expect("poll_update")
+	b.expect("poll_update")
 	a.barrier()
 	b.barrier()
 }

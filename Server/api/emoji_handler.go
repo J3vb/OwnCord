@@ -73,7 +73,7 @@ var allowedEmojiMIME = map[string]bool{
 // are gated on MANAGE_SERVER inside EmojiService. The image route is
 // authenticated rather than public so an emoji cannot be used as an
 // unauthenticated tracking pixel hosted on someone else's server.
-func MountEmojiRoutes(r chi.Router, database *db.DB, svc *service.Services, store FileStore, limiter *auth.RateLimiter, broadcaster EmojiBroadcaster) {
+func MountEmojiRoutes(r chi.Router, svc *service.Services, store FileStore, limiter *auth.RateLimiter, broadcaster EmojiBroadcaster) {
 	r.Route("/api/v1/emoji", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
 		r.Get("/", handleListEmoji(svc))

@@ -620,9 +620,9 @@ func TestDM_ReactionAdd_NonParticipantError(t *testing.T) {
 	// Error replies are sent synchronously by handleMessage — already buffered.
 	msgs := dmDrainAll(sendCharlie)
 	code := dmFindErrorCode(msgs)
-	// Non-participant reaction returns BAD_REQUEST (normalized to prevent IDOR info leak).
-	if code != "BAD_REQUEST" {
-		t.Errorf("non-participant reaction: error code = %q, want BAD_REQUEST", code)
+	// A non-participant gets the same NOT_FOUND as for a missing message.
+	if code != "NOT_FOUND" {
+		t.Errorf("non-participant reaction: error code = %q, want NOT_FOUND", code)
 	}
 }
 

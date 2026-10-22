@@ -502,14 +502,21 @@ A ready-made unit file ships in the repository:
 
 **To install it:**
 
-1. Create a service user and the install folder:
+1. Create a service user. Its home is the state folder, which systemd creates
+   and owns (`StateDirectory=owncord`, `/var/lib/owncord`):
 
    ```bash
-   sudo useradd --system --home /opt/owncord --shell /usr/sbin/nologin owncord
-   sudo mkdir -p /opt/owncord && sudo chown owncord:owncord /opt/owncord
+   sudo useradd --system --home /var/lib/owncord --shell /usr/sbin/nologin owncord
    ```
 
-2. Put the `chatserver` binary in `/opt/owncord/`.
+2. Install the `chatserver` binary, owned by root, so the service can run it
+   but not change it:
+
+   ```bash
+   sudo install -d -o root -g root -m 0755 /opt/owncord
+   sudo install -o root -g root -m 0755 ./chatserver /opt/owncord/chatserver
+   ```
+
 3. Copy the unit file and start the service:
 
    ```bash
@@ -518,6 +525,17 @@ A ready-made unit file ships in the repository:
    ```
 
 4. Read the log with `journalctl -u owncord -f`.
+
+The program lives in `/opt/owncord`. Everything the server writes lives in
+`/var/lib/owncord`: `config.yaml`, `data/` (the database, uploads,
+certificates, backups) and the bundled LiveKit. The unit sets
+`WorkingDirectory=/var/lib/owncord`, so the relative `data_dir` default
+(`data`) lands there with no configuration.
+
+**Upgrading from the old layout?** Earlier unit files kept both the program
+and its state in `/opt/owncord`. Your installed copy keeps working until you
+re-copy the unit. Before you do, follow
+[Migrating from the /opt/owncord data layout](#migrating-from-the-optowncord-data-layout).
 
 **What the unit file sets, and why:**
 
@@ -545,10 +563,12 @@ A ready-made unit file ships in the repository:
   shutdown is stuck, and then it kills the process. For other supervisors, the
   server has its own 90-second restart backstop.
 
-- **`ReadWritePaths=/opt/owncord` with `ProtectSystem=strict`.**
-  `ProtectSystem=strict` makes the rest of the filesystem read-only for the
-  service. The install folder must stay writable, because self-update puts the
-  new binary there.
+- **`StateDirectory=owncord` with `ProtectSystem=strict`.**
+  `ProtectSystem=strict` makes the filesystem read-only for the service,
+  except the state folder `/var/lib/owncord`, which systemd creates (mode
+  `0750`) and keeps writable. The program folder `/opt/owncord` stays
+  read-only to the service. Do not add `NoExecPaths=` for the state folder:
+  the bundled LiveKit runs from `data/livekit/`.
 
   **Add every other folder the server writes to.** The usual ones are an
   off-disk `backup.dir` or `upload.storage_dir`. Without that, writes fail with
@@ -558,14 +578,132 @@ A ready-made unit file ships in the repository:
   ReadWritePaths=/mnt/backup-disk/owncord
   ```
 
-- **`AmbientCapabilities=CAP_NET_BIND_SERVICE`.** Only needed for
-  `tls.mode: acme`, which listens on port 80 as a non-root user.
+- **`AssertPathExists=!/opt/owncord/data`.** The unit refuses to start while
+  the old layout's data folder still exists. Without it, a re-copied unit would
+  start the server in an empty `/var/lib/owncord` and it would look like your
+  data was gone. A new install never has that folder, so this costs nothing.
+
+- **`#AmbientCapabilities=CAP_NET_BIND_SERVICE` (commented out).** Only needed
+  for `tls.mode: acme`, which listens on port 80 as a non-root user. If you use
+  `acme`, uncomment the line. Without it the server logs
+  `ACME HTTP server error`, with the bind error, and certificate challenges
+  and renewal fail until you fix it and restart.
 
 - **`LimitNOFILE=65536`.** The open-file limit. Each WebSocket connection uses
   one file descriptor, so this caps how many people can be online. 65,536 is
   far more than 2,000 people need (about 4,256). Raise it only past about
   30,000 connections. An old systemd default of 1,024 would stop you at a few
   hundred people. See [Open-file limit](#open-file-limit-file-descriptors).
+
+### Migrating from the /opt/owncord data layout
+
+Do this before you copy the new unit file over an old one. Follow every step;
+the signs of a missed one are at the end.
+
+1. Stop the service:
+
+   ```bash
+   sudo systemctl stop owncord
+   ```
+
+2. Create the state folder, or skip this and let systemd create it on the first
+   start. Then move your state into it:
+
+   ```bash
+   sudo mkdir -p /var/lib/owncord
+   sudo mv /opt/owncord/data /opt/owncord/config.yaml /var/lib/owncord/
+   ```
+
+3. Check the moved config for absolute `/opt/owncord` paths:
+
+   ```bash
+   sudo grep -n '/opt/owncord' /var/lib/owncord/config.yaml
+   ```
+
+   Read the list before you change anything. Relative paths (the default
+   `data_dir: data`) need no change.
+   - Paths into the data you just moved (`data_dir`, `backup.dir`,
+     `upload.storage_dir` under `/opt/owncord/data`) now live under
+     `/var/lib/owncord/data`. Edit those keys by hand, or rewrite only that
+     tree:
+
+     ```bash
+     sudo sed -i 's#/opt/owncord/data#/var/lib/owncord/data#g' /var/lib/owncord/config.yaml
+     ```
+
+   - TLS certificate and key files kept elsewhere under `/opt/owncord`: move
+     them into `/var/lib/owncord` first, then edit their paths.
+   - `voice.livekit_binary` and anything else that stays beside the program
+     keeps its `/opt/owncord` path. The program folder is read-only to the
+     service, which is fine for files it only reads.
+   - A `data_dir`, `backup.dir` or `upload.storage_dir` outside both folders
+     (for example `/srv/owncord`) stays where it is, but add it to
+     `ReadWritePaths=` in the unit (step 5), or writes there fail.
+
+   If a move is interrupted, do not start the service: delete the partial copy
+   under `/var/lib/owncord` and redo the move.
+
+4. Hand the state to the service and the program to root, and point the
+   service user's home at the state folder:
+
+   ```bash
+   sudo chown -R owncord:owncord /var/lib/owncord
+   sudo chmod 0750 /var/lib/owncord
+   sudo chown -R root:root /opt/owncord
+   sudo usermod -d /var/lib/owncord owncord
+   ```
+
+5. Edit the new unit before you install it, if you need to:
+   - `tls.mode: acme`: uncomment `AmbientCapabilities=CAP_NET_BIND_SERVICE`.
+   - A data, backup or upload folder outside `/var/lib/owncord`: add it to
+     `ReadWritePaths=`.
+   - Admin-panel updates: follow
+     [Opt in to admin-panel updates](#opt-in-to-admin-panel-updates) after the
+     next step.
+
+6. Copy the new unit and start the service:
+
+   ```bash
+   sudo cp deploy/owncord.service /etc/systemd/system/owncord.service
+   sudo systemctl daemon-reload && sudo systemctl start owncord
+   ```
+
+**Signs of a missed step:**
+
+- The unit fails with `Assertion failed ... /opt/owncord/data` and the service
+  does not start: the data folder is still under `/opt/owncord`. Do step 2.
+- Backups or uploads fail with `EROFS` (read-only file system): a path in
+  `config.yaml` still points under `/opt/owncord`, or at a folder not listed in
+  `ReadWritePaths`. Do step 3.
+
+### Opt in to admin-panel updates
+
+By default the service cannot write to `/opt/owncord`, so the admin panel
+cannot replace the binary: the Updates page says the server cannot replace its
+own program file, and the apply request answers `503 INSTALL_READ_ONLY` before
+it downloads anything. You then install new releases by hand, as in
+[Performing the upgrade](#performing-the-upgrade).
+
+To let the admin panel update the server, give the service write access to the
+program folder with a drop-in:
+
+```bash
+sudo systemctl edit owncord
+```
+
+```ini
+[Service]
+ReadWritePaths=/opt/owncord
+```
+
+```bash
+sudo chown owncord /opt/owncord
+sudo systemctl restart owncord
+```
+
+The service can then rewrite its own program file. Remove the drop-in
+(`sudo systemctl revert owncord`) and `sudo chown root /opt/owncord` to go back
+to the default.
 
 Pair the service with scheduled backups from the admin panel. Or drive backups
 from cron instead: see
@@ -1450,7 +1588,7 @@ sudo systemctl stop owncord          # or: nssm stop OwnCord
 # 3. Copy the state to another disk, not into the folder you are upgrading.
 #    The destination must exist: cp with two sources will not create it.
 sudo mkdir -p /mnt/backup-disk/owncord-pre-upgrade
-sudo cp -a /opt/owncord/data /opt/owncord/config.yaml \
+sudo cp -a /var/lib/owncord/data /var/lib/owncord/config.yaml \
   /mnt/backup-disk/owncord-pre-upgrade/
 
 # 4. Keep the binary you are upgrading FROM. Without it, step 3 is only half a
@@ -1501,7 +1639,7 @@ migrates the database on its first start.
 
 ```bash
 sudo systemctl stop owncord
-sudo install -m 0755 ./chatserver /opt/owncord/chatserver
+sudo install -o root -g root -m 0755 ./chatserver /opt/owncord/chatserver
 sudo systemctl start owncord
 ```
 
@@ -1547,10 +1685,11 @@ that copy.
 
 ```bash
 sudo systemctl stop owncord
-sudo rm -rf /opt/owncord/data
-sudo cp -a /mnt/backup-disk/owncord-pre-upgrade/data /opt/owncord/data
-sudo cp /mnt/backup-disk/owncord-pre-upgrade/config.yaml /opt/owncord/config.yaml
-sudo install -m 0755 /mnt/backup-disk/owncord-pre-upgrade/chatserver-previous \
+sudo rm -rf /var/lib/owncord/data
+sudo cp -a /mnt/backup-disk/owncord-pre-upgrade/data /var/lib/owncord/data
+sudo cp /mnt/backup-disk/owncord-pre-upgrade/config.yaml /var/lib/owncord/config.yaml
+sudo chown -R owncord:owncord /var/lib/owncord
+sudo install -o root -g root -m 0755 /mnt/backup-disk/owncord-pre-upgrade/chatserver-previous \
   /opt/owncord/chatserver
 sudo systemctl start owncord
 ```
@@ -2197,8 +2336,10 @@ The audit log tells you which stage failed. Every update writes
 - **The install folder is read-only to the service.** The panel answers
   `503 INSTALL_READ_ONLY` before it downloads anything, and the Updates page
   says the server cannot replace its own program file. Install the release by
-  hand ([Upgrade and Rollback](#upgrade-and-rollback)), or give the service write access to the folder
-  that holds the binary.
+  hand ([Upgrade and Rollback](#upgrade-and-rollback)), or give the service
+  write access to the folder that holds the binary. Under the shipped systemd
+  unit this is the default; see
+  [Opt in to admin-panel updates](#opt-in-to-admin-panel-updates).
 
 To make failures rare:
 

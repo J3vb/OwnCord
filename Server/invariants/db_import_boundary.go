@@ -83,6 +83,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"admin/handlers_archive.go":          {Disposition: "boundary", Note: "full-archive download: VACUUM INTO snapshot, then zip the data dir and config", Calls: calls{"BackupToSafe": 1}},
 	"admin/archive_link.go":              {Disposition: "boundary", Note: "issues and redeems the single-use archive and backup download links; the handle re-resolves the link's credential, audits a backup download with WriteAudit, and is threaded through to serveArchive", Hands: calls{"auth.ResolveTokenHash": 1}},
 	"admin/handlers_channel_perms.go":    {Disposition: "adapter", Note: "override response shapes; the service owns the policy and the calls"},
+	"admin/handlers_category_perms.go":   {Disposition: "adapter", Note: "category template response shapes; the service owns the guards and the writes"},
 	"admin/handlers_channels.go":         {Disposition: "adapter", Note: "db.Channel in the resolver and response shapes; the service owns the calls"},
 	"admin/handlers_config_overrides.go": {Disposition: "boundary", Note: "audits config-override changes and the restart request with WriteAudit, and probes a candidate database.path with the read-only CheckBackupIntegrity/CheckBackupSchemaAhead helpers; no handle calls"},
 	"admin/handlers_users.go":            {Disposition: "adapter", Note: "UserWithRole/User/Role types in the panel response shapes; UserService owns the reads"},
@@ -108,7 +109,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"api/profile_handler.go":          {Disposition: "adapter", Note: "User/Session types in the profile and session response shapes; the services own the calls"},
 	"api/push_handler.go":             {Disposition: "adapter", Note: "db.User type on the context key only; PushService owns every call"},
 	"api/report_handler.go":           {Disposition: "adapter", Note: "db.User from the auth context only; ReportService owns every call"},
-	"api/router.go":                   {Disposition: "boundary", Note: "health probe (PingRead, SQLDb, SQLReaderDB); hub construction left in B3-3", Calls: calls{"PingRead": 1, "SQLDb": 1, "SQLReaderDB": 1}, Hands: calls{"admin.NewHandler": 1, "service.NewAuthService": 1}},
+	"api/router.go":                   {Disposition: "boundary", Note: "health probe (PingRead, SQLDb, SQLReaderDB); hub construction left in B3-3", Calls: calls{"PingRead": 1, "SQLDb": 1, "SQLReaderDB": 1}, Hands: calls{"admin.NewHandler": 1}},
 	// ── auth ──────────────────────────────────────────────────────────────
 	"auth/helpers.go": {Disposition: "adapter", Note: "db.User type in a helper signature"},
 	"auth/resolve.go": {Disposition: "adapter", Note: "Session/APIToken/Role/User types; resolution is injected"},
@@ -118,7 +119,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"internal/app/app.go":      {Disposition: "boundary", Note: "the App holds the handle for its lifetime; no calls"},
 	"internal/app/database.go": {Disposition: "boundary", Note: "opens the handle, migrates, clears stale state at boot, and writes the pre-migration safety copy and the staged-restore audit row", Calls: calls{"BackupToSafe": 1, "ClearAllVoiceStates": 1, "LogAudit": 1, "ResetAllUserStatuses": 1}},
 	"internal/app/erasure.go":  {Disposition: "boundary", Note: "opens the deletion-marker file and replays it against the handle before anything serves (B4-10)", Calls: calls{"CheckpointErasureWAL": 1, "Close": 2}, Hands: calls{"service.NewErasureService": 1, "service.NewRetentionService": 1}},
-	"internal/app/hub.go":      {Disposition: "boundary", Note: "hands the handle to the hub and the service layer it builds", Hands: calls{"auth.NewPersistentRateLimiter": 1, "service.New": 1, "service.PoolStatsSources": 1, "service.WriterWaitSource": 1, "ws.DBReaders": 1, "ws.HubOptions": 1}},
+	"internal/app/hub.go":      {Disposition: "boundary", Note: "hands the handle to the hub and the service layer it builds", Hands: calls{"auth.NewPersistentRateLimiter": 1, "service.New": 1, "service.NewAuthService": 1, "service.PoolStatsSources": 1, "service.WriterWaitSource": 1, "ws.DBReaders": 1, "ws.HubOptions": 1}},
 	// B6-14: no import of its own — the start/stop sequence opens the handle
 	// through openDatabase (the package's own constructor, not db.Open*),
 	// registers its Close and wires it into everything, all of which is handle
@@ -136,14 +137,15 @@ var DBImportAllow = map[string]DBImportEntry{
 	"cmd/gendocs/main.go":         {Disposition: "boundary", Note: "docs generator migrates its own in-memory catalog", Calls: calls{"Close": 2, "QueryContext": 2}, Hands: calls{"api.NewRouter": 1, "app.StartRuntime": 1}},
 	"plugin/pluginstore.go":       {Disposition: "adapter", Note: "PluginRow type only; the store is injected"},
 	// ── ws ────────────────────────────────────────────────────────────────
-	"ws/client.go":          {Disposition: "adapter", Note: "db.User type on the connection"},
-	"ws/deps.go":            {Disposition: "adapter", Note: "dispatch helpers read through the DispatchReader seam (readers.go); db types in signatures"},
-	"ws/event.go":           {Disposition: "adapter", Note: "pure BroadcastStatus helper"},
-	"ws/event_persister.go": {Disposition: "adapter", Note: "PersistedEvent type; store is an interface"},
-	"ws/eventstore.go":      {Disposition: "adapter", Note: "PersistedEvent type; store is an interface"},
-	"ws/handlers.go":        {Disposition: "adapter", Note: "command handlers read through the DispatchReader seam; db types in payload shapes"},
-	"ws/handlers_chat.go":   {Disposition: "adapter", Note: "pure NewDMChannelInfo helper"},
-	"ws/hub.go":             {Disposition: "boundary", Note: "Hub state holds the handle the families read through; no calls"},
+	"ws/client.go":              {Disposition: "adapter", Note: "db.User type on the connection"},
+	"ws/deps.go":                {Disposition: "adapter", Note: "dispatch helpers read through the DispatchReader seam (readers.go); db types in signatures"},
+	"ws/event.go":               {Disposition: "adapter", Note: "pure BroadcastStatus helper"},
+	"ws/event_persister.go":     {Disposition: "adapter", Note: "PersistedEvent type; store is an interface"},
+	"ws/eventstore.go":          {Disposition: "adapter", Note: "PersistedEvent type; store is an interface"},
+	"ws/handlers.go":            {Disposition: "adapter", Note: "command handlers read through the DispatchReader seam; db types in payload shapes"},
+	"ws/handlers_chat.go":       {Disposition: "adapter", Note: "pure NewDMChannelInfo helper"},
+	"ws/permission_notifier.go": {Disposition: "adapter", Note: "service.PermissionChangeNotifier adapter; db.Channel in a signature only"},
+	"ws/hub.go":                 {Disposition: "boundary", Note: "Hub state holds the handle the families read through; no calls"},
 	// B6-14: no import of its own — the replay purge reaches Hub.db directly,
 	// and deliberately. Since WP 2A-7 (ARCH-007) purgeReplay installs the
 	// tombstones and drops the ring's copies under seqMu, releases it, flushes

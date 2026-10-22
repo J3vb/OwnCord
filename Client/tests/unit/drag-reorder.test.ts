@@ -185,7 +185,12 @@ beforeEach(() => {
     motd: null,
     isAuthenticated: false,
   }));
-  channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  channelsStore.setState(() => ({
+    channels: new Map(),
+    activeChannelId: null,
+    roles: [],
+    categories: [],
+  }));
   document.body.className = "";
   document.body.innerHTML = "";
 });
@@ -438,6 +443,7 @@ describe("reorder index arithmetic", () => {
     signIn("owner");
     const rig = buildRig([makeCh(1, 0), makeCh(2, 1)]);
     channelsStore.setState(() => ({
+      categories: [],
       channels: new Map([
         [1, makeCh(1, 0)],
         [2, makeCh(2, 1)],
@@ -598,6 +604,7 @@ describe("drop indicator", () => {
 describe("mid-drag sidebar re-render", () => {
   function setStoreChannels(channels: Channel[]): void {
     channelsStore.setState(() => ({
+      categories: [],
       channels: new Map(channels.map((c) => [c.id, c])),
       activeChannelId: null,
       roles: [],

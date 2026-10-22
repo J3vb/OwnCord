@@ -101,6 +101,7 @@ describe("notifyIncomingMessage — popup body is plain text (U1a)", () => {
       isAuthenticated: true,
     }));
     channelsStore.setState(() => ({
+      categories: [],
       channels: new Map([
         [
           1,

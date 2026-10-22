@@ -18,8 +18,13 @@ type ChannelService struct {
 	st    Store
 	afk   AFKStore
 	cats  CategoryStore
+	cperm CategoryPermStore
+	forum ForumStore
 	perms *PermissionService
 	batch *ConnWrites
+	// notifier re-derives channel audiences after an override change (WP
+	// 5.1a). Set once before the server serves; nil is a no-op.
+	notifier PermissionChangeNotifier
 	// wakeExpiry nudges the custom status expirer after a status with an
 	// expiry commits; nil when none is installed.
 	wakeExpiry func()
@@ -33,10 +38,14 @@ func NewChannelService(st Store, perms *PermissionService) *ChannelService {
 	// that does not leaves SetAFKChannel answering ErrInternal.
 	afk, _ := st.(AFKStore)
 	cats, _ := st.(CategoryStore)
+	cperm, _ := st.(CategoryPermStore)
+	forum, _ := st.(ForumStore)
 	return &ChannelService{
 		st:    st,
 		afk:   afk,
 		cats:  cats,
+		cperm: cperm,
+		forum: forum,
 		perms: perms,
 		now:   time.Now,
 	}
@@ -101,7 +110,8 @@ func (s *ChannelService) ListVisibleChannels(ctx context.Context, userID int64) 
 func channelRefs(channels []db.Channel) []permissions.ChannelRef {
 	refs := make([]permissions.ChannelRef, len(channels))
 	for i := range channels {
-		refs[i] = permissions.ChannelRef{ID: channels[i].ID, Type: channels[i].Type, Archived: channels[i].Archived}
+		refs[i] = permissions.ChannelRef{ID: channels[i].ID, Type: channels[i].Type, Archived: channels[i].Archived,
+			NSFW: channels[i].NSFW, AuthorityID: channels[i].Thread.ParentID, ThreadLocked: channels[i].Thread.Locked}
 	}
 	return refs
 }
@@ -120,6 +130,12 @@ func (s *ChannelService) HandleTyping(ctx context.Context, userID, channelID int
 	ch, err := s.st.GetChannel(ctx, channelID)
 	if err != nil || ch == nil {
 		return nil, nil //nolint:nilerr // typing indicators are best-effort; errors silently dropped
+	}
+
+	// A forum holds no messages, so there is nothing to type into: silent
+	// like every other typing refusal (a send is refused in checkSendPermission).
+	if ch.Type == db.ForumTypeName {
+		return nil, nil
 	}
 
 	// A typing indicator announces a post, so it answers to the post policy
@@ -303,6 +319,11 @@ func (s *ChannelService) HandleChannelFocus(ctx context.Context, userID, channel
 	if err != nil {
 		return nil, err
 	}
+	// A forum holds no messages, so it has no read state to keep: focusing it
+	// only subscribes the socket (its posts' changes arrive on that topic).
+	if ch.Type == db.ForumTypeName {
+		return ch, nil
+	}
 	// Mark channel as read. latestID == 0 (no undeleted messages) still
 	// writes: the upsert is what zeroes mention_count, and a last_read of 0 is
 	// correct then — any future message id is larger, so unread counts hold.
@@ -351,6 +372,12 @@ func (s *ChannelService) HandleChannelFocus(ctx context.Context, userID, channel
 func admitReadState(ctx context.Context, st Store, perms *PermissionService, userID, channelID int64) (*db.Channel, error) {
 	ch, err := st.GetChannel(ctx, channelID)
 	if err != nil || ch == nil {
+		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
+	}
+	if ch.IsThread() {
+		// A thread is never a socket's focused channel (6.9c): a parent's
+		// visibility refresh revokes the parent topic only, so a thread
+		// topic held here would outlive the parent's revocation.
 		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
 	sub, subErr := channelSubject(ctx, st, perms, userID, ch, false)

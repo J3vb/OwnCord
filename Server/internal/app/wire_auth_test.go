@@ -1,6 +1,6 @@
-package api
+package app
 
-// wireAuth is unexported, so these live in package api (not api_test) to
+// wireAuth is unexported, so these live in package app (not app_test) to
 // call it directly. They pin OC-0404's two halves: the nil-Erasure guard
 // used to dominate RetentionService's file/hub wiring below it, and
 // UseErasure's nil case used to leave AuthService silently degraded on its
@@ -176,5 +176,34 @@ func TestWireAuth_NonNilErasureSwapsQuietly(t *testing.T) {
 	}
 	if out := logs.String(); strings.Contains(out, "level=ERROR") {
 		t.Fatalf("wireAuth logged an error with svc.Erasure present; log output = %q", out)
+	}
+}
+
+// TestWireAuth_WiresPermissionNotifiers pins the WP 5.1a composition-root
+// wiring: the role, channel and moderation services own permission
+// invalidation and fan-out, so each must receive the hub as its
+// PermissionChangeNotifier. A service left without one silently skips the live
+// fan-out (no sidebar, topic or role-list update) while still committing.
+func TestWireAuth_WiresPermissionNotifiers(t *testing.T) {
+	svc := &service.Services{
+		Roles:      service.NewRoleService(nil, nil),
+		Channels:   service.NewChannelService(nil, nil),
+		Moderation: service.NewModerationService(nil, nil),
+	}
+	hub := &ws.Hub{}
+
+	wireAuth(svc, newWireAuthTestAuthSvc(t), nil, hub)
+
+	for name, v := range map[string]reflect.Value{
+		"Roles":      reflect.ValueOf(svc.Roles).Elem().FieldByName("notifier"),
+		"Channels":   reflect.ValueOf(svc.Channels).Elem().FieldByName("notifier"),
+		"Moderation": reflect.ValueOf(svc.Moderation).Elem().FieldByName("permNotifier"),
+	} {
+		if !v.IsValid() {
+			t.Fatalf("%s service has no permission notifier field (renamed?)", name)
+		}
+		if v.IsNil() {
+			t.Errorf("%s.SetPermissionNotifier was not called by wireAuth", name)
+		}
 	}
 }

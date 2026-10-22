@@ -36,7 +36,7 @@ func setupDiagnosticsRouter(t *testing.T) (http.Handler, string, *db.DB) {
 		},
 	}
 
-	rt, rtErr := app.StartRuntime(cfg, database, nil)
+	rt, rtErr := app.StartRuntime(cfg, database, nil, testRuntimeInputs(cfg))
 	if rtErr != nil {
 		t.Fatalf("app.StartRuntime: %v", rtErr)
 	}
@@ -111,7 +111,7 @@ func TestDiagnosticsConnectivity_HonoursTrustedProxies(t *testing.T) {
 		},
 	}
 
-	rt, rtErr := app.StartRuntime(cfg, database, nil)
+	rt, rtErr := app.StartRuntime(cfg, database, nil, testRuntimeInputs(cfg))
 	if rtErr != nil {
 		t.Fatalf("app.StartRuntime: %v", rtErr)
 	}
@@ -264,7 +264,7 @@ func diagnosticsWithConfig(t *testing.T, cfg *config.Config) (http.Handler, stri
 	}
 	t.Cleanup(func() { _ = database.Close() })
 
-	rt, rtErr := app.StartRuntime(cfg, database, nil)
+	rt, rtErr := app.StartRuntime(cfg, database, nil, testRuntimeInputs(cfg))
 	if rtErr != nil {
 		t.Fatalf("app.StartRuntime: %v", rtErr)
 	}

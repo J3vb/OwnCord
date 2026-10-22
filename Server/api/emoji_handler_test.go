@@ -88,7 +88,7 @@ func newEmojiHarness(t *testing.T) *emojiHarness {
 	svc := service.New(database, auth.NewRateLimiter())
 	h.svc = svc
 	r := chi.NewRouter()
-	api.MountEmojiRoutes(r, database, svc, store, auth.NewRateLimiter(), h.broadcaster)
+	api.MountEmojiRoutes(r, svc, store, auth.NewRateLimiter(), h.broadcaster)
 	h.router = r
 
 	h.ownerToken = emojiSeedUser(t, database, "owner", int(permissions.OwnerRoleID))

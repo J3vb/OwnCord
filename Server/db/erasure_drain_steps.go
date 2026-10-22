@@ -25,6 +25,11 @@ var erasureDrainSteps = []drainStep{
 	limitStep("mention_receipts",
 		`DELETE FROM mention_receipts WHERE (user_id, channel_id, message_id) IN
 		   (SELECT user_id, channel_id, message_id FROM mention_receipts WHERE user_id = ?1 LIMIT ?2)`),
+	// poll_votes is WITHOUT ROWID, so the chunk is named by its primary key. The
+	// polls the chunk's votes belong to get their version bumped in the same
+	// transaction as the delete, so no reader sees the old counts at a newer
+	// version.
+	pollVotesStep(),
 	{label: "attachments uploaded", run: drainUploadedAttachments},
 	{label: "messages", run: drainMessages},
 	windowStep("reactions", "reactions", "id", `user_id = ?1`),
@@ -36,6 +41,34 @@ var erasureDrainSteps = []drainStep{
 func limitStep(label, query string) drainStep {
 	return drainStep{label: label, run: func(ctx context.Context, tx *sql.Tx, userID, _ int64) (drainResult, error) {
 		res, err := tx.ExecContext(ctx, query, userID, erasureChunk)
+		if err != nil {
+			return drainResult{}, fmt.Errorf("delete: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return drainResult{}, fmt.Errorf("rows affected: %w", err)
+		}
+		return drainResult{done: n < int64(erasureChunk)}, nil
+	}}
+}
+
+// pollVotesChunk names one chunk of the subject's votes by primary key, in key
+// order so the bump and the delete in one transaction see the same rows.
+const pollVotesChunk = `SELECT message_id, user_id, answer_id FROM poll_votes WHERE user_id = ?1
+		   ORDER BY message_id, user_id, answer_id LIMIT ?2`
+
+// pollVotesStep deletes a chunk of the subject's poll votes. Before it does,
+// it bumps polls.version for each poll the chunk touches (WP 6.9b), so a
+// client refetch sees counts fresher than any copy it holds.
+func pollVotesStep() drainStep {
+	bump := `UPDATE polls SET version = version + 1 WHERE message_id IN
+		   (SELECT message_id FROM poll_votes WHERE (message_id, user_id, answer_id) IN (` + pollVotesChunk + `))`
+	del := `DELETE FROM poll_votes WHERE (message_id, user_id, answer_id) IN (` + pollVotesChunk + `)`
+	return drainStep{label: "poll_votes", run: func(ctx context.Context, tx *sql.Tx, userID, _ int64) (drainResult, error) {
+		if _, err := tx.ExecContext(ctx, bump, userID, erasureChunk); err != nil {
+			return drainResult{}, fmt.Errorf("bump poll versions: %w", err)
+		}
+		res, err := tx.ExecContext(ctx, del, userID, erasureChunk)
 		if err != nil {
 			return drainResult{}, fmt.Errorf("delete: %w", err)
 		}

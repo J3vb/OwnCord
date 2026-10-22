@@ -22,6 +22,10 @@ const (
 	// ErrCodeReactionLimit refines BAD_REQUEST: a new emoji on a message that
 	// already holds 20 different ones. No reaction_update is sent.
 	ErrCodeReactionLimit = "REACTION_LIMIT"
+	// ErrCodePollEnded refines BAD_REQUEST: a poll_vote or poll_end on a poll
+	// that was already ended or whose time ran out. Nothing was written and no
+	// poll_update is sent for the refused command.
+	ErrCodePollEnded = "POLL_ENDED"
 	// ErrCodeAlreadyDeleted is the WS twin of REST's 409 ALREADY_DELETED: the
 	// same "already in the requested end state" refusal, so a client sees one
 	// code for the state rather than FORBIDDEN over WS and ALREADY_DELETED

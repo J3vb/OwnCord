@@ -202,7 +202,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		defaultVoiceQuality: defaultVoiceQuality,
 		settingsUpload:      opts.UploadPolicy,
 		uploadFileTypes:     opts.UploadFileTypes,
-		voiceMod:            newUserLocks(),
+		voiceMod:            newUserLocks[lockRankVoiceMod](),
 		presence:            opts.Presence,
 		authn:               opts.Auth,
 		privacy:             opts.ChannelPrivacy,

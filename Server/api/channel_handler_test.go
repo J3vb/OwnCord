@@ -110,12 +110,27 @@ CREATE TABLE IF NOT EXISTS channel_categories (
     created_at TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_categories_name ON channel_categories(name COLLATE NOCASE);
+CREATE TABLE IF NOT EXISTS category_overrides (
+    category_id INTEGER NOT NULL REFERENCES channel_categories(id) ON DELETE CASCADE,
+    role_id     INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    allow       INTEGER NOT NULL DEFAULT 0,
+    deny        INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(category_id, role_id)
+);
+CREATE TABLE IF NOT EXISTS category_user_overrides (
+    category_id INTEGER NOT NULL REFERENCES channel_categories(id) ON DELETE CASCADE,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    allow       INTEGER NOT NULL DEFAULT 0,
+    deny        INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(category_id, user_id)
+);
 
 CREATE TABLE IF NOT EXISTS channels (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     name             TEXT    NOT NULL,
     type             TEXT    NOT NULL DEFAULT 'text',
     category_id INTEGER REFERENCES channel_categories(id) ON DELETE SET NULL,
+    permissions_synced INTEGER NOT NULL DEFAULT 0,
     topic            TEXT,
     position         INTEGER NOT NULL DEFAULT 0,
     slow_mode        INTEGER NOT NULL DEFAULT 0,
@@ -127,6 +142,15 @@ CREATE TABLE IF NOT EXISTS channels (
     voice_max_video  INTEGER NOT NULL DEFAULT 0,
     nsfw             INTEGER NOT NULL DEFAULT 0,
     afk             INTEGER NOT NULL DEFAULT 0,
+    parent_channel_id INTEGER REFERENCES channels(id) ON DELETE CASCADE,
+    thread_starter_message_id INTEGER,
+    thread_owner_id INTEGER,
+    thread_archived INTEGER NOT NULL DEFAULT 0,
+    thread_locked INTEGER NOT NULL DEFAULT 0,
+    thread_auto_archive_minutes INTEGER NOT NULL DEFAULT 1440,
+    thread_last_activity_at TEXT,
+    forum_require_tag INTEGER NOT NULL DEFAULT 0,
+    forum_default_auto_archive_minutes INTEGER NOT NULL DEFAULT 4320,
     is_group         INTEGER NOT NULL DEFAULT 0,
     dm_owner_id      INTEGER,
     dm_icon      TEXT
@@ -173,6 +197,29 @@ CREATE TABLE IF NOT EXISTS message_forwards (
     source_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
     source_channel_id INTEGER NOT NULL,
     source_timestamp  TEXT    NOT NULL
+);
+
+-- History reads look up poll blocks on every page (migration 073).
+CREATE TABLE IF NOT EXISTS polls (
+    message_id        INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+    question          TEXT    NOT NULL,
+    allow_multiselect INTEGER NOT NULL DEFAULT 0,
+    expires_at        TEXT    NOT NULL,
+    ended_at          TEXT,
+    version           INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS poll_answers (
+    message_id INTEGER NOT NULL REFERENCES polls(message_id) ON DELETE CASCADE,
+    answer_id  INTEGER NOT NULL,
+    text       TEXT    NOT NULL,
+    emoji      TEXT,
+    PRIMARY KEY (message_id, answer_id)
+);
+CREATE TABLE IF NOT EXISTS poll_votes (
+    message_id INTEGER NOT NULL,
+    answer_id  INTEGER NOT NULL,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (message_id, user_id, answer_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, id DESC);
@@ -331,7 +378,7 @@ func buildChannelRouter(database *db.DB) http.Handler {
 	limiter := auth.NewRateLimiter()
 	st := database
 	svc := service.New(st, limiter)
-	api.MountChannelRoutes(r, database, svc, limiter, nil, nil)
+	api.MountChannelRoutes(r, svc, limiter, nil, nil)
 	return r
 }
 
@@ -829,7 +876,7 @@ func TestSearch_TrustedProxyRateLimitUsesForwardedIP(t *testing.T) {
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
-	api.MountChannelRoutes(r, database, svc, limiter, []string{"127.0.0.0/8"}, nil)
+	api.MountChannelRoutes(r, svc, limiter, []string{"127.0.0.0/8"}, nil)
 	token := chTestCreateToken(t, database, "proxysearch", 1)
 
 	for i := range 30 {
@@ -1260,7 +1307,7 @@ func buildPurgeRouter(t *testing.T) (http.Handler, *db.DB, *recordingPurgeBroadc
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
-	api.MountChannelRoutes(r, database, svc, limiter, nil, broadcaster)
+	api.MountChannelRoutes(r, svc, limiter, nil, broadcaster)
 	return r, database, broadcaster
 }
 

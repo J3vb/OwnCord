@@ -7,11 +7,11 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// Migration 073 resets user_roles to exactly the role users.role_id names.
-func TestMigrate_073ReconcilesUserRolesWithMirror(t *testing.T) {
+// Migration 077 resets user_roles to exactly the role users.role_id names.
+func TestMigrate_077ReconcilesUserRolesWithMirror(t *testing.T) {
 	database := openMemory(t)
-	if err := db.MigrateFS(database, migrationsUpTo(t, "073_")); err != nil {
-		t.Fatalf("pre-073 schema: %v", err)
+	if err := db.MigrateFS(database, migrationsUpTo(t, "077_")); err != nil {
+		t.Fatalf("pre-077 schema: %v", err)
 	}
 	execAll(t, database,
 		// 1 consistent, 2 demoted from Admin (mirror 4, still holds 2),

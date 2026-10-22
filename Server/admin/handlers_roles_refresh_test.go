@@ -88,7 +88,7 @@ func TestAdminAPI_RoleChange_InvalidatesBeforeEnqueue(t *testing.T) {
 			var log []string
 			hub := &mockHub{onEnqueue: func(ws.RoleRefresh) { log = append(log, "enqueue") }}
 			inv := &probeInvalidator{log: &log}
-			handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv, newTestServices(database))
+			handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv, newTestServicesFor(database, hub, inv))
 			if w := doRequest(t, handler, m.method, m.path, token, m.body); w.Code != m.status {
 				t.Fatalf("status = %d, want %d; body: %s", w.Code, m.status, w.Body.String())
 			}
@@ -128,7 +128,7 @@ func TestAdminAPI_RoleRoutes_FanOutSurvivesRequestCancel(t *testing.T) {
 			hub := &mockHub{}
 			// The invalidation runs after the commit: abort the request there.
 			inv := &probeInvalidator{log: &log, hook: cancel}
-			handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv, newTestServices(database))
+			handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv, newTestServicesFor(database, hub, inv))
 			body, err := json.Marshal(m.body)
 			if err != nil {
 				t.Fatalf("marshal: %v", err)
@@ -164,7 +164,8 @@ func TestAdminAPI_PatchRole_UnreadableHoldersRefreshesAllConnected(t *testing.T)
 	hub := &mockHub{}
 	inv := &mockPermInvalidator{}
 	roles := service.NewRoleService(erroringMembersStore{Store: database},
-		service.NewPermissionService(database, permissions.NewChecker(database)))
+		observeInvalidations(service.NewPermissionService(database, permissions.NewChecker(database)), inv))
+	roles.SetPermissionNotifier(hub)
 	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv, svcWithRoles(database, roles))
 	token := createAdminUser(t, database)
 
@@ -220,7 +221,7 @@ func TestAdminAPI_PatchUserRole_HandlerReturnsBeforeFanOut(t *testing.T) {
 		hub.Stop()
 		<-hub.Done()
 	})
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServices(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServicesFor(database, hub, nil))
 	token := createAdminUser(t, database)
 	uid, err := database.CreateUser(context.Background(), "gated-target", "$2a$12$placeholder", 3)
 	if err != nil {
@@ -274,7 +275,7 @@ func TestAdminAPI_DeleteRole_ManyHoldersReleasesFirst32(t *testing.T) {
 		}
 	}
 	hub := &mockHub{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, &mockPermInvalidator{}, newTestServices(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, &mockPermInvalidator{}, newTestServicesFor(database, hub, &mockPermInvalidator{}))
 	token := createAdminUser(t, database)
 
 	if w := doRequest(t, handler, http.MethodDelete, "/roles/9", token, nil); w.Code != http.StatusNoContent {

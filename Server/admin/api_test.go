@@ -51,6 +51,48 @@ func newTestRoleService(database *db.DB) *service.RoleService {
 	return service.NewRoleService(st, service.NewPermissionService(st, checker))
 }
 
+// permObserver is the invalidation sink the wired test services report to.
+type permObserver interface {
+	InvalidateUser(userID int64)
+	InvalidateAll()
+}
+
+// observeInvalidations reports every eviction p issues to inv (nil: none).
+func observeInvalidations(p *service.PermissionService, inv permObserver) *service.PermissionService {
+	if inv != nil {
+		p.SetInvalidationObserver(func(userID int64, all bool) {
+			if all {
+				inv.InvalidateAll()
+				return
+			}
+			inv.InvalidateUser(userID)
+		})
+	}
+	return p
+}
+
+// newTestServicesFor is newTestServices wired the way the composition root
+// wires production (WP 5.1a): the role, channel and moderation services own
+// permission-cache invalidation and the live fan-out, so a test that watches
+// the hub or the invalidation log installs them here. hub receives the
+// fan-out; inv (may be nil) is told of every eviction the services issue, in
+// the same order and with the same ids the handlers used to send it.
+func newTestServicesFor(database *db.DB, hub service.PermissionChangeNotifier, inv permObserver) *service.Services {
+	observe := func(p *service.PermissionService) *service.PermissionService {
+		return observeInvalidations(p, inv)
+	}
+	checker := permissions.NewChecker(database)
+	mod := service.NewModerationService(database, observe(service.NewPermissionService(database, checker)))
+	roles := service.NewRoleService(database, observe(service.NewPermissionService(database, checker)))
+	channels := service.NewChannelService(database, observe(service.NewPermissionService(database, nil)))
+	mod.SetPermissionNotifier(hub)
+	roles.SetPermissionNotifier(hub)
+	channels.SetPermissionNotifier(hub)
+	svc := newTestServices(database)
+	svc.Moderation, svc.Roles, svc.Channels = mod, roles, channels
+	return svc
+}
+
 // newTestServices bundles the services NewAdminAPI routes to, each a real one
 // over the test database so the routes exercise production authorization
 // rather than stubs. Tests that need a service absent (the fail-closed rows)
@@ -171,12 +213,27 @@ CREATE TABLE IF NOT EXISTS channel_categories (
     created_at TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_categories_name ON channel_categories(name COLLATE NOCASE);
+CREATE TABLE IF NOT EXISTS category_overrides (
+    category_id INTEGER NOT NULL REFERENCES channel_categories(id) ON DELETE CASCADE,
+    role_id     INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    allow       INTEGER NOT NULL DEFAULT 0,
+    deny        INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(category_id, role_id)
+);
+CREATE TABLE IF NOT EXISTS category_user_overrides (
+    category_id INTEGER NOT NULL REFERENCES channel_categories(id) ON DELETE CASCADE,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    allow       INTEGER NOT NULL DEFAULT 0,
+    deny        INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(category_id, user_id)
+);
 
 CREATE TABLE IF NOT EXISTS channels (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     name             TEXT    NOT NULL,
     type             TEXT    NOT NULL DEFAULT 'text',
     category_id INTEGER REFERENCES channel_categories(id) ON DELETE SET NULL,
+    permissions_synced INTEGER NOT NULL DEFAULT 0,
     topic            TEXT,
     position         INTEGER NOT NULL DEFAULT 0,
     slow_mode        INTEGER NOT NULL DEFAULT 0,
@@ -188,6 +245,15 @@ CREATE TABLE IF NOT EXISTS channels (
     voice_max_video  INTEGER NOT NULL DEFAULT 0,
     nsfw             INTEGER NOT NULL DEFAULT 0,
     afk              INTEGER NOT NULL DEFAULT 0,
+    parent_channel_id INTEGER REFERENCES channels(id) ON DELETE CASCADE,
+    thread_starter_message_id INTEGER,
+    thread_owner_id INTEGER,
+    thread_archived INTEGER NOT NULL DEFAULT 0,
+    thread_locked INTEGER NOT NULL DEFAULT 0,
+    thread_auto_archive_minutes INTEGER NOT NULL DEFAULT 1440,
+    thread_last_activity_at TEXT,
+    forum_require_tag INTEGER NOT NULL DEFAULT 0,
+    forum_default_auto_archive_minutes INTEGER NOT NULL DEFAULT 4320,
     is_group         INTEGER NOT NULL DEFAULT 0
 );
 
@@ -1779,6 +1845,20 @@ func (m *mockHub) BroadcastChatBulkDeleted(channelID int64, messageIDs []int64) 
 func (m *mockHub) RevokeUnreadableChannels(userID int64) {
 	m.revokedIDs = append(m.revokedIDs, userID)
 }
+
+// RoleChanged, ChannelAudienceChanged and RevokeUnreadable make mockHub a
+// service.PermissionChangeNotifier, recording through the same fields the
+// handlers' direct hub calls used to fill.
+func (m *mockHub) RoleChanged(f service.RoleFanout) {
+	m.EnqueueRoleRefresh(ws.RoleRefresh{
+		Visibility: f.Visibility, AllConnected: f.AllConnected,
+		MemberUpdate: f.MemberUpdate, Roles: f.Roles,
+	})
+}
+
+func (m *mockHub) ChannelAudienceChanged(ch *db.Channel) { m.RefreshChannelVisibility(ch) }
+
+func (m *mockHub) RevokeUnreadable(userID int64) { m.RevokeUnreadableChannels(userID) }
 
 func (m *mockHub) EnqueueRoleRefresh(r ws.RoleRefresh) {
 	m.roleRefreshes = append(m.roleRefreshes, r)

@@ -6,6 +6,8 @@ import type {
   CallInfo,
   GroupEventInfo,
   ForwardInfo,
+  PollInfo,
+  PollView,
   ChatMessagePayload,
   MessageUser,
   Attachment,
@@ -70,6 +72,8 @@ export interface Message {
   readonly groupEvent?: GroupEventInfo;
   /** Set on a forwarded message (WP 6.9a): the snapshot's source, never an author. */
   readonly forward?: ForwardInfo;
+  /** Set on a poll message (WP 6.9b): the card's source, kept in version order by pollState.ts. */
+  readonly poll?: PollView;
 }
 
 /** A reaction toggle applied optimistically, awaiting its server echo. Keyed
@@ -144,6 +148,11 @@ export interface MessagesState {
 // Helpers: convert wire types to store types
 // -----------------------------------------------------------------------------
 
+/** The wire block as the client holds it: `me` is current as of the block's own version. */
+function toPollView(poll: PollInfo): PollView {
+  return { ...poll, selfVersion: poll.results.version };
+}
+
 export function chatPayloadToMessage(payload: ChatMessagePayload): Message {
   return {
     id: payload.id,
@@ -170,6 +179,7 @@ export function chatPayloadToMessage(payload: ChatMessagePayload): Message {
     ...(payload.call !== undefined && { call: payload.call }),
     ...(payload.group_event !== undefined && { groupEvent: payload.group_event }),
     ...(payload.forward !== undefined && { forward: payload.forward }),
+    ...(payload.poll !== undefined && { poll: toPollView(payload.poll) }),
   };
 }
 
@@ -198,6 +208,7 @@ export function messageResponseToMessage(response: MessageResponse): Message {
     ...(response.call !== undefined && { call: response.call }),
     ...(response.group_event !== undefined && { groupEvent: response.group_event }),
     ...(response.forward !== undefined && { forward: response.forward }),
+    ...(response.poll !== undefined && { poll: toPollView(response.poll) }),
   };
 }
 

@@ -80,7 +80,11 @@ async function apiRes(method,path,body,headers){
   if(res.status===401){handleSessionExpired();throw new Error('Your session expired — sign in again.')}
   if(res.status===204)return{data:null,res};
   const data=await res.json();
-  if(!res.ok)throw new Error(data.message||res.statusText);
+  if(!res.ok){
+    /* status and code ride on the Error so a caller can tell a conflict from a
+       failure without parsing the message. */
+    throw Object.assign(new Error(data.message||res.statusText),{status:res.status,code:data.error});
+  }
   if(method==='GET')noteBadgeSource(path,data);
   return{data,res};
 }
@@ -140,7 +144,7 @@ const ACTION_LABEL={
   appeal_submit:'appealed a moderation action',appeal_withdraw:'withdrew an appeal',appeal_assign:'took an appeal',appeal_decide:'decided an appeal',
   registration_approve:'approved the registration of {t}',registration_deny:'denied the registration of {t}',invite_create:'created an invite',invite_revoke:'revoked an invite',
   channel_create:'created {t}',channel_update:'edited {t}',channel_delete:'deleted {t}',channel_perms_update:'changed role access to {t}',channel_perms_clear:'reset role access to {t}',
-  channel_user_perms_update:'changed member access to {t}',channel_user_perms_clear:'reset member access to {t}',channel_retention_change:'changed message retention for {t}',
+  channel_user_perms_update:'changed member access to {t}',channel_user_perms_clear:'reset member access to {t}',category_perms_update:'changed role access on category {t}',category_perms_clear:'reset role access on category {t}',category_user_perms_update:'changed member access on category {t}',category_user_perms_clear:'reset member access on category {t}',channel_perms_sync:'synced category access into {t}',channel_retention_change:'changed message retention for {t}',
   role_create:'created {t}',role_update:'edited {t}',role_delete:'deleted {t}',role_reorder:'reordered the roles',role_change:'changed the role of {t}',
   permission_explain:'checked the permissions of {t}',permission_preview:'previewed permissions for {t}',emoji_create:'added an emoji',emoji_delete:'removed an emoji',
   setting_change:'changed a server setting',settings_change:'changed the server settings',registration_mode_change:'changed who can join',

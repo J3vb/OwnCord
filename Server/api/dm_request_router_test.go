@@ -78,7 +78,7 @@ func TestNewRouter_DMRequestTransition_ReachesLiveConnection(t *testing.T) {
 			Name: "Test Server", Port: 8443, DataDir: t.TempDir(), AllowedOrigins: []string{"*"},
 		},
 	}
-	rt, rtErr := app.StartRuntime(cfg, database, nil)
+	rt, rtErr := app.StartRuntime(cfg, database, nil, testRuntimeInputs(cfg))
 	if rtErr != nil {
 		t.Fatalf("app.StartRuntime: %v", rtErr)
 	}
@@ -199,7 +199,7 @@ func TestNewRouter_MessageRequest_CreationAndSendDoNotLeakToReplay(t *testing.T)
 			Name: "Test Server", Port: 8443, DataDir: t.TempDir(), AllowedOrigins: []string{"*"},
 		},
 	}
-	rt, rtErr := app.StartRuntime(cfg, database, nil)
+	rt, rtErr := app.StartRuntime(cfg, database, nil, testRuntimeInputs(cfg))
 	if rtErr != nil {
 		t.Fatalf("app.StartRuntime: %v", rtErr)
 	}

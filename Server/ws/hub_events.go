@@ -74,6 +74,25 @@ func (h *Hub) SetPluginEventSink(s *plugin.EventSink) {
 	h.pluginSink.Store(s)
 }
 
+// dispatchToPlugins hands one sequenced frame to the plugin sink, if any.
+func (h *Hub) dispatchToPlugins(msg []byte) {
+	sink := h.pluginSink.Load()
+	if sink == nil {
+		return
+	}
+	eventType := extractEventType(msg)
+	if eventType == "" {
+		eventType = "broadcast"
+	}
+	if hook := pluginDispatchHook.Load(); hook != nil {
+		(*hook)(h, msg)
+	}
+	sink.Dispatch(context.Background(), eventType, msg)
+}
+
+// pluginDispatchHook is a test seam called right before the plugin sink.
+var pluginDispatchHook atomic.Pointer[func(h *Hub, msg []byte)]
+
 // ReconnectTierStats returns the per-tier resume hit counters in the order
 // (buffer, db, full). Phase B Step 7 metrics surface; OpenTelemetry meters
 // (Step 8) read from the same atomics.
@@ -287,6 +306,7 @@ var messageFamily = map[string]struct{}{
 	MsgTypeChatDeleted:     {},
 	MsgTypeChatBulkDeleted: {},
 	MsgTypeReactionUpdate:  {},
+	MsgTypePollUpdate:      {},
 }
 
 // eventNamesMessage reports whether a wrapped broadcast frame is a

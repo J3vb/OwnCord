@@ -94,7 +94,12 @@ beforeEach(() => {
     unreads.push([id, messageId]);
     return `u-${unreads.length}`;
   });
-  channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  channelsStore.setState(() => ({
+    channels: new Map(),
+    activeChannelId: null,
+    roles: [],
+    categories: [],
+  }));
   dmStore.setState(() => ({ channels: [] }));
   messagesStore.setState(() => ({
     messagesByChannel: new Map(),

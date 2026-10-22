@@ -86,11 +86,50 @@ attachment rows. Forwards of an erased user's message stay without any author
 `channel_categories` and `channels.category_id` (WP 6.5a). A category is a name and
 a position an administrator writes, holds no user content and no personal data, and
 is shared by every member who can see a channel in it, so it adds no data class. A
-channel outlives its category (`ON DELETE SET NULL`). **Amended 2026-10-21 (role reconcile):** `073_user_roles_reconcile.sql` rewrites
+channel outlives its category (`ON DELETE SET NULL`). **Amended 2026-10-21 (role reconcile):** `077_user_roles_reconcile.sql` rewrites
 `user_roles` rows so they match the role `users.role_id` already names (WP 6.3b).
 It moves no personal data and adds no data class here; the rows keep going with
 their user or role by cascade. Other historical
 status statements retain their `cbebd37c` baseline.
+**Amended 2026-10-21 (polls):** `073_polls.sql` adds `polls`, `poll_answers` and
+`poll_votes` (WP 6.9b). A poll is an ordinary message of its author whose text is a
+readable fallback of the question and answers, so it follows the message rows. The
+side rows go with the message by cascade. The one new data class is the vote (lifecycle
+row 10a in `data-lifecycle.md`): a voter's rows are public to the community as
+reactions are, and go with the account. Counts are never stored. Voting, ending and
+expiry (WP 6.9b-b) add no data class: a vote is a row of the same table, and ending
+only sets `polls.ended_at` and bumps `polls.version`. The poll expirer keeps no
+state of its own beyond a wake signal and reads the next deadline from the table.
+**Amended 2026-10-21 (threads):** `074_threads.sql` adds the thread columns to
+`channels` (WP 6.9c). A thread is a channel row under a text channel, so its
+messages, attachments, reactions and read state are the existing classes and
+follow their rows. It has no permission, NSFW, archive or retention state of its
+own: every one is its parent's, and the admin override, NSFW acknowledgement and
+retention routes refuse a thread id. `thread_owner_id` goes `NULL` with its user
+and `thread_starter_message_id` with its message; the thread goes with its
+parent by cascade. It adds no data class.
+**Amended 2026-10-21 (forums):** `075_forums.sql` adds the `forum` channel type,
+`forum_tags` and `thread_tags` (WP 6.9d). A forum is a channel row that holds no
+messages, and its posts are threads under it, so every message, attachment,
+reaction and read-state row in a post is the existing class and follows its row.
+A post takes its overrides, NSFW label, archive state and retention from the forum,
+exactly as a thread does from its text channel, so the NSFW acknowledgement and
+retention routes still refuse a post id and answer for the forum. The one new
+data class is the tag: a name and an optional emoji owned by the forum, editable
+only with MANAGE_CHANNELS, carrying no personal data, and deleted with the forum.
+A post's tag links go with the post or the tag. A client that did not declare the
+`forums` feature is sent no forum row, so an NSFW-labelled forum's name and topic
+reach only sockets that can read it and render it. It adds no other data class.
+
+**Amended 2026-10-21 (category permissions):** `076_category_permissions.sql` adds
+`category_overrides`, `category_user_overrides` and `channels.permissions_synced`
+(WP 6.5d), a template of permission overrides that a category's synced channels
+follow. The per-member rows are keyed by user exactly like `channel_user_overrides`,
+so they join the account-erasure inventory (class 18c) and are deleted with the
+account; the per-role rows hold no personal data. No new data class beyond that.
+A new channel in a category copies the template without an actor check: every
+template row was guarded when it was written, and template rows stay in force
+after their writer is demoted.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each
 service are documented"). **Input to:** HP-5, and to the retention and
 erasure obligations every B5 step carries.

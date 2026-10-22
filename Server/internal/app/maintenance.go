@@ -28,6 +28,9 @@ type maintenance struct {
 	uploads    *service.UploadService
 	reports    *service.ReportService
 	moderation *service.ModerationService
+	// backupDir is backup.dir as configured; maintainBackups resolves it
+	// (empty = data/backups) so a hand-built maintenance keeps the default.
+	backupDir string
 	// reportRetentionDays is moderation.report_retention_days (0 = never).
 	reportRetentionDays int
 	// actionRetentionDays is moderation.action_retention_days (0 = never).
@@ -56,9 +59,10 @@ type maintenanceStep struct {
 // newMaintenance builds the pass over the composition root's services. svc
 // may be nil (a partial wiring in tests), which leaves every service-backed
 // step skipped.
-func newMaintenance(log *slog.Logger, cfg *config.Config, database *db.DB, svc *service.Services) *maintenance {
+func newMaintenance(log *slog.Logger, cfg *config.Config, database *db.DB, svc *service.Services, files *storage.Storage) *maintenance {
 	m := &maintenance{
 		log: log, database: database,
+		backupDir:           cfg.Backup.Dir,
 		reportRetentionDays: cfg.Moderation.ReportRetentionDays,
 		actionRetentionDays: cfg.Moderation.ActionRetentionDays,
 	}
@@ -70,28 +74,22 @@ func newMaintenance(log *slog.Logger, cfg *config.Config, database *db.DB, svc *
 		m.attention = svc.Attention
 	}
 	// Periodically purge expired sessions and orphaned attachments.
-	files, err := storage.New(cfg.Upload.StorageDir, cfg.Upload.MaxSizeMB)
-	if err != nil {
-		log.Warn("failed to create file storage for maintenance; orphan file cleanup disabled", "error", err)
+	// files is the one upload store StartRuntime shares with the router and
+	// the erasure replay (WP 5.6g). It already holds the erasure and
+	// retention runners' file remover (wireAuth), so nothing is installed
+	// here — in particular no setter runs after the hub started.
+	if files == nil {
+		log.Warn("failed to create file storage for maintenance; orphan file cleanup disabled")
 		return m
 	}
 	m.files = files
-	// The erasure runner removes files through whichever storage was
-	// installed first (the router's, normally); this one is the fallback so
-	// journaled jobs still finish when the upload routes did not mount.
-	if m.erasure != nil && !m.erasure.HasFiles() {
-		m.erasure.SetFiles(files)
-	}
-	if m.retention != nil {
-		m.retention.SetFiles(files)
-	}
 	return m
 }
 
 // startMaintenanceLoop starts the periodic maintenance loop and returns the
 // stop step the maintenance stage registers with App.Close.
-func startMaintenanceLoop(bgCtx context.Context, log *slog.Logger, cfg *config.Config, database *db.DB, svc *service.Services) func() {
-	m := newMaintenance(log, cfg, database, svc)
+func startMaintenanceLoop(bgCtx context.Context, log *slog.Logger, cfg *config.Config, database *db.DB, svc *service.Services, files *storage.Storage) func() {
+	m := newMaintenance(log, cfg, database, svc, files)
 	erasureCtx, cancelErasure := context.WithCancel(bgCtx)
 	m.erasureCtx = erasureCtx
 	stop := runMaintenanceLoop(bgCtx, log, m)
@@ -311,7 +309,7 @@ func (m *maintenance) maintainBackups(ctx context.Context) error {
 	if m.settings == nil {
 		return nil
 	}
-	return admin.MaintainBackups(ctx, m.database, m.settings)
+	return admin.MaintainBackups(ctx, m.database, m.settings, admin.ResolveBackupDir(m.backupDir))
 }
 
 // sweepOrphans cleans up orphaned attachments (uploaded but never linked to
