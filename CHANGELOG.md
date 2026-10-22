@@ -60,6 +60,10 @@ and only when it changes something a contributor or fork holder must do
 - Moving a role (editing its position or reordering roles) now updates the highest role of every member who holds it next to another one, and drops their cached permissions. Deleting a role no longer moves a member who holds other roles onto the default role; only a member left with no role gets it.
 - A member under a moderator timeout can no longer change their display name or username (`403 TIMED_OUT`), so a moderator's nickname reset stays in place until the timeout ends; avatar, about text and other profile edits still work. A display name that matches another member's username (ignoring case) is now refused, both when you set it and when a moderator does; your own username is still fine. The audit log entry for a profile update now shows a display name change as old and new.
 
+**Mentions**
+
+- The server now understands `<@123>` (a member by id) and `<@&5>` (a role by id) in a message, next to the typed `@name`. A role ping needs the role to be marked mentionable or the sender to have Mention Everyone; otherwise it stays plain text and pings nobody. Everyone holding a pinged role gets a mention badge and notification, except the sender and people who blocked them. Messages list the pinged roles as `mention_roles`. An edit updates the list but never raises a badge. Roles cannot be pinged in a DM. Clients start using this in a later release.
+
 **Messages & files**
 
 - A member who turns off "allow member DMs" can no longer be reached in a one-to-one DM by someone they have not accepted: that person cannot open a DM, send, edit, react, pin, ring or join the DM call, and sees the same short refusal ("you can't message this user") a block gives. Anyone you accepted, wrote to first or were already talking to still reaches you, and group DMs are covered by the next entry. The setting is read from the server; clients get a switch for it in a later release.

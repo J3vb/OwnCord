@@ -198,7 +198,7 @@ func TestThreadCountsOnlyLiveUserMessagesAndPostReopens(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The production post path (it touches the thread in its own transaction).
-	if _, err := f.d.CreateMessageWithMentions(ctx, th.ID, f.user, "wake up", nil, nil, 0, false); err != nil {
+	if _, err := f.d.CreateMessageWithMentions(ctx, th.ID, f.user, "wake up", nil, nil, 0, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	got, err = f.d.GetThread(ctx, th.ID)

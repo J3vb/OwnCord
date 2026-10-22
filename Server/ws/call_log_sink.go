@@ -15,6 +15,7 @@ type callEditedPayload struct {
 	Content          string     `json:"content"`
 	EditedAt         *string    `json:"edited_at"`
 	Mentions         []int64    `json:"mentions"`
+	MentionRoles     []int64    `json:"mention_roles"`
 	MentionsEveryone bool       `json:"mentions_everyone"`
 	MentionsHere     bool       `json:"mentions_here"`
 	Kind             string     `json:"kind"`
@@ -67,12 +68,13 @@ func (h *Hub) CallLogEnded(ctx context.Context, ev service.CallLogEvent) {
 	frame := buildJSON(wsMsg{
 		Type: MsgTypeChatEdited,
 		Payload: callEditedPayload{
-			MessageID: ev.MessageID,
-			ChannelID: ev.ChannelID,
-			Content:   ev.Content,
-			Mentions:  []int64{},
-			Kind:      string(MessageKindCall),
-			Call:      newCallBlock(ev),
+			MessageID:    ev.MessageID,
+			ChannelID:    ev.ChannelID,
+			Content:      ev.Content,
+			Mentions:     []int64{},
+			MentionRoles: []int64{},
+			Kind:         string(MessageKindCall),
+			Call:         newCallBlock(ev),
 		},
 	})
 	h.EmitEvents(ctx, []Event{dmEvt{evType: MsgTypeChatEdited, channelID: ev.ChannelID, participantIDs: ev.Audience, payload: frame}})

@@ -325,7 +325,7 @@ export function channelRowModel(
   }
   const muted = ctx.isMuted(channel.id);
   return {
-    kind: channel.type === "announcement" ? "announcement" : "text",
+    kind: channel.type === "announcement" || channel.type === "forum" ? channel.type : "text",
     channelId: channel.id,
     name: channel.name,
     nsfw: channel.nsfw,

@@ -14,6 +14,7 @@ import type { WsClient } from "@lib/ws";
 import { ApiClientError, type ApiClient } from "@lib/api";
 import type { ChannelType } from "@lib/types";
 import { createMessageList } from "@components/MessageList";
+import { NAVIGATION_DESTINATIONS } from "../../features/navigation/destinations";
 import { bindGifFavoritesApi } from "@stores/gifFavorites.store";
 import { setInlineImageDecorator } from "@components/message-list/media";
 import { gifFavoriteStar } from "@components/message-list/gifFavoriteStar";
@@ -674,7 +675,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     // the next full `ready`. mark_read is a local no-op (already zeroed on
     // open) — it only repairs the server's view. With a read pointer, leaving
     // marks only what the reader saw (leaveChannel), never "everything".
-    if (previousChannelId !== null) {
+    // A forum holds no messages, so it has no read state to repair.
+    const leftForum =
+      channelsStore.getState().channels.get(previousChannelId ?? 0)?.type === "forum";
+    if (previousChannelId !== null && !leftForum) {
       if (readPointerEnabled()) leaveChannel(previousChannelId);
       else markChannelRead(previousChannelId);
       // The server only delivers live broadcasts for the focused channel, so
@@ -1298,6 +1302,33 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           },
         }),
       );
+      return;
+    }
+
+    // A forum shows its post list in place of the message list, and has no
+    // typing row or composer (WP 6.9d). A post opens in the thread panel.
+    if ((storedChannel?.type ?? channelType) === "forum") {
+      const forum = NAVIGATION_DESTINATIONS.forum;
+      if (forum === undefined) return;
+      slots.messagesSlot.appendChild(
+        forum.build({
+          channelId,
+          signal,
+          api,
+          ws,
+          openPost: (threadId) =>
+            threadHost?.openById(
+              threadId,
+              channelId,
+              signal,
+              () =>
+                // The post's row, or the New Post button once the row is gone.
+                slots.messagesSlot.querySelector<HTMLElement>(`[data-post-id="${threadId}"]`) ??
+                slots.messagesSlot.querySelector<HTMLElement>('[data-testid="forum-new-post"]'),
+            ),
+        }),
+      );
+      if (storedChannel?.nsfw === true) mountConsentBar();
       return;
     }
 

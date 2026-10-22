@@ -176,6 +176,13 @@ export function applyReadyActiveChannel(payload: Payload<"ready">): number | nul
  * those unseen messages read (isChannelAway, lib/read-state.ts).
  */
 export function markReadyActiveChannelRead(currentActive: number | null): void {
+  // A forum holds no messages, so there is nothing in it to mark read.
+  if (
+    currentActive !== null &&
+    channelsStore.getState().channels.get(currentActive)?.type === "forum"
+  ) {
+    return;
+  }
   if (currentActive !== null && !isChannelAway(currentActive)) {
     // With a read pointer the ready-time mark is only what the reader saw, not
     // "everything": a resync that restated messages missed while the list was

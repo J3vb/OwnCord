@@ -144,6 +144,9 @@ button.msg-thread-chip:hover {
   border-bottom: 1px solid var(--border);
   background: var(--bg-secondary);
 }
+.thread-starter[hidden] {
+  display: none;
+}
 .thread-starter-main {
   min-width: 0;
   flex: 1;

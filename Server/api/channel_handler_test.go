@@ -210,6 +210,11 @@ CREATE TABLE IF NOT EXISTS message_mentions (
     mentioned_user_id INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
     PRIMARY KEY (message_id, mentioned_user_id)
 );
+CREATE TABLE IF NOT EXISTS message_role_mentions (
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    role_id    INTEGER NOT NULL,
+    PRIMARY KEY (message_id, role_id)
+);
 
 -- History reads look up forward blocks on every page (migration 071).
 CREATE TABLE IF NOT EXISTS message_forwards (

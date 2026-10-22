@@ -46,14 +46,24 @@ export interface ThreadPanelHostOptions {
 }
 
 export interface ThreadPanelHost {
-  /** Open the thread (or focus its composer when it is the one open). */
-  open(thread: ThreadInfo): void;
+  /**
+   * Open the thread (or focus its composer when it is the one open).
+   * `returnFocus` names the element the panel's own Close button hands focus
+   * back to (a forum's post row); it is looked up at close time, so a list
+   * that repainted in between still has its row found.
+   */
+  open(thread: ThreadInfo, returnFocus?: () => HTMLElement | null): void;
   /**
    * Open a thread known only by id (the loser of a create race, who is told the
    * winner's id): from the store, else from the parent's thread list. Dropped
    * when `signal` aborts first (the channel was left).
    */
-  openById(threadId: number, parentId: number, signal: AbortSignal): void;
+  openById(
+    threadId: number,
+    parentId: number,
+    signal: AbortSignal,
+    returnFocus?: () => HTMLElement | null,
+  ): void;
   /** Close the panel and tell the server. A no-op when none is open. */
   close(): void;
   /** The thread the panel has open, or null. */
@@ -67,6 +77,7 @@ export function createThreadPanelHost(options: ThreadPanelHostOptions): ThreadPa
   let openId: number | null = null;
   let panel: ThreadPanelComponent | null = null;
   let loadGen = 0;
+  let returnFocus: (() => HTMLElement | null) | null = null;
   // Across a reconnect the dispatcher asks us to re-focus the open thread.
   setThreadResume(resumeThreadFocus);
 
@@ -77,6 +88,7 @@ export function createThreadPanelHost(options: ThreadPanelHostOptions): ThreadPa
 
   function unmount(): void {
     loadGen++;
+    returnFocus = null;
     // The server stops sending this thread's frames once it is unfocused, so
     // what is held goes stale: the next open reloads it.
     if (openId !== null) invalidateChannelMessageWindow(openId);
@@ -95,7 +107,7 @@ export function createThreadPanelHost(options: ThreadPanelHostOptions): ThreadPa
     sendFocus(null);
   }
 
-  function open(thread: ThreadInfo): void {
+  function open(thread: ThreadInfo, back?: () => HTMLElement | null): void {
     if (openId === thread.id) {
       panel?.focusComposer();
       return;
@@ -104,6 +116,7 @@ export function createThreadPanelHost(options: ThreadPanelHostOptions): ThreadPa
     // outranks the snapshot the caller holds (a list row, a create ack).
     if (threadsStore.getState().deleted.has(thread.id)) return;
     unmount();
+    returnFocus = back ?? null;
     adoptThreadSnapshots([thread]);
     openId = thread.id;
     setFocusedThread(thread.id);
@@ -127,7 +140,13 @@ export function createThreadPanelHost(options: ThreadPanelHostOptions): ThreadPa
             showError: (msg) => showToast(msg, "error"),
           }),
           showToast,
-          onClose: close,
+          onClose: () => {
+            // The Close button hands focus to the opener (the list row), not
+            // to the body its own removal would leave it on.
+            const opener = returnFocus;
+            close();
+            opener?.()?.focus();
+          },
         });
         panel = next;
         next.mount(slot);
@@ -147,18 +166,29 @@ export function createThreadPanelHost(options: ThreadPanelHostOptions): ThreadPa
   const unsubscribe = threadsStore.subscribeSelector(
     (s) => s.focusedThreadId,
     (focused) => {
-      if (focused !== openId && openId !== null && focused === null) unmount();
+      if (focused !== openId && openId !== null && focused === null) {
+        // The open thread went away (deleted, or gone after a reconnect): hand
+        // focus back to the opener rather than to the body.
+        const opener = returnFocus;
+        unmount();
+        opener?.()?.focus();
+      }
     },
   );
 
-  function openById(threadId: number, parentId: number, signal: AbortSignal): void {
+  function openById(
+    threadId: number,
+    parentId: number,
+    signal: AbortSignal,
+    back?: () => HTMLElement | null,
+  ): void {
     // Queued behind the dispatcher's own write of the same frame, so a thread
     // the server just told us about is already in the store.
     withThreadsStore((m) => {
       if (signal.aborted) return;
       const known = m.getThread(threadId);
       if (known !== undefined) {
-        open(known);
+        open(known, back);
         return;
       }
       // The thread may be open or archived; look through the open ones first.
@@ -168,7 +198,7 @@ export function createThreadPanelHost(options: ThreadPanelHostOptions): ThreadPa
             if (signal.aborted) return;
             adoptThreadSnapshots(page.threads);
             const found = getThread(threadId);
-            if (found !== undefined) open(found);
+            if (found !== undefined) open(found, back);
             else if (next !== null) look(next, null);
           },
           (err: unknown) => log.warn("Thread list fetch failed", { error: String(err) }),

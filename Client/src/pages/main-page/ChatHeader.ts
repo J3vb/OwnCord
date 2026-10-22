@@ -322,9 +322,14 @@ export function setChatHeaderChannelType(
   refs: ChatHeaderRefs,
   type: ChannelType | undefined,
 ): void {
-  if (type === "announcement" || type === "voice") {
+  if (type === "announcement" || type === "voice" || type === "forum") {
     refs.hashEl.dataset["channelType"] = type;
-    refs.hashEl.replaceChildren(createIcon(type === "voice" ? "volume-2" : "megaphone", 18));
+    refs.hashEl.replaceChildren(
+      createIcon(
+        type === "voice" ? "volume-2" : type === "forum" ? "messages-square" : "megaphone",
+        18,
+      ),
+    );
   } else {
     delete refs.hashEl.dataset["channelType"];
     setText(refs.hashEl, "#");
