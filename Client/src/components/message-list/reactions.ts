@@ -5,6 +5,7 @@
 import { createElement } from "@lib/dom";
 import type { Message } from "@stores/messages.store";
 import { channelsStore } from "@stores/channels.store";
+import { authorityChannelId } from "@stores/threads.store";
 import { messagingText } from "../../i18n/messaging";
 import { uiStore } from "@stores/ui.store";
 import { safetyStore } from "../../features/safety/store";
@@ -47,7 +48,7 @@ export function atReactionLimit(
 
 /** The server's can_react verdict for a channel; undefined when it never said. */
 export function channelCanReact(channelId: number): boolean | undefined {
-  return channelsStore.getState().channels.get(channelId)?.canReact;
+  return channelsStore.getState().channels.get(authorityChannelId(channelId))?.canReact;
 }
 
 export function renderReactions(

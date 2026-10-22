@@ -262,6 +262,14 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
     ) {
       return false;
     }
+    // These act on the channel's own composer; from the thread panel's composer
+    // the key is left alone rather than opening the parent's picker or file chooser.
+    if (
+      (id === "emojiPicker" || id === "gifPicker" || id === "uploadFile") &&
+      inThreadPanel(e.target)
+    ) {
+      return false;
+    }
     // Toggle on the press edge only, not on auto-repeat.
     if (e.repeat) {
       e.preventDefault();
@@ -302,7 +310,7 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
     if (e.key === "PageUp" || e.key === "PageDown") {
       // A focused scroller pages itself; only these two would page nothing.
       if (!isComposer(e.target) && e.target !== document.body) return;
-      if (dialogOpen()) return;
+      if (inThreadPanel(e.target) || dialogOpen()) return;
       const direction = e.key === "PageDown" ? 1 : -1;
       runGlobal(e, "scroll-messages", () => handlers.onScrollMessages(direction));
       return;
@@ -340,6 +348,8 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
     if (e.key !== "Escape" || e.ctrlKey || e.metaKey || e.altKey) return;
     if (escapeTaken || e.defaultPrevented || e.isComposing || e.repeat) return;
     if (isTypingTarget(e.target) && !isComposer(e.target)) return;
+    // Escape in the thread panel's composer must not mark the parent read.
+    if (inThreadPanel(e.target)) return;
     // A ringing call outranks mark-read: the key declines it, and the
     // preventDefault inside runGlobal keeps anything else from reusing it.
     if (!e.shiftKey && handlers.ringActive?.() === true) {
@@ -419,6 +429,11 @@ function focusNewComposer(): void {
 }
 
 /** The message composer's textarea, where Alt+↑/↓ still steps channels. */
+/** Whether the key was pressed inside the thread side panel (WP 6.9c). */
+function inThreadPanel(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest(".thread-panel") !== null;
+}
+
 function isComposer(target: EventTarget | null): boolean {
   return target instanceof HTMLTextAreaElement && target.classList.contains("msg-textarea");
 }

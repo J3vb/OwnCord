@@ -53,7 +53,16 @@ import { authStore } from "@stores/auth.store";
 import type { MessageUser } from "@lib/types";
 import type { MessageController } from "./MessageController";
 import type { ReactionController } from "./ReactionController";
-import { updateChatHeaderForDm, setChatHeaderChannelType, setChatHeaderTopic } from "./ChatHeader";
+import {
+  updateChatHeaderForDm,
+  setChatHeaderChannelType,
+  setChatHeaderThreads,
+  setChatHeaderTopic,
+} from "./ChatHeader";
+import { createThreadPanelHost } from "./ThreadPanelHost";
+import type { ThreadPanelHost } from "./ThreadPanelHost";
+import type { ThreadListPopover } from "@components/ThreadListPopover";
+import type { ThreadInfo } from "@lib/types";
 import type { ChatHeaderRefs } from "./ChatHeader";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
@@ -73,7 +82,7 @@ import { requestsText } from "../../i18n/requests";
 import { shellText, statusLabel } from "../../i18n/shell";
 import { formatUntil, safetyText } from "../../i18n/safety";
 import { leaveChannel, markChannelRead, markChannelReadSeen } from "@lib/read-state";
-import { readPointerEnabled } from "@lib/serverCapabilities";
+import { readPointerEnabled, threadsEnabled } from "@lib/serverCapabilities";
 import {
   newClientMessageId,
   pendingMessageExpired,
@@ -111,6 +120,8 @@ export interface ChannelControllerOptions {
     readonly messagesSlot: HTMLDivElement;
     readonly typingSlot: HTMLDivElement;
     readonly inputSlot: HTMLDivElement;
+    /** Where a thread's side panel mounts, beside the chat column (WP 6.9c). */
+    readonly threadSlot?: HTMLDivElement;
   };
   readonly chatHeaderName: HTMLSpanElement | null;
   readonly chatHeaderRefs: ChatHeaderRefs | null;
@@ -138,6 +149,12 @@ export interface ChannelController {
   readonly currentChannelId: number | null;
   /** Currently mounted message list (for scroll-to-message). */
   readonly messageList: MessageListComponent | null;
+  /** Open a thread in the side panel beside the channel (WP 6.9c). */
+  openThread(thread: ThreadInfo): void;
+  /** The thread the side panel has open, or null. */
+  readonly openThreadId: number | null;
+  /** Open or close the channel's thread list under the header's Threads button. */
+  toggleThreadList(anchor: HTMLButtonElement): void;
   /** Open the composer's attachment picker (Ctrl+Shift+U). No-op with no composer. */
   openFilePicker(): void;
   /** Open or close the composer's emoji or GIF picker (Ctrl+E, Ctrl+G). */
@@ -247,6 +264,20 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     onContentGated,
     focusFallback,
   } = opts;
+
+  // The thread side panel beside the chat column (WP 6.9c). It belongs to the
+  // mounted channel: a channel switch closes it, and `thread_focus` goes null.
+  const threadHost: ThreadPanelHost | null =
+    slots.threadSlot === undefined
+      ? null
+      : createThreadPanelHost({
+          ws,
+          api,
+          msgCtrl,
+          slot: slots.threadSlot,
+          showToast: (msg, type) => showToast(msg, type),
+        });
+  let threadList: ThreadListPopover | null = null;
 
   let currentChannelId: number | null = null;
   let channelAbort: AbortController | null = null;
@@ -552,6 +583,8 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   }
 
   function destroyChannel(): void {
+    threadList?.close();
+    threadHost?.close();
     // The reaction picker is a body-mounted overlay keyed to a message in
     // this channel — every other teardown path already routes through here,
     // so this is the one choke point to close it before the channel it was
@@ -1160,12 +1193,13 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       const typeRefs = chatHeaderRefs;
       const typeOf = (): ChannelType | undefined =>
         channelsStore.getState().channels.get(channelId)?.type ?? channelType;
-      setChatHeaderChannelType(typeRefs, typeOf());
+      const syncHeaderType = (): void => {
+        setChatHeaderChannelType(typeRefs, typeOf());
+        setChatHeaderThreads(typeRefs, typeOf() === "text" && threadsEnabled());
+      };
+      syncHeaderType();
       composerGatingUnsubs.push(
-        channelsStore.subscribeSelector(
-          (s) => s.channels.get(channelId)?.type,
-          () => setChatHeaderChannelType(typeRefs, typeOf()),
-        ),
+        channelsStore.subscribeSelector((s) => s.channels.get(channelId)?.type, syncHeaderType),
       );
       if (chatHeaderName !== null) {
         setText(chatHeaderName, channelName);
@@ -1521,6 +1555,28 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       // come back as poll_update through the dispatcher (WP 6.9b).
       onPollVote: (messageId, answerIds) => votePoll(ws, messageId, answerIds, signal),
       onPollEnd: (messageId) => endPoll(ws, messageId, signal),
+      ...(threadHost !== null && {
+        onCreateThreadClick: (msgId: number) => {
+          import("../../components/CreateThreadDialog").then(
+            ({ openCreateThreadDialog }) => {
+              if (signal.aborted) return;
+              openCreateThreadDialog({
+                ws,
+                channelId,
+                messageId: msgId,
+                signal,
+                onCreated: (thread) => threadHost.openById(thread.id, channelId, signal),
+                onExists: (threadId) => threadHost.openById(threadId, channelId, signal),
+                fallbackFocus: () => slots.inputSlot.querySelector<HTMLElement>("textarea"),
+              });
+            },
+            () => showToast(messagingText("thread.panelLoadFailed"), "error"),
+          );
+        },
+        onOpenThread: (threadId: number) => {
+          threadHost.openById(threadId, channelId, signal);
+        },
+      }),
       onRetry: (correlationId: string) => retrySend(correlationId),
       onDeleteDraft: (correlationId: string) => deleteDraft(correlationId),
       renderUploadStrip: (correlationId, stripSignal) => {
@@ -1962,12 +2018,55 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     draftByChannel.clear();
     for (const entry of queuedSends.values()) abortQueued(entry);
     queuedSends.clear();
+    threadHost?.destroy();
+  }
+
+  /** The header's Threads button: close the list when it is open, else open it
+   *  for the mounted channel. Its code loads on the first open. */
+  function toggleThreadList(anchor: HTMLButtonElement): void {
+    if (threadList !== null) {
+      threadList.close();
+      return;
+    }
+    const channelId = currentChannelId;
+    const signal = channelAbort?.signal;
+    if (channelId === null || signal === undefined || threadHost === null) return;
+    const host = threadHost;
+    // A second click while the code loads must not queue a second popover.
+    anchor.setAttribute("aria-expanded", "true");
+    import("../../components/ThreadListPopover").then(
+      ({ openThreadListPopover }) => {
+        if (signal.aborted) {
+          anchor.setAttribute("aria-expanded", "false");
+          return;
+        }
+        threadList = openThreadListPopover({
+          api,
+          channelId,
+          anchor,
+          signal,
+          onOpenThread: (thread) => host.open(thread),
+          onClosed: () => {
+            threadList = null;
+          },
+        });
+      },
+      () => {
+        anchor.setAttribute("aria-expanded", "false");
+        showToast(messagingText("thread.panelLoadFailed"), "error");
+      },
+    );
   }
 
   return {
     mountChannel,
     destroyChannel,
     destroy,
+    openThread: (thread) => threadHost?.open(thread),
+    toggleThreadList,
+    get openThreadId() {
+      return threadHost?.openThreadId ?? null;
+    },
     openFilePicker: () => messageInput?.openFilePicker(),
     togglePicker: (kind) => messageInput?.togglePicker(kind),
     get currentChannelId() {

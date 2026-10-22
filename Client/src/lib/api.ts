@@ -20,6 +20,7 @@ import type {
   HealthResponse,
   ServerInfoResponse,
   MessagesResponse,
+  ThreadListResponse,
   MessagesAroundResponse,
   ReactionUsersResponse,
   PurgeResponse,
@@ -1349,6 +1350,25 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     getPins(channelId: number, signal?: AbortSignal): Promise<MessagesResponse> {
       return channelContent(channelId, () =>
         request<MessagesResponse>("GET", `/channels/${channelId}/pins`, undefined, signal),
+      );
+    },
+
+    /**
+     * A text channel's threads (WP 6.9c): `query` is the list route's query
+     * string (`archived`, `before`, `limit`), which the Threads popover builds.
+     */
+    listThreads(
+      channelId: number,
+      query: string,
+      signal?: AbortSignal,
+    ): Promise<ThreadListResponse> {
+      return channelContent(channelId, () =>
+        request<ThreadListResponse>(
+          "GET",
+          `/channels/${channelId}/threads?${query}`,
+          undefined,
+          signal,
+        ),
       );
     },
 

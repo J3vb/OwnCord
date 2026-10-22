@@ -67,7 +67,10 @@ import {
   handlePollVoteOk,
   handleReactionUpdate,
   handleSendFailure,
+  handleThreadDeleted,
+  handleThreadState,
   handleTyping,
+  resumeThreadFocus,
 } from "../features/messaging/wsHandlers";
 import {
   applyReadyBlocks,
@@ -182,6 +185,9 @@ export function wireDispatcher(
     ws.on(S.AUTH_OK, (payload) => {
       handleAuthOk(ws, clock, payload);
       refreshSafetyOnResume(api, payload);
+      // thread_focus is not carried across a connection: say it again, and
+      // refetch the open panel's history (it missed frames while down).
+      resumeThreadFocus(ws, api);
       // A resumed connection gets no ready, so refetch Message Requests here;
       // a full flow ("none") refetches them from ready instead.
       if (payload.replay_source === "buffer" || payload.replay_source === "db") {
@@ -241,6 +247,14 @@ export function wireDispatcher(
   // ── Chat Messages ─────────────────────────────────────
 
   unsubs.push(ws.on(S.CHAT_MESSAGE, (payload) => handleChatMessage(clock, payload)));
+
+  // ── Threads (WP 6.9c) ───────────────────────────────────
+
+  // thread_create_ok answers this socket's own create; thread_changed is the
+  // thread's whole state, sequenced on its parent. Both replace what we hold.
+  unsubs.push(ws.on(S.THREAD_CREATE_OK, handleThreadState));
+  unsubs.push(ws.on(S.THREAD_CHANGED, handleThreadState));
+  unsubs.push(ws.on(S.THREAD_DELETED, handleThreadDeleted));
 
   unsubs.push(ws.on(S.CHAT_EDITED, (payload) => handleChatEdited(api, payload)));
 

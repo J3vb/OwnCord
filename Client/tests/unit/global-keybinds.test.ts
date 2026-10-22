@@ -105,6 +105,64 @@ describe("global keybinds", () => {
     expect(upload.defaultPrevented).toBe(true);
   });
 
+  describe("from the thread panel's composer (WP 6.9c)", () => {
+    function panelComposer(): HTMLTextAreaElement {
+      const panel = document.createElement("div");
+      panel.className = "thread-panel";
+      const box = document.createElement("textarea");
+      box.className = "msg-textarea";
+      panel.appendChild(box);
+      document.body.appendChild(panel);
+      onTestFinished(() => panel.remove());
+      return box;
+    }
+    function keyFrom(
+      target: HTMLElement,
+      key: string,
+      opts: KeyboardEventInit = {},
+    ): KeyboardEvent {
+      const event = new KeyboardEvent("keydown", {
+        key,
+        code: codeFor(key),
+        bubbles: true,
+        cancelable: true,
+        ...opts,
+      });
+      target.dispatchEvent(event);
+      return event;
+    }
+
+    it("leaves Ctrl+Shift+U to itself, where the channel's composer would take it", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+      keyFrom(panelComposer(), "U", { ctrlKey: true, shiftKey: true, code: "KeyU" });
+      expect(h.onUploadFile).not.toHaveBeenCalled();
+    });
+
+    it("does not mark the parent channel read on Escape or scroll it on Page Down", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+      const box = panelComposer();
+      keyFrom(box, "Escape");
+      keyFrom(box, "PageDown");
+      expect(h.onMarkChannelRead).not.toHaveBeenCalled();
+      expect(h.onScrollMessages).not.toHaveBeenCalled();
+    });
+
+    it("still does both from the channel's own composer", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+      const own = document.createElement("textarea");
+      own.className = "msg-textarea";
+      document.body.appendChild(own);
+      onTestFinished(() => own.remove());
+      keyFrom(own, "Escape");
+      keyFrom(own, "PageDown");
+      expect(h.onMarkChannelRead).toHaveBeenCalledOnce();
+      expect(h.onScrollMessages).toHaveBeenCalledWith(1);
+    });
+  });
+
   it("a mute already bound to U keeps Ctrl+Shift+U", () => {
     saveGlobalShortcutVk("mute", 0x55);
     onTestFinished(() => {

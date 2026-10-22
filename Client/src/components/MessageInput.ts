@@ -24,7 +24,7 @@ import {
   createChannelAutocomplete,
   type ChannelAutocompleteComponent,
 } from "@components/ChannelAutocomplete";
-import { claimComposer } from "../features/messaging/activeComposer";
+import { claimComposer, focusComposer } from "../features/messaging/activeComposer";
 import { emojiCatalog, loadEmojiCatalog } from "../features/messaging/emojiCatalog";
 import {
   createSlashAutocomplete,
@@ -87,6 +87,10 @@ export interface MessageInputOptions {
   readonly onDraftChange?: () => void;
   /** Initial disabled reason (e.g. read-only / no-permission / offline). */
   readonly disabledReason?: string | null;
+  /** Replaces the "Message #channel" placeholder (a text-only thread composer). */
+  readonly placeholder?: string;
+  /** Leave the "+" attach button out (a text-only thread composer). */
+  readonly noAttach?: boolean;
 }
 
 /** A file a send carried, kept so one the server did not attach can go back
@@ -851,6 +855,12 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
   }
 
+  function idlePlaceholder(): string {
+    return (
+      options.placeholder ?? messagingText("composer.placeholder", { channel: options.channelName })
+    );
+  }
+
   /** Reflect the current disabledReason onto the DOM (textarea + controls). */
   function applyDisabledState(): void {
     if (textarea === null) return;
@@ -862,9 +872,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // `disabled` (they are not focus targets the user is typing into).
     textarea.readOnly = disabled;
     textarea.setAttribute("aria-disabled", String(disabled));
-    textarea.placeholder = disabled
-      ? disabledReason!
-      : messagingText("composer.placeholder", { channel: options.channelName });
+    textarea.placeholder = disabled ? disabledReason! : idlePlaceholder();
     const uploadsOff = uploadsDisabledByServer();
     for (const btn of controlButtons) {
       const isAttach = btn.classList.contains("attach-btn");
@@ -1548,7 +1556,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
     textarea = createElement("textarea", {
       class: "msg-textarea",
-      placeholder: messagingText("composer.placeholder", { channel: options.channelName }),
+      placeholder: idlePlaceholder(),
       rows: "1",
       "data-testid": "msg-textarea",
     });
@@ -1938,7 +1946,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       "data-testid": "char-counter",
     });
     charCounter.hidden = true;
-    appendChildren(inputBox, attachBtn, textarea, emojiBtn, gifBtn);
+    if (options.noAttach !== true) inputBox.appendChild(attachBtn);
+    appendChildren(inputBox, textarea, emojiBtn, gifBtn);
     if (pollBtn !== null) inputBox.appendChild(pollBtn);
     appendChildren(inputBox, charCounter, sendBtn);
     slowModeNoteEl = createElement("div", {
@@ -1949,9 +1958,11 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     applySlowModeNote();
     container.appendChild(root);
     releaseComposer?.();
-    releaseComposer = claimComposer({
-      insertMention: insertMentionAtCaret,
-      canMention: canTakeText,
+    const mentionTarget = { insertMention: insertMentionAtCaret, canMention: canTakeText };
+    releaseComposer = claimComposer(mentionTarget);
+    // With a thread's composer beside this one, a Mention goes where the user is.
+    root.addEventListener("focusin", () => focusComposer(mentionTarget), {
+      signal: disposable.signal,
     });
     // Apply any initial disabled reason before focusing.
     applyDisabledState();

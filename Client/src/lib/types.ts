@@ -77,6 +77,10 @@ export type WsErrorCode =
   // A reaction_add of a new emoji on a message that already has 20 (3A-12).
   | "REACTION_LIMIT"
   | "BAD_PAYLOAD"
+  // WP 6.9c: the message already has a thread (the payload names it), or the
+  // thread is locked and only a moderator may post in or change it.
+  | "THREAD_EXISTS"
+  | "THREAD_LOCKED"
   | "NOT_KEY_HOLDER"
   // The same account connected from another device and displaced this socket.
   | "SESSION_REPLACED"
@@ -450,6 +454,12 @@ export interface ReadyPayload {
      * server.
      */
     readonly dm_privacy?: boolean;
+    /**
+     * The server supports threads (WP 6.9c): the `thread_*` frames and `GET
+     * /channels/{id}/threads`. Absent means an older server, which shows no
+     * thread controls.
+     */
+    readonly threads?: boolean;
   };
   readonly channels: readonly ReadyChannel[];
   /**
@@ -671,6 +681,63 @@ export interface PollEndOkPayload {
   readonly message_id: number;
 }
 
+/**
+ * A thread as the server states it (WP 6.9c). Always absolute: a later frame
+ * replaces an earlier one. `owner_id` and `starter_message_id` are null once
+ * the user or the message is erased; `last_message_at` is null with no replies.
+ */
+export interface ThreadInfo {
+  readonly id: number;
+  readonly parent_id: number;
+  readonly name: string;
+  readonly owner_id: number | null;
+  readonly starter_message_id: number | null;
+  readonly archived: boolean;
+  readonly locked: boolean;
+  readonly auto_archive_minutes: number;
+  readonly message_count: number;
+  readonly last_message_at: string | null;
+  readonly created_at: string;
+}
+
+/** The idle periods a thread can auto-archive after, in minutes. */
+export type ThreadAutoArchiveMinutes = 60 | 1440 | 4320 | 10080;
+
+/** thread_create_ok / thread_changed: the thread's whole state. */
+export interface ThreadPayload {
+  readonly thread: ThreadInfo;
+}
+
+/** thread_deleted: `channel_id` is the parent. */
+export interface ThreadDeletedPayload {
+  readonly channel_id: number;
+  readonly thread_id: number;
+}
+
+/** Start a thread on a message of a text channel. */
+export interface ThreadCreatePayload {
+  readonly channel_id: number;
+  readonly message_id: number;
+  readonly name: string;
+  readonly auto_archive_minutes: ThreadAutoArchiveMinutes;
+}
+
+/** Change a thread; an absent field is unchanged. */
+export interface ThreadUpdatePayload {
+  readonly thread_id: number;
+  readonly name?: string;
+  readonly archived?: boolean;
+  readonly locked?: boolean;
+  readonly auto_archive_minutes?: ThreadAutoArchiveMinutes;
+}
+
+/** GET /channels/{id}/threads. `next_before` is opaque and "" on the last page. */
+export interface ThreadListResponse {
+  readonly threads: readonly ThreadInfo[];
+  readonly has_more: boolean;
+  readonly next_before: string;
+}
+
 export interface ChatMessagePayload {
   readonly client_message_id?: string;
   readonly id: number;
@@ -712,6 +779,8 @@ export interface ChatMessagePayload {
   readonly forward?: ForwardInfo;
   /** Present on a poll message only (WP 6.9b). */
   readonly poll?: PollInfo;
+  /** Present on a thread's starter message only (WP 6.9c). */
+  readonly thread?: ThreadInfo;
 }
 
 export interface ChatSendOkPayload {
@@ -1157,6 +1226,8 @@ export interface ErrorPayload {
   readonly message: string;
   /** SERVER_BUSY only: the least wait before redialling. */
   readonly retry_after_ms?: number;
+  /** THREAD_EXISTS only: the thread the message already has (WP 6.9c). */
+  readonly thread_id?: number;
 }
 
 // -----------------------------------------------------------------------------
@@ -1361,6 +1432,10 @@ export type ServerMessage =
   | (WsEnvelope<ChatMessagePayload> & { readonly type: "chat_message" })
   | (WsEnvelope<ChatSendOkPayload> & { readonly type: "chat_send_ok" })
   | (WsEnvelope<ChatForwardOkPayload> & { readonly type: "chat_forward_ok" })
+  | (WsEnvelope<ThreadPayload> & { readonly type: "thread_create_ok" })
+  | (WsEnvelope<{ readonly thread_id: number }> & { readonly type: "thread_update_ok" })
+  | (WsEnvelope<ThreadPayload> & { readonly type: "thread_changed" })
+  | (WsEnvelope<ThreadDeletedPayload> & { readonly type: "thread_deleted" })
   | (WsEnvelope<ChatEditedPayload> & { readonly type: "chat_edited" })
   | (WsEnvelope<ChatDeletedPayload> & { readonly type: "chat_deleted" })
   | (WsEnvelope<ChatBulkDeletedPayload> & { readonly type: "chat_bulk_deleted" })
@@ -1420,6 +1495,10 @@ export type ClientMessage =
   | (WsEnvelope<PollCreatePayload> & { readonly type: "poll_create" })
   | (WsEnvelope<PollVotePayload> & { readonly type: "poll_vote" })
   | (WsEnvelope<PollEndPayload> & { readonly type: "poll_end" })
+  | (WsEnvelope<ThreadCreatePayload> & { readonly type: "thread_create" })
+  | (WsEnvelope<ThreadUpdatePayload> & { readonly type: "thread_update" })
+  | (WsEnvelope<{ readonly thread_id: number }> & { readonly type: "thread_delete" })
+  | (WsEnvelope<{ readonly thread_id: number | null }> & { readonly type: "thread_focus" })
   | (WsEnvelope<ChatEditPayload> & { readonly type: "chat_edit" })
   | (WsEnvelope<ChatDeletePayload> & { readonly type: "chat_delete" })
   | (WsEnvelope<ReactionAddPayload> & { readonly type: "reaction_add" })
@@ -1586,6 +1665,8 @@ export interface MessageResponse {
   readonly forward?: ForwardInfo;
   /** Present on a poll message only (WP 6.9b). */
   readonly poll?: PollInfo;
+  /** Present on a thread's starter message only (WP 6.9c). */
+  readonly thread?: ThreadInfo;
 }
 
 /**

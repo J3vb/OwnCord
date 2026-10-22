@@ -310,6 +310,7 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
       chatArea,
       slots,
       callPanelSlot,
+      threadSlot: document.createElement("div"),
       videoGrid,
       chatHeaderName: document.createElement("span"),
       chatHeaderRefs: {
@@ -4056,7 +4057,8 @@ describe("MainPage — B9-4 content view wiring", () => {
   it("places the view column between the chat column and the DM profile slot", () => {
     const view = container.querySelector("[data-testid='feature-view']");
     const chat = capturedChatAreaRef.current!;
-    expect(view?.previousElementSibling).toBe(chat.chatArea);
+    // The thread panel's slot (WP 6.9c) sits right behind the chat column.
+    expect(view?.previousElementSibling?.previousElementSibling).toBe(chat.chatArea);
     // The member column (3C-6b) sits between the content view and the DM panel.
     expect(view?.nextElementSibling?.id).toBe("member-column");
     expect(view?.nextElementSibling?.nextElementSibling).toBe(chat.dmProfileSlot);

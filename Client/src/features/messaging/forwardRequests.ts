@@ -1,7 +1,8 @@
 /**
- * The envelope ids of in-flight Forward frames (WP 6.9a). The dispatcher's error
+ * The envelope ids of in-flight Forward frames (WP 6.9a), and of a Create
+ * Thread request (WP 6.9c), whose dialog shows its own refusal. The dispatcher's error
  * handler asks `isForwardRequest` so a refused forward is reported once, in the
- * picker's own per-target result, and not again by the generic error toast.
+ * picker's own per-target result (or the dialog's own line), and not again by the generic error toast.
  * A leaf with no imports of its own: the dispatcher reaches it at startup,
  * while the sender that fills it (forwardSend.ts) loads with the picker.
  */
