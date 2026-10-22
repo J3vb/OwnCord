@@ -113,14 +113,15 @@ describe("portal sign-in form", () => {
     expect(field("host").value).toBe(HOST);
   });
 
-  it("names the server in a header, the host until its name arrives", () => {
+  it("one heading: the card's subtitle names the server, the host until its name arrives", () => {
     const names = new Map<string, string>();
     const { page } = mountPortal({ getServerName: (h) => names.get(h) ?? null });
-    const header = container.querySelector(".portal-header")!;
-    expect(header.textContent).toContain(HOST);
+    expect(container.querySelector(".portal-header")).toBeNull();
+    expect(container.querySelectorAll(".brand-name, .form-logo h1")).toHaveLength(1);
+    const subtitle = container.querySelector(".form-logo p")!;
+    expect(subtitle.textContent).toBe(portalText("login.subtitle", { server: HOST }));
     names.set(HOST, "Casey's Place");
     page.updateCompatibility(HOST, "compatible", 1);
-    expect(header.textContent).toContain("Casey's Place");
-    expect(header.textContent).not.toContain(HOST);
+    expect(subtitle.textContent).toBe(portalText("login.subtitle", { server: "Casey's Place" }));
   });
 });

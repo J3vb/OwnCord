@@ -9,6 +9,7 @@
 
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
 import { connectText } from "../../i18n/connect";
+import { portalText } from "../../i18n/portal";
 
 export interface IncompatibleNoticeOptions {
   /** Called when the user chooses to update this client. */
@@ -57,28 +58,39 @@ export function createIncompatibleNotice(opts: IncompatibleNoticeOptions): Incom
     // The update exit is offered only when the client is the older side: an
     // older server's requirement cannot be resolved by installing this
     // client, and offering the updater there would update the wrong side.
-    if (serverEpoch !== null && serverEpoch > clientEpoch) {
+    // On the portal a reload is the one action in either case: a cached page
+    // can be newer or older than the server it talks to.
+    if (__OWNCORD_WEB__ || (serverEpoch !== null && serverEpoch > clientEpoch)) {
       const updateBtn = createElement("button", {
         class: "incompatible-notice-update btn-primary",
         type: "button",
       });
-      setText(updateBtn, connectText("incompatible.updateClient"));
+      // The portal is the page itself: updating the client is reloading it.
+      setText(
+        updateBtn,
+        __OWNCORD_WEB__
+          ? portalText("incompatible.reload")
+          : connectText("incompatible.updateClient"),
+      );
       updateBtn.addEventListener("click", () => {
         if (currentHost !== null) opts.onUpdate(currentHost);
       });
       actions.appendChild(updateBtn);
     }
 
-    const leaveBtn = createElement("button", {
-      class: "incompatible-notice-leave btn-ghost",
-      type: "button",
-    });
-    setText(leaveBtn, connectText("incompatible.leave"));
-    leaveBtn.addEventListener("click", () => {
-      notice.hide();
-      opts.onLeave();
-    });
-    appendChildren(actions, leaveBtn);
+    // The portal serves one server, so there is no other server to choose.
+    if (!__OWNCORD_WEB__) {
+      const leaveBtn = createElement("button", {
+        class: "incompatible-notice-leave btn-ghost",
+        type: "button",
+      });
+      setText(leaveBtn, connectText("incompatible.leave"));
+      leaveBtn.addEventListener("click", () => {
+        notice.hide();
+        opts.onLeave();
+      });
+      appendChildren(actions, leaveBtn);
+    }
 
     appendChildren(element, text, actions);
   }
