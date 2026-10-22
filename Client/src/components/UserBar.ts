@@ -35,6 +35,7 @@ import type { WsClient } from "@lib/ws";
 import type { PresenceSender } from "@lib/presence";
 import { shellText } from "../i18n/shell";
 import { voiceText } from "../i18n/voice";
+import { portalText } from "../i18n/portal";
 
 export interface UserBarOptions {
   readonly onDisconnect?: () => void;
@@ -431,10 +432,14 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
 
     if (options?.onDisconnect !== undefined) {
       const disconnectFn = options.onDisconnect;
+      // The portal serves one server, so the button signs out instead.
+      const disconnectLabel = __OWNCORD_WEB__
+        ? portalText("userBar.signOut")
+        : shellText("quickSwitch.label");
       const disconnectBtn = createElement("button", {
         class: "ub-ctrl-btn",
-        title: shellText("quickSwitch.label"),
-        "aria-label": shellText("quickSwitch.label"),
+        title: disconnectLabel,
+        "aria-label": disconnectLabel,
         "data-testid": "disconnect-btn",
       });
       disconnectBtn.appendChild(createIcon("log-out", 18));

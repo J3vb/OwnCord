@@ -25,6 +25,7 @@ export type { SimpleProfile } from "./connect-page/ServerPanel";
 
 import type { SimpleProfile } from "./connect-page/ServerPanel";
 import { connectText } from "../i18n/connect";
+import { portalText } from "../i18n/portal";
 
 /** Callbacks for external wiring (API integration added later). */
 export interface ConnectPageCallbacks {
@@ -47,7 +48,7 @@ export interface ConnectPageCallbacks {
   getRetentionNotice?(host: string): string | null;
   /** A typed host settled in register mode; probe its `server-info` if unknown. */
   onHostSettled?(host: string): void;
-  /** The name `server-info` reported for a host, if known (the portal header, WP 6.13e). */
+  /** The name `server-info` reported for a host, if known (the portal card's subtitle, WP 6.13e). */
   getServerName?(host: string): string | null;
 }
 
@@ -216,12 +217,14 @@ export function createConnectPage(
     initialProfiles,
   );
 
-  // The portal header's server name: what `server-info` reported, else the host.
-  let portalName: HTMLDivElement | null = null;
+  // The portal's one heading is the form card; its subtitle names the server:
+  // what `server-info` reported, else the host.
   function refreshPortalName(): void {
-    if (__OWNCORD_WEB__ && fixedHost !== undefined && portalName !== null) {
-      setText(portalName, callbacks.getServerName?.(fixedHost) ?? fixedHost);
-    }
+    if (!__OWNCORD_WEB__ || fixedHost === undefined) return;
+    const subtitle = loginForm.element.querySelector(".form-logo p");
+    if (subtitle === null) return;
+    const server = callbacks.getServerName?.(fixedHost) ?? fixedHost;
+    setText(subtitle, portalText("login.subtitle", { server }));
   }
 
   // ---------------------------------------------------------------------------
@@ -309,14 +312,11 @@ export function createConnectPage(
     appendChildren(branding, brandName, brandTag);
 
     if (__OWNCORD_WEB__ && fixedHost !== undefined) {
-      // One server: no list to pick from, so the branding and the server's
-      // name head the form and the panel is never mounted.
+      // One server: no list to pick from and no second brand block; the form
+      // card is the only heading and the panel is never mounted.
       root.classList.add("connect-page--portal");
-      portalName = createElement("div", { class: "portal-server-name" });
-      const portalHeader = createElement("div", { class: "portal-header" });
-      appendChildren(portalHeader, branding, portalName);
+      appendChildren(root, loginForm.element);
       refreshPortalName();
-      appendChildren(root, portalHeader, loginForm.element);
     } else {
       serverPanel.element.insertBefore(branding, serverPanel.element.firstChild);
       appendChildren(root, serverPanel.element, loginForm.element);

@@ -25,6 +25,7 @@ import { createCategoryDialogs } from "./categoryDialogs";
 import { migrateCollapsedToCategoryIds } from "../../features/channels/collapsedMigration";
 import type { VoiceWidgetOptions } from "@components/VoiceWidget";
 import { createDeleteChannelModal } from "@components/DeleteChannelModal";
+import { logout } from "@lib/logout";
 import { createUserBar } from "@components/UserBar";
 import { createQuickSwitchOverlay } from "@components/QuickSwitchOverlay";
 import type { QuickSwitchProfile } from "@components/QuickSwitchOverlay";
@@ -1390,7 +1391,8 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   const userBarSlot = createElement("div", {});
   const selfVoiceCallbacks = createVoiceWidgetCallbacks(ws, limiters);
   const userBar = createUserBar({
-    onDisconnect: openQuickSwitch,
+    // The portal serves one server: the button signs out, nothing to switch to.
+    onDisconnect: __OWNCORD_WEB__ ? () => logout(api) : openQuickSwitch,
     ws,
     presenceSender,
     onMuteToggle: selfVoiceCallbacks.onMuteToggle,

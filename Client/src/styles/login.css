@@ -132,14 +132,9 @@
   color: var(--text-muted);
   line-height: 1.4;
 }
-/* Web portal (one server): branding and server name above the form */
+/* Web portal (one server): the form card is the page's only heading */
 .connect-page--portal {
   flex-direction: column;
-}
-.portal-header {
-  position: relative;
-  z-index: 1;
-  text-align: center;
 }
 .portal-insecure {
   max-width: 480px;
@@ -152,14 +147,6 @@
   font-size: var(--font-size-xl);
   margin-bottom: 8px;
 }
-.portal-server-name {
-  font-size: var(--font-size-md);
-  font-weight: 600;
-  color: var(--text-normal);
-  overflow-wrap: anywhere;
-  padding: 0 16px;
-}
-
 .header-actions {
   display: flex;
   gap: 4px;
@@ -812,6 +799,11 @@
   gap: 8px;
   margin-bottom: 16px;
   margin-top: -8px;
+}
+/* Beats the flex above: the portal hides this group, and the later, equally
+   specific rule would otherwise keep it on screen. */
+.remember-password-group.form-group--hidden {
+  display: none;
 }
 .remember-password-group input[type="checkbox"] {
   width: 18px;

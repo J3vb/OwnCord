@@ -2,7 +2,8 @@
 
 **Kind:** target-state map. **Status:** the desktop half is implemented — B7-3
 wrote the contracts and B7-4/B7-5 moved every native call behind
-`Client/src/platform/desktop/`; the `browser/` half is B8, deferred.
+`Client/src/platform/desktop/`; the `browser/` half is implemented too (WP
+6.13b-e: credentials, socket, the portal sign-in and its in-app branches).
 **Measured against:** B7-5 (branch `fm/b7-5-impl`, 2026-09-21), which moved
 the last native importers behind the seam, and B7-16 (branch `fm/b7-16-impl`,
 2026-09-21), which added the external-content broker contract, its two native

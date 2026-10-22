@@ -9,6 +9,11 @@ import { defineCatalog } from "./format";
  */
 export const portalText = /* @__PURE__ */ defineCatalog("portal", {
   "login.stayLoggedIn": "Stay signed in",
+  "login.subtitle": "Sign in to {server}",
+
+  "userBar.signOut": "Sign out",
+
+  "incompatible.reload": "Reload page",
 
   "insecure.title": "A secure connection is required",
   "insecure.body":
