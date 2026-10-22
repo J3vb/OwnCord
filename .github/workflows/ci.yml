@@ -1143,7 +1143,9 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    # A PR into main restores no dev Rust cache and compiles every crate cold
+    # (over 30 min); a warm dev run takes about 12.
+    timeout-minutes: 50
     defaults:
       run:
         working-directory: Client/src-tauri/
