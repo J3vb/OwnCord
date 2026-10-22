@@ -257,10 +257,7 @@ interface VirtualItemBlockedRun {
 }
 
 export type VirtualItem =
-  | VirtualItemMessage
-  | VirtualItemDivider
-  | VirtualItemNewDivider
-  | VirtualItemBlockedRun;
+  VirtualItemMessage | VirtualItemDivider | VirtualItemNewDivider | VirtualItemBlockedRun;
 
 // -- Smart height estimation --------------------------------------------------
 
