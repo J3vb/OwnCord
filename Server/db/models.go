@@ -310,13 +310,13 @@ type MessageAPIResponse struct {
 	// for an ordinary message. See CallInfo.
 	Kind string    `json:"kind,omitempty"`
 	Call *CallInfo `json:"call,omitempty"`
-	// GroupEvent is set only on a group event row (kinds group_add to
-	// group_icon). See GroupEventInfo.
+	// GroupEvent is set only on a group event row (group_add to group_icon).
 	GroupEvent *GroupEventInfo `json:"group_event,omitempty"`
 	// Forward is set only on a forwarded message (WP 6.9a). See ForwardInfo.
 	Forward *ForwardInfo `json:"forward,omitempty"`
-	// Poll is set only on a poll message (WP 6.9b). See PollInfo.
-	Poll *PollInfo `json:"poll,omitempty"`
+	// Poll is set only on a poll (6.9b), Thread only on a thread starter (6.9c).
+	Poll   *PollInfo   `json:"poll,omitempty"`
+	Thread *ThreadInfo `json:"thread,omitempty"`
 }
 
 // GroupEventInfo is the group_event block of a group DM row. Which fields are

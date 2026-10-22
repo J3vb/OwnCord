@@ -56,4 +56,8 @@ const (
 	// event that names this class explicitly can reach it. Needs
 	// BroadcastAllEvent.
 	classBroadcastAll
+	// classThreadNote: a note for the thread_changed coalescer; nothing is
+	// sent now, the coalescer sequences the frame when it flushes. Needs
+	// ThreadNoteEvent.
+	classThreadNote
 )

@@ -615,6 +615,7 @@ func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64,
 		ChannelID: msg.ChannelID,
 		IsDM:      isDM,
 		IsMod:     isMod,
+		IsThread:  ch.IsThread(),
 	}
 
 	if isDM {

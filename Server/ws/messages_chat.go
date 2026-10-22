@@ -50,6 +50,12 @@ type chatMessagePayload struct {
 	// a replayed frame must not roll a newer count back (clients keep the higher
 	// results.version).
 	Poll *service.PollInfo `json:"poll,omitempty"`
+	// Thread is the starter message's thread (WP 6.9c): the same shape as the
+	// history payload's db.ThreadInfo. A message that has just been sent has no
+	// thread yet, so no live send sets it; thread_changed carries a thread that
+	// appears or changes afterwards. The field exists so a frame built from a
+	// stored row has one shape with history.
+	Thread *service.ThreadInfo `json:"thread,omitempty"`
 }
 
 // groupEventBlock is the group_event object of a group DM row. Add and remove

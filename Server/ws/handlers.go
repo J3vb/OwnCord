@@ -156,7 +156,11 @@ func (h *Hub) handleMessageError(fctx context.Context, c *Client, env envelope, 
 		return
 	}
 	if ce, ok := errors.AsType[ClientError](result.Error); ok {
-		c.sendMsg(buildErrorMsgWithID(ce.Code, ce.Message, env.ID))
+		if ce.ThreadID != 0 {
+			c.sendMsg(buildThreadErrorMsg(ce, env.ID))
+		} else {
+			c.sendMsg(buildErrorMsgWithID(ce.Code, ce.Message, env.ID))
+		}
 	} else {
 		slog.Error("ws handler internal error",
 			"user_id", c.userID, "msg_type", msgType, "req_id", reqID, "err", result.Error)
@@ -269,6 +273,9 @@ func (h *Hub) handleMessageApply(ctx, fctx context.Context, c *Client, env envel
 	// Apply client state mutations and side effects.
 	if result.SetChannelID != nil {
 		h.applyFocusResult(c, env.Type, *result.SetChannelID)
+	}
+	if result.SetThreadID != nil {
+		h.applyThreadFocus(c, *result.SetThreadID)
 	}
 	if result.DeferChannelFocus != nil {
 		h.deferChannelFocus(c, *result.DeferChannelFocus, env.ID, !result.DeferChannelFocusNoRead)

@@ -330,6 +330,7 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 			live.channelID = 0
 		}
 		live.mu.Unlock()
+		h.revokeHeldThread(ctx, live, ch.ID)
 	}
 
 	// Clients not connected right now missed the targeted sends above. Move
@@ -481,6 +482,10 @@ func (h *Hub) computeAllowedChannels(ctx context.Context, database VisibilityRea
 	}
 	for _, id := range dmIDs {
 		allowed[id] = true
+	}
+	// The thread the user's socket has open rides its parent's visibility.
+	if err := h.admitHeldThread(ctx, database, user.ID, allowed); err != nil {
+		return nil, err
 	}
 
 	return allowed, nil

@@ -68,6 +68,8 @@ func (h *Hub) emitOne(ctx context.Context, senderID int64, ev Event) bool {
 		return h.emitPresence(ctx, senderID, ev)
 	case classBroadcastAll:
 		return h.emitBroadcastAll(ctx, senderID, ev)
+	case classThreadNote:
+		return h.emitThreadNote(ctx, senderID, ev)
 	case classInvalid:
 		return false
 	default:
@@ -232,6 +234,15 @@ func (h *Hub) emitActivity(_ context.Context, _ int64, ev Event) bool {
 	} else {
 		h.activity.note(n)
 	}
+	return true
+}
+
+func (h *Hub) emitThreadNote(_ context.Context, _ int64, ev Event) bool {
+	e, ok := ev.(ThreadNoteEvent)
+	if !ok {
+		return false
+	}
+	h.handleThreadNote(e.ThreadNote()) //nolint:contextcheck // the coalescer timer is owned by the hub lifecycle, not by this request
 	return true
 }
 
