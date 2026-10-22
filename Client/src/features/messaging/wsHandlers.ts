@@ -138,7 +138,10 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
   // mention counts, so the badge here must agree with the next `ready`.
   const isMention =
     !blocksStore.getState().blockedByMe.has(payload.user.id) &&
-    (mentionsCurrentUser(payload.content, { mentions: payload.mentions }) ||
+    (mentionsCurrentUser(payload.content, {
+      mentions: payload.mentions,
+      mentionRoles: payload.mention_roles,
+    }) ||
       (payload.mentions_everyone === true && !(payload.mentions_here === true && isReplayFrame)));
   // P4-03: "active" only means "the reader is watching" while the window is
   // focused (isChannelAway, lib/read-state.ts). A minimised or unfocused window

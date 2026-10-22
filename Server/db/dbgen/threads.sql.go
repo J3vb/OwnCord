@@ -241,6 +241,181 @@ func (q *Queries) IsThreadChannel(ctx context.Context, id int64) (int64, error) 
 	return column_1, err
 }
 
+const isThreadFollower = `-- name: IsThreadFollower :one
+SELECT EXISTS(SELECT 1 FROM thread_members WHERE thread_id = ? AND user_id = ?)
+`
+
+type IsThreadFollowerParams struct {
+	ThreadID int64 `json:"threadId"`
+	UserID   int64 `json:"userId"`
+}
+
+func (q *Queries) IsThreadFollower(ctx context.Context, arg IsThreadFollowerParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, isThreadFollower, arg.ThreadID, arg.UserID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const joinThread = `-- name: JoinThread :execrows
+
+INSERT OR IGNORE INTO thread_members (thread_id, user_id)
+SELECT c.id, ?1 FROM channels c
+WHERE c.id = ?2 AND c.type = 'thread'
+`
+
+type JoinThreadParams struct {
+	UserID   int64 `json:"userId"`
+	ThreadID int64 `json:"threadId"`
+}
+
+// Thread follows (WP 6.9c, migration 079). A row is never permission: every
+// read below is for the caller to join with the parent's visibility.
+// The insert path checks the type, so a row can only name a thread. rows
+// affected is 1 when the user was newly joined and 0 when they already were.
+func (q *Queries) JoinThread(ctx context.Context, arg JoinThreadParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, joinThread, arg.UserID, arg.ThreadID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const leaveThread = `-- name: LeaveThread :execrows
+DELETE FROM thread_members WHERE thread_id = ? AND user_id = ?
+`
+
+type LeaveThreadParams struct {
+	ThreadID int64 `json:"threadId"`
+	UserID   int64 `json:"userId"`
+}
+
+func (q *Queries) LeaveThread(ctx context.Context, arg LeaveThreadParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, leaveThread, arg.ThreadID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const listFollowedThreadStates = `-- name: ListFollowedThreadStates :many
+SELECT c.id, COALESCE(c.parent_channel_id, 0) AS parent_id, c.name, c.thread_owner_id,
+       c.thread_starter_message_id, c.thread_archived, c.thread_locked,
+       c.thread_auto_archive_minutes,
+       (SELECT COUNT(*) FROM messages m
+         WHERE m.channel_id = c.id AND m.deleted = 0 AND m.kind = 0) AS message_count,
+       (SELECT MAX(m.timestamp) FROM messages m
+         WHERE m.channel_id = c.id AND m.deleted = 0) AS last_message_at,
+       c.created_at,
+       (SELECT COALESCE(MAX(m.id), 0) FROM messages m
+         WHERE m.channel_id = c.id AND m.deleted = 0) AS last_message_id,
+       COALESCE((SELECT rs.last_message_id FROM read_states rs
+                  WHERE rs.channel_id = c.id AND rs.user_id = tm.user_id), 0) AS last_read_message_id,
+       (SELECT COUNT(*) FROM (SELECT 1 FROM messages m
+         WHERE m.channel_id = c.id AND m.deleted = 0
+           AND m.id > COALESCE((SELECT rs.last_message_id FROM read_states rs
+                                 WHERE rs.channel_id = c.id AND rs.user_id = tm.user_id), 0)
+         LIMIT 100)) AS unread_count,
+       COALESCE((SELECT rs.mention_count FROM read_states rs
+                  WHERE rs.channel_id = c.id AND rs.user_id = tm.user_id), 0) AS mention_count
+FROM thread_members tm
+JOIN channels c ON c.id = tm.thread_id AND c.type = 'thread'
+WHERE tm.user_id = ?1 AND c.thread_archived = 0
+ORDER BY COALESCE(c.thread_last_activity_at, '') DESC, c.id DESC
+LIMIT ?2
+`
+
+type ListFollowedThreadStatesParams struct {
+	UserID   int64 `json:"userId"`
+	RowLimit int64 `json:"rowLimit"`
+}
+
+type ListFollowedThreadStatesRow struct {
+	ID                       int64       `json:"id"`
+	ParentID                 int64       `json:"parentId"`
+	Name                     string      `json:"name"`
+	ThreadOwnerID            *int64      `json:"threadOwnerId"`
+	ThreadStarterMessageID   *int64      `json:"threadStarterMessageId"`
+	ThreadArchived           int64       `json:"threadArchived"`
+	ThreadLocked             int64       `json:"threadLocked"`
+	ThreadAutoArchiveMinutes int64       `json:"threadAutoArchiveMinutes"`
+	MessageCount             int64       `json:"messageCount"`
+	LastMessageAt            interface{} `json:"lastMessageAt"`
+	CreatedAt                string      `json:"createdAt"`
+	LastMessageID            interface{} `json:"lastMessageId"`
+	LastReadMessageID        interface{} `json:"lastReadMessageId"`
+	UnreadCount              int64       `json:"unreadCount"`
+	MentionCount             interface{} `json:"mentionCount"`
+}
+
+// The user's followed open threads with their read position, newest activity
+// first. Unread counts stop at 100, as a channel's do.
+func (q *Queries) ListFollowedThreadStates(ctx context.Context, arg ListFollowedThreadStatesParams) ([]ListFollowedThreadStatesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listFollowedThreadStates, arg.UserID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListFollowedThreadStatesRow{}
+	for rows.Next() {
+		var i ListFollowedThreadStatesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ParentID,
+			&i.Name,
+			&i.ThreadOwnerID,
+			&i.ThreadStarterMessageID,
+			&i.ThreadArchived,
+			&i.ThreadLocked,
+			&i.ThreadAutoArchiveMinutes,
+			&i.MessageCount,
+			&i.LastMessageAt,
+			&i.CreatedAt,
+			&i.LastMessageID,
+			&i.LastReadMessageID,
+			&i.UnreadCount,
+			&i.MentionCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listThreadFollowerIDs = `-- name: ListThreadFollowerIDs :many
+SELECT user_id FROM thread_members WHERE thread_id = ? ORDER BY user_id ASC
+`
+
+func (q *Queries) ListThreadFollowerIDs(ctx context.Context, threadID int64) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, listThreadFollowerIDs, threadID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var user_id int64
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listThreadInfosByParent = `-- name: ListThreadInfosByParent :many
 SELECT c.id, COALESCE(c.parent_channel_id, 0) AS parent_id, c.name, c.thread_owner_id,
        c.thread_starter_message_id, c.thread_archived, c.thread_locked,

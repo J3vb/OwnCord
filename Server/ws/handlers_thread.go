@@ -15,7 +15,7 @@ type ThreadDeps struct {
 	ChannelSvc *service.ChannelService
 }
 
-// registerThreadHandlers registers the four thread commands. A hub built
+// registerThreadHandlers registers the five thread commands. A hub built
 // without Services has no thread service, so they answer INTERNAL there
 // (threadsUnavailable) and the ready payload does not advertise `threads`.
 func registerThreadHandlers(r *HandlerRegistry, deps ThreadDeps) {
@@ -23,6 +23,7 @@ func registerThreadHandlers(r *HandlerRegistry, deps ThreadDeps) {
 	r.RegisterV2(MsgTypeThreadUpdate, handleThreadUpdateV2, deps)
 	r.RegisterV2(MsgTypeThreadDelete, handleThreadDeleteV2, deps)
 	r.RegisterV2(MsgTypeThreadFocus, handleThreadFocusV2, deps)
+	r.RegisterV2(MsgTypeThreadFollow, handleThreadFollowV2, deps)
 }
 
 // threadsUnavailable is the answer of a hub that has no thread service.
@@ -95,17 +96,53 @@ func handleThreadDeleteV2(ctx context.Context, cmd Command, info ClientInfo, dep
 		return threadsUnavailable()
 	}
 	c := cmd.(ThreadDeleteCmd)
-	t, err := d.ThreadSvc.Delete(ctx, info.UserID, c.ThreadID)
+	t, followers, err := d.ThreadSvc.DeleteNotifying(ctx, info.UserID, c.ThreadID)
 	if err != nil {
 		return threadErrorToResult(err)
 	}
 	// The note comes first: it drops the thread's coalescer entry, so a flush
 	// that read the thread before the delete cannot announce it after the
 	// sequenced thread_deleted.
-	return Result{Events: []Event{
+	events := []Event{
 		threadNoteEvt{threadID: t.ID, parentID: t.ParentID, deleted: true},
 		channelEvt{evType: MsgTypeThreadDeleted, channelID: t.ParentID, payload: buildThreadDeleted(t.ParentID, t.ID)},
-	}}
+	}
+	// Each follower's rows went with the thread: tell them they no longer follow it.
+	gone := buildThreadFollowUpdate(t.ID, false, nil)
+	for _, uid := range followers {
+		events = append(events, threadFollowEvt{targetUserID: uid, payload: gone})
+	}
+	return Result{Events: events}
+}
+
+// handleThreadFollowV2 follows or unfollows a thread for the sender. The reply
+// is thread_follow_ok with the state the follow is in; the same state follows
+// to the sender's socket as a thread_follow_update, which is how the thread
+// reaches a client that did not have it.
+func handleThreadFollowV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
+	d := deps.(ThreadDeps)
+	if d.ThreadSvc == nil {
+		return threadsUnavailable()
+	}
+	c := cmd.(ThreadFollowCmd)
+	// Its own budget, the focus one: following is user-paced.
+	if d.Limiter != nil && !d.Limiter.Allow(auth.Key("threadfollow", info.UserID), focusRateLimit, focusRateWindow) {
+		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many thread follow changes"}}
+	}
+	t, err := d.ThreadSvc.SetFollow(ctx, info.UserID, c.ThreadID, c.Follow)
+	if err != nil {
+		return threadErrorToResult(err)
+	}
+	var shown *service.ThreadInfo
+	if c.Follow {
+		shown = t
+	}
+	return Result{
+		Reply: buildThreadFollowOK(info.ReqID, t.ID, c.Follow),
+		Events: []Event{threadFollowEvt{
+			targetUserID: info.UserID, payload: buildThreadFollowUpdate(t.ID, c.Follow, shown),
+		}},
+	}
 }
 
 // handleThreadFocusV2 moves the second subscription slot. A null thread_id

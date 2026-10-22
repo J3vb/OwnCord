@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
@@ -37,8 +38,9 @@ func (s *MessageService) SetReadStateNotifier(n ReadStateNotifier) {
 // MoveReadPointer moves userID's read pointer in channelID and tells them the
 // result. It lives on MessageService because it owns mentionEmitMu.
 //
-// Admission is the one channel_focus uses (admitReadState): a missing channel
-// is ErrNotFound, lost access or an archived channel ErrForbidden. messageID
+// Admission is the one channel_focus uses (admitReadState), except that a
+// thread is admitted too (admitReadPointer): a missing channel is ErrNotFound,
+// lost access or an archived channel ErrForbidden. messageID
 // must be positive for db.ReadUpTo and db.MarkUnread (ErrBadRequest otherwise);
 // db.ReadAtLatest ignores it. A message that is not a live message of the
 // channel is ErrNotFound (still wrapping db.ErrNotFound) for db.MarkUnread.
@@ -57,7 +59,7 @@ func (s *MessageService) MoveReadPointer(ctx context.Context, userID, channelID 
 	if op != db.ReadAtLatest && messageID <= 0 {
 		return db.ReadPointer{}, fmt.Errorf("%w: message_id must be positive", ErrBadRequest)
 	}
-	ch, err := admitReadState(ctx, s.st, s.perms, userID, channelID)
+	ch, err := admitReadPointer(ctx, s.st, s.perms, userID, channelID)
 	if err != nil {
 		return db.ReadPointer{}, err
 	}
@@ -124,4 +126,26 @@ func (s *MessageService) readAtLatestIsCurrent(ctx context.Context, userID, chan
 		return db.ReadPointer{}, false
 	}
 	return db.ReadPointer{LastReadMessageID: lastRead}, true
+}
+
+// admitReadPointer is admitReadState for the commands that move a read pointer
+// without focusing (mark_read, mark_unread). Those never touch the socket's
+// focus slot, so a thread is admitted through its parent like thread_focus
+// does (WP 6.9c): the thread panel and the sidebar row mark a thread read.
+func admitReadPointer(ctx context.Context, st Store, perms *PermissionService, userID, channelID int64) (*db.Channel, error) {
+	ch, err := st.GetChannel(ctx, channelID)
+	if err != nil || ch == nil {
+		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
+	}
+	if !ch.IsThread() {
+		return admitReadState(ctx, st, perms, userID, channelID)
+	}
+	sub, subErr := channelSubject(ctx, st, perms, userID, ch, false)
+	if subErr != nil {
+		return nil, fmt.Errorf("%w: access denied", ErrForbidden)
+	}
+	if err := permissions.CanAdmitSession(sub); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrForbidden, err)
+	}
+	return ch, nil
 }

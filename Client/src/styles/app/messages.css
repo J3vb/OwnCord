@@ -393,6 +393,25 @@
   background: var(--yellow);
   color: var(--bg-tertiary);
 }
+/* A role mention (`<@&id>`): tinted with the role's own colour (--role-pill is
+   set only from a validated hex), and not a button: it opens no profile. */
+.mention.mention-role {
+  background: color-mix(in srgb, var(--role-pill, var(--accent)) 25%, transparent);
+  /* The role colour pulled toward the text colour, so a dark role stays legible. */
+  color: color-mix(in srgb, var(--role-pill, var(--text-link)) 65%, var(--text-normal));
+  cursor: default;
+}
+.mention.mention-role:hover {
+  background: color-mix(in srgb, var(--role-pill, var(--accent)) 45%, transparent);
+  color: color-mix(in srgb, var(--role-pill, var(--text-link)) 65%, var(--text-normal));
+}
+.mention.mention-role.mention-self {
+  background: color-mix(in srgb, var(--yellow) 28%, transparent);
+  color: color-mix(in srgb, var(--role-pill, var(--yellow)) 65%, var(--text-normal));
+}
+.mention.mention-role.mention-self:hover {
+  background: color-mix(in srgb, var(--yellow) 45%, transparent);
+}
 /* Whole-row highlight: Discord-style left accent + tinted background. */
 .message.mentioned {
   background: color-mix(in srgb, var(--yellow) 8%, transparent);

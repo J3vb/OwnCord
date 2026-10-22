@@ -86,6 +86,11 @@ type SendMessageResult struct {
 	// clients highlight from server-resolved data instead of re-guessing.
 	Mentions         []int64
 	MentionsEveryone bool
+	// ThreadJoined lists the users this send newly made followers of its thread
+	// (WP 6.9c): the author and each direct mention who was not one already. The
+	// ws layer tells each of them with a thread_follow_update. Nil outside a
+	// thread and on a retry acknowledgment.
+	ThreadJoined []int64
 	// MentionsHere reports that MentionsEveryone came from @here rather than
 	// @everyone (mentionSet.HereOnly — never both, @here only narrows when
 	// @everyone is absent). mentionEntries skips the mention-count bump

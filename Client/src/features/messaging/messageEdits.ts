@@ -68,6 +68,7 @@ export function reduceEditMessage(prev: MessagesState, payload: ChatEditedPayloa
             editedAt: payload.edited_at,
             mentions: payload.mentions,
             mentionsEveryone: payload.mentions_everyone,
+            mentionRoles: payload.mention_roles,
             // A call row's end carries the finished `call`; its edited_at is null.
             ...(payload.call !== undefined && { kind: payload.kind ?? "call", call: payload.call }),
           }

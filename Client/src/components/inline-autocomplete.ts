@@ -46,6 +46,9 @@ export interface InlineAutocompleteConfig<T> {
   readonly primeOnCreate?: boolean;
   /** Called with `valueOf(picked)` when a row is chosen. */
   readonly onSelect: (value: string) => void;
+  /** Called with the chosen row itself just before `onSelect`, for a caller that
+   *  needs more than the inserted text (which row, not only which spelling). */
+  readonly onPick?: (item: T) => void;
   /** Called when the user dismisses the popup (Escape). */
   readonly onClose: () => void;
   /**
@@ -118,6 +121,7 @@ export function createInlineAutocomplete<T>(
   function choose(index: number): void {
     const picked = suggestions[index];
     if (picked === undefined) return;
+    cfg.onPick?.(picked);
     cfg.onSelect(cfg.valueOf(picked));
   }
 

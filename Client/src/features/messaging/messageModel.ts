@@ -65,6 +65,8 @@ export interface Message {
   readonly mentions?: readonly number[];
   /** Whether an honoured @everyone/@here is present. Optional, as above. */
   readonly mentionsEveryone?: boolean;
+  /** Server-resolved mentioned role IDs (WP 6.3f). Optional, as above. */
+  readonly mentionRoles?: readonly number[];
   /** "call" for a server-written DM call log row; absent for an ordinary message. */
   readonly kind?: string;
   /** The call a `kind: "call"` row stands for; the render source, never `content`. */
@@ -178,6 +180,7 @@ export function chatPayloadToMessage(payload: ChatMessagePayload): Message {
     errorCode: null,
     mentions: payload.mentions,
     mentionsEveryone: payload.mentions_everyone,
+    ...(payload.mention_roles !== undefined && { mentionRoles: payload.mention_roles }),
     ...(payload.kind !== undefined && { kind: payload.kind }),
     ...(payload.call !== undefined && { call: payload.call }),
     ...(payload.group_event !== undefined && { groupEvent: payload.group_event }),
@@ -208,6 +211,7 @@ export function messageResponseToMessage(response: MessageResponse): Message {
     errorCode: null,
     mentions: response.mentions,
     mentionsEveryone: response.mentions_everyone,
+    ...(response.mention_roles !== undefined && { mentionRoles: response.mention_roles }),
     ...(response.kind !== undefined && { kind: response.kind }),
     ...(response.call !== undefined && { call: response.call }),
     ...(response.group_event !== undefined && { groupEvent: response.group_event }),

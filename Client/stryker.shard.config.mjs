@@ -226,6 +226,8 @@ export const shards = {
   ], // 1249 measured with lib-rest-8 on run 38902717516, timed out at 96%
   "lib-rest-8": [
     "src/lib/mentions.ts",
+    "src/lib/pickedMentions.ts",
+    "src/lib/roleLookup.ts",
     "src/lib/presence.ts",
     "src/lib/read-state.ts",
     "src/lib/themes.ts",

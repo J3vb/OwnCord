@@ -20,6 +20,7 @@ export interface ReadyCapabilityFlags {
   readonly threads?: boolean;
   readonly forums?: boolean;
   readonly multi_role?: boolean;
+  readonly id_mentions?: boolean;
 }
 
 /** The last full `ready`'s capabilities; null until one arrives. */
@@ -111,4 +112,13 @@ export function forumsEnabled(): boolean {
  */
 export function multiRoleEnabled(): boolean {
   return caps?.multi_role === true;
+}
+
+/**
+ * Whether the server resolves `<@id>` and `<@&id>` mention tokens (WP 6.3f):
+ * the composer then sends the mentions the user picked as tokens, and offers
+ * roles. False keeps today's plain `@name` text and a user-only popup.
+ */
+export function idMentionsEnabled(): boolean {
+  return caps?.id_mentions === true;
 }

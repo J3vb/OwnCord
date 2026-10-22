@@ -76,8 +76,8 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 		Attachments:          attachments,
 		SkippedAttachmentIDs: skipped,
 		Mentions:             mentions.UserIDs,
-		MentionsEveryone:     mentions.Everyone,
-		MentionsHere:         mentions.HereOnly,
+		MentionsEveryone:     mentions.Everyone, MentionsHere: mentions.HereOnly,
+		ThreadJoined: msg.ThreadJoined,
 	}
 	if p.ReplyTo != nil {
 		// The message is committed; a failed snippet read only costs the

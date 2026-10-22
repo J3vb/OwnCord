@@ -146,6 +146,10 @@ func (d *DB) CreateThread(ctx context.Context, n NewThread) (info *ThreadInfo, c
 	if err != nil {
 		return nil, false, fmt.Errorf("CreateThread id: %w", err)
 	}
+	// The owner follows the thread they start (WP 6.9c).
+	if _, err := q.JoinThread(ctx, dbgen.JoinThreadParams{ThreadID: id, UserID: n.OwnerID}); err != nil {
+		return nil, false, fmt.Errorf("CreateThread follow: %w", err)
+	}
 	t, err := d.getThread(ctx, q, id)
 	if err != nil {
 		return nil, false, err
@@ -310,16 +314,23 @@ func (d *DB) DeleteThread(ctx context.Context, id int64) (bool, error) {
 // the message's own transaction, so activity and message commit together. For
 // any other channel it matches nothing.
 func touchThreadOnPost(ctx context.Context, q *dbgen.Queries, channelID int64) error {
+	_, err := touchIfThread(ctx, q, channelID)
+	return err
+}
+
+// touchIfThread is touchThreadOnPost that also reports whether channelID is a
+// thread, so the send transaction can join its followers with the one lookup.
+func touchIfThread(ctx context.Context, q *dbgen.Queries, channelID int64) (isThread bool, err error) {
 	if is, err := q.IsThreadChannel(ctx, channelID); err != nil {
-		return fmt.Errorf("touch thread: %w", err)
+		return false, fmt.Errorf("touch thread: %w", err)
 	} else if is == 0 {
-		return nil
+		return false, nil
 	}
 	now := time.Now().UTC().Format(ThreadActivityLayout)
 	if err := q.TouchThreadOnPost(ctx, dbgen.TouchThreadOnPostParams{ID: channelID, At: &now}); err != nil {
-		return fmt.Errorf("touch thread: %w", err)
+		return false, fmt.Errorf("touch thread: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 // DueThread is a thread the archiver just archived.
