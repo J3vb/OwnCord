@@ -61,6 +61,10 @@ import {
   setChatHeaderTopic,
 } from "./ChatHeader";
 import { createThreadPanelHost } from "./ThreadPanelHost";
+import {
+  setThreadNavigationConsumer,
+  settleThreadNavigation,
+} from "../../features/threads/threadNavigation";
 import type { ThreadPanelHost } from "./ThreadPanelHost";
 import type { ThreadListPopover } from "@components/ThreadListPopover";
 import type { ThreadInfo } from "@lib/types";
@@ -2006,6 +2010,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       },
       { signal },
     );
+
+    // A sidebar thread row asked for this channel: open its thread or list now.
+    settleThreadNavigation(channelId);
   }
 
   // 2A-3 at controller scope, not per mount: an ack or refusal can land while
@@ -2050,6 +2057,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     for (const entry of queuedSends.values()) abortQueued(entry);
     queuedSends.clear();
     threadHost?.destroy();
+    setThreadNavigationConsumer(null);
   }
 
   /** The header's Threads button: close the list when it is open, else open it
@@ -2087,6 +2095,25 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         showToast(messagingText("thread.panelLoadFailed"), "error");
       },
     );
+  }
+
+  // The sidebar's thread rows reach this channel view through threadNavigation.
+  if (threadHost !== null) {
+    setThreadNavigationConsumer({
+      get currentChannelId() {
+        return currentChannelId;
+      },
+      open: (req) => {
+        const signal = channelAbort?.signal;
+        if (signal === undefined) return;
+        if (req.kind === "thread") {
+          threadHost.openById(req.threadId, req.parentId, signal);
+          return;
+        }
+        const anchor = chatHeaderRefs?.threadsBtn;
+        if (anchor !== undefined && !anchor.hidden && threadList === null) toggleThreadList(anchor);
+      },
+    });
   }
 
   return {

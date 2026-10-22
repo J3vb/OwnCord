@@ -53,6 +53,8 @@ function inputs(over: Partial<ChannelListInputs> = {}): ChannelListInputs {
     collapsed: new Set(),
     hideMuted: false,
     mute: {},
+    threads: new Map(),
+    focusedThreadId: null,
     ...over,
   };
 }

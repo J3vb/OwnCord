@@ -20,7 +20,14 @@ import {
   permissionsForMemberIn,
 } from "../../lib/permissions";
 import { Permission } from "../../lib/types";
-import type { CategoryGroupModel, ChannelAccess, TextChannelRowModel } from "./channelRow.view";
+import type { FollowedThreadRow } from "../../stores/followedThreads.store";
+import type {
+  CategoryGroupModel,
+  ChannelAccess,
+  TextChannelRowModel,
+  ThreadMoreRowModel,
+  ThreadRowModel,
+} from "./channelRow.view";
 import type { VoiceRowInputs } from "./voiceRowModel";
 
 export type { ChannelAccess };
@@ -45,6 +52,10 @@ export interface ChannelListInputs {
   readonly hideMuted: boolean;
   /** A fresh token per mute event: `isMuted` answers differ after it. */
   readonly mute: object;
+  /** `followedThreadsStore.byParent` (identity): open followed threads under each parent. */
+  readonly threads: ReadonlyMap<number, readonly FollowedThreadRow[]>;
+  /** The thread open in the side panel, or null. */
+  readonly focusedThreadId: number | null;
 }
 
 /** What the builders need beyond the snapshot, injected by the sidebar. */
@@ -93,6 +104,24 @@ export type VoiceChannelRowModel = {
 };
 
 export type ChannelRowModel = TextChannelRowModel | VoiceChannelRowModel;
+
+/** Every row the keyed list holds: a channel, a followed thread, or a parent's "N more". */
+export type SidebarRowModel = ChannelRowModel | ThreadRowModel | ThreadMoreRowModel;
+
+/** What one row of the keyed list stands for. */
+export type SidebarEntry =
+  | { readonly kind: "channel"; readonly channel: Channel }
+  | { readonly kind: "thread"; readonly row: FollowedThreadRow }
+  | { readonly kind: "threadMore"; readonly parentId: number; readonly count: number };
+
+/** Followed threads shown under a parent before the rest fold into "N more". */
+export const MAX_THREAD_ROWS = 5;
+
+/** Row key: channel ids, thread ids and "more" rows never collide. */
+export function entryKey(e: SidebarEntry): string {
+  if (e.kind === "channel") return String(e.channel.id);
+  return e.kind === "thread" ? `t${e.row.id}` : `m${e.parentId}`;
+}
 
 type Occupancy = Pick<VoiceRowInputs, "voiceUsers" | "currentChannelId">;
 
@@ -178,6 +207,68 @@ export function visibleRows(
       ) &&
       (!collapsed || rowVisibleWhenCollapsed(ch, list.activeChannelId, voice, ctx)),
   );
+}
+
+/**
+ * The keyed list for a group: each shown channel, followed by its open followed
+ * threads (newest activity first, at most `MAX_THREAD_ROWS`, then an "N more"
+ * row). A collapsed category shows none, and a parent that is not shown (hidden
+ * muted, collapsed away) shows none. A voice channel has no threads. A parent
+ * absent from `list.channels` (it became unreadable) has no row to hang them on.
+ */
+export function sidebarEntries(
+  shown: readonly Channel[],
+  g: ChannelGroup,
+  list: ChannelListInputs,
+): SidebarEntry[] {
+  const collapsed = g.key !== null && list.collapsed.has(g.key);
+  return shown.flatMap((channel): SidebarEntry[] => {
+    const threads =
+      collapsed || channel.type === "voice" ? undefined : list.threads.get(channel.id);
+    if (threads === undefined || threads.length === 0) return [{ kind: "channel", channel }];
+    const rows: SidebarEntry[] = threads
+      .slice(0, MAX_THREAD_ROWS)
+      .map((row) => ({ kind: "thread", row }));
+    if (threads.length > MAX_THREAD_ROWS) {
+      rows.push({
+        kind: "threadMore",
+        parentId: channel.id,
+        count: threads.length - MAX_THREAD_ROWS,
+      });
+    }
+    return [{ kind: "channel", channel }, ...rows];
+  });
+}
+
+/** A followed thread's row model: it looks as quiet or as loud as its parent. */
+function threadRowModel(
+  row: FollowedThreadRow,
+  list: ChannelListInputs,
+  ctx: ChannelListContext,
+): ThreadRowModel {
+  const muted = ctx.isMuted(row.parentId);
+  return {
+    kind: "thread",
+    threadId: row.id,
+    parentId: row.parentId,
+    name: row.name,
+    active: row.id === list.focusedThreadId,
+    unread: row.unread > 0 && (!muted || row.mentions > 0),
+    mentionCount: row.mentions,
+    muted,
+  };
+}
+
+/** The model of any row in the keyed list. */
+export function sidebarRowModel(
+  entry: SidebarEntry,
+  g: ChannelGroup,
+  list: ChannelListInputs,
+  ctx: ChannelListContext,
+): SidebarRowModel {
+  if (entry.kind === "channel") return channelRowModel(entry.channel, g, list, ctx);
+  if (entry.kind === "thread") return threadRowModel(entry.row, list, ctx);
+  return { kind: "threadMore", parentId: entry.parentId, count: entry.count };
 }
 
 /** A group header's model. The uncategorized group draws nothing but its

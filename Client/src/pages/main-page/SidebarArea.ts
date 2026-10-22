@@ -17,6 +17,8 @@ import type { PresenceSender } from "@lib/presence";
 import type { ToastContainer } from "@components/Toast";
 import { createLogger } from "@lib/logger";
 import { createChannelSidebar } from "@components/ChannelSidebar";
+import { withThreadsStore } from "@stores/threadsLoader";
+import { requestOpenThread, requestOpenThreadList } from "../../features/threads/threadNavigation";
 import { createDmSidebar } from "@components/DmSidebar";
 import type { DmConversation, DmSidebar } from "@components/DmSidebar";
 import type { DmMenuActions } from "@components/dmContextMenu";
@@ -541,6 +543,20 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       onOpenCall: () => opts.onOpenCall?.(),
       onVoiceModerate: createVoiceModerationCallbacks(ws),
       onWatchStream: opts.onWatchStream,
+      onOpenThread: requestOpenThread,
+      onOpenThreadList: requestOpenThreadList,
+      onUnfollowThread: (threadId) => {
+        // Dropped while the socket is down: a lost frame would leave the row until the next ready.
+        if (uiStore.getState().connectionStatus !== "connected") return;
+        ws.send({ type: "thread_follow", payload: { thread_id: threadId, follow: false } });
+      },
+      onMarkThreadRead: (threadId) => {
+        // Dropped while the socket is down, like Unfollow: a lost mark_read would clear the row for nothing.
+        if (uiStore.getState().connectionStatus !== "connected") return;
+        // mark_read accepts a thread id; the same path as a channel's Mark as Read.
+        markChannelRead(threadId);
+        withThreadsStore((m) => m.clearFollowedCounts(threadId));
+      },
       onInviteFromChannel: () => {
         void headerInviteCtrl.open();
       },

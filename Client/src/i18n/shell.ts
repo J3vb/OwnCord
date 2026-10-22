@@ -98,6 +98,8 @@ export const shellText = defineCatalog("shell", {
   "channel.private": "Private channel",
   "channel.mentions": { one: "{count} mention", other: "{count} mentions" },
   "channel.unread": "Unread",
+  "channel.threadsMore": "{count} more",
+  "channel.threadUnfollow": "Unfollow Thread",
   "channel.reconnecting": "Reconnecting…",
   "channel.notConnected": "Not connected",
   "channel.voiceCapacity": "{connected} of {max} connected",

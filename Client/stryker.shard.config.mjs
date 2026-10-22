@@ -220,6 +220,7 @@ export const shards = {
     "src/features/messaging/threadFrames.ts",
     "src/features/messaging/threadResume.ts",
     "src/features/threads/threadCommands.ts",
+    "src/features/threads/threadNavigation.ts",
     "src/features/messaging/slashCommands.ts",
     "src/lib/logger.ts",
     "src/lib/logPersistence.ts",
@@ -278,6 +279,7 @@ export const shards = {
   "stores-4": [
     "src/stores/voice.store.ts",
     "src/stores/threads.store.ts",
+    "src/stores/followedThreads.store.ts",
     "src/stores/threadsLoader.ts",
   ],
   "stores-2": [

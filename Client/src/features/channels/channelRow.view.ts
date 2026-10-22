@@ -52,6 +52,31 @@ export type TextChannelRowModel = {
   readonly access: ChannelAccess;
 };
 
+/**
+ * A followed thread under its parent's row (WP 6.9c): indented, thread glyph,
+ * the name bold when unread and a mention badge. Not draggable, and keyed by
+ * the thread id apart from channel ids.
+ */
+export type ThreadRowModel = {
+  readonly kind: "thread";
+  readonly threadId: number;
+  readonly parentId: number;
+  readonly name: string;
+  /** The thread open in the side panel: the `active` class. */
+  readonly active: boolean;
+  /** Looks unread: the `unread` class (a muted parent is quiet unless mentioned). */
+  readonly unread: boolean;
+  readonly mentionCount: number;
+  readonly muted: boolean;
+};
+
+/** The "N more" row after a parent's first five followed threads. */
+export type ThreadMoreRowModel = {
+  readonly kind: "threadMore";
+  readonly parentId: number;
+  readonly count: number;
+};
+
 /** A category's header; `name` null is the uncategorized group, which draws
  *  no header. */
 export type CategoryGroupModel = {
@@ -160,6 +185,57 @@ export function drawTextChannelRow(model: TextChannelRowModel): HTMLDivElement {
   if (model.private) item.appendChild(privateIndicator(model.channelId));
 
   if (model.mentionCount > 0) item.appendChild(mentionBadge(model.channelId, model.mentionCount));
+  return item;
+}
+
+/** Draw one followed-thread row, without handlers. */
+export function drawThreadRow(model: ThreadRowModel): HTMLDivElement {
+  const classes = ["channel-item", "thread-item"];
+  if (model.active) classes.push("active");
+  if (model.unread) classes.push("unread");
+  if (model.mentionCount > 0) classes.push("mentioned");
+  if (model.muted) classes.push("muted");
+  const item = createElement("div", {
+    class: classes.join(" "),
+    "data-testid": `thread-row-${model.threadId}`,
+    role: "link",
+    tabindex: "-1",
+  });
+  item.dataset.threadId = String(model.threadId);
+  item.dataset.parentId = String(model.parentId);
+  item.setAttribute("aria-current", model.active ? "page" : "false");
+  if (model.unread && model.mentionCount === 0) {
+    item.setAttribute("aria-description", shellText("channel.unread"));
+  }
+  const prefix = createElement("span", { class: "ch-icon", "aria-hidden": "true" });
+  prefix.appendChild(createIcon("message-square", 14));
+  appendChildren(item, prefix, createElement("span", { class: "ch-name" }, model.name));
+  if (model.mentionCount > 0) {
+    const badge = mentionBadge(model.threadId, model.mentionCount);
+    badge.setAttribute("data-testid", `thread-mentions-${model.threadId}`);
+    item.appendChild(badge);
+  }
+  return item;
+}
+
+/** Draw a parent's "N more" row, without handlers. */
+export function drawThreadMoreRow(model: ThreadMoreRowModel): HTMLDivElement {
+  const item = createElement("div", {
+    class: "channel-item thread-item thread-more",
+    "data-testid": `thread-more-${model.parentId}`,
+    role: "link",
+    tabindex: "-1",
+  });
+  item.dataset.moreParentId = String(model.parentId);
+  appendChildren(
+    item,
+    createElement("span", { class: "ch-icon", "aria-hidden": "true" }),
+    createElement(
+      "span",
+      { class: "ch-name" },
+      shellText("channel.threadsMore", { count: model.count }),
+    ),
+  );
   return item;
 }
 

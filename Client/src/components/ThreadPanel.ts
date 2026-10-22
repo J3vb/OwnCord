@@ -44,7 +44,8 @@ import {
   setMessagePinned,
   type Message,
 } from "@stores/messages.store";
-import { getThread, threadsStore } from "@stores/threads.store";
+import { getThread, isFollowed, threadsStore } from "@stores/threads.store";
+import { threadFollowsEnabled } from "@lib/serverCapabilities";
 import { safetyStore } from "../features/safety/store";
 import { formatUntil, safetyText } from "../i18n/safety";
 import { messageResponseToMessage } from "../features/messaging/messageModel";
@@ -53,6 +54,7 @@ import {
   cleanThreadName,
   isThreadModerator,
   sendThreadDelete,
+  sendThreadFollow,
   sendThreadUpdate,
   threadComposerReason,
   THREAD_NAME_MAX,
@@ -153,6 +155,21 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
     const t = thread();
     if (t !== undefined) update({ locked: !t.locked });
   });
+  // Follow / Following (WP 6.9c): the state comes back as thread_follow_update.
+  const followBtn = createElement("button", {
+    type: "button",
+    class: "thread-panel-btn thread-panel-follow",
+    "data-testid": "thread-follow",
+  });
+  followBtn.addEventListener(
+    "click",
+    () => {
+      if (!sendThreadFollow(ws, threadId, !isFollowed(threadId))) {
+        showToast(threadsText("toast.notConnected"), "error");
+      }
+    },
+    { signal },
+  );
   const deleteBtn = iconButton("trash-2", "thread-delete", () => confirmDelete());
   deleteBtn.classList.add("danger");
   const closeBtn = iconButton("x", "thread-close", onClose);
@@ -289,6 +306,12 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
         ),
     );
     tagsEl.hidden = tagsEl.childElementCount === 0;
+
+    const following = isFollowed(threadId);
+    followBtn.hidden = !threadFollowsEnabled();
+    followBtn.textContent = threadsText(following ? "follow.following" : "follow.follow");
+    followBtn.setAttribute("aria-pressed", String(following));
+    followBtn.title = threadsText(following ? "follow.unfollowHint" : "follow.followHint");
 
     const manage = canManageThread(t, userId());
     const moderator = isThreadModerator(t);
@@ -544,7 +567,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
     });
     const header = createElement("div", { class: "thread-panel-header" });
     titleEl.append(nameEl, parentEl, statusEl, tagsEl);
-    actionsEl.append(renameBtn, archiveBtn, lockBtn, deleteBtn, closeBtn);
+    actionsEl.append(followBtn, renameBtn, archiveBtn, lockBtn, deleteBtn, closeBtn);
     header.append(titleEl, renameForm, actionsEl);
     const messagesSlot = createElement("div", {
       class: "thread-panel-messages",
@@ -636,6 +659,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
         paintComposer();
       },
     );
+    disposable.onStoreChange(threadsStore, (s) => s.followed.has(threadId), paintHeader);
     disposable.onStoreChange(
       messagesStore,
       (s) => s.messagesByChannel.get(thread()?.parent_id ?? 0),

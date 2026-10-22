@@ -2432,6 +2432,91 @@ describe("notifyIncomingMessage", () => {
       expect(invoke).toHaveBeenCalledTimes(1);
     });
 
+    describe("a followed thread (WP 6.9c-c2)", () => {
+      const thread = { parentId: 1, name: "Release plan", watching: false };
+      beforeEach(() => setChannelMutesHost("thread.test"));
+      afterEach(() => unmuteChannel(1));
+      const threadEntry = (flags: Partial<ChannelActivityEntry> = {}): ChannelActivityEntry =>
+        entry({ ...flags, channel_id: 91 } as never);
+
+      it("is titled '#parent › thread' and opens the parent channel", async () => {
+        const { invoke } = await spies();
+
+        notifyChannelActivity(threadEntry(), thread);
+
+        await vi.waitFor(() => {
+          expect(invoke).toHaveBeenCalledWith(
+            "notify_message",
+            expect.objectContaining({
+              title: "Alice in #general › Release plan",
+              channelId: 1,
+            }),
+          );
+        });
+      });
+
+      it("notifies a plain message only when the parent's level is All", async () => {
+        const { invoke } = await spies();
+        testPrefs.set("notificationLevel", "mentions");
+
+        notifyChannelActivity(threadEntry(), thread);
+        await new Promise((r) => setTimeout(r, 50));
+        expect(invoke).not.toHaveBeenCalled();
+
+        // The parent's own override decides, not a level for the thread id.
+        testPrefs.set("channelNotificationLevels:thread.test", { 1: "all" });
+        notifyChannelActivity(threadEntry({ message_id: 43 }), thread);
+        await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(1));
+      });
+
+      it("takes the parent's Nothing level, which silences even a mention", async () => {
+        const { invoke } = await spies();
+        testPrefs.set("channelNotificationLevels:thread.test", { 1: "nothing" });
+
+        notifyChannelActivity(threadEntry({ mentions_you: true }), thread);
+        await new Promise((r) => setTimeout(r, 50));
+        expect(invoke).not.toHaveBeenCalled();
+      });
+
+      it("takes the parent's mute for a plain message but lets a mention through", async () => {
+        const { invoke } = await spies();
+        muteChannel(1);
+
+        notifyChannelActivity(threadEntry(), thread);
+        await new Promise((r) => setTimeout(r, 50));
+        expect(invoke).not.toHaveBeenCalled();
+
+        notifyChannelActivity(threadEntry({ message_id: 43, mentions_you: true }), thread);
+        await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(1));
+        unmuteChannel(1);
+      });
+
+      it("stays quiet while the reader has the thread open", async () => {
+        const { invoke } = await spies();
+        vi.spyOn(document, "hasFocus").mockReturnValue(true);
+
+        notifyChannelActivity(threadEntry({ mentions_you: true }), { ...thread, watching: true });
+        await new Promise((r) => setTimeout(r, 50));
+        expect(invoke).not.toHaveBeenCalled();
+      });
+
+      it("titles a mention alert for the thread with its parent's name", async () => {
+        const { invoke } = await spies();
+
+        notifyMention(91, thread);
+
+        await vi.waitFor(() => {
+          expect(invoke).toHaveBeenCalledWith(
+            "notify_message",
+            expect.objectContaining({
+              title: "You were mentioned in #general › Release plan",
+              channelId: 1,
+            }),
+          );
+        });
+      });
+    });
+
     it("chimes only while the window is focused on another channel", async () => {
       const { invoke, win } = await spies();
       vi.spyOn(document, "hasFocus").mockReturnValue(true);
