@@ -45,7 +45,7 @@ export function permissionsForMemberIn(
   roleIds: readonly number[] | undefined,
   roleName: string,
 ): number | null {
-  if (roleIds !== undefined && roleIds.length > 0) {
+  if (roleIds !== undefined) {
     let mask = 0;
     let found = false;
     for (const id of roleIds) {
@@ -69,13 +69,13 @@ export function topPositionFor(
   roleIds: readonly number[] | undefined,
   roleName: string,
 ): number | undefined {
-  if (roleIds !== undefined && roleIds.length > 0) {
-    let top: number | undefined;
+  if (roleIds !== undefined) {
+    let top = Number.NEGATIVE_INFINITY;
     for (const id of roleIds) {
       const position = roles.find((r) => r.id === id)?.position;
-      if (position !== undefined && (top === undefined || position > top)) top = position;
+      if (position !== undefined) top = Math.max(top, position);
     }
-    if (top !== undefined) return top;
+    if (top !== Number.NEGATIVE_INFINITY) return top;
   }
   const name = roleName.toLowerCase();
   return roles.find((r) => r.name.toLowerCase() === name)?.position;

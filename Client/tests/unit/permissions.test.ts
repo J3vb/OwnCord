@@ -372,6 +372,17 @@ describe("topPositionFor", () => {
 
   it("takes the highest position among held ids, not array order", () => {
     expect(topPositionFor(ROLES, [3, 2], "member")).toBe(20);
+    expect(topPositionFor(ROLES, [2, 3], "member")).toBe(20);
+  });
+
+  it("skips held ids the roster lacks", () => {
+    expect(topPositionFor(ROLES, [99, 2], "member")).toBe(20);
+    expect(topPositionFor(ROLES, [2, 99], "member")).toBe(20);
+  });
+
+  it("falls back to the role name when no held id resolves", () => {
+    expect(topPositionFor(ROLES, [99], "member")).toBe(10);
+    expect(topPositionFor(ROLES, [], "helper")).toBe(20);
   });
 
   it("falls back to the role name, then to undefined", () => {
