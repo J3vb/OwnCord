@@ -348,6 +348,52 @@ func handleForceLogout(mod *service.ModerationService) http.HandlerFunc {
 	}
 }
 
+// writeMemberRoleErr maps ModerationService role-assignment errors: a member's
+// last role answers 409 LAST_ROLE, everything else follows writeModerationErr.
+func writeMemberRoleErr(w http.ResponseWriter, err error) {
+	if errors.Is(err, service.ErrLastRole) {
+		writeErr(w, http.StatusConflict, "LAST_ROLE", "a member must keep at least one role")
+		return
+	}
+	writeModerationErr(w, err)
+}
+
+// handleMemberRole serves PUT and DELETE {base}/{id}/roles/{roleId}: add or
+// remove one role of a member without touching the others (WP 6.3c). The route
+// is perimeter-level like PATCH; ModerationService enforces MANAGE_ROLES, the
+// actor-outranks-target rule and the assign-below-own-rank rule, owns the
+// cache invalidation and live fan-out, and writes the role_add/role_remove
+// audit row.
+func handleMemberRole(mod *service.ModerationService, add bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := pathInt64(r, "id")
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid user id")
+			return
+		}
+		roleID, err := pathInt64(r, "roleId")
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid role id")
+			return
+		}
+		if mod == nil {
+			// Fail closed rather than write user_roles without the checks.
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
+			return
+		}
+		if add {
+			_, err = mod.AddUserRole(r.Context(), actorFromContext(r), id, roleID)
+		} else {
+			_, err = mod.RemoveUserRole(r.Context(), actorFromContext(r), id, roleID)
+		}
+		if err != nil {
+			writeMemberRoleErr(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
 // handleDeleteUser erases the target account (B4-9). The route is gated on
 // ADMINISTRATOR; ModerationService additionally enforces the
 // actor-outranks-target hierarchy, refuses the last admin-class account and

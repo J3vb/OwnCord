@@ -93,8 +93,8 @@ func (q *Queries) CountUserRoles(ctx context.Context, userID int64) (int64, erro
 }
 
 const createRole = `-- name: CreateRole :one
-INSERT INTO roles (name, color, permissions, position, is_default)
-VALUES (?, ?, ?, ?, 0)
+INSERT INTO roles (name, color, permissions, position, is_default, hoist, mentionable)
+VALUES (?, ?, ?, ?, 0, ?, ?)
 RETURNING id, name, color, permissions, position, is_default, hoist, mentionable
 `
 
@@ -103,6 +103,8 @@ type CreateRoleParams struct {
 	Color       *string `json:"color"`
 	Permissions int64   `json:"permissions"`
 	Position    int64   `json:"position"`
+	Hoist       int64   `json:"hoist"`
+	Mentionable int64   `json:"mentionable"`
 }
 
 func (q *Queries) CreateRole(ctx context.Context, arg CreateRoleParams) (Role, error) {
@@ -111,6 +113,8 @@ func (q *Queries) CreateRole(ctx context.Context, arg CreateRoleParams) (Role, e
 		arg.Color,
 		arg.Permissions,
 		arg.Position,
+		arg.Hoist,
+		arg.Mentionable,
 	)
 	var i Role
 	err := row.Scan(
@@ -228,6 +232,80 @@ func (q *Queries) GetRoleForUser(ctx context.Context, userID int64) (Role, error
 		&i.Mentionable,
 	)
 	return i, err
+}
+
+const getRolePosition = `-- name: GetRolePosition :one
+SELECT position FROM roles WHERE id = ?
+`
+
+func (q *Queries) GetRolePosition(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getRolePosition, id)
+	var position int64
+	err := row.Scan(&position)
+	return position, err
+}
+
+const listAllUserRoleIDs = `-- name: ListAllUserRoleIDs :many
+SELECT ur.user_id, ur.role_id
+FROM user_roles ur
+JOIN roles r ON r.id = ur.role_id
+ORDER BY ur.user_id ASC, r.position DESC, r.id ASC
+`
+
+// Every held role id of every member, top role first within a member.
+func (q *Queries) ListAllUserRoleIDs(ctx context.Context) ([]UserRole, error) {
+	rows, err := q.db.QueryContext(ctx, listAllUserRoleIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []UserRole{}
+	for rows.Next() {
+		var i UserRole
+		if err := rows.Scan(&i.UserID, &i.RoleID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMultiRoleHoldersOfRole = `-- name: ListMultiRoleHoldersOfRole :many
+SELECT ur.user_id FROM user_roles ur
+WHERE ur.role_id = ?
+  AND (SELECT COUNT(*) FROM user_roles x WHERE x.user_id = ur.user_id) > 1
+ORDER BY ur.user_id ASC
+`
+
+// Holders of the role who hold at least one other role: the only members whose
+// top role (and role order) a position change can move.
+func (q *Queries) ListMultiRoleHoldersOfRole(ctx context.Context, roleID int64) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, listMultiRoleHoldersOfRole, roleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var user_id int64
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listRoleIDsByUser = `-- name: ListRoleIDsByUser :many
@@ -425,7 +503,7 @@ func (q *Queries) SyncTopRole(ctx context.Context, userID int64) error {
 }
 
 const updateRole = `-- name: UpdateRole :exec
-UPDATE roles SET name = ?, color = ?, permissions = ?, position = ? WHERE id = ?
+UPDATE roles SET name = ?, color = ?, permissions = ?, position = ?, hoist = ?, mentionable = ? WHERE id = ?
 `
 
 type UpdateRoleParams struct {
@@ -433,6 +511,8 @@ type UpdateRoleParams struct {
 	Color       *string `json:"color"`
 	Permissions int64   `json:"permissions"`
 	Position    int64   `json:"position"`
+	Hoist       int64   `json:"hoist"`
+	Mentionable int64   `json:"mentionable"`
 	ID          int64   `json:"id"`
 }
 
@@ -442,6 +522,8 @@ func (q *Queries) UpdateRole(ctx context.Context, arg UpdateRoleParams) error {
 		arg.Color,
 		arg.Permissions,
 		arg.Position,
+		arg.Hoist,
+		arg.Mentionable,
 		arg.ID,
 	)
 	return err

@@ -34,7 +34,7 @@ func (e *memberActionsEnv) channelCount(t *testing.T) int {
 func (e *memberActionsEnv) addKicker(t *testing.T) string {
 	t.Helper()
 	ctx := context.Background()
-	role, err := e.db.CreateRole(ctx, "kicker", nil, permissions.ReadMessages|permissions.KickMembers, 50)
+	role, err := e.db.CreateRole(ctx, "kicker", nil, permissions.ReadMessages|permissions.KickMembers, 50, false, false)
 	if err != nil {
 		t.Fatalf("CreateRole: %v", err)
 	}

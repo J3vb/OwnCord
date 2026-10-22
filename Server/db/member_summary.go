@@ -29,13 +29,27 @@ func memberBannerOf(bannerID, color *string) *MemberBanner {
 	return &MemberBanner{Banner: banner, BannerColor: color}
 }
 
+// MemberRoleSet is a member's displayed role and every role they hold.
+type MemberRoleSet struct {
+	// Role is the top role's lowercased name.
+	Role string `json:"role"`
+	// RoleIDs is every held role, top role first. Never nil from ListMembers:
+	// a member holds at least one role, and the wire always carries an array.
+	RoleIDs []int64 `json:"role_ids"`
+}
+
 // MemberSummary is a lightweight user shape for the ready payload.
 type MemberSummary struct {
 	ID       int64   `json:"id"`
 	Username string  `json:"username"`
 	Avatar   *string `json:"avatar"`
 	Status   string  `json:"status"`
-	Role     string  `json:"role"`
+	// MemberRoleSet carries role (the top role's lowercased name) and role_ids
+	// (every role held, top first), flat in the JSON at this position (WP
+	// 6.3c). An embedded pointer keeps MemberSummary under the range-copy size
+	// limit; ListMembers always sets it, and a summary built by hand needs it
+	// before .Role or .RoleIDs is read.
+	*MemberRoleSet
 	// IdentityPublicKey is the user's long-term E2EE identity public key
 	// (base64), pinned by peers on first sight (F3 TOFU). Omitted when the
 	// user has not published one.
@@ -82,6 +96,14 @@ func (d *DB) ListMembers(ctx context.Context) ([]MemberSummary, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ListMembers: %w", err)
 	}
+	held, err := d.q.ListAllUserRoleIDs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("ListMembers role ids: %w", err)
+	}
+	byUser := make(map[int64][]int64)
+	for _, h := range held {
+		byUser[h.UserID] = append(byUser[h.UserID], h.RoleID)
+	}
 	members := make([]MemberSummary, 0, len(rows))
 	for i := range rows {
 		r := &rows[i]
@@ -90,7 +112,7 @@ func (d *DB) ListMembers(ctx context.Context) ([]MemberSummary, error) {
 			Username:          r.Username,
 			Avatar:            r.Avatar,
 			Status:            r.Status,
-			Role:              r.Lower,
+			MemberRoleSet:     &MemberRoleSet{Role: r.Lower, RoleIDs: memberRoleIDs(byUser[r.ID])},
 			IdentityPublicKey: r.IdentityPublicKey,
 			DisplayName:       r.DisplayName,
 			About:             r.About,
@@ -100,4 +122,13 @@ func (d *DB) ListMembers(ctx context.Context) ([]MemberSummary, error) {
 		})
 	}
 	return members, nil
+}
+
+// memberRoleIDs returns ids as a non-nil slice, so a roster entry always
+// encodes role_ids as an array.
+func memberRoleIDs(ids []int64) []int64 {
+	if ids == nil {
+		return []int64{}
+	}
+	return ids
 }

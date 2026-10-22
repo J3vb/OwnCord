@@ -184,7 +184,7 @@ var handleReconnectPostCheckPreRegisterRaceHook func()
 // deterministically, same pattern as handleReconnectPreRegisterRaceHook.
 var freshConnectPreRegisterRaceHook func()
 
-// refreshUserSnapshot replaces c.user (and, when the role changed, c.roleName)
+// refreshUserSnapshot replaces c.user, c.roleName and c.roleIDs
 // with a fresh read of the user row. Handshake paths call it before
 // registerNow, while c is still invisible to every other goroutine, so the
 // plain field writes are safe. Fail closed: callers must not proceed on the
@@ -206,18 +206,27 @@ func (h *Hub) refreshUserSnapshot(ctx context.Context, database VisibilityReader
 	if auth.IsEffectivelyBanned(user) {
 		return fmt.Errorf("refreshUserSnapshot: user %d is banned", c.userID)
 	}
-	if user.RoleID != c.user.RoleID {
-		// Fail closed like the sibling lookups in upgradeAndAuth and
-		// handleFreshConnect: c.roleName is authoritative on the wire
-		// (auth_ok, member_join, every chat_message), so a lookup failure
-		// must not silently substitute "member" and pin the session to a
-		// fabricated role (OC-0299).
-		role, roleErr := database.GetRoleByID(ctx, user.RoleID)
-		if roleErr != nil || role == nil {
-			return fmt.Errorf("refreshUserSnapshot: role lookup failed for user %d role %d: %w", c.userID, user.RoleID, roleErr)
-		}
-		c.roleName = strings.ToLower(role.Name)
+	// Read the held-role set, not just the users.role_id mirror: adding or
+	// removing a role that is not the member's top role moves their
+	// permissions without moving the mirror (WP 6.3c). Fail closed like the
+	// sibling lookups in upgradeAndAuth and handleFreshConnect: c.roleName is
+	// authoritative on the wire (auth_ok, member_join, every chat_message), so
+	// a lookup failure must not silently substitute "member" and pin the
+	// session to a fabricated role (OC-0299).
+	held, roleErr := database.GetMemberRoles(ctx, c.userID)
+	if roleErr != nil || held == nil {
+		return fmt.Errorf("refreshUserSnapshot: role lookup failed for user %d role %d: %w", c.userID, user.RoleID, roleErr)
 	}
+	if user.RoleID != held.Top.ID {
+		// The mirror and the held set disagree (a change landed between the
+		// two reads, or the mirror is damaged). The held set is authoritative;
+		// a mirror naming a role that does not exist is still a refusal.
+		if mirror, mirrorErr := database.GetRoleByID(ctx, user.RoleID); mirrorErr != nil || mirror == nil {
+			return fmt.Errorf("refreshUserSnapshot: role lookup failed for user %d role %d: %w", c.userID, user.RoleID, mirrorErr)
+		}
+	}
+	c.roleName = strings.ToLower(held.Top.Name)
+	c.roleIDs = held.IDs
 	c.user = user
 	return nil
 }
@@ -265,7 +274,7 @@ func (h *Hub) announceFreshConnect(c *Client) {
 	text, _ := storedCustomStatus(c.user.CustomStatus, c.user.CustomStatusExpiresAt, time.Now())
 	p := pendingPresence{status: c.user.Status, customStatus: text}
 	if h.presenceRepair.marked(&h.presenceRepair.joins, c.userID) || c.user.Banned {
-		m := memberPayloadFor(c.user, c.roleName)
+		m := memberPayloadFor(c.user, c.roleName, c.roleIDs)
 		p.member = &m
 	}
 	slog.Info("ws announcing connect presence", "user_id", c.userID, "username", c.user.Username, "new_member", p.member != nil)

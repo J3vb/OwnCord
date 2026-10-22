@@ -138,16 +138,6 @@ func (i *Invite) Expired(now time.Time) bool {
 	return !now.Before(t)
 }
 
-// Role represents a row in the roles table.
-type Role struct {
-	ID          int64   `json:"id"`
-	Name        string  `json:"name"`
-	Color       *string `json:"color"`
-	Permissions int64   `json:"permissions"`
-	Position    int     `json:"position"`
-	IsDefault   bool    `json:"is_default"`
-}
-
 // Channel represents a row in the channels table.
 type Channel struct {
 	ID       int64  `json:"id"`

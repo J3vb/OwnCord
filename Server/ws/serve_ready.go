@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"iter"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/coder/websocket"
@@ -20,7 +21,7 @@ import (
 //   - "none"   — fresh connection or full re-sync (no resume)
 //   - "buffer" — resume served from the in-memory ring buffer
 //   - "db"     — resume served from the persistent EventStore (Phase B Step 7)
-func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, replaySource string) []byte {
+func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, roleIDs []int64, replaySource string) []byte {
 	var avatarVal any
 	if user.Avatar != nil {
 		avatarVal = *user.Avatar
@@ -45,6 +46,8 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 				"username": user.Username,
 				"avatar":   avatarVal,
 				"role":     roleName,
+				// Every held role, top first (WP 6.3c); role is the top's name.
+				"role_ids": roleIDsOrEmpty(roleIDs),
 				// The signed-in user's own profile fields. Null when unset;
 				// display_name falls back to username client-side, and about
 				// is what the "edit my profile" form pre-fills from.
@@ -508,7 +511,10 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	// Scoped to the resume-fallback path — a pure fresh connect (lastSeq==0)
 	// inherits no subscriptions; channel_focus and voice_join re-check live.
 	if c.lastSeq > 0 {
-		if fresh, err := database.GetUserByID(ctx, c.userID); err != nil || fresh == nil || fresh.RoleID != c.user.RoleID {
+		// Compared by the held-role SET: adding or removing a role that is not
+		// the member's top role changes what they may read without moving the
+		// users.role_id mirror (WP 6.3c).
+		if fresh, err := database.GetMemberRoles(ctx, c.userID); err != nil || fresh == nil || !sameRoleSet(fresh.IDs, heldRoles.IDs) {
 			//nolint:contextcheck // revokeUnreadableChannels takes no context by design (admin HubBroadcaster interface).
 			h.revokeUnreadableChannels(c.userID)
 		}
@@ -520,7 +526,7 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 
 	// Fresh connection or replay fallback: full auth_ok + ready flow.
 	slog.Info("ws sending auth_ok", "user_id", c.userID, "username", c.user.Username, "role", c.roleName)
-	if err := handshakeWrite(ctx, conn, h.buildAuthOK(ctx, c.user, c.roleName, "none")); err != nil {
+	if err := handshakeWrite(ctx, conn, h.buildAuthOK(ctx, c.user, c.roleName, c.roleIDs, "none")); err != nil {
 		slog.Warn("ws: failed to send auth_ok", "user_id", c.userID, "err", err)
 		h.unregisterFailedHandshake(ctx, c)
 		_ = conn.Close(websocket.StatusInternalError, "handshake failed")
@@ -620,4 +626,19 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, txn *voiceTxn, c 
 	// stale participant — the identity includes joinedAt, so a quick rejoin's
 	// new session has a different identity and won't be removed.
 	h.removeLiveKitParticipantAsync(ctx, vs.ChannelID, c.userID, vs.JoinedAt, "ws fresh connect:")
+}
+
+// roleIDsOrEmpty is ids as a non-nil slice, so auth_ok.user.role_ids is always
+// an array.
+func roleIDsOrEmpty(ids []int64) []int64 {
+	if ids == nil {
+		return []int64{}
+	}
+	return ids
+}
+
+// sameRoleSet reports whether a and b name the same roles, whatever their
+// order (a position change reorders a member's roles without changing them).
+func sameRoleSet(a, b []int64) bool {
+	return slices.Equal(slices.Sorted(slices.Values(a)), slices.Sorted(slices.Values(b)))
 }

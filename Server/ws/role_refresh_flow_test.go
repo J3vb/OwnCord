@@ -80,8 +80,8 @@ func TestRoleRefresh_ResumeWhilePendingTakesFullReady(t *testing.T) {
 	}
 	// Move the seq past the enqueue-time watermark, so only the pending
 	// refresh (covers) can force the affected user onto a full ready.
-	hub.BroadcastToAll(buildMemberUpdate(1, "x"))
-	hub.BroadcastToAll(buildMemberUpdate(1, "y"))
+	hub.BroadcastToAll(buildMemberUpdate(1, "x", nil))
+	hub.BroadcastToAll(buildMemberUpdate(1, "y", nil))
 	rrWaitFor(t, "the seq to pass the watermark", func() bool {
 		return atomic.LoadUint64(&hub.seq) >= 100
 	})
@@ -552,7 +552,7 @@ func TestRoleRefresh_FirstChunkLeavesRoomForConcurrentDispatch(t *testing.T) {
 			// Dispatch pushes while the worker waits for the queue.
 			time.Sleep(10 * time.Millisecond)
 			for range 64 {
-				f.hub.BroadcastToAll(buildMemberUpdate(1, "x"))
+				f.hub.BroadcastToAll(buildMemberUpdate(1, "x", nil))
 			}
 			// The writer catches up a little later.
 			time.Sleep(60 * time.Millisecond)

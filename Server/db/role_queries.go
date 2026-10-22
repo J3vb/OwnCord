@@ -23,6 +23,8 @@ func roleFromGen(r dbgen.Role) *Role {
 		Permissions: r.Permissions,
 		Position:    int(r.Position),
 		IsDefault:   r.IsDefault != 0,
+		Hoist:       r.Hoist != 0,
+		Mentionable: r.Mentionable != 0,
 	}
 }
 
@@ -228,12 +230,14 @@ func (d *DB) GetDefaultRole(ctx context.Context) (*Role, error) {
 
 // CreateRole inserts a role and returns it. is_default is always 0: exactly one
 // role is the default and it is seeded, never created through the API.
-func (d *DB) CreateRole(ctx context.Context, name string, color *string, perms int64, position int) (*Role, error) {
+func (d *DB) CreateRole(ctx context.Context, name string, color *string, perms int64, position int, hoist, mentionable bool) (*Role, error) {
 	r, err := d.q.CreateRole(ctx, dbgen.CreateRoleParams{
 		Name:        name,
 		Color:       color,
 		Permissions: perms,
 		Position:    int64(position),
+		Hoist:       boolToInt64(hoist),
+		Mentionable: boolToInt64(mentionable),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("CreateRole: %w", err)
@@ -241,19 +245,77 @@ func (d *DB) CreateRole(ctx context.Context, name string, color *string, perms i
 	return roleFromGen(r), nil
 }
 
+func boolToInt64(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 // UpdateRole overwrites a role's mutable columns. is_default is deliberately
 // not writable: which role is the fallback is a schema decision.
-func (d *DB) UpdateRole(ctx context.Context, id int64, name string, color *string, perms int64, position int) error {
-	if err := d.q.UpdateRole(ctx, dbgen.UpdateRoleParams{
+//
+// A position change moves the top role of every member who holds this role
+// next to another one, so the same transaction re-mirrors users.role_id for
+// them (syncTopRoleTx). The returned ids are those multi-role holders, whose
+// role order may have changed; nil when the position did not move.
+func (d *DB) UpdateRole(ctx context.Context, id int64, name string, color *string, perms int64, position int, hoist, mentionable bool) ([]int64, error) {
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("UpdateRole begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	q := d.q.WithTx(tx)
+	old, err := q.GetRolePosition(ctx, id)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("UpdateRole read position: %w", err)
+	}
+	if err := q.UpdateRole(ctx, dbgen.UpdateRoleParams{
 		Name:        name,
 		Color:       color,
 		Permissions: perms,
 		Position:    int64(position),
+		Hoist:       boolToInt64(hoist),
+		Mentionable: boolToInt64(mentionable),
 		ID:          id,
 	}); err != nil {
-		return fmt.Errorf("UpdateRole: %w", err)
+		return nil, fmt.Errorf("UpdateRole: %w", err)
 	}
-	return nil
+	var resynced []int64
+	if err == nil && old != int64(position) {
+		if resynced, err = resyncMultiRoleHoldersTx(ctx, q, []int64{id}); err != nil {
+			return nil, fmt.Errorf("UpdateRole: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("UpdateRole commit: %w", err)
+	}
+	return resynced, nil
+}
+
+// resyncMultiRoleHoldersTx re-mirrors users.role_id for every member who holds
+// one of roleIDs and at least one other role, in the caller's transaction, and
+// returns those members' ids in ascending order. A member with a single role
+// has nothing to re-rank.
+func resyncMultiRoleHoldersTx(ctx context.Context, q *dbgen.Queries, roleIDs []int64) ([]int64, error) {
+	seen := make(map[int64]struct{})
+	for _, rid := range roleIDs {
+		holders, err := q.ListMultiRoleHoldersOfRole(ctx, rid)
+		if err != nil {
+			return nil, fmt.Errorf("list multi-role holders of %d: %w", rid, err)
+		}
+		for _, uid := range holders {
+			seen[uid] = struct{}{}
+		}
+	}
+	ids := slices.Sorted(maps.Keys(seen))
+	for _, uid := range ids {
+		if err := syncTopRoleTx(ctx, q, uid); err != nil {
+			return nil, err
+		}
+	}
+	return ids, nil
 }
 
 // ListUserIDsByRole returns the ids of every user currently holding roleID.
@@ -284,13 +346,15 @@ func (d *DB) CountRoleMembers(ctx context.Context) (map[int64]int, error) {
 // SetRolePositions writes new positions for several roles in one writer
 // transaction, so a reader can never observe a half-applied reorder (which
 // would briefly duplicate or invert the hierarchy the permission checks read).
-func (d *DB) SetRolePositions(ctx context.Context, positions map[int64]int) error {
+// The same transaction re-mirrors users.role_id for every member who holds a
+// moved role next to another one, and returns those members' ids.
+func (d *DB) SetRolePositions(ctx context.Context, positions map[int64]int) ([]int64, error) {
 	if len(positions) == 0 {
-		return nil
+		return nil, nil
 	}
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("SetRolePositions begin tx: %w", err)
+		return nil, fmt.Errorf("SetRolePositions begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
@@ -301,13 +365,17 @@ func (d *DB) SetRolePositions(ctx context.Context, positions map[int64]int) erro
 			Position: int64(positions[id]),
 			ID:       id,
 		}); err != nil {
-			return fmt.Errorf("SetRolePositions update %d: %w", id, err)
+			return nil, fmt.Errorf("SetRolePositions update %d: %w", id, err)
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("SetRolePositions commit: %w", err)
+	resynced, err := resyncMultiRoleHoldersTx(ctx, q, slices.Sorted(maps.Keys(positions)))
+	if err != nil {
+		return nil, fmt.Errorf("SetRolePositions: %w", err)
 	}
-	return nil
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("SetRolePositions commit: %w", err)
+	}
+	return resynced, nil
 }
 
 // DeleteRoleReassigning deletes roleID, drops its channel_overrides rows and
