@@ -180,7 +180,12 @@ func TestTimeoutExpiry_SupersededTimerKeepsMuteUntilNewTimeoutEnds(t *testing.T)
 	st, _ := h.voice.State(ctx, uid)
 	mod := modID(t, database)
 
-	expiresA := time.Now().Add(time.Second)
+	// expires_at is stored to the whole second, so a plain time.Now()+1s can
+	// already read as expired by the time MuteForTimeout checks it if the
+	// test starts late in a second. Anchoring on a whole second keeps A at
+	// least a second ahead of now, and B well past A's timer.
+	base := time.Now().Truncate(time.Second)
+	expiresA := base.Add(2 * time.Second)
 	idA, _, err := database.TimeoutUser(ctx, uid, mod, nil, "first", expiresA)
 	if err != nil {
 		t.Fatalf("TimeoutUser A: %v", err)
@@ -191,7 +196,7 @@ func TestTimeoutExpiry_SupersededTimerKeepsMuteUntilNewTimeoutEnds(t *testing.T)
 	h.scheduleTimeoutExpiryRefresh(uid, expiresA)
 
 	// B supersedes A before A's timer fires; ownership moves A -> B.
-	expiresB := time.Now().Add(3 * time.Second)
+	expiresB := base.Add(5 * time.Second)
 	idB, superseded, err := database.TimeoutUser(ctx, uid, mod, nil, "second", expiresB)
 	if err != nil {
 		t.Fatalf("TimeoutUser B: %v", err)
@@ -208,7 +213,7 @@ func TestTimeoutExpiry_SupersededTimerKeepsMuteUntilNewTimeoutEnds(t *testing.T)
 		t.Fatalf("A's timer lifted or disturbed B's mute: %+v", s)
 	}
 
-	deadline := time.Now().Add(6 * time.Second)
+	deadline := expiresB.Add(timeoutExpiryRefreshSlack + 3*time.Second)
 	for {
 		if s, _ := h.voice.State(ctx, uid); s != nil && !s.ServerMuted {
 			return
