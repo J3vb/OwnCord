@@ -15,6 +15,9 @@ export async function startTestServer(
     tls?: boolean;
     livekit?: boolean;
     seed?: boolean;
+    /** Host the browser client from the server (`server.browser_client_enabled`).
+     *  The binary must be built with the bundle embedded (build-server.mjs --web). */
+    browserClient?: boolean;
     binary?: string;
     env?: NodeJS.ProcessEnv;
   } = {},
@@ -56,6 +59,7 @@ export async function startTestServer(
       port,
       data_dir: dataDir,
       restart_mode: "spawn",
+      ...(options.browserClient ? { browser_client_enabled: true } : {}),
       allowed_origins: [
         "http://localhost:1420",
         "http://localhost:4173",
