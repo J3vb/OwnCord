@@ -21,9 +21,14 @@ import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
 import { errorText } from "@lib/api";
+import { canManageChannels } from "@lib/permissions";
+import { forumsEnabled } from "@lib/serverCapabilities";
 import type { MountableComponent } from "@lib/safe-render";
 import { channelsStore, type Channel, type ChannelsState } from "@stores/channels.store";
 import { shellText } from "../i18n/shell";
+import type { ForumSettingsSection } from "../features/forums/ForumSettingsSection";
+import { forumsText } from "../i18n/forums";
+import type { ForumSettingsBody } from "@lib/types";
 import { channelTypeLabel, MAX_CHANNEL_TOPIC_LENGTH } from "./channelTypes";
 import {
   buildCategorySelect,
@@ -114,6 +119,12 @@ export interface EditChannelModalOptions {
   /** Current voice capacity limits (0 = unlimited). Voice channels only. */
   readonly channelVoiceMaxUsers?: number;
   readonly channelVoiceMaxVideo?: number;
+  /**
+   * Writes a forum's tags and settings (PUT .../forum). Its presence, a forum
+   * channel, the forums capability and MANAGE_CHANNELS together show the
+   * "Forum settings" section, which saves on its own button.
+   */
+  readonly onSaveForum?: (body: ForumSettingsBody) => Promise<void>;
   /** Called when the user saves changes. */
   readonly onSave: (data: EditChannelData) => Promise<void>;
   /** Called when the modal is closed. */
@@ -158,11 +169,16 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     channelVoiceMaxUsers,
     channelVoiceMaxVideo,
     onSave,
+    onSaveForum,
     onClose,
   } = options;
   const isVoice = channelType === "voice";
   const disposable = new Disposable();
   let instance: ModalInstance | null = null;
+  let forumSection: ForumSettingsSection | null = null;
+  let destroyed = false;
+  /** Set once the dialog has warned about unsaved forum settings; the next close goes through. */
+  let warnedForum = false;
 
   function mount(container: Element): void {
     // Header
@@ -176,7 +192,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     });
     closeBtn.textContent = "";
     closeBtn.appendChild(createIcon("x", 14));
-    closeBtn.addEventListener("click", onClose, { signal: disposable.signal });
+    closeBtn.addEventListener("click", requestClose, { signal: disposable.signal });
     appendChildren(header, title, closeBtn);
 
     // Body
@@ -449,6 +465,32 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     });
     body.appendChild(errorEl);
 
+    // Forum settings: a lazy chunk, only for a forum an admin may configure.
+    if (
+      channelType === "forum" &&
+      onSaveForum !== undefined &&
+      forumsEnabled() &&
+      canManageChannels()
+    ) {
+      void import("../features/forums/ForumSettingsSection").then(
+        ({ createForumSettingsSection }) => {
+          if (destroyed) return;
+          const section = createForumSettingsSection({
+            channelId: options.channelId,
+            save: onSaveForum,
+          });
+          if (section === null) return;
+          forumSection = section;
+          body.insertBefore(section.element, errorEl);
+          section.element.addEventListener("input", rearm, { signal: disposable.signal });
+          section.element.addEventListener("click", rearm, { signal: disposable.signal });
+        },
+        () => {
+          // The chunk failed to load: the rest of the dialog still works.
+        },
+      );
+    }
+
     // Footer
     const footer = createElement("div", { class: "modal-footer" });
     const cancelBtn = createElement(
@@ -456,7 +498,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
       { class: "btn-modal-cancel", type: "button" },
       shellText("common.cancel"),
     );
-    cancelBtn.addEventListener("click", onClose, { signal: disposable.signal });
+    cancelBtn.addEventListener("click", requestClose, { signal: disposable.signal });
 
     const saveBtn = createElement(
       "button",
@@ -479,11 +521,12 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
           return;
         }
 
+        if (warnUnsavedForum()) return;
         const data: Mutable = {};
         for (const f of fields) if (touched(f)) f.send(data);
         // Nothing changed: there is nothing to PATCH.
         if (Object.keys(data).length === 0) {
-          onClose();
+          requestClose();
           return;
         }
 
@@ -527,7 +570,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
       "click",
       (e) => {
         if (e.target === instance?.overlay) {
-          onClose();
+          requestClose();
         }
       },
       { signal: disposable.signal },
@@ -540,7 +583,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
       "keydown",
       (e: KeyboardEvent) => {
         if (e.key === "Escape" && instance?.overlay.isConnected === true) {
-          onClose();
+          requestClose();
         }
       },
       { signal: disposable.signal },
@@ -550,7 +593,32 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     nameInput.select();
   }
 
+  const rearm = (): void => {
+    warnedForum = false;
+  };
+  /**
+   * Unsaved forum settings are never dropped silently: the first Save or close
+   * with edits pending keeps the dialog open and says so; asking again discards
+   * them (editing the section again re-arms the warning). No browser confirm.
+   */
+  function warnUnsavedForum(): boolean {
+    if (forumSection?.isDirty() !== true || warnedForum) return false;
+    warnedForum = true;
+    const el = document.querySelector<HTMLElement>("[data-testid='edit-channel-error']");
+    if (el !== null) {
+      el.style.display = "block";
+      setText(el, forumsText("settings.unsaved"));
+    }
+    return true;
+  }
+  function requestClose(): void {
+    if (!warnUnsavedForum()) onClose();
+  }
+
   function destroy(): void {
+    destroyed = true;
+    forumSection?.destroy();
+    forumSection = null;
     disposable.destroy();
     instance?.destroy();
     instance = null;

@@ -119,6 +119,12 @@ const ROUTES = [
   { pattern: `${LIST}&tag=1`, status: 200, body: page_([POSTS[1], POSTS[3]]) },
   { pattern: "/channels/9/threads?archived=1", status: 200, body: page_([OLD]) },
   { pattern: "/channels/10/threads", status: 200, body: page_([]) },
+  {
+    pattern: "/api/v1/moderation/channels/9/forum",
+    method: "PUT",
+    status: 200,
+    body: { id: 9, name: "feedback", type: "forum" },
+  },
 ];
 
 // The server's answer to forum_post_create: the post, with the envelope id.
@@ -146,10 +152,32 @@ async function setup(page: Page, theme: "dark" | "light" = "dark"): Promise<void
     buildTauriMockScript({
       httpRoutes: ROUTES,
       simulateWsFlow: true,
-      readyOverrides: { channels: CHANNELS, roles: MOCK_ROLES },
+      readyOverrides: { channels: CHANNELS, roles: MOCK_ROLES, capabilities: { forums: true } },
       wsHandlers: [{ type: "forum_post_create", handler: POST_CREATE_HANDLER }],
     }),
   );
+  await page.addInitScript(() => {
+    // Record the forum settings PUT so a test can read what the editor sent.
+    const w = window as unknown as {
+      __forumPuts: string[];
+      __TAURI_INTERNALS__?: { invoke: (cmd: string, args: unknown) => Promise<unknown> };
+    };
+    w.__forumPuts = [];
+    const timer = setInterval(() => {
+      const internals = w.__TAURI_INTERNALS__;
+      if (internals === undefined) return;
+      clearInterval(timer);
+      const orig = internals.invoke;
+      internals.invoke = async (cmd, args) => {
+        const cfg = (args as { clientConfig?: { method?: string; url?: string; data?: number[] } })
+          ?.clientConfig;
+        if (cmd === "plugin:http|fetch" && cfg?.method === "PUT" && Array.isArray(cfg.data)) {
+          w.__forumPuts.push(new TextDecoder().decode(new Uint8Array(cfg.data)));
+        }
+        return orig(cmd, args);
+      };
+    }, 0);
+  });
   await page.goto("/");
   await navigateToMainPage(page);
 }
@@ -276,6 +304,57 @@ for (const theme of ["dark", "light"] as const) {
         "How do I move my account",
       );
       await expect(page.getByTestId("forum-post-3")).toContainText("2 replies");
+    });
+
+    test("edits a forum's tags and settings from Edit Channel", async ({ page }) => {
+      await page.setViewportSize({ width: 1280, height: 1000 });
+      await setup(page, theme);
+      await page.locator("[data-testid='channel-9']").click({ button: "right" });
+      await page.locator("[data-testid='ctx-edit-channel']").click();
+      const section = page.getByTestId("forum-settings");
+      await expect(section).toBeVisible();
+      await expect(page.getByTestId("forum-settings-tag-name-1")).toHaveValue("Idea");
+      await expect(page.getByTestId("forum-settings-require-tag")).toBeChecked();
+
+      await page.getByTestId("forum-settings-tag-name-1").fill("Suggestion");
+      await page.getByTestId("forum-settings-tag-down-0").click();
+      await page.getByTestId("forum-settings-add").click();
+      await page.getByTestId("forum-settings-tag-name-3").fill("Docs");
+      await page.getByTestId("forum-settings-tag-emoji-3").fill("📖");
+      await page.getByTestId("forum-settings-archive").selectOption("10080");
+      await section.scrollIntoViewIfNeeded();
+      await shot(page, theme, "07-forum-settings");
+
+      await page.getByTestId("forum-settings-save").click();
+      await expect(page.getByTestId("forum-settings-note")).toHaveText("Forum settings saved");
+      const puts = await page.evaluate(
+        () => (window as unknown as { __forumPuts: string[] }).__forumPuts,
+      );
+      expect(puts).toHaveLength(1);
+      // Ids kept through the rename and the move; the new tag has none.
+      expect(JSON.parse(puts[0]!)).toEqual({
+        tags: [
+          { id: 2, name: "Suggestion", emoji: "💡" },
+          { id: 1, name: "Bug", emoji: "🐛" },
+          { id: 3, name: "Question" },
+          { name: "Docs", emoji: "📖" },
+        ],
+        require_tag: true,
+        default_auto_archive_minutes: 10080,
+      });
+    });
+
+    test("shows a tag name the editor refuses", async ({ page }) => {
+      await page.setViewportSize({ width: 1280, height: 1000 });
+      await setup(page, theme);
+      await page.locator("[data-testid='channel-9']").click({ button: "right" });
+      await page.locator("[data-testid='ctx-edit-channel']").click();
+      await page.getByTestId("forum-settings-tag-name-1").fill("bug");
+      await page.getByTestId("forum-settings-save").click();
+      await expect(page.getByTestId("forum-settings-error")).toHaveText(
+        "Tag names must be different",
+      );
+      await shot(page, theme, "08-forum-settings-error");
     });
   });
 }

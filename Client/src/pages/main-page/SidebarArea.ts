@@ -590,6 +590,10 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
               channelNsfw: stored?.nsfw ?? false,
               channelVoiceMaxUsers: stored?.voiceMaxUsers ?? 0,
               channelVoiceMaxVideo: stored?.voiceMaxVideo ?? 0,
+              // The editor's own write: the live channel_update reaches the store.
+              onSaveForum: async (body) => {
+                await api.adminUpdateForumSettings(channel.id, body);
+              },
               onSave: async (data) => {
                 try {
                   await api.adminUpdateChannel(channel.id, data);
