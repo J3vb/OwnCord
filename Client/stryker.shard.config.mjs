@@ -220,6 +220,7 @@ export const shards = {
     "src/features/messaging/threadFrames.ts",
     "src/features/messaging/threadResume.ts",
     "src/features/threads/threadCommands.ts",
+    "src/features/threads/threadNavigation.ts",
     "src/features/messaging/slashCommands.ts",
     "src/lib/logger.ts",
     "src/lib/logPersistence.ts",
@@ -259,7 +260,12 @@ export const shards = {
     "src/lib/imageHeader.ts",
     "src/features/channels/categoryActions.ts",
     "src/features/channels/collapsedMigration.ts",
-  ], // the 6.5b category calls and the collapsed-name migration (about 100 lines together) joined the smallest shard
+    "src/features/forums/forumModel.ts",
+    "src/features/threads/threadAgo.ts",
+    "src/features/forums/view.ts",
+    "src/features/forums/ForumView.ts",
+    "src/features/forums/NewPostDialog.ts",
+  ], // the 6.5b category calls and the collapsed-name migration (about 100 lines together) joined the smallest shard; the WP 6.9d forum view and New Post dialog (about 700 lines) joined it too, its icons.ts mutants being static and skipped
   "stores-1": [
     "src/stores/auth.store.ts",
     "src/stores/emoji.store.ts",
@@ -273,6 +279,7 @@ export const shards = {
   "stores-4": [
     "src/stores/voice.store.ts",
     "src/stores/threads.store.ts",
+    "src/stores/followedThreads.store.ts",
     "src/stores/threadsLoader.ts",
   ],
   "stores-2": [

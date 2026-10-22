@@ -67,7 +67,9 @@ import {
   handlePollVoteOk,
   handleReactionUpdate,
   handleSendFailure,
+  applyReadyThreads,
   handleThreadDeleted,
+  handleThreadFollow,
   handleThreadState,
   handleTyping,
   resumeThreadFocus,
@@ -211,6 +213,7 @@ export function wireDispatcher(
       activateReadyPendingMessages(api, payload);
       const applyReadyVoice = snapshotReadyVoice();
       applyReadyChannels(payload);
+      applyReadyThreads(payload);
       applyReadyVoice(ws, payload);
       publishReadyIdentity(api, payload);
       const readyActive = applyReadyActiveChannel(payload);
@@ -254,7 +257,12 @@ export function wireDispatcher(
   // thread's whole state, sequenced on its parent. Both replace what we hold.
   unsubs.push(ws.on(S.THREAD_CREATE_OK, handleThreadState));
   unsubs.push(ws.on(S.THREAD_CHANGED, handleThreadState));
+  // A forum post's create ack carries the post's whole state, like thread_create_ok.
+  unsubs.push(ws.on(S.FORUM_POST_CREATE_OK, handleThreadState));
   unsubs.push(ws.on(S.THREAD_DELETED, handleThreadDeleted));
+  // Following (c2): the ack and the update both state where the follow was left.
+  unsubs.push(ws.on(S.THREAD_FOLLOW_OK, handleThreadFollow));
+  unsubs.push(ws.on(S.THREAD_FOLLOW_UPDATE, handleThreadFollow));
 
   unsubs.push(ws.on(S.CHAT_EDITED, (payload) => handleChatEdited(api, payload)));
 

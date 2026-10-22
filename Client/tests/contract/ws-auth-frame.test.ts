@@ -3,7 +3,9 @@
 // (ws.ts:441-453) -- the client side of the same wire contract a sibling Go
 // test freezes for the server. B2-2 added the `epoch` field (the wire epoch
 // this client speaks, PROTOCOL_EPOCH from protocolTypes.ts); the U4 follow-up
-// added the optional `wake` field (a dial after a process suspend). The key
+// added the optional `wake` field (a dial after a process suspend), and WP 6.9d
+// added `features` (the optional client features this build speaks, so the
+// server hides forums from older clients). The key
 // sets below include them deliberately. Any further field MUST fail here until
 // it is added on purpose. Extend this file, do not replace or delete it.
 //
@@ -65,7 +67,7 @@ describe("contract: auth frame key set (epoch 1)", () => {
     vi.useRealTimers();
   });
 
-  it("fresh connect: envelope keys are exactly [type, payload, id], payload keys exactly [token, last_seq, epoch]", async () => {
+  it("fresh connect: envelope keys are exactly [type, payload, id], payload keys exactly [token, last_seq, epoch, features]", async () => {
     client.connect({ host: "localhost:8443", token: "t" });
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
@@ -78,14 +80,15 @@ describe("contract: auth frame key set (epoch 1)", () => {
     // the two the auth message literal at ws.ts:446-453 has on its own.
     expect(Object.keys(frame).sort()).toEqual(["id", "payload", "type"]);
     expect(frame.type).toBe("auth");
-    expect(Object.keys(frame.payload).sort()).toEqual(["epoch", "last_seq", "token"]);
+    expect(Object.keys(frame.payload).sort()).toEqual(["epoch", "features", "last_seq", "token"]);
     expect(frame.payload.token).toBe("t");
     expect(frame.payload.last_seq).toBe(0);
     expect(frame.payload.epoch).toBe(PROTOCOL_EPOCH);
     expect(PROTOCOL_EPOCH).toBe(1);
+    expect(frame.payload.features).toEqual(["forums"]);
   });
 
-  it("resume with a registered active-channel provider: payload keys exactly [token, last_seq, active_channel_id, epoch]", async () => {
+  it("resume with a registered active-channel provider: payload keys exactly [token, last_seq, active_channel_id, epoch, features]", async () => {
     client.connect({ host: "localhost:8443", token: "t" });
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
@@ -114,6 +117,7 @@ describe("contract: auth frame key set (epoch 1)", () => {
     expect(Object.keys(frame.payload).sort()).toEqual([
       "active_channel_id",
       "epoch",
+      "features",
       "last_seq",
       "token",
     ]);
@@ -121,7 +125,7 @@ describe("contract: auth frame key set (epoch 1)", () => {
     expect(frame.payload.active_channel_id).toBe(42);
   });
 
-  it("resume without a provider registered: payload keys stay exactly [token, last_seq, epoch]", async () => {
+  it("resume without a provider registered: payload keys stay exactly [token, last_seq, epoch, features]", async () => {
     client.connect({ host: "localhost:8443", token: "t" });
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
@@ -146,11 +150,11 @@ describe("contract: auth frame key set (epoch 1)", () => {
     emitTauriEvent("ws-state", "open");
 
     const frame = getAuthFrame();
-    expect(Object.keys(frame.payload).sort()).toEqual(["epoch", "last_seq", "token"]);
+    expect(Object.keys(frame.payload).sort()).toEqual(["epoch", "features", "last_seq", "token"]);
     expect(frame.payload.last_seq).toBe(3);
   });
 
-  it("wake reconnect: payload keys are exactly [token, last_seq, epoch, wake]", async () => {
+  it("wake reconnect: payload keys are exactly [token, last_seq, epoch, features, wake]", async () => {
     client.connect({ host: "localhost:8443", token: "t" });
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
@@ -176,7 +180,13 @@ describe("contract: auth frame key set (epoch 1)", () => {
     emitTauriEvent("ws-state", "open");
 
     const frame = getAuthFrame();
-    expect(Object.keys(frame.payload).sort()).toEqual(["epoch", "last_seq", "token", "wake"]);
+    expect(Object.keys(frame.payload).sort()).toEqual([
+      "epoch",
+      "features",
+      "last_seq",
+      "token",
+      "wake",
+    ]);
     expect(frame.payload.wake).toBe(true);
   });
 });

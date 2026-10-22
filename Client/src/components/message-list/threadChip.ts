@@ -10,11 +10,13 @@
  */
 
 import { createElement } from "@lib/dom";
-import { parseTimestamp } from "@lib/formatting";
 import { createIcon } from "@lib/icons";
 import type { ThreadInfo } from "@lib/types";
 import { threadOfMessage, threadsStore } from "@stores/threads.store";
 import { messagingText } from "../../i18n/messaging";
+import { threadAgoLabel } from "../../features/threads/threadAgo";
+
+export { threadAgoLabel };
 
 function shape(tag: "rect" | "path", attrs: Record<string, string>): SVGElement {
   const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
@@ -36,10 +38,6 @@ export function createArchiveIcon(size: number): SVGSVGElement {
 /** A thread shows its exact count up to this many, then "50+". */
 export const THREAD_COUNT_CAP = 50;
 
-const MINUTE_MS = 60_000;
-const HOUR_MS = 60 * MINUTE_MS;
-const DAY_MS = 24 * HOUR_MS;
-
 /** "No messages yet", "1 message", "12 messages", "50+ messages". */
 export function threadCountLabel(count: number): string {
   if (count <= 0) return messagingText("thread.noMessages");
@@ -47,19 +45,6 @@ export function threadCountLabel(count: number): string {
     return messagingText("thread.countCapped", { count: THREAD_COUNT_CAP });
   }
   return messagingText("thread.count", { count });
-}
-
-/** "just now", "3 min ago", "5 h ago", "2 d ago". */
-export function threadAgoLabel(iso: string, now: number = Date.now()): string {
-  const elapsed = Math.max(0, now - parseTimestamp(iso).getTime());
-  if (elapsed < MINUTE_MS) return messagingText("thread.ago.now");
-  if (elapsed < HOUR_MS) {
-    return messagingText("thread.ago.minutes", { count: Math.floor(elapsed / MINUTE_MS) });
-  }
-  if (elapsed < DAY_MS) {
-    return messagingText("thread.ago.hours", { count: Math.floor(elapsed / HOUR_MS) });
-  }
-  return messagingText("thread.ago.days", { count: Math.floor(elapsed / DAY_MS) });
 }
 
 /** The chip's text parts, rebuilt from the thread's state. */

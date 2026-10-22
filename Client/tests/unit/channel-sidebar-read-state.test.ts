@@ -33,6 +33,7 @@ const CHANNELS: ReadyChannel[] = [
   },
   { id: 2, name: "random", type: "text", category: "Text Channels", position: 1, unread_count: 0 },
   { id: 3, name: "lobby", type: "voice", category: "Voice Channels", position: 0 },
+  { id: 4, name: "feedback", type: "forum", category: "Text Channels", position: 2 },
 ];
 
 describe("ChannelSidebar — mark as read", () => {
@@ -117,5 +118,16 @@ describe("ChannelSidebar — mark as read", () => {
     el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }));
     const menu = document.querySelector('[data-testid="channel-context-menu"]');
     expect(menu?.querySelector('[data-testid="ctx-mark-read"]') ?? null).toBeNull();
+  });
+
+  it("omits Mark as Read for a forum, which has no unread state, but keeps Mute", () => {
+    setChannels(CHANNELS);
+    sidebar.mount(container);
+
+    const el = container.querySelector('[data-channel-id="4"]') as HTMLElement;
+    el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }));
+    const menu = document.querySelector('[data-testid="channel-context-menu"]');
+    expect(menu?.querySelector('[data-testid="ctx-mark-read"]') ?? null).toBeNull();
+    expect(menu?.querySelector('[data-testid="ctx-mute-channel"]')).not.toBeNull();
   });
 });

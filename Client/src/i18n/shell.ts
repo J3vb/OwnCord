@@ -98,6 +98,8 @@ export const shellText = defineCatalog("shell", {
   "channel.private": "Private channel",
   "channel.mentions": { one: "{count} mention", other: "{count} mentions" },
   "channel.unread": "Unread",
+  "channel.threadsMore": "{count} more",
+  "channel.threadUnfollow": "Unfollow Thread",
   "channel.reconnecting": "Reconnecting…",
   "channel.notConnected": "Not connected",
   "channel.voiceCapacity": "{connected} of {max} connected",
@@ -123,6 +125,8 @@ export const shellText = defineCatalog("shell", {
   "channel.type.text": "Text",
   "channel.type.voice": "Voice",
   "channel.type.announcement": "Announcement",
+  "channel.type.forum": "Forum",
+  "channel.forumLoadFailed": "Couldn't load this forum",
   "channel.type.dm": "Dm",
 
   "channelForm.category": "Category",

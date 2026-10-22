@@ -187,6 +187,12 @@ describe("markReadyActiveChannelRead", () => {
     expect(markChannelRead).toHaveBeenCalledWith(5);
   });
 
+  it("marks nothing for a forum, which holds no messages", () => {
+    setChannels([channel(5, "forum", 0)]);
+    markReadyActiveChannelRead(5);
+    expect(markChannelRead).not.toHaveBeenCalled();
+  });
+
   it("marks nothing when there is no channel to mark", () => {
     markReadyActiveChannelRead(null);
     expect(markChannelRead).not.toHaveBeenCalled();

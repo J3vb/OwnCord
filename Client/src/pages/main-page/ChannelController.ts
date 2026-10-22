@@ -14,6 +14,7 @@ import type { WsClient } from "@lib/ws";
 import { ApiClientError, type ApiClient } from "@lib/api";
 import type { ChannelType } from "@lib/types";
 import { createMessageList } from "@components/MessageList";
+import { NAVIGATION_DESTINATIONS } from "../../features/navigation/destinations";
 import { bindGifFavoritesApi } from "@stores/gifFavorites.store";
 import { setInlineImageDecorator } from "@components/message-list/media";
 import { gifFavoriteStar } from "@components/message-list/gifFavoriteStar";
@@ -60,6 +61,10 @@ import {
   setChatHeaderTopic,
 } from "./ChatHeader";
 import { createThreadPanelHost } from "./ThreadPanelHost";
+import {
+  setThreadNavigationConsumer,
+  settleThreadNavigation,
+} from "../../features/threads/threadNavigation";
 import type { ThreadPanelHost } from "./ThreadPanelHost";
 import type { ThreadListPopover } from "@components/ThreadListPopover";
 import type { ThreadInfo } from "@lib/types";
@@ -670,7 +675,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     // the next full `ready`. mark_read is a local no-op (already zeroed on
     // open) — it only repairs the server's view. With a read pointer, leaving
     // marks only what the reader saw (leaveChannel), never "everything".
-    if (previousChannelId !== null) {
+    // A forum holds no messages, so it has no read state to repair.
+    const leftForum =
+      channelsStore.getState().channels.get(previousChannelId ?? 0)?.type === "forum";
+    if (previousChannelId !== null && !leftForum) {
       if (readPointerEnabled()) leaveChannel(previousChannelId);
       else markChannelRead(previousChannelId);
       // The server only delivers live broadcasts for the focused channel, so
@@ -1294,6 +1302,33 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           },
         }),
       );
+      return;
+    }
+
+    // A forum shows its post list in place of the message list, and has no
+    // typing row or composer (WP 6.9d). A post opens in the thread panel.
+    if ((storedChannel?.type ?? channelType) === "forum") {
+      const forum = NAVIGATION_DESTINATIONS.forum;
+      if (forum === undefined) return;
+      slots.messagesSlot.appendChild(
+        forum.build({
+          channelId,
+          signal,
+          api,
+          ws,
+          openPost: (threadId) =>
+            threadHost?.openById(
+              threadId,
+              channelId,
+              signal,
+              () =>
+                // The post's row, or the New Post button once the row is gone.
+                slots.messagesSlot.querySelector<HTMLElement>(`[data-post-id="${threadId}"]`) ??
+                slots.messagesSlot.querySelector<HTMLElement>('[data-testid="forum-new-post"]'),
+            ),
+        }),
+      );
+      if (storedChannel?.nsfw === true) mountConsentBar();
       return;
     }
 
@@ -1975,6 +2010,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       },
       { signal },
     );
+
+    // A sidebar thread row asked for this channel: open its thread or list now.
+    settleThreadNavigation(channelId);
   }
 
   // 2A-3 at controller scope, not per mount: an ack or refusal can land while
@@ -2019,6 +2057,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     for (const entry of queuedSends.values()) abortQueued(entry);
     queuedSends.clear();
     threadHost?.destroy();
+    setThreadNavigationConsumer(null);
   }
 
   /** The header's Threads button: close the list when it is open, else open it
@@ -2056,6 +2095,25 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         showToast(messagingText("thread.panelLoadFailed"), "error");
       },
     );
+  }
+
+  // The sidebar's thread rows reach this channel view through threadNavigation.
+  if (threadHost !== null) {
+    setThreadNavigationConsumer({
+      get currentChannelId() {
+        return currentChannelId;
+      },
+      open: (req) => {
+        const signal = channelAbort?.signal;
+        if (signal === undefined) return;
+        if (req.kind === "thread") {
+          threadHost.openById(req.threadId, req.parentId, signal);
+          return;
+        }
+        const anchor = chatHeaderRefs?.threadsBtn;
+        if (anchor !== undefined && !anchor.hidden && threadList === null) toggleThreadList(anchor);
+      },
+    });
   }
 
   return {

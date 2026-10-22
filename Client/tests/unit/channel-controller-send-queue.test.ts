@@ -45,6 +45,8 @@ vi.mock("@components/TypingIndicator", () => ({
 }));
 vi.mock("../../src/pages/main-page/ChatHeader", () => ({ updateChatHeaderForDm: vi.fn() }));
 vi.mock("@lib/read-state", () => ({
+  setKnownThreadCheck: vi.fn(),
+  setThreadReadPointer: vi.fn(),
   markChannelRead: vi.fn(),
   leaveChannel: vi.fn(),
   markChannelReadSeen: vi.fn(),

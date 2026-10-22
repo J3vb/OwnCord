@@ -12,6 +12,7 @@ const CHANNEL_TYPE_LABELS = {
   text: "channel.type.text",
   voice: "channel.type.voice",
   announcement: "channel.type.announcement",
+  forum: "channel.type.forum",
   dm: "channel.type.dm",
 } as const;
 

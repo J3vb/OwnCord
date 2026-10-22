@@ -97,6 +97,24 @@ function resolveNotificationChannel(channelId: number): { name: string; isDm: bo
   };
 }
 
+/**
+ * A followed thread an alert is for (WP 6.9c). A thread notifies as its parent
+ * channel does: the parent's level and mute apply, and the popup is titled
+ * "#parent › thread". `watching` is true while the reader has the thread open.
+ */
+export interface ThreadNotifyContext {
+  readonly parentId: number;
+  readonly name: string;
+  readonly watching: boolean;
+}
+
+/** The "#channel" label of an alert, with the thread name after it for a thread. */
+function alertLabel(channelName: string, thread: ThreadNotifyContext | undefined): string {
+  return thread === undefined
+    ? `#${channelName}`
+    : connectText("notifications.inThread", { channel: `#${channelName}`, thread: thread.name });
+}
+
 /** The chime's preference gate (WP M-8): the "Notification Sounds" group switch
  *  AND the switch of the sound that would play, a mention's or a plain
  *  message's. Do Not Disturb is the caller's. */
@@ -257,22 +275,23 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
  * say which kind raised it, so "Suppress @everyone" keeps these alerts off
  * entirely rather than let every @everyone through.
  */
-export function notifyMention(channelId: number): void {
-  const { name: channelName, isDm } = resolveNotificationChannel(channelId);
+export function notifyMention(channelId: number, thread?: ThreadNotifyContext): void {
+  // A thread answers to its parent for the name, the level and the mute.
+  const authority = thread?.parentId ?? channelId;
+  const { name: channelName, isDm } = resolveNotificationChannel(authority);
   if (isDm) return;
   if (loadPref<boolean>("suppressEveryone", false)) return;
 
   const focused = isWindowFocused();
-  const activeChannelId = channelsStore.getState().activeChannelId;
-  if (focused && channelId === activeChannelId && !isWindowDetached(channelId)) return;
-  const focusedElsewhere = focused && channelId !== activeChannelId;
+  if (focused && isViewing(channelId, thread)) return;
+  const focusedElsewhere = focused && !isOpenSurface(channelId, thread);
 
   if (
-    !shouldNotifyForLevel(channelNotificationLevel(channelId), { mentioned: true, isDm: false })
+    !shouldNotifyForLevel(channelNotificationLevel(authority), { mentioned: true, isDm: false })
   ) {
     return;
   }
-  if (!notificationAllowed(channelId, true)) return;
+  if (!notificationAllowed(authority, true)) return;
 
   const dnd = loadUserStatus() === "dnd";
   const showPopup = !dnd && !focusedElsewhere && loadPref<boolean>("desktopNotifications", true);
@@ -281,10 +300,10 @@ export function notifyMention(channelId: number): void {
 
   if (showPopup) {
     const title = sanitizeNotif(
-      connectText("notifications.mentionedIn", { channel: `#${channelName}` }),
+      connectText("notifications.mentionedIn", { channel: alertLabel(channelName, thread) }),
       80,
     );
-    fireDesktopNotification(title, "", 0, { host: currentHost(), channelId });
+    fireDesktopNotification(title, "", 0, { host: currentHost(), channelId: authority });
   }
   if (flash) flashTaskbar();
   if (chime) playNotificationSound();
@@ -302,8 +321,12 @@ export function notifyMention(channelId: number): void {
  * popup/flash/chime preferences, the focused-elsewhere rule and burst
  * coalescing. A DM is skipped: its own chat_message reaches every participant.
  */
-export function notifyChannelActivity(entry: ChannelActivityEntry): void {
-  const { name: channelName, isDm } = resolveNotificationChannel(entry.channel_id);
+export function notifyChannelActivity(
+  entry: ChannelActivityEntry,
+  thread?: ThreadNotifyContext,
+): void {
+  const authority = thread?.parentId ?? entry.channel_id;
+  const { name: channelName, isDm } = resolveNotificationChannel(authority);
   if (isDm) return;
 
   const authorId = entry.author_id;
@@ -318,20 +341,19 @@ export function notifyChannelActivity(entry: ChannelActivityEntry): void {
   const mentioned = directMention || everyoneMention;
 
   const focused = isWindowFocused();
-  const activeChannelId = channelsStore.getState().activeChannelId;
-  if (focused && entry.channel_id === activeChannelId && !isWindowDetached(entry.channel_id)) {
-    return;
-  }
-  const focusedElsewhere = focused && entry.channel_id !== activeChannelId;
+  if (focused && isViewing(entry.channel_id, thread)) return;
+  const focusedElsewhere = focused && !isOpenSurface(entry.channel_id, thread);
 
+  // A followed thread's plain messages pass only a parent at "all": the level
+  // check below needs a mention at any lower level, as in any channel.
   if (
-    !shouldNotifyForLevel(channelNotificationLevel(entry.channel_id), {
+    !shouldNotifyForLevel(channelNotificationLevel(authority), {
       mentioned,
       isDm: false,
     })
   )
     return;
-  if (!notificationAllowed(entry.channel_id, mentioned)) return;
+  if (!notificationAllowed(authority, mentioned)) return;
 
   const dnd = loadUserStatus() === "dnd";
   const showPopup = !dnd && !focusedElsewhere && loadPref<boolean>("desktopNotifications", true);
@@ -342,7 +364,7 @@ export function notifyChannelActivity(entry: ChannelActivityEntry): void {
   if (shouldCoalesce(entry.channel_id, mentioned, Date.now())) return;
 
   if (showPopup) {
-    const channel = `#${channelName}`;
+    const channel = alertLabel(channelName, thread);
     const member =
       authorId === undefined ? undefined : membersStore.getState().members.get(authorId);
     const author = member === undefined ? null : resolveDisplayName(member);
@@ -354,14 +376,30 @@ export function notifyChannelActivity(entry: ChannelActivityEntry): void {
         : mentioned
           ? connectText("notifications.mentioned", { author, channel })
           : connectText("notifications.inChannel", { author, channel });
-    fireDesktopNotification(sanitizeNotif(title, 80), "", 0, {
-      host: currentHost(),
-      channelId: entry.channel_id,
-      messageId: entry.message_id,
-    });
+    // A thread's message is not in its parent's list, so the click opens the parent.
+    fireDesktopNotification(
+      sanitizeNotif(title, 80),
+      "",
+      0,
+      thread === undefined
+        ? { host: currentHost(), channelId: entry.channel_id, messageId: entry.message_id }
+        : { host: currentHost(), channelId: authority },
+    );
   }
   if (flash) flashTaskbar();
   if (chime) playNotificationSound();
+}
+
+/** Whether `channelId` is the open channel, or the open thread: the reader's current surface. */
+function isOpenSurface(channelId: number, thread: ThreadNotifyContext | undefined): boolean {
+  return thread !== undefined
+    ? thread.watching
+    : channelId === channelsStore.getState().activeChannelId;
+}
+
+/** Whether the reader can see `channelId` now: its surface, unless a detached window hides the live tail. */
+function isViewing(channelId: number, thread: ThreadNotifyContext | undefined): boolean {
+  return isOpenSurface(channelId, thread) && (thread !== undefined || !isWindowDetached(channelId));
 }
 
 /** Strip control characters from user-provided text and cap its length. */

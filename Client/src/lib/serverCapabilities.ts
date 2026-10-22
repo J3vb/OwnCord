@@ -18,8 +18,10 @@ export interface ReadyCapabilityFlags {
   readonly dm_privacy?: boolean;
   readonly polls?: boolean;
   readonly threads?: boolean;
+  readonly forums?: boolean;
   readonly multi_role?: boolean;
   readonly id_mentions?: boolean;
+  readonly thread_follows?: boolean;
 }
 
 /** The last full `ready`'s capabilities; null until one arrives. */
@@ -97,6 +99,14 @@ export function threadsEnabled(): boolean {
 }
 
 /**
+ * Whether the server supports forum channels (WP 6.9d): `forum_post_create` and
+ * a forum's posts. False hides the Forum option in Create Channel.
+ */
+export function forumsEnabled(): boolean {
+  return caps?.forums === true;
+}
+
+/**
  * Whether a member can hold several roles (WP 6.3c): `role_ids` on members, a
  * `hoist` flag on roles and the add/remove role routes. False keeps today's
  * single-role picker and per-role member-list groups.
@@ -112,4 +122,13 @@ export function multiRoleEnabled(): boolean {
  */
 export function idMentionsEnabled(): boolean {
   return caps?.id_mentions === true;
+}
+
+/**
+ * Whether the server lets a member follow a thread (WP 6.9c): `thread_follow`,
+ * `thread_follow_update` and `ready.threads`. False hides the panel's Follow
+ * toggle and the sidebar's thread rows.
+ */
+export function threadFollowsEnabled(): boolean {
+  return caps?.thread_follows === true && caps.threads === true;
 }
