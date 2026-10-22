@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
@@ -79,17 +81,19 @@ func moderationActionResponses(ctx context.Context, svc *service.Services, viewe
 }
 
 // MountModerationRoutes registers the user-directed moderator actions
-// (warning, timeout, untimeout, the ledger read) and the notice
-// acknowledgement route. Authorization is enforced inside ModerationService
+// (warning, timeout, untimeout, the ledger read, the nickname change) and the
+// notice acknowledgement route. broadcaster receives the nickname change's
+// user_update; nil skips the broadcast. Authorization is enforced inside ModerationService
 // (requirePerm/requireOutranks) so these handlers carry no permission check
 // of their own.
-func MountModerationRoutes(r chi.Router, svc *service.Services) {
+func MountModerationRoutes(r chi.Router, svc *service.Services, broadcaster ProfileBroadcaster) {
 	r.Route("/api/v1/moderation/users/{id}", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
 		r.Post("/warn", handleModerationWarn(svc))
 		r.Post("/timeout", handleModerationTimeout(svc))
 		r.Post("/untimeout", handleModerationUntimeout(svc))
 		r.Get("/actions", handleModerationActions(svc))
+		r.Put("/nickname", handleModerationNickname(svc, broadcaster))
 	})
 	r.With(AuthMiddleware(svc.Sessions)).
 		Post("/api/v1/users/me/notices/{id}/ack", handleModerationAckNotice(svc))
@@ -273,5 +277,58 @@ func handleOwnModeration(svc *service.Services) http.HandlerFunc {
 			resp = append(resp, item)
 		}
 		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+// nicknameRequest is PUT /api/v1/moderation/users/{id}/nickname's body.
+// DisplayName keeps the raw JSON so an absent key (a malformed request) can be
+// told apart from an explicit null (clear).
+type nicknameRequest struct {
+	DisplayName json.RawMessage `json:"display_name"`
+}
+
+// nicknameResponse is the committed nickname, null when cleared.
+type nicknameResponse struct {
+	UserID      int64   `json:"user_id"`
+	DisplayName *string `json:"display_name"`
+}
+
+func handleModerationNickname(svc *service.Services, broadcaster ProfileBroadcaster) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		actorID, ok := currentUserID(r)
+		if !ok {
+			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
+			return
+		}
+		targetID, ok := moderationTargetIDParam(w, r)
+		if !ok {
+			return
+		}
+		var req nicknameRequest
+		r.Body = http.MaxBytesReader(w, r.Body, 8192)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.DisplayName == nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: "display_name is required (a string, or null to clear)"})
+			return
+		}
+		var name *string
+		if err := json.Unmarshal(req.DisplayName, &name); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: "display_name must be a string or null"})
+			return
+		}
+		updated, err := svc.Moderation.SetNickname(r.Context(), actorID, targetID, name)
+		if errors.Is(err, service.ErrBadRequest) {
+			// Same code as the member's own PATCH /users/me; the message is the
+			// validator's text without the sentinel prefix.
+			msg := strings.TrimPrefix(err.Error(), service.ErrBadRequest.Error()+": ")
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: msg})
+			return
+		}
+		if err != nil {
+			writeServiceError(r.Context(), w, err)
+			return
+		}
+		// The committed row, not the request body, reaches every client.
+		broadcastUserUpdate(broadcaster, updated)
+		writeJSON(w, http.StatusOK, nicknameResponse{UserID: updated.ID, DisplayName: updated.DisplayName})
 	}
 }
