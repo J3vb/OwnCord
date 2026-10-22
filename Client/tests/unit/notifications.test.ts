@@ -314,6 +314,29 @@ describe("notifyIncomingMessage", () => {
     });
   });
 
+  it("role mention notifies a holder", async () => {
+    const { sendNotification } = await import("@tauri-apps/plugin-notification");
+    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+    testPrefs.set("notificationLevel", "mentions");
+    authStore.setState((prev) => ({
+      ...prev,
+      user: prev.user === null ? null : { ...prev.user, role_ids: [5] },
+    }));
+    // A non-holder's role: the "mentions only" level stays silent.
+    notifyIncomingMessage(makePayload({ id: 10, content: "hey <@&6>" }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sendNotification).not.toHaveBeenCalled();
+    // A typed token the server did not list stays silent.
+    notifyIncomingMessage(makePayload({ id: 11, content: "hey <@&5>" }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sendNotification).not.toHaveBeenCalled();
+    // A held role the server lists notifies.
+    notifyIncomingMessage(makePayload({ id: 12, content: "hey team", mention_roles: [5] }));
+    await vi.waitFor(() => {
+      expect(sendNotification).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("handles long messages by truncating", async () => {
     const { sendNotification } = await import("@tauri-apps/plugin-notification");
     (sendNotification as ReturnType<typeof vi.fn>).mockClear();

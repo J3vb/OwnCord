@@ -198,6 +198,10 @@ var erasureStatements = []struct {
 	// rows of a category's template. The users delete below would cascade them,
 	// but this is the explicit statement the inventory's zero is proved against.
 	{"category_user_overrides", `DELETE FROM category_user_overrides WHERE user_id = ?`},
+	// Thread follows (migration 079, class 18d): the subject's membership rows.
+	// The users delete below would cascade them, but this is the explicit
+	// statement the inventory's zero is proved against.
+	{"thread_members", `DELETE FROM thread_members WHERE user_id = ?`},
 	// Message requests and trusted senders (migration 046, B5-6, classes 14c
 	// and 14d): both tables name a sender and a recipient, so an erasure of
 	// either party needs both columns — the users delete below would cascade

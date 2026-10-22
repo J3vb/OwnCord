@@ -19,5 +19,6 @@ func readyCapabilities(retryFloorMS int64, threads, forums bool) map[string]any 
 		"forums":                       forums,  // WP 6.9d: forum_post_create and a forum's posts
 		"multi_role":                   true,    // WP 6.3c: role_ids, hoist, role add/remove
 		"manage_nicknames":             true,    // WP 6.4: PUT /api/v1/moderation/users/{id}/nickname
+		"thread_follows":               threads, // WP 6.9c: thread_follow, thread_follow_update and ready.threads
 	}
 }

@@ -57,6 +57,17 @@ type ThreadFocusCmd struct {
 func (c ThreadFocusCmd) Type() string  { return MsgTypeThreadFocus }
 func (c ThreadFocusCmd) UserID() int64 { return c.userID }
 
+// ThreadFollowCmd represents a thread_follow message: follow (Follow true) or
+// unfollow a thread.
+type ThreadFollowCmd struct {
+	userID   int64
+	ThreadID int64
+	Follow   bool
+}
+
+func (c ThreadFollowCmd) Type() string  { return MsgTypeThreadFollow }
+func (c ThreadFollowCmd) UserID() int64 { return c.userID }
+
 // positiveID reads a required positive integer field.
 func positiveID(n json.Number, field string) (int64, error) {
 	v, err := n.Int64()
@@ -147,6 +158,24 @@ func parseThreadFocus(userID int64, _ string, raw json.RawMessage) (Command, err
 	return ThreadFocusCmd{userID: userID, ThreadID: id}, nil
 }
 
+func parseThreadFollow(userID int64, _ string, raw json.RawMessage) (Command, error) {
+	var p struct {
+		ThreadID json.Number `json:"thread_id"`
+		Follow   *bool       `json:"follow"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, fmt.Errorf("invalid thread_follow payload: %w", err)
+	}
+	id, err := positiveID(p.ThreadID, "thread_id")
+	if err != nil {
+		return nil, err
+	}
+	if p.Follow == nil {
+		return nil, fmt.Errorf("follow is required")
+	}
+	return ThreadFollowCmd{userID: userID, ThreadID: id, Follow: *p.Follow}, nil
+}
+
 // buildThreadCreateOK answers a thread_create to its sender.
 func buildThreadCreateOK(requestID string, t *service.ThreadInfo) []byte {
 	return buildJSON(wsMsg{Type: MsgTypeThreadCreateOK, ID: requestID, Payload: struct {
@@ -159,6 +188,26 @@ func buildThreadUpdateOK(requestID string, threadID int64) []byte {
 	return buildJSON(wsMsg{Type: MsgTypeThreadUpdateOK, ID: requestID, Payload: struct {
 		ThreadID int64 `json:"thread_id"`
 	}{threadID}})
+}
+
+// buildThreadFollowOK answers a thread_follow to its sender with the state it
+// left the follow in.
+func buildThreadFollowOK(requestID string, threadID int64, following bool) []byte {
+	return buildJSON(wsMsg{Type: MsgTypeThreadFollowOK, ID: requestID, Payload: struct {
+		ThreadID  int64 `json:"thread_id"`
+		Following bool  `json:"following"`
+	}{threadID, following}})
+}
+
+// buildThreadFollowUpdate is the thread_follow_update frame: one user's follow
+// of a thread, with the thread when they follow it. Never authoritative: ready
+// is.
+func buildThreadFollowUpdate(threadID int64, following bool, t *service.ThreadInfo) []byte {
+	return buildJSON(wsMsg{Type: MsgTypeThreadFollowUpdate, Payload: struct {
+		ThreadID  int64               `json:"thread_id"`
+		Following bool                `json:"following"`
+		Thread    *service.ThreadInfo `json:"thread,omitempty"`
+	}{threadID, following, t}})
 }
 
 // buildThreadChanged is the thread_changed frame: the thread's absolute state.

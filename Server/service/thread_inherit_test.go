@@ -164,9 +164,11 @@ func TestThreadRefusedOnParentOnlySurfaces(t *testing.T) {
 	}
 }
 
-// A socket cannot focus a thread: the parent's visibility refresh would not
-// revoke the thread topic, so channel_focus, mark_read and mark_unread refuse
-// a thread id as if it did not exist.
+// A socket cannot focus a thread through channel_focus: the parent's visibility
+// refresh would not revoke the thread topic, so it refuses a thread id as if it
+// did not exist. A thread rides thread_focus instead; mark_read and mark_unread,
+// which focus nothing, admit it through the parent
+// (TestMoveReadPointer_ThreadAdmittedThroughParent).
 func TestThreadNotFocusable(t *testing.T) {
 	channels, _, database := newOverrideFixture(t)
 	ctx := context.Background()

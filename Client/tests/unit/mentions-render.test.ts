@@ -30,7 +30,7 @@ import {
 } from "../../src/lib/mentions";
 import { membersStore } from "../../src/stores/members.store";
 import { authStore } from "../../src/stores/auth.store";
-import { channelsStore, setChannels } from "../../src/stores/channels.store";
+import { channelsStore, setChannels, setRoles } from "../../src/stores/channels.store";
 import type { Message } from "../../src/stores/messages.store";
 import type { MessageListOptions } from "../../src/components/MessageList";
 import type { ReadyChannel } from "../../src/lib/types";
@@ -532,5 +532,170 @@ describe("invite link chip (P29)", () => {
     const el = render("owncord://invite/");
     expect(el.querySelector(".message-link-chip")).toBeNull();
     expect(el.textContent).toBe("owncord://invite/");
+  });
+});
+
+describe("id mention rendering (WP 6.3e)", () => {
+  function seedRoles(): void {
+    setRoles([
+      { id: 5, name: "Mods", color: "#ff8800", permissions: 0 },
+      { id: 6, name: "Plain", color: null, permissions: 0 },
+      { id: 7, name: "Odd", color: "red; background:url(x)", permissions: 0 },
+    ]);
+    channelsStore.flush();
+  }
+
+  it("renders <@id> with current display name", () => {
+    membersStore.setState((prev) => ({
+      ...prev,
+      members: new Map([
+        ...prev.members,
+        [
+          10,
+          {
+            id: 10,
+            username: "alice",
+            displayName: "Alice Liddell",
+            avatar: null,
+            role: "member",
+            status: "online" as const,
+          },
+        ],
+      ]),
+    }));
+    const el = render("hi <@10>!");
+    const pill = el.querySelector(".mention");
+    expect(pill?.textContent).toBe("@Alice Liddell");
+    expect(pill?.getAttribute("data-user-id")).toBe("10");
+    expect(pill?.classList.contains("mention-self")).toBe(false);
+    expect(el.textContent).toBe("hi @Alice Liddell!");
+  });
+
+  it("falls back to the username and marks the signed-in user", () => {
+    const el = render("<@12> and <@11>");
+    const pills = el.querySelectorAll(".mention");
+    expect(Array.from(pills).map((p) => p.textContent)).toEqual(["@me", "@Bob"]);
+    expect(pills[0]?.classList.contains("mention-self")).toBe(true);
+    expect(pills[1]?.classList.contains("mention-self")).toBe(false);
+  });
+
+  /** A rendered run inside the region resync scans. */
+  function renderInRow(text: string): HTMLDivElement {
+    const row = document.createElement("div");
+    row.className = "msg-text";
+    row.appendChild(renderMentionSegment(text));
+    container.appendChild(row);
+    return row;
+  }
+
+  it("follows a rename on resync", () => {
+    const el = renderInRow("hi <@10>");
+    membersStore.setState((prev) => ({
+      ...prev,
+      members: new Map([
+        ...prev.members,
+        [
+          10,
+          { id: 10, username: "alicia", avatar: null, role: "member", status: "online" as const },
+        ],
+      ]),
+    }));
+    resyncMentions(container);
+    expect(el.querySelector(".mention")?.textContent).toBe("@alicia");
+  });
+
+  it("<@&id> with role colour", () => {
+    seedRoles();
+    const el = render("ping <@&5>");
+    const pill = el.querySelector<HTMLElement>(".mention.mention-role");
+    expect(pill?.textContent).toBe("@Mods");
+    expect(pill?.getAttribute("data-role-id")).toBe("5");
+    expect(pill?.getAttribute("data-role-color")).toBe("#ff8800");
+    expect(pill?.style.getPropertyValue("--role-pill")).toBe("#ff8800");
+    // A role pill opens no profile.
+    expect(pill?.hasAttribute("data-user-id")).toBe(false);
+    expect(pill?.hasAttribute("role")).toBe(false);
+  });
+
+  it("never applies a colour that is not a hex literal", () => {
+    seedRoles();
+    const odd = render("<@&7>").querySelector<HTMLElement>(".mention-role");
+    expect(odd?.textContent).toBe("@Odd");
+    expect(odd?.hasAttribute("data-role-color")).toBe(false);
+    expect(odd?.getAttribute("style") ?? "").toBe("");
+    const none = render("<@&6>").querySelectorAll<HTMLElement>(".mention-role");
+    expect(none[none.length - 1]?.hasAttribute("data-role-color")).toBe(false);
+  });
+
+  it("marks a role pill for a held role with mention-self", () => {
+    seedRoles();
+    authStore.setState((prev) => ({
+      ...prev,
+      user: prev.user === null ? null : { ...prev.user, role_ids: [5] },
+    }));
+    const el = render("<@&5> <@&6>", { mentionRoles: [5, 6] });
+    const pills = el.querySelectorAll(".mention-role");
+    expect(pills[0]?.classList.contains("mention-self")).toBe(true);
+    expect(pills[1]?.classList.contains("mention-self")).toBe(false);
+  });
+
+  it("a held role the server did not list is no mention-self pill", () => {
+    seedRoles();
+    authStore.setState((prev) => ({
+      ...prev,
+      user: prev.user === null ? null : { ...prev.user, role_ids: [5] },
+    }));
+    const pill = render("<@&5>").querySelector(".mention-role");
+    expect(pill?.textContent).toBe("@Mods");
+    expect(pill?.classList.contains("mention-self")).toBe(false);
+  });
+
+  it("a self pill the server did not list is not mention-self", () => {
+    expect(render("<@12>", { mentions: [10] }).querySelector(".mention")?.className).toBe(
+      "mention",
+    );
+    expect(render("<@12>", { mentions: [12] }).querySelector(".mention-self")).not.toBeNull();
+  });
+
+  it("unknown ids stay plain", () => {
+    seedRoles();
+    const el = render("<@999> and <@&888>");
+    expect(el.querySelector(".mention")).toBeNull();
+    expect(el.querySelector("[data-user-id]")).toBeNull();
+    expect(el.textContent).toBe("@unknown-user and @deleted-role");
+  });
+
+  it("a role the server did not honour reads as plain text", () => {
+    seedRoles();
+    const el = render("<@&5>", { mentionRoles: [] });
+    expect(el.querySelector(".mention")).toBeNull();
+    expect(el.textContent).toBe("@Mods");
+    const honoured = render("<@&5>", { mentionRoles: [5] });
+    expect(honoured.querySelector(".mention-role")).not.toBeNull();
+  });
+
+  it("a member who left becomes @unknown-user on resync and a pill again on return", () => {
+    const el = renderInRow("hi <@10>");
+    membersStore.setState((prev) => ({
+      ...prev,
+      members: new Map([...prev.members].filter(([id]) => id !== 10)),
+    }));
+    resyncMentions(container);
+    expect(el.querySelector(".mention")).toBeNull();
+    expect(el.textContent).toBe("hi @unknown-user");
+    seedStores();
+    resyncMentions(container);
+    expect(el.querySelector(".mention")?.textContent).toBe("@alice");
+  });
+
+  it("leaves a token in code alone and keeps the row accent in step", () => {
+    const code = renderMessageContent("`<@10>`");
+    expect(code.textContent).toBe("<@10>");
+    expect(code.querySelector(".mention")).toBeNull();
+  });
+
+  it("is a legacy-compatible no-op for @name text", () => {
+    const el = render("hey @alice");
+    expect(el.querySelector(".mention")?.textContent).toBe("@alice");
   });
 });

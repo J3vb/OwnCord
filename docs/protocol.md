@@ -96,15 +96,15 @@ The sequence number system enables reconnection with state recovery.
 
 ### Which Messages Get seq
 
-| Category           | Has seq? | Examples                                                                                                                                                                                                                                                                                                  |
-| ------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`, `poll_update`                                                                                                                                                                                       |
-| Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart`                                                                    |
-| Ephemeral          | No       | `typing`, `upload_policy` (see below), a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `member_timeouts` (see below), `channel_categories` (see below), `appeal_status`, `mention_count`, `read_state`, `channel_activity`, `channel_create` (targeted per recipient; see below) |
-| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update`, `poll_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                                                                    |
-| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                                                                                                |
-| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                                                                                          |
-| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `chat_forward_ok`, `poll_create_ok`, `poll_vote_ok`, `poll_end_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                                               |
+| Category           | Has seq? | Examples                                                                                                                                                                                                                                                                                                                          |
+| ------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`, `poll_update`                                                                                                                                                                                                               |
+| Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart`                                                                                            |
+| Ephemeral          | No       | `typing`, `upload_policy` (see below), a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `member_timeouts` (see below), `channel_categories` (see below), `appeal_status`, `mention_count`, `read_state`, `channel_activity`, `thread_follow_update`, `channel_create` (targeted per recipient; see below) |
+| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update`, `poll_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                                                                                            |
+| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                                                                                                                        |
+| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                                                                                                                  |
+| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `chat_forward_ok`, `poll_create_ok`, `poll_vote_ok`, `poll_end_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                                                                       |
 
 **Presence is sequenced, but droppable.** Connect and disconnect presence
 arrives as `presence_batch` (one frame per coalescing window), a status change
@@ -510,7 +510,7 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
 
 ### Payload Fields
 
-**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true, "user_notes": true, "profile_banners": true, "dm_privacy": true, "polls": true, "threads": true, "multi_role": true, "manage_nicknames": true }`. `multi_role` means a member can hold several roles: `role_ids` rides `members[]`, `auth_ok.user`, `member_join.user` and `member_update`, `roles[]` carry `hoist` and `mentionable`, and `PUT` / `DELETE {base}/{id}/roles/{roleId}` add and remove one role (see `docs/api.md`, Member actions). A client that does not see it treats `role` as the only role. `manage_nicknames` means the server accepts `PUT /api/v1/moderation/users/{id}/nickname` (body `{ "display_name": string | null }`, `null` or `""` clears) from a member holding `MANAGE_NICKNAMES` who outranks the target, and answers with the usual `user_update` frame to every client; a client that does not see it offers no Change Nickname action, even if the member holds the bit. `polls` means the server understands `poll_create`, `poll_vote` and `poll_end` and sends `poll_update`; a client that does not see it hides the Poll button. `threads` means the server supports the thread frames and `GET /api/v1/channels/{id}/threads` (see Threads); a client that does not see it shows no thread controls. `ready` never lists thread rows. `dm_privacy` means the server stores the two direct message privacy settings (`GET` and `PUT /api/v1/users/me/privacy`, body `{ "allow_member_dms": bool, "message_requests": bool }`, both required); a client that does not see it shows no privacy controls. The server applies them to direct messages (see `dm_request`). `profile_banners` means the server supports profile banners (`POST` and `DELETE /api/v1/users/me/banner`, `banner_color` on `PATCH /api/v1/users/me`); a client that does not see it shows no banner controls. `user_notes` means the server stores private profile notes (`GET` and `PUT /api/v1/users/me/notes/{userId}`); a client that does not see it keeps notes in local storage. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
+**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true, "user_notes": true, "profile_banners": true, "dm_privacy": true, "polls": true, "threads": true, "multi_role": true, "manage_nicknames": true, "thread_follows": true }`. `multi_role` means a member can hold several roles: `role_ids` rides `members[]`, `auth_ok.user`, `member_join.user` and `member_update`, `roles[]` carry `hoist` and `mentionable`, and `PUT` / `DELETE {base}/{id}/roles/{roleId}` add and remove one role (see `docs/api.md`, Member actions). A client that does not see it treats `role` as the only role. `manage_nicknames` means the server accepts `PUT /api/v1/moderation/users/{id}/nickname` (body `{ "display_name": string | null }`, `null` or `""` clears) from a member holding `MANAGE_NICKNAMES` who outranks the target, and answers with the usual `user_update` frame to every client; a client that does not see it offers no Change Nickname action, even if the member holds the bit. `polls` means the server understands `poll_create`, `poll_vote` and `poll_end` and sends `poll_update`; a client that does not see it hides the Poll button. `threads` means the server supports the thread frames and `GET /api/v1/channels/{id}/threads` (see Threads); a client that does not see it shows no thread controls. `ready` never lists thread rows in `channels`. `thread_follows` means the server understands `thread_follow`, sends `thread_follow_update` and lists the viewer's followed threads in `ready.threads`; a client that does not see it shows no Follow control and no followed threads. It is only ever `true` together with `threads`. `dm_privacy` means the server stores the two direct message privacy settings (`GET` and `PUT /api/v1/users/me/privacy`, body `{ "allow_member_dms": bool, "message_requests": bool }`, both required); a client that does not see it shows no privacy controls. The server applies them to direct messages (see `dm_request`). `profile_banners` means the server supports profile banners (`POST` and `DELETE /api/v1/users/me/banner`, `banner_color` on `PATCH /api/v1/users/me`); a client that does not see it shows no banner controls. `user_notes` means the server stores private profile notes (`GET` and `PUT /api/v1/users/me/notes/{userId}`); a client that does not see it keeps notes in local storage. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
 These fields advertise retry-safe `chat_send` support. Older servers omit them;
 clients must not infer support from the protocol epoch or silently retry a
 durable pending message against a server that no longer advertises support.
@@ -656,6 +656,8 @@ to reconstruct them:
    yet is `"offline"` too; their `presence` broadcast follows once it does.
 2. An `"invisible"` member is `"offline"` to everyone but themselves. The
    viewer's own entry carries their true status.
+
+**threads[]:** The viewer's followed, open threads (WP 6.9c), newest activity first, at most 200; the key is present whenever the server advertises `thread_follows` and is `[]` when the viewer follows none. Each entry is `{ "thread": ThreadInfo, "last_message_id", "last_read_message_id", "unread_count", "mention_count" }`: the thread, the newest live message in it (`0` when empty), the viewer's read pointer for it (`0` for none), the number of messages after the pointer (counted up to 100, as in `channels[]`) and the viewer's `read_states.mention_count` for it. An archived thread is left out (it is still in the thread list), and so is a thread whose parent channel the viewer cannot read (a deny override, a lost role, an archived parent): the follow is kept and the thread returns when read access does. A thread of an NSFW-labelled parent the viewer has not acknowledged is left out too, and `thread_follow_update` frames for it are not sent, because a thread's name discloses its starter message. A follow row for a user who cannot read the parent (or has not acknowledged it) is kept and ignored; it surfaces again if they later regain `READ_MESSAGES` or acknowledge. An older client ignores the key. `ready` is authoritative for the set; `thread_follow_update` only keeps it current.
 
 **voice_states[]:** All users currently in any voice channel: `channel_id`, `user_id`, `username`, `muted`, `deafened`, `server_muted`, `server_deafened`, `speaking`, `camera`, `screenshare`
 
@@ -1745,6 +1747,12 @@ audience once and sends every recipient **one** frame listing all the channels
 that changed for them, so a connection gets about one frame per second however
 many channels are busy.
 
+For a **thread** id (WP 6.9c) the audience is narrowed to the thread's followers
+who can read its parent, so an entry never reaches a user who does not follow
+the thread. A forum post is the exception: its entry goes to the forum's whole
+audience, as before (WP 6.9d). A client that finds a thread id here for a thread it does not follow
+can ignore it.
+
 - **Audience.** Connected users who may view the channel (the same
   `CanViewChannel` verdict as `ready`), for `text`, `announcement` and `voice` channels
   only (the channels `ready` gives an `unread_count`). Not sent to the channel's
@@ -1835,7 +1843,28 @@ Errors: `THREAD_EXISTS` (the message already has a thread that the caller did no
 
 ### thread_focus (Client -> Server)
 
-`{ "thread_id": 91 }`, or `null` to close. A second focus slot beside `channel_focus`: the thread open beside the focused channel. It subscribes the socket to the thread's frames (ordinary `chat_message`, `chat_edited`, reactions and so on, sequenced on the thread) and, like `channel_focus`, marks the thread read. The caller needs `READ_MESSAGES` in the **parent**. `channel_focus`, `mark_read` and `mark_unread` still refuse a thread id. The slot is revalidated after the subscribe, and is dropped silently when the parent's overrides, a role change, a timeout or the thread's deletion take the right away. It is not carried across a reconnect: re-send `thread_focus` after `ready`. Over its own budget of 5 per second it answers `RATE_LIMITED`.
+`{ "thread_id": 91 }`, or `null` to close. A second focus slot beside `channel_focus`: the thread open beside the focused channel. It subscribes the socket to the thread's frames (ordinary `chat_message`, `chat_edited`, reactions and so on, sequenced on the thread) and, like `channel_focus`, marks the thread read. The caller needs `READ_MESSAGES` in the **parent**. `channel_focus` still refuses a thread id. `mark_read` and `mark_unread` accept one, with the same parent check, and focus nothing, so the open thread panel and a sidebar row can move the thread's read pointer. The slot is revalidated after the subscribe, and is dropped silently when the parent's overrides, a role change, a timeout or the thread's deletion take the right away. It is not carried across a reconnect: re-send `thread_focus` after `ready`. Over its own budget of 5 per second it answers `RATE_LIMITED`.
+
+### thread_follow (Client -> Server)
+
+`{ "thread_id": 91, "follow": true }`. Follows (`true`) or unfollows (`false`) a thread for the caller; both are idempotent. The thread must be visible to the caller (the parent's `READ_MESSAGES`, the gate `thread_focus` uses), otherwise `NOT_FOUND`; a locked or archived thread can still be followed or unfollowed. Answered with `thread_follow_ok`, then a `thread_follow_update` to the caller's socket. Over its own budget of 5 per second it answers `RATE_LIMITED`. The capability is `thread_follows`. A thread whose parent is NSFW-labelled needs the member's acknowledgement first: without it `thread_follow` answers `FORBIDDEN` with `NSFW_ACKNOWLEDGEMENT_REQUIRED` and writes nothing.
+
+A user also follows a thread without asking: by **creating** it, by **posting** in it (including a forward or a poll), and by being **directly mentioned** in a post there (`@name` or a reply ping, never `@everyone` or `@here`). Unfollowing removes the follow and posting again follows again. A follow is a preference, never permission: it grants nothing and limits nothing, and every use of it is checked against what the parent channel lets the user see.
+
+### thread_follow_ok (Server -> Client, direct)
+
+`{ "thread_id": 91, "following": true }`, with the request `id`. `following` is the state the follow was left in.
+
+### thread_follow_update (Server -> Client, targeted)
+
+`{ "thread_id": 91, "following": true, "thread"?: ThreadInfo }`. One user's follow of a thread, sent only to that user's socket. Unsequenced, on the low queue like `mention_count`, not replayed: a missed frame costs nothing, because `ready.threads` is authoritative. `thread` is the thread's current state and is present when `following` is `true`. Sent when
+
+- the user is newly made a follower by a post (their own, or a direct mention in someone else's);
+- the user follows or unfollows with `thread_follow`;
+- a followed thread changes (rename, archive, lock, a new message), carrying the same `ThreadInfo` as `thread_changed`: this is how a sidebar row stays current for a user who does not have the parent focused. Only users who can still read the parent receive it;
+- the thread is deleted: `following` is `false` and there is no `thread`.
+
+A client applies the last frame it received for a thread. Two devices racing a follow and an unfollow each get a frame carrying the state that device's write left, and the next `ready` corrects any difference.
 
 ### thread_changed (Server -> Client, broadcast)
 
@@ -3429,6 +3458,7 @@ tables below add per-type behavioral notes.
 | `channel_focus`       | 5/sec (deferred, see above)          | Updates read state                                              |
 | `thread_focus`        | 5/sec, own budget (`RATE_LIMITED`)   | Second focus slot for a thread; marks it read                   |
 | `thread_create`       | 5/10min                              | `RATE_LIMITED`; a retry by the owner is free                    |
+| `thread_follow`       | 5/sec, own budget (`RATE_LIMITED`)   | Follow or unfollow a thread; idempotent                         |
 | `mark_read`           | 5/sec, own budget (silently dropped) | Updates read state without moving focus; answers `read_state`   |
 | `mark_unread`         | 5/sec, own budget (`RATE_LIMITED`)   | Moves the read pointer back; answers `read_state`               |
 | `presence_update`     | 1/10sec                              |                                                                 |
@@ -3453,67 +3483,69 @@ tables below add per-type behavioral notes.
 
 ### Server -> Client (46 types)
 
-| Type                  | Has seq? | Delivery                                                                                               |
-| --------------------- | -------- | ------------------------------------------------------------------------------------------------------ |
-| `auth_ok`             | No       | Direct                                                                                                 |
-| `auth_error`          | No       | Direct (then close)                                                                                    |
-| `ready`               | No       | Direct                                                                                                 |
-| `chat_message`        | Yes      | Channel or DM participants                                                                             |
-| `chat_send_ok`        | No       | Direct to sender                                                                                       |
-| `chat_forward_ok`     | No       | Direct to sender                                                                                       |
-| `poll_create_ok`      | No       | Direct to sender                                                                                       |
-| `poll_vote_ok`        | No       | Direct to sender                                                                                       |
-| `poll_end_ok`         | No       | Direct to sender                                                                                       |
-| `thread_create_ok`    | No       | Direct to sender                                                                                       |
-| `thread_update_ok`    | No       | Direct to sender                                                                                       |
-| `thread_changed`      | Yes      | Parent channel (coalesced, at most 1 per thread per 2 s)                                               |
-| `thread_deleted`      | Yes      | Parent channel; unsequenced copy to sockets with the thread open                                       |
-| `chat_edited`         | Yes      | Channel or DM participants                                                                             |
-| `chat_deleted`        | Yes      | Channel or DM participants                                                                             |
-| `chat_bulk_deleted`   | Yes      | Channel                                                                                                |
-| `chat_pinned`         | Yes      | Channel                                                                                                |
-| `reaction_update`     | Yes      | Channel or DM participants                                                                             |
-| `poll_update`         | Yes      | Channel or DM participants                                                                             |
-| `typing`              | No       | Channel (excl. sender) or DM                                                                           |
-| `presence`            | Yes      | All clients                                                                                            |
-| `presence_batch`      | Yes      | All clients (a full snapshot: no, direct to one client)                                                |
-| `channel_create`      | No       | Each client that may view the channel (per-recipient)                                                  |
-| `channel_update`      | Yes      | All clients                                                                                            |
-| `channel_delete`      | Yes      | All clients                                                                                            |
-| `voice_state`         | Yes      | All clients                                                                                            |
-| `voice_leave`         | Yes      | All clients                                                                                            |
-| `voice_moved`         | No       | Direct to moved user                                                                                   |
-| `voice_disconnected`  | No       | Direct to disconnected user                                                                            |
-| `voice_config`        | No       | Direct to joiner                                                                                       |
-| `voice_token`         | No       | Direct to joiner                                                                                       |
-| `member_join`         | Yes      | All clients                                                                                            |
-| `member_update`       | Yes      | All clients                                                                                            |
-| `user_update`         | Yes      | All clients (profile changes)                                                                          |
-| `member_ban`          | Yes      | All clients                                                                                            |
-| `roles_update`        | Yes      | All clients (full role list)                                                                           |
-| `emoji_update`        | Yes      | All clients (full custom-emoji set)                                                                    |
-| `upload_policy`       | No       | All clients (both upload file-type lists)                                                              |
-| `dm_channel_open`     | No       | Direct to participant                                                                                  |
-| `dm_channel_close`    | No       | Direct to participant                                                                                  |
-| `dm_request`          | No       | Direct to recipient (B5-6)                                                                             |
-| `call_incoming`       | No       | Direct to each other DM participant                                                                    |
-| `call_declined`       | No       | Direct to each other DM participant                                                                    |
-| `voice_e2ee_announce` | No       | Voice channel (excl. sender)                                                                           |
-| `voice_e2ee_offer`    | No       | Direct to target participant                                                                           |
-| `voice_watching`      | No       | Voice channel (excl. sender)                                                                           |
-| `server_restart`      | Yes      | All clients                                                                                            |
-| `mod_queue`           | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders only                                              |
-| `mod_action`          | No       | Direct to the live target only                                                                         |
-| `member_timeouts`     | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders (full list) and each timed-out member (own entry) |
-| `channel_categories`  | No       | Connected `MANAGE_CHANNELS`/`ADMINISTRATOR` holders only (full list, judged at send time)              |
-| `appeal_status`       | No       | Direct to the appellant only                                                                           |
-| `mention_count`       | No       | Direct to the reader whose mention badge changed (DP-27)                                               |
-| `read_state`          | No       | Direct to the caller after an accepted `mark_read` or `mark_unread` (WP 3D-5c)                         |
-| `error`               | No       | Direct to requester                                                                                    |
-| `pong`                | No       | Direct to pinger                                                                                       |
-| `command_reply`       | No       | Direct to invoking client (ephemeral plugin reply)                                                     |
-| `plugin_broadcast`    | Yes      | Channel (plugin output posted as a broadcast; sequenced and replayable)                                |
-| `nsfw_ack`            | No       | Direct to the user's own sockets (B5-7)                                                                |
+| Type                   | Has seq? | Delivery                                                                                               |
+| ---------------------- | -------- | ------------------------------------------------------------------------------------------------------ |
+| `auth_ok`              | No       | Direct                                                                                                 |
+| `auth_error`           | No       | Direct (then close)                                                                                    |
+| `ready`                | No       | Direct                                                                                                 |
+| `chat_message`         | Yes      | Channel or DM participants                                                                             |
+| `chat_send_ok`         | No       | Direct to sender                                                                                       |
+| `chat_forward_ok`      | No       | Direct to sender                                                                                       |
+| `poll_create_ok`       | No       | Direct to sender                                                                                       |
+| `poll_vote_ok`         | No       | Direct to sender                                                                                       |
+| `poll_end_ok`          | No       | Direct to sender                                                                                       |
+| `thread_create_ok`     | No       | Direct to sender                                                                                       |
+| `thread_update_ok`     | No       | Direct to sender                                                                                       |
+| `thread_follow_ok`     | No       | Direct to sender                                                                                       |
+| `thread_follow_update` | No       | The one user (low queue, not replayed)                                                                 |
+| `thread_changed`       | Yes      | Parent channel (coalesced, at most 1 per thread per 2 s)                                               |
+| `thread_deleted`       | Yes      | Parent channel; unsequenced copy to sockets with the thread open                                       |
+| `chat_edited`          | Yes      | Channel or DM participants                                                                             |
+| `chat_deleted`         | Yes      | Channel or DM participants                                                                             |
+| `chat_bulk_deleted`    | Yes      | Channel                                                                                                |
+| `chat_pinned`          | Yes      | Channel                                                                                                |
+| `reaction_update`      | Yes      | Channel or DM participants                                                                             |
+| `poll_update`          | Yes      | Channel or DM participants                                                                             |
+| `typing`               | No       | Channel (excl. sender) or DM                                                                           |
+| `presence`             | Yes      | All clients                                                                                            |
+| `presence_batch`       | Yes      | All clients (a full snapshot: no, direct to one client)                                                |
+| `channel_create`       | No       | Each client that may view the channel (per-recipient)                                                  |
+| `channel_update`       | Yes      | All clients                                                                                            |
+| `channel_delete`       | Yes      | All clients                                                                                            |
+| `voice_state`          | Yes      | All clients                                                                                            |
+| `voice_leave`          | Yes      | All clients                                                                                            |
+| `voice_moved`          | No       | Direct to moved user                                                                                   |
+| `voice_disconnected`   | No       | Direct to disconnected user                                                                            |
+| `voice_config`         | No       | Direct to joiner                                                                                       |
+| `voice_token`          | No       | Direct to joiner                                                                                       |
+| `member_join`          | Yes      | All clients                                                                                            |
+| `member_update`        | Yes      | All clients                                                                                            |
+| `user_update`          | Yes      | All clients (profile changes)                                                                          |
+| `member_ban`           | Yes      | All clients                                                                                            |
+| `roles_update`         | Yes      | All clients (full role list)                                                                           |
+| `emoji_update`         | Yes      | All clients (full custom-emoji set)                                                                    |
+| `upload_policy`        | No       | All clients (both upload file-type lists)                                                              |
+| `dm_channel_open`      | No       | Direct to participant                                                                                  |
+| `dm_channel_close`     | No       | Direct to participant                                                                                  |
+| `dm_request`           | No       | Direct to recipient (B5-6)                                                                             |
+| `call_incoming`        | No       | Direct to each other DM participant                                                                    |
+| `call_declined`        | No       | Direct to each other DM participant                                                                    |
+| `voice_e2ee_announce`  | No       | Voice channel (excl. sender)                                                                           |
+| `voice_e2ee_offer`     | No       | Direct to target participant                                                                           |
+| `voice_watching`       | No       | Voice channel (excl. sender)                                                                           |
+| `server_restart`       | Yes      | All clients                                                                                            |
+| `mod_queue`            | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders only                                              |
+| `mod_action`           | No       | Direct to the live target only                                                                         |
+| `member_timeouts`      | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders (full list) and each timed-out member (own entry) |
+| `channel_categories`   | No       | Connected `MANAGE_CHANNELS`/`ADMINISTRATOR` holders only (full list, judged at send time)              |
+| `appeal_status`        | No       | Direct to the appellant only                                                                           |
+| `mention_count`        | No       | Direct to the reader whose mention badge changed (DP-27)                                               |
+| `read_state`           | No       | Direct to the caller after an accepted `mark_read` or `mark_unread` (WP 3D-5c)                         |
+| `error`                | No       | Direct to requester                                                                                    |
+| `pong`                 | No       | Direct to pinger                                                                                       |
+| `command_reply`        | No       | Direct to invoking client (ephemeral plugin reply)                                                     |
+| `plugin_broadcast`     | Yes      | Channel (plugin output posted as a broadcast; sequenced and replayable)                                |
+| `nsfw_ack`             | No       | Direct to the user's own sockets (B5-7)                                                                |
 
 ### Plugin command types
 

@@ -58,6 +58,7 @@
               "polls": true,
               "profile_banners": true,
               "read_pointer": true,
+              "thread_follows": true,
               "threads": true,
               "user_notes": true
             },
@@ -193,6 +194,7 @@
               }
             ],
             "server_name": "OwnCord Server",
+            "threads": [],
             "voice_states": []
           },
           "type": "ready"
@@ -349,6 +351,7 @@
               "polls": true,
               "profile_banners": true,
               "read_pointer": true,
+              "thread_follows": true,
               "threads": true,
               "user_notes": true
             },
@@ -484,6 +487,7 @@
               }
             ],
             "server_name": "OwnCord Server",
+            "threads": [],
             "voice_states": []
           },
           "type": "ready"
