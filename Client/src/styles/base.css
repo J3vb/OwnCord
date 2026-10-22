@@ -41,6 +41,8 @@ body {
 
 #app {
   height: 100%;
+  /* --app-height is the keyboard-aware height touch input writes (6.13f2). */
+  height: var(--app-height, 100dvh);
 }
 
 button {

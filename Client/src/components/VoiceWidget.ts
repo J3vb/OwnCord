@@ -616,7 +616,12 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       options.onDisconnect,
       "disconnect",
     );
-    appendChildren(controls, cameraBtn, shareBtn, disconnectBtn);
+    // A browser without getDisplayMedia (phones) offers no screen share.
+    if (__OWNCORD_WEB__ && typeof navigator.mediaDevices?.getDisplayMedia !== "function") {
+      appendChildren(controls, cameraBtn, disconnectBtn);
+    } else {
+      appendChildren(controls, cameraBtn, shareBtn, disconnectBtn);
+    }
 
     // "Grant Microphone" button for listen-only mode
     grantMicBtn = createElement(

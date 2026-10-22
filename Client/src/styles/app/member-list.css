@@ -314,3 +314,15 @@
 .member-item.offline .mi-avatar {
   filter: saturate(0.3);
 }
+
+@media (max-width: 899px) {
+  .member-column {
+    padding-right: env(safe-area-inset-right);
+  }
+}
+/* Phones: the overlay takes the whole width. */
+@media (max-width: 600px) {
+  .member-column {
+    width: 100% !important;
+  }
+}
