@@ -2,8 +2,9 @@ name: Install Playwright browser
 description: >
   Restore the Playwright browser and its apt packages from cache, then run
   scripts/ci/playwright-install.sh from Client/. The apt packages are cached
-  because the runner's apt mirror can trickle a ~25 MB download for longer
-  than the step's timeout; on a hit apt reads every .deb from disk.
+  because the runner's apt mirror can stall for longer than the step's
+  timeout; on an exact hit they are installed with dpkg and apt never goes
+  to the network.
 
 runs:
   using: composite
@@ -32,6 +33,8 @@ runs:
     - name: Install browser and system dependencies
       shell: bash
       working-directory: Client/
+      env:
+        OWNCORD_PLAYWRIGHT_APT_CACHE_HIT: ${{ steps.apt-cache.outputs.cache-hit }}
       run: OWNCORD_PLAYWRIGHT_APT_CACHE="$HOME/.cache/owncord-playwright-apt" bash ../scripts/ci/playwright-install.sh
 
     # Saved right away, not in a post step, so a job whose tests fail later
