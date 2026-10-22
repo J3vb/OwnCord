@@ -72,6 +72,7 @@ export const CAPABILITIES = [
   "browser", // Client E2E (Playwright) + Client E2E (parity subset)
   "integration", // Client E2E (real server and media) + Admin Panel E2E
   "native", // Client E2E (Windows native)
+  "webclient", // Client E2E (web portal against a real server), non-blocking
   "workflows", // Workflow Security Lint (zizmor over .github/workflows/)
   "deps", // Supply-chain Scan (osv-scanner + cargo-deny over the lockfiles)
   "permissions", // the permissions.ts mutation hotspot step inside Client Static Checks
@@ -155,6 +156,31 @@ const RUST_READS_OUTSIDE = new Set([
 const RUST_HARNESS_PREFIXES = [
   "Client/tests/e2e/native-voice/",
   "Client/playwright.config.native-voice.ts",
+];
+
+/**
+ * What the browser portal suite (`npm run test:e2e:web`) exercises: the
+ * client source that becomes the bundle, the two build configs, the suite and
+ * its server harness, the embedded-bundle directory and the portal handler. It
+ * is narrower than the `Client/` prefix on purpose: the job is non-blocking
+ * and builds a bundle plus a server, so a test-only or Rust-only change does
+ * not spend it.
+ */
+const WEBCLIENT_PREFIXES = [
+  "Client/src/",
+  "Client/public/",
+  "Client/index.html",
+  "Client/package.json",
+  "Client/package-lock.json",
+  "Client/vite.config",
+  "Client/tsconfig",
+  "Client/playwright.config.web.ts",
+  "Client/tests/e2e/web/",
+  "Client/tests/e2e/support/",
+  "Client/tests/e2e/scripts/build-server.mjs",
+  "Server/webclient/",
+  "Server/api/portal",
+  "protocol/",
 ];
 
 /**
@@ -280,6 +306,7 @@ export function classify(paths) {
     if (K6_HARNESS_PATHS.has(path)) add("server");
     if (PERMISSIONS_MUTATION_PATHS.has(path)) add("permissions");
     if (DEPS_FILES.has(path)) add("deps");
+    if (WEBCLIENT_PREFIXES.some((p) => path.startsWith(p))) add("webclient");
 
     if (path.startsWith("Server/")) {
       // `integration` because the real-server suites drive this server, and

@@ -67,7 +67,7 @@ export function renderConnect(
           ...getSavedProfiles().filter((p) => p.host === fixedHost),
           ...(profileManager.getAll().some((p) => p.host === fixedHost)
             ? []
-            : [{ name: fixedHost, host: fixedHost }]),
+            : [{ name: fixedHost, host: fixedHost, synthetic: true }]),
         ]
       : getSavedProfiles();
 
