@@ -230,7 +230,11 @@ export function startSession(
   // just an absence of one (OCV-022): a password stored under an earlier
   // opt-in must not outlive the opt-out, so the whole credential goes. The
   // username survives in the profile, so the form still prefills it.
-  const keepToken = rememberPassword || autoConnect;
+  //
+  // The web portal keeps the token for every login: an unticked "Stay signed
+  // in" saves it session-only (it goes with the tab) rather than not at all,
+  // so a reload does not sign the user out.
+  const keepToken = __OWNCORD_WEB__ || rememberPassword || autoConnect;
   if (!keepToken && rememberIsUserChoice) {
     void (async () => {
       // The store holds one credential per host (`login_account(host) =
@@ -260,7 +264,20 @@ export function startSession(
     // also erases any password saved under an earlier Remember opt-in
     // (clearPassword); a stored-token resume never clears anything.
     const clearPassword = !rememberPassword && rememberIsUserChoice;
-    saveCredential(host, username, token, rememberPassword ? password : undefined, clearPassword)
+    // The user's own login decides where a portal token lives; a resume says
+    // nothing, so the token stays in the area it was read from.
+    const savedPassword = rememberPassword ? password : undefined;
+    (__OWNCORD_WEB__
+      ? saveCredential(
+          host,
+          username,
+          token,
+          savedPassword,
+          clearPassword,
+          rememberIsUserChoice ? !autoConnect : undefined,
+        )
+      : saveCredential(host, username, token, savedPassword, clearPassword)
+    )
       .then((ok) => {
         if (!ok && owner.isCurrent()) {
           log.warn("Credential save failed — auto-login will not work for this server");
@@ -277,7 +294,18 @@ export function startSession(
   // (BUG-135). No password is passed: save_credential preserves the stored
   // one when none is supplied, which is why the plaintext no longer has to
   // make a round trip through JavaScript.
-  sessionUnsubs.push(ws.on("user_update", createUserUpdateCredentialSaver(host, keepToken)));
+  sessionUnsubs.push(
+    ws.on(
+      "user_update",
+      __OWNCORD_WEB__
+        ? createUserUpdateCredentialSaver(host, keepToken, () => {
+            if (!owner.isCurrent()) return;
+            log.warn("Credential re-save failed — auto-login will not work for this server");
+            setTransientError(connectText("session.credentialsSaveFailed"));
+          })
+        : createUserUpdateCredentialSaver(host, keepToken),
+    ),
+  );
 
   const unsubState = ws.onStateChange((wsState) => {
     log.debug("WS state change", { state: wsState });
@@ -390,6 +418,9 @@ export function installLogoutTeardown(): void {
         connectedOverlay?.destroy();
         connectedOverlay = null;
         ws.disconnect();
+        // The token this session ran on, for the web's delete: another tab may
+        // have saved a different one since, and that one must survive.
+        const sessionToken = lastConnectToken;
         lastConnectToken = "";
         lastConnectHost = "";
         // Clear stored credential on logout. (A server restart never gets
@@ -403,8 +434,10 @@ export function installLogoutTeardown(): void {
           // skip flag below — does not survive that relaunch).
           // A quick switch keeps it as well: switching back resumes with it
           // (B7-13), and the departed session is left for that return.
-          if (reason !== "protocol_epoch" && reason !== "server_switch")
-            void deleteCredential(host);
+          if (reason !== "protocol_epoch" && reason !== "server_switch") {
+            if (__OWNCORD_WEB__) void deleteCredential(host, sessionToken || undefined);
+            else void deleteCredential(host);
+          }
           // Whenever this session must not turn around and auto-login with the
           // credential (removed, or just refused), say so.
           sessionStorage.setItem("owncord:skip-auto-login", "1");

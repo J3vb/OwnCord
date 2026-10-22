@@ -543,7 +543,7 @@ overrides, NSFW, slow mode, archive and retention exactly like a text channel,
 and its posts are `thread` rows whose parent is the forum, with no starter
 message: the thread shape triggers accept a text channel or a forum as a
 thread's parent, and "is this a forum post" is answered by the parent's type,
-never by the starter being NULL. `forum_require_tag` and
+never by the starter being NULL. Creating a post (`forum_post_create`) inserts the thread, its tag links, its first message and the `thread_post_message_id` pointer in the one delivery transaction, and the `client_message_id` receipt is keyed on the forum. `forum_require_tag` and
 `forum_default_auto_archive_minutes` mean something only on a forum row, and
 the triggers refuse them elsewhere. A post's `thread_post_message_id` is its
 opening message, set once to a message in that post. The guidelines are the

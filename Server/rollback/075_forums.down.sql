@@ -1,7 +1,9 @@
 -- Rollback of migration 075: forums go away.
 --
 -- Cost: every forum, every post under it and every message in those posts is
--- deleted, along with the tags and the links between tags and posts. An older
+-- deleted, along with the tags and the links between tags and posts, the polls
+-- and votes on those messages, and the send receipts that name them. A reply
+-- elsewhere to a deleted message loses its reply target. An older
 -- binary has no forum type and its type trigger would refuse the rows. Threads
 -- under text channels, and every text channel, are untouched.
 --
@@ -29,6 +31,12 @@ DELETE FROM message_calls WHERE message_id IN (SELECT id FROM messages WHERE cha
 DELETE FROM message_forwards WHERE message_id IN (SELECT id FROM messages WHERE channel_id IN (SELECT id FROM channels WHERE type = 'forum' OR (type = 'thread' AND parent_channel_id IN (SELECT id FROM channels WHERE type = 'forum'))));
 UPDATE message_forwards SET source_message_id = NULL WHERE source_message_id IN (SELECT id FROM messages WHERE channel_id IN (SELECT id FROM channels WHERE type = 'forum' OR (type = 'thread' AND parent_channel_id IN (SELECT id FROM channels WHERE type = 'forum'))));
 UPDATE attachments SET message_id = NULL WHERE message_id IN (SELECT id FROM messages WHERE channel_id IN (SELECT id FROM channels WHERE type = 'forum' OR (type = 'thread' AND parent_channel_id IN (SELECT id FROM channels WHERE type = 'forum'))));
+DELETE FROM poll_votes WHERE message_id IN (SELECT id FROM messages WHERE channel_id IN (SELECT id FROM channels WHERE type = 'forum' OR (type = 'thread' AND parent_channel_id IN (SELECT id FROM channels WHERE type = 'forum'))));
+DELETE FROM poll_answers WHERE message_id IN (SELECT id FROM messages WHERE channel_id IN (SELECT id FROM channels WHERE type = 'forum' OR (type = 'thread' AND parent_channel_id IN (SELECT id FROM channels WHERE type = 'forum'))));
+DELETE FROM polls WHERE message_id IN (SELECT id FROM messages WHERE channel_id IN (SELECT id FROM channels WHERE type = 'forum' OR (type = 'thread' AND parent_channel_id IN (SELECT id FROM channels WHERE type = 'forum'))));
+DELETE FROM message_delivery_receipts WHERE message_id IN (SELECT id FROM messages WHERE channel_id IN (SELECT id FROM channels WHERE type = 'forum' OR (type = 'thread' AND parent_channel_id IN (SELECT id FROM channels WHERE type = 'forum')))) OR channel_id IN (SELECT id FROM channels WHERE type = 'forum' OR (type = 'thread' AND parent_channel_id IN (SELECT id FROM channels WHERE type = 'forum')));
+UPDATE message_requests SET first_message_id = NULL WHERE first_message_id IN (SELECT id FROM messages WHERE channel_id IN (SELECT id FROM channels WHERE type = 'forum' OR (type = 'thread' AND parent_channel_id IN (SELECT id FROM channels WHERE type = 'forum'))));
+UPDATE messages SET reply_to = NULL WHERE reply_to IN (SELECT id FROM messages WHERE channel_id IN (SELECT id FROM channels WHERE type = 'forum' OR (type = 'thread' AND parent_channel_id IN (SELECT id FROM channels WHERE type = 'forum'))));
 DELETE FROM messages WHERE channel_id IN (SELECT id FROM channels WHERE type = 'forum' OR (type = 'thread' AND parent_channel_id IN (SELECT id FROM channels WHERE type = 'forum')));
 DELETE FROM channel_overrides WHERE channel_id IN (SELECT id FROM channels WHERE type = 'forum' OR (type = 'thread' AND parent_channel_id IN (SELECT id FROM channels WHERE type = 'forum')));
 DELETE FROM channel_user_overrides WHERE channel_id IN (SELECT id FROM channels WHERE type = 'forum' OR (type = 'thread' AND parent_channel_id IN (SELECT id FROM channels WHERE type = 'forum')));

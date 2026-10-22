@@ -109,6 +109,7 @@ var contentBearingKinds = map[string]bool{
 	MsgTypeChatSendOK:          false, // direct to the sender, who already knows their own content
 	MsgTypeChatForwardOK:       false, // direct to the sender; ids only
 	MsgTypePollCreateOK:        false, // direct to the sender; ids only
+	MsgTypeForumPostCreateOK:   false, // direct to the sender, who already knows their own content
 	MsgTypePollVoteOK:          false, // direct to the sender; ids only
 	MsgTypePollEndOK:           false, // direct to the sender; ids only
 	MsgTypeChatDeleted:         false, // ids only

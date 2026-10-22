@@ -180,7 +180,20 @@ async function renderPage(pageId: PageId): Promise<void> {
   rerunConnectHealth = null;
   applyInviteToConnectPage = null;
 
-  if (pageId === "connect") {
+  if (__OWNCORD_WEB__ && globalThis.isSecureContext !== true) {
+    // The browser adapters are inert on a page that is not a secure context,
+    // so nothing but this notice may render, and nothing reaches the API.
+    try {
+      const { createInsecureContextPage } = await import("@pages/portal/InsecureContextPage");
+      if (!isCurrentNavigation()) return;
+      const notice = createInsecureContextPage();
+      safeMount(notice, appEl, renderRecovery);
+      currentPage = notice;
+    } catch (err) {
+      log.error("Insecure-context notice failed to load", err);
+      if (isCurrentNavigation()) renderFallback(appEl, err, renderRecovery);
+    }
+  } else if (pageId === "connect") {
     [currentPage, rerunConnectHealth, applyInviteToConnectPage] = renderConnect(
       api,
       profileManager,

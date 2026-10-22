@@ -77,6 +77,8 @@ type EditMessageResult struct {
 	MentionsEveryone bool
 	// MentionsHere: see SendMessageResult.MentionsHere.
 	MentionsHere bool
+	// PostOpening marks the edit of a forum post's opening message (WP 6.9d).
+	PostOpening bool
 }
 
 // DeleteMessageResult contains the output of a successful message delete.
@@ -189,6 +191,9 @@ type MessageService struct {
 	forward forwardDeps
 	// poll backs CreatePoll (WP 6.9b); see message_poll.go.
 	poll pollDeps
+	// threads reads a forum post's thread for a retry (WP 6.9d); nil disables
+	// forum posts. It is the ThreadStore slice, not a Store method.
+	threads ThreadStore
 }
 
 // SetMessageRequests wires the first-contact gate and delivery-audience
@@ -229,6 +234,7 @@ func NewMessageService(st Store, perms *PermissionService, limiter *auth.RateLim
 	}
 	s.forward.store, _ = st.(ForwardStore)
 	s.poll.store, _ = st.(PollStore)
+	s.threads, _ = st.(ThreadStore)
 	return s
 }
 

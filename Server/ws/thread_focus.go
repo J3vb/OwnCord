@@ -35,6 +35,14 @@ func (h *Hub) applyThreadFocus(c *Client, newID int64) {
 	if newID <= 0 {
 		return
 	}
+	if h.refusesForumTopic(c, newID) {
+		c.mu.Lock()
+		if c.threadID == newID {
+			c.threadID = 0
+		}
+		c.mu.Unlock()
+		return
+	}
 	if threadFocusBeforeSubscribeHook != nil {
 		threadFocusBeforeSubscribeHook(c, newID)
 	}
@@ -54,7 +62,8 @@ func (h *Hub) applyThreadFocus(c *Client, newID int64) {
 	if err != nil {
 		return
 	}
-	if ch != nil && ch.IsThread() {
+	// A socket without the forums feature never holds a forum post's topic.
+	if ch != nil && ch.IsThread() && !withholdsForumPost(c.ctx, h.readers.Dispatch, c, ch) {
 		sub, subErr := h.subjectFor(c.ctx, c.userID, newID)
 		if subErr != nil {
 			return

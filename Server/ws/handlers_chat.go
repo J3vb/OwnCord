@@ -14,6 +14,7 @@ import (
 func registerChatHandlers(r *HandlerRegistry, deps ChatDeps) {
 	r.RegisterV2(MsgTypeChatSend, handleChatSendV2, deps)
 	r.RegisterV2(MsgTypeChatForward, handleChatForwardV2, deps)
+	r.RegisterV2(MsgTypeForumPostCreate, handleForumPostCreateV2, deps)
 	registerPollHandlers(r, deps)
 	r.RegisterV2(MsgTypeChatEdit, handleChatEditV2, deps)
 	r.RegisterV2(MsgTypeChatDelete, handleChatDeleteV2, deps)
@@ -162,6 +163,34 @@ func handleChatForwardV2(ctx context.Context, cmd Command, info ClientInfo, deps
 	return sendResultEvents(d, info, fwd.ClientMessageID, fwd.ChannelID, nil, reply, result)
 }
 
+// handleForumPostCreateV2 processes a forum_post_create (WP 6.9d) via the
+// MessageService. The reply is forum_post_create_ok; the events are the send
+// path's, addressed to the new post's thread: its opening chat_message, and a
+// thread note that tells the forum's viewers (thread_changed, coalesced). A
+// retry answered from the receipt announces nothing.
+func handleForumPostCreateV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
+	d := deps.(ChatDeps)
+	post := cmd.(ForumPostCreateCmd)
+
+	res, err := d.MessageSvc.CreateForumPost(ctx, service.ForumPostParams{
+		ClientMessageID: post.ClientMessageID, ChannelID: post.ChannelID, UserID: info.UserID,
+		Username: info.Username, Name: post.Name, Content: post.Content,
+		AttachmentIDs: post.Attachments(), TagIDs: post.TagIDs,
+	})
+	if err != nil {
+		return serviceErrorToResult(err)
+	}
+	var skipped []string
+	if res.Send != nil {
+		skipped = res.Send.SkippedAttachmentIDs
+	}
+	reply := buildForumPostCreateOK(info.ReqID, res.Thread, res.MessageID, post.ClientMessageID, res.Duplicate, skipped)
+	if res.Duplicate {
+		return Result{Reply: reply}
+	}
+	return sendResultEvents(d, info, post.ClientMessageID, res.Thread.ID, nil, reply, res.Send)
+}
+
 // channelSendResult is a committed non-DM send: the sequenced chat_message,
 // then the note the channel_activity coalescer records.
 func channelSendResult(reply, broadcast []byte, channelID, authorID int64, result *service.SendMessageResult) Result {
@@ -198,11 +227,17 @@ func handleChatEditV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 			channelEvt{evType: MsgTypeChatEdited, channelID: result.ChannelID, payload: editedPayload},
 			result.ParticipantIDs)}}
 	}
-	return Result{Events: []Event{channelEvt{
+	events := []Event{channelEvt{
 		evType:    MsgTypeChatEdited,
 		channelID: result.ChannelID,
 		payload:   editedPayload,
-	}}}
+	}}
+	if result.PostOpening {
+		// A forum post's opening message is the list's preview: the forum's
+		// viewers hear the new text as a thread_changed (coalesced).
+		events = append(events, threadNoteEvt{threadID: result.ChannelID})
+	}
+	return Result{Events: events}
 }
 
 // handleChatDeleteV2 processes a chat_delete command via the MessageService.

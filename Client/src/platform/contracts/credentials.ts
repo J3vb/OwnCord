@@ -38,6 +38,13 @@ export interface CredentialStore {
     sessionOnly?: boolean,
   ): Promise<boolean>;
   load(host: string): Promise<SavedCredential | null>;
-  delete(host: string): Promise<boolean>;
+  /**
+   * `token` (6.13e) names the token the caller is signing out or was refused.
+   * A store that can hold several copies (the browser's two Web Storage areas,
+   * shared with other tabs) removes only a copy holding that token, so a
+   * different token another tab saved survives. Omitted, every copy goes. The
+   * desktop store holds one credential per host and ignores it.
+   */
+  delete(host: string, token?: string): Promise<boolean>;
   loginWithSavedPassword(host: string, username: string): Promise<SavedLoginResponse | null>;
 }

@@ -75,7 +75,7 @@ func handleThreadUpdateV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	c := cmd.(ThreadUpdateCmd)
 	t, err := d.ThreadSvc.Update(ctx, service.UpdateThreadParams{
 		UserID: info.UserID, ThreadID: c.ThreadID, Name: c.Name, Archived: c.Archived, Locked: c.Locked,
-		AutoArchiveMinutes: c.AutoArchiveMinutes,
+		AutoArchiveMinutes: c.AutoArchiveMinutes, TagIDs: c.TagIDs,
 	})
 	if err != nil {
 		return threadErrorToResult(err)

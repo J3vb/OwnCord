@@ -59,6 +59,9 @@ type ThreadInfo struct {
 	MessageCount       int64   `json:"message_count"`
 	LastMessageAt      *string `json:"last_message_at"`
 	CreatedAt          string  `json:"created_at"`
+	// Post is the forum post block (WP 6.9d), present only when the parent is
+	// a forum.
+	Post *ForumPostMeta `json:"post,omitempty"`
 }
 
 // threadFields carries the columns shared by every thread info row; the
@@ -185,6 +188,9 @@ func (d *DB) getThread(ctx context.Context, q *dbgen.Queries, id int64) (*Thread
 		return nil, fmt.Errorf("GetThread: %w", err)
 	}
 	t := threadFromFields(threadFields(r))
+	if err := attachPosts(ctx, q, []*ThreadInfo{&t}); err != nil {
+		return nil, fmt.Errorf("GetThread: %w", err)
+	}
 	return &t, nil
 }
 
@@ -236,6 +242,13 @@ func (d *DB) ListThreads(ctx context.Context, parentID int64, archived bool, aft
 			Activity: r.ActivityAt,
 		})
 	}
+	ts := make([]*ThreadInfo, len(out))
+	for i := range out {
+		ts[i] = &out[i].ThreadInfo
+	}
+	if err := attachPosts(ctx, d.q, ts); err != nil {
+		return nil, fmt.Errorf("ListThreads: %w", err)
+	}
 	return out, nil
 }
 
@@ -246,6 +259,9 @@ type ThreadPatch struct {
 	Archived           *bool
 	Locked             *bool
 	AutoArchiveMinutes *int
+	// TagIDs, when set, replaces the tags of a forum post (WP 6.9d). The
+	// service only sets it for a post; ErrNotFound otherwise.
+	TagIDs *[]int64
 }
 
 // UpdateThread applies patch in one writer transaction and returns the thread
@@ -281,6 +297,14 @@ func (d *DB) UpdateThread(ctx context.Context, id int64, patch ThreadPatch, byMo
 	}
 	if patch.AutoArchiveMinutes != nil {
 		cur.AutoArchiveMinutes = *patch.AutoArchiveMinutes
+	}
+	if patch.TagIDs != nil {
+		if cur.Post == nil {
+			return nil, ErrNotFound
+		}
+		if err := replaceThreadTags(ctx, q, id, cur.ParentID, *patch.TagIDs); err != nil {
+			return nil, err
+		}
 	}
 	if _, err := q.UpdateThreadRow(ctx, dbgen.UpdateThreadRowParams{
 		ID: id, Name: cur.Name, Archived: b2i64(cur.Archived), Locked: b2i64(cur.Locked),

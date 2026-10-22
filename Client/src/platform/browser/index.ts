@@ -158,8 +158,10 @@ const pushToTalk: PushToTalk = {
   supported: async () => false,
 };
 
-// 6.13e sets `fixedHost` from the portal; until then the browser is unscoped.
-const serverScope: ServerScope = { fixedHost: null };
+// The web build is only ever served by one server's portal (6.13a), so the page
+// is bound to its own host. `location.host` is already canonical (lower case,
+// no default port), the form every credential and profile key takes.
+const serverScope: ServerScope = { fixedHost: globalThis.location.host };
 
 const inertSettings: SettingsStore = {
   load: async () => null,

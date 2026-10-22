@@ -59,8 +59,8 @@ describe("browser platform registry", () => {
     }
   });
 
-  it("answers the server scope with no fixed host until the portal sets one (6.13e)", () => {
-    expect(browser.serverScope).toEqual({ fixedHost: null });
+  it("binds the server scope to the page's own host (6.13e)", () => {
+    expect(browser.serverScope).toEqual({ fixedHost: location.host });
   });
 
   it("refuses or does nothing on every capability", async () => {
@@ -315,7 +315,7 @@ describe("browser platform registry: secure-context guard", () => {
     for (const [member, adapter] of Object.entries(adapters)) {
       expect(platform[member as keyof typeof adapters], member).toBe(adapter);
     }
-    expect(platform.serverScope).toEqual({ fixedHost: null });
+    expect(platform.serverScope).toEqual({ fixedHost: location.host });
   });
 
   it("keeps them inert on a page that is not a secure context", async () => {

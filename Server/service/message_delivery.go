@@ -58,7 +58,9 @@ func messageDeliveryParams(p SendMessageParams, floorMS int64) (*db.MessageDeliv
 		// And the canonical poll input (WP 6.9b): empty for every send that
 		// is not a poll_create, so older receipts hash the same.
 		Poll string `json:",omitempty"`
-	}{p.ChannelID, p.Content, p.ReplyTo, attachments, p.ReplyPing, p.ForwardOf, p.Poll})
+		// And the forum post's title and tags (WP 6.9d).
+		ForumPost string `json:",omitempty"`
+	}{p.ChannelID, p.Content, p.ReplyTo, attachments, p.ReplyPing, p.ForwardOf, p.Poll, p.ForumPost})
 	if err != nil {
 		return nil, fmt.Errorf("%w: fingerprint message: %w", ErrInternal, err)
 	}
