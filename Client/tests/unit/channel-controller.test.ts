@@ -362,6 +362,10 @@ import {
 } from "@stores/channels.store";
 import { createMessageList } from "@components/MessageList";
 import { loadSavedDraft, saveDraft } from "@lib/savedDrafts";
+import {
+  NAVIGATION_DESTINATIONS,
+  type ForumViewContext,
+} from "../../src/features/navigation/destinations";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -4541,6 +4545,131 @@ describe("unsent attachments (2A-3)", () => {
     capturedMessageListOpts.onRetry("cid-1");
     expect(opts.ws.send).not.toHaveBeenCalled();
     mockGetChannelMessages.mockReturnValue([]);
+    ctrl.destroyChannel();
+  });
+});
+
+describe("a forum channel (WP 6.9d)", () => {
+  const FORUM = 5151;
+  const TEXT = 5152;
+  const destinations = NAVIGATION_DESTINATIONS as {
+    forum?: { build: (c: ForumViewContext) => HTMLElement };
+  };
+  const realForum = destinations.forum;
+  let built: ForumViewContext[];
+
+  function seed(forumOver: { nsfw?: boolean; nsfw_acknowledged?: boolean } = {}): void {
+    setChannels([
+      {
+        id: FORUM,
+        name: "feedback",
+        type: "forum",
+        category: null,
+        position: 0,
+        can_send: true,
+        ...forumOver,
+      },
+      { id: TEXT, name: "general", type: "text", category: null, position: 1, can_send: true },
+    ]);
+  }
+
+  // The (mocked) lazy gate module resolves after its async factory: load it once.
+  beforeAll(async () => {
+    await import("@components/NsfwGate");
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    built = [];
+    destinations.forum = {
+      build: (ctx) => {
+        built.push(ctx);
+        const el = document.createElement("div");
+        el.className = "forum-view";
+        return el;
+      },
+    };
+    seed();
+  });
+  afterEach(() => {
+    destinations.forum = realForum;
+  });
+
+  it("mounts the forum view in the messages slot, with no message list, typing row or composer", () => {
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(FORUM, "feedback", "forum");
+
+    expect(ctrl.currentChannelId).toBe(FORUM);
+    expect(built).toHaveLength(1);
+    expect(opts.slots.messagesSlot.querySelector(".forum-view")).not.toBeNull();
+    expect(createMessageList).not.toHaveBeenCalled();
+    expect(mockMessageInputMount).not.toHaveBeenCalled();
+    expect(mockTypingMount).not.toHaveBeenCalled();
+    expect(opts.slots.inputSlot.childElementCount).toBe(0);
+    expect(opts.msgCtrl.loadMessages).not.toHaveBeenCalled();
+    expect(opts.ws.send).toHaveBeenCalledWith({
+      type: "channel_focus",
+      payload: { channel_id: FORUM },
+    });
+    ctrl.destroyChannel();
+  });
+
+  it("hands the view the channel, the api, the socket and the channel's own signal", () => {
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(FORUM, "feedback", "forum");
+
+    const ctx = built[0]!;
+    expect(ctx.channelId).toBe(FORUM);
+    expect(ctx.api).toBe(opts.api);
+    expect(ctx.ws).toBe(opts.ws);
+    expect(ctx.signal.aborted).toBe(false);
+    ctrl.destroyChannel();
+    expect(ctx.signal.aborted).toBe(true);
+    expect(opts.slots.messagesSlot.querySelector(".forum-view")).toBeNull();
+  });
+
+  it("decides by the stored type when the caller passes none", () => {
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(FORUM, "feedback");
+    expect(built).toHaveLength(1);
+    ctrl.destroyChannel();
+  });
+
+  it("mounts a text channel the usual way", () => {
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(TEXT, "general", "text");
+    expect(built).toHaveLength(0);
+    expect(createMessageList).toHaveBeenCalled();
+    ctrl.destroyChannel();
+  });
+
+  it("leaves a forum without a mark-read, since it holds no messages", () => {
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(FORUM, "feedback", "forum");
+    ctrl.mountChannel(TEXT, "general", "text");
+    expect(mockMarkChannelRead).not.toHaveBeenCalledWith(FORUM);
+    expect(mockLeaveChannel).not.toHaveBeenCalledWith(FORUM);
+    ctrl.destroyChannel();
+  });
+
+  it("puts a labelled forum behind the consent gate, mounting nothing of the forum", async () => {
+    seed({ nsfw: true, nsfw_acknowledged: false });
+    const opts = makeOpts({
+      api: {
+        acknowledgeNsfw: vi.fn(),
+        revokeNsfw: vi.fn(),
+      } as unknown as ChannelControllerOptions["api"],
+    });
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(FORUM, "feedback", "forum");
+    await vi.dynamicImportSettled();
+    expect(mockCreateNsfwGate).toHaveBeenCalled();
+    expect(built).toHaveLength(0);
     ctrl.destroyChannel();
   });
 });

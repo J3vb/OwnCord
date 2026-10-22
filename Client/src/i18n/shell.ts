@@ -123,6 +123,8 @@ export const shellText = defineCatalog("shell", {
   "channel.type.text": "Text",
   "channel.type.voice": "Voice",
   "channel.type.announcement": "Announcement",
+  "channel.type.forum": "Forum",
+  "channel.forumLoadFailed": "Couldn't load this forum",
   "channel.type.dm": "Dm",
 
   "channelForm.category": "Category",

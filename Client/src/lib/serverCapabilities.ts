@@ -18,6 +18,7 @@ export interface ReadyCapabilityFlags {
   readonly dm_privacy?: boolean;
   readonly polls?: boolean;
   readonly threads?: boolean;
+  readonly forums?: boolean;
   readonly multi_role?: boolean;
 }
 
@@ -93,6 +94,14 @@ export function pollsEnabled(): boolean {
  */
 export function threadsEnabled(): boolean {
   return caps?.threads === true;
+}
+
+/**
+ * Whether the server supports forum channels (WP 6.9d): `forum_post_create` and
+ * a forum's posts. False hides the Forum option in Create Channel.
+ */
+export function forumsEnabled(): boolean {
+  return caps?.forums === true;
 }
 
 /**

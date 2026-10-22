@@ -13,6 +13,7 @@ import type {
   ChannelUpdatePayload,
   ChannelType,
   ChannelCategory,
+  ForumSettings,
 } from "@lib/types";
 
 export interface Channel {
@@ -94,6 +95,8 @@ export interface Channel {
    * listen-only. Absent from older servers, which is read as false.
    */
   readonly afk?: boolean | undefined;
+  /** A forum's tags and settings (WP 6.9d); absent on every other type. */
+  readonly forum?: ForumSettings | undefined;
 }
 
 export interface ChannelsState {
@@ -185,6 +188,7 @@ export function setChannels(channels: readonly ReadyChannel[]): void {
       voiceMaxUsers: ch.voice_max_users ?? 0,
       voiceMaxVideo: ch.voice_max_video ?? 0,
       afk: ch.afk ?? false,
+      forum: ch.forum,
     });
   }
   channelsStore.setState((prev) => {
@@ -278,6 +282,7 @@ export function addChannel(channel: ChannelCreatePayload): void {
       voiceMaxUsers: channel.voice_max_users ?? 0,
       voiceMaxVideo: channel.voice_max_video ?? 0,
       afk: channel.afk ?? existing?.afk ?? false,
+      forum: channel.forum ?? existing?.forum,
     });
     return { ...prev, channels: next };
   });
@@ -319,6 +324,7 @@ export function updateChannel(update: ChannelUpdatePayload): void {
       ...(update.voice_max_users !== undefined ? { voiceMaxUsers: update.voice_max_users } : {}),
       ...(update.voice_max_video !== undefined ? { voiceMaxVideo: update.voice_max_video } : {}),
       ...(update.afk !== undefined ? { afk: update.afk } : {}),
+      ...(update.forum !== undefined ? { forum: update.forum } : {}),
     };
     const next = new Map(prev.channels);
     next.set(update.id, updated);

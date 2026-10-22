@@ -196,3 +196,20 @@ describe("auth frame: active_channel_id", () => {
     expect(Object.prototype.hasOwnProperty.call(payload, "active_channel_id")).toBe(false);
   });
 });
+
+describe("auth frame: features (WP 6.9d)", () => {
+  it("declares the forums feature on every auth, so the server sends forum channels", async () => {
+    vi.useFakeTimers();
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue(undefined);
+    eventHandlers.clear();
+    setActiveChannelProvider(null);
+    const client = createWsClient();
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+    expect(getAuthPayload().features).toEqual(["forums"]);
+    client.disconnect();
+    vi.useRealTimers();
+  });
+});

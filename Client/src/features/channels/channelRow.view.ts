@@ -30,7 +30,7 @@ export type ChannelAccess = {
 };
 
 export type TextChannelRowModel = {
-  readonly kind: "text" | "announcement";
+  readonly kind: "text" | "announcement" | "forum";
   /** Row key; drawn as `data-channel-id` and in the test ids. */
   readonly channelId: number;
   readonly name: string;
@@ -146,6 +146,8 @@ export function drawTextChannelRow(model: TextChannelRowModel): HTMLDivElement {
   const prefix = createElement("span", { class: "ch-icon", "aria-hidden": "true" });
   if (model.kind === "announcement") {
     prefix.appendChild(createIcon("megaphone", 16));
+  } else if (model.kind === "forum") {
+    prefix.appendChild(createIcon("messages-square", 16));
   } else {
     prefix.textContent = "#";
   }

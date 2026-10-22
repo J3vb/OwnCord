@@ -254,6 +254,8 @@ export function wireDispatcher(
   // thread's whole state, sequenced on its parent. Both replace what we hold.
   unsubs.push(ws.on(S.THREAD_CREATE_OK, handleThreadState));
   unsubs.push(ws.on(S.THREAD_CHANGED, handleThreadState));
+  // A forum post's create ack carries the post's whole state, like thread_create_ok.
+  unsubs.push(ws.on(S.FORUM_POST_CREATE_OK, handleThreadState));
   unsubs.push(ws.on(S.THREAD_DELETED, handleThreadDeleted));
 
   unsubs.push(ws.on(S.CHAT_EDITED, (payload) => handleChatEdited(api, payload)));

@@ -119,6 +119,11 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
     class: "thread-panel-status",
     "data-testid": "thread-panel-status",
   });
+  /** A forum post's tags (WP 6.9d); empty and hidden on any other thread. */
+  const tagsEl = createElement("span", {
+    class: "forum-tags thread-panel-tags",
+    "data-testid": "thread-panel-tags",
+  });
   const actionsEl = createElement("div", { class: "thread-panel-actions" });
   const titleEl = createElement("div", { class: "thread-panel-title" });
   const renameForm = createElement("form", { class: "thread-panel-rename" });
@@ -275,6 +280,15 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
     ].filter((m) => m !== "");
     setText(statusEl, marks.join(" · "));
     statusEl.hidden = marks.length === 0;
+    const forumTags = channelsStore.getState().channels.get(t.parent_id)?.forum?.tags ?? [];
+    tagsEl.replaceChildren(
+      ...forumTags
+        .filter((tag) => t.post?.tag_ids.includes(tag.id) === true)
+        .map((tag) =>
+          createElement("span", { class: "forum-tag" }, `${tag.emoji ?? ""} ${tag.name}`.trim()),
+        ),
+    );
+    tagsEl.hidden = tagsEl.childElementCount === 0;
 
     const manage = canManageThread(t, userId());
     const moderator = isThreadModerator(t);
@@ -335,7 +349,10 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
   function paintStarter(): void {
     const t = thread();
     starterEl.replaceChildren();
-    if (t === undefined) return;
+    // A forum post has no starter message: its opening message is the first
+    // one in the list below, so there is nothing to state here (WP 6.9d).
+    starterEl.hidden = t?.post !== undefined;
+    if (t === undefined || t.post !== undefined) return;
     const msg = findStarter();
     if (t.starter_message_id === null || msg?.deleted === true) {
       starterEl.appendChild(
@@ -522,7 +539,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
       "aria-label": t?.name ?? threadsText("panel.label"),
     });
     const header = createElement("div", { class: "thread-panel-header" });
-    titleEl.append(nameEl, parentEl, statusEl);
+    titleEl.append(nameEl, parentEl, statusEl, tagsEl);
     actionsEl.append(renameBtn, archiveBtn, lockBtn, deleteBtn, closeBtn);
     header.append(titleEl, renameForm, actionsEl);
     const messagesSlot = createElement("div", {

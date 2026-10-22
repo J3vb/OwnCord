@@ -2,10 +2,40 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { CHANNEL_TYPES, createCreateChannelModal } from "@components/CreateChannelModal";
 import type { CreateChannelModalOptions } from "@components/CreateChannelModal";
 import { NO_CATEGORY, setChannels, type CategoryRef } from "@stores/channels.store";
+import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
 
 describe("CHANNEL_TYPES", () => {
   it("offers every channel type, regardless of category", () => {
     expect([...CHANNEL_TYPES]).toEqual(["text", "voice", "announcement"]);
+  });
+});
+
+describe("Forum in the type list (WP 6.9d)", () => {
+  afterEach(() => {
+    resetServerCapabilities();
+    document.body.replaceChildren();
+  });
+  const typeOptions = (): string[] => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const modal = createCreateChannelModal({
+      category: { id: 0, name: "Text Channels" },
+      onCreate: vi.fn(async () => {}),
+      onClose: vi.fn(),
+    });
+    modal.mount(container);
+    const values = Array.from(
+      container.querySelectorAll<HTMLOptionElement>("[data-testid='channel-type-select'] option"),
+    ).map((o) => o.value);
+    modal.destroy?.();
+    return values;
+  };
+
+  it("is offered only when the server has the forums capability", () => {
+    applyReadyCapabilities({});
+    expect(typeOptions()).toEqual(["text", "voice", "announcement"]);
+    applyReadyCapabilities({ forums: true });
+    expect(typeOptions()).toEqual(["text", "voice", "announcement", "forum"]);
   });
 });
 

@@ -102,7 +102,8 @@ export function attachChannelContextMenu(
   const showDelete = canManage && onDelete !== undefined;
   // Mark as Read touches only the caller's own read state, so it needs no
   // permission — but a voice channel holds no messages to read.
-  const showMarkRead = channel.type !== "voice";
+  // A forum holds no messages either, so it has no unread state to clear.
+  const showMarkRead = channel.type !== "voice" && channel.type !== "forum";
   // Muting silences notifications, which a voice channel does not produce.
   const showMute = channel.type !== "voice";
   // Keyboard reordering only makes sense with the row's own group at hand.

@@ -130,6 +130,20 @@ describe("text channel row model", () => {
     expect(channelRowModel(ch(1), g, inputs(), ctx()).kind).toBe("text");
   });
 
+  it("a forum draws with the forum glyph in place of the hash, and no unread state", () => {
+    const g = group(null, []);
+    const forum = ch(1, { type: "forum", unreadCount: 0 });
+    const model = channelRowModel(forum, g, inputs(), ctx());
+    expect(model.kind).toBe("forum");
+    if (model.kind === "voice") throw new Error("a forum is not a voice row");
+    const el = drawTextChannelRow(model);
+    const icon = el.querySelector(".ch-icon");
+    expect(icon?.querySelector("svg")).not.toBeNull();
+    expect(icon?.textContent).toBe("");
+    expect(el.dataset["channelId"]).toBe("1");
+    expect(el.classList.contains("unread")).toBe(false);
+  });
+
   it("is draggable only for a manager when the page wired reordering", () => {
     const g = group(null, []);
     const draggable = (list: ChannelListInputs, c: ChannelListContext): boolean =>

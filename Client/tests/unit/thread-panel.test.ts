@@ -543,3 +543,145 @@ describe("a thread created after its starter row rendered", () => {
     await vi.waitFor(() => expect(chipText()).toContain("Again"));
   });
 });
+
+describe("a forum post in the panel (WP 6.9d)", () => {
+  const POST = 95;
+  const TAGGED = {
+    tag_ids: [2],
+    first_message: {
+      id: 950,
+      author_id: ME,
+      preview: "hi",
+      has_attachments: false,
+      deleted: false,
+    },
+  };
+
+  beforeEach(() => {
+    setChannel({
+      type: "forum",
+      canSend: true,
+      forum: {
+        tags: [
+          { id: 1, name: "Bug", position: 0 },
+          { id: 2, name: "Idea", emoji: "💡", position: 1 },
+        ],
+        require_tag: false,
+        default_auto_archive_minutes: 4320,
+      },
+    });
+    upsertThread(
+      makeThread({
+        id: POST,
+        parent_id: PARENT,
+        starter_message_id: null,
+        owner_id: ME,
+        post: TAGGED,
+      }),
+    );
+    seedMessages(POST, [makeMessage({ id: 950, channelId: POST, content: "the opening message" })]);
+  });
+
+  function mountPost() {
+    const panel = createThreadPanel({
+      ws: ws as unknown as WsClient,
+      api,
+      msgCtrl,
+      threadId: POST,
+      reactions,
+      showToast: toast,
+      onClose: vi.fn(),
+    });
+    panel.mount(container);
+    disposers.push(() => panel.destroy?.());
+    return panel;
+  }
+
+  it("has no starter to state: the opening message is the first one in the list", () => {
+    mountPost();
+    const starter = q<HTMLElement>('[data-testid="thread-starter"]');
+    expect(starter.hidden).toBe(true);
+    expect(starter.textContent).toBe("");
+    expect(q('[data-testid="thread-panel-messages"]').textContent).toContain("the opening message");
+  });
+
+  it("shows the post's tags under its title", () => {
+    mountPost();
+    const tags = q<HTMLElement>('[data-testid="thread-panel-tags"]');
+    expect(tags.hidden).toBe(false);
+    expect(Array.from(tags.querySelectorAll(".forum-tag")).map((t) => t.textContent)).toEqual([
+      "💡 Idea",
+    ]);
+    expect(q('[data-testid="thread-panel"]').textContent).toContain("in #general");
+  });
+
+  it("still states a missing starter for an ordinary thread", () => {
+    upsertThread(makeThread({ id: 96, parent_id: PARENT, starter_message_id: null }));
+    const panel = createThreadPanel({
+      ws: ws as unknown as WsClient,
+      api,
+      msgCtrl,
+      threadId: 96,
+      reactions,
+      showToast: toast,
+      onClose: vi.fn(),
+    });
+    panel.mount(container);
+    disposers.push(() => panel.destroy?.());
+    expect(q<HTMLElement>('[data-testid="thread-starter"]').hidden).toBe(false);
+    expect(q('[data-testid="thread-starter"]').textContent).toContain(
+      "original message was deleted",
+    );
+  });
+
+  it("hands focus back to the list row when the panel's Close is pressed", async () => {
+    const slot = document.createElement("div");
+    const list = document.createElement("div");
+    const row = document.createElement("button");
+    row.dataset["postId"] = String(POST);
+    list.appendChild(row);
+    document.body.append(list, slot);
+    const host = createThreadPanelHost({
+      ws: ws as unknown as WsClient,
+      api,
+      msgCtrl: msgCtrl as never,
+      slot,
+      showToast: toast,
+    });
+    disposers.push(() => host.destroy());
+    const signal = new AbortController().signal;
+    host.openById(POST, PARENT, signal, () =>
+      list.querySelector<HTMLElement>(`[data-post-id="${POST}"]`),
+    );
+    await vi.waitFor(() =>
+      expect(slot.querySelector('[data-testid="thread-panel"]')).not.toBeNull(),
+    );
+    slot.querySelector<HTMLButtonElement>('[data-testid="thread-close"]')!.focus();
+    slot.querySelector<HTMLButtonElement>('[data-testid="thread-close"]')!.click();
+    expect(host.openThreadId).toBeNull();
+    expect(document.activeElement).toBe(row);
+  });
+
+  it("does not move focus when the panel is closed by the page (a channel switch)", async () => {
+    const slot = document.createElement("div");
+    const row = document.createElement("button");
+    document.body.append(row, slot);
+    const elsewhere = document.createElement("button");
+    document.body.appendChild(elsewhere);
+    const host = createThreadPanelHost({
+      ws: ws as unknown as WsClient,
+      api,
+      msgCtrl: msgCtrl as never,
+      slot,
+      showToast: toast,
+    });
+    disposers.push(() => host.destroy());
+    host.open(getThread(POST)!, () => row);
+    await vi.waitFor(() =>
+      expect(slot.querySelector('[data-testid="thread-panel"]')).not.toBeNull(),
+    );
+    elsewhere.focus();
+    host.close();
+    expect(document.activeElement).toBe(elsewhere);
+  });
+});
