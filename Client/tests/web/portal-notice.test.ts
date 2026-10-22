@@ -22,4 +22,14 @@ describe("portal incompatible notice", () => {
     notice.show("chat.example", 3, 4);
     expect(notice.element.querySelector(".incompatible-notice-leave")).toBeNull();
   });
+
+  it("offers Reload page when the server is the older side too", () => {
+    const onUpdate = vi.fn();
+    const notice = createIncompatibleNotice({ onUpdate, onLeave: vi.fn() });
+    notice.show("chat.example", 3, 4);
+    const button = notice.element.querySelector<HTMLButtonElement>(".incompatible-notice-update")!;
+    expect(button.textContent).toBe(portalText("incompatible.reload"));
+    button.click();
+    expect(onUpdate).toHaveBeenCalledWith("chat.example");
+  });
 });

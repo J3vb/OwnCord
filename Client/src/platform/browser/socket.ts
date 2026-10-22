@@ -26,9 +26,11 @@ const OPEN = 1;
  *  (`src-tauri/src/ws_proxy.rs`, `CONNECT_TIMEOUT`). */
 const HANDSHAKE_TIMEOUT_MS = 10_000;
 
-/** A plain-http portal (a trusted LAN) is served by a server with no TLS, and
- *  `lib/ws.ts` builds `wss:` URLs. For the page's own host only, dial `ws:`:
- *  a page on `http:` may not do better, and another host is never downgraded. */
+/** A plain-http page reaches this only on a loopback host (any other http
+ *  page is not a secure context, and the router shows only a notice there).
+ *  `lib/ws.ts` builds `wss:` URLs, so for the page's own host only, dial
+ *  `ws:`: a page on `http:` may not do better, and another host is never
+ *  downgraded. */
 function dialUrl(url: string): string {
   const page = globalThis.location;
   if (page === undefined || page.protocol !== "http:") return url;

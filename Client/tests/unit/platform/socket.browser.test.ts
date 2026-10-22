@@ -344,6 +344,16 @@ describe("browser socket scheme", () => {
     );
   });
 
+  it("http page on the default port dials ws:", async () => {
+    pageAt("http:", "localhost");
+    expect(await dial("wss://localhost/api/v1/ws")).toBe("ws://localhost/api/v1/ws");
+  });
+
+  it("http page on a bracketed IPv6 loopback dials ws:", async () => {
+    pageAt("http:", "[::1]:8443");
+    expect(await dial("wss://[::1]:8443/api/v1/ws")).toBe("ws://[::1]:8443/api/v1/ws");
+  });
+
   it("https page keeps wss:", async () => {
     pageAt("https:", "chat.example");
     expect(await dial("wss://chat.example/api/v1/ws")).toBe("wss://chat.example/api/v1/ws");

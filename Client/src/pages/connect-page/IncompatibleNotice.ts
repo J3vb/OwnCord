@@ -58,7 +58,9 @@ export function createIncompatibleNotice(opts: IncompatibleNoticeOptions): Incom
     // The update exit is offered only when the client is the older side: an
     // older server's requirement cannot be resolved by installing this
     // client, and offering the updater there would update the wrong side.
-    if (serverEpoch !== null && serverEpoch > clientEpoch) {
+    // On the portal a reload is the one action in either case: a cached page
+    // can be newer or older than the server it talks to.
+    if (__OWNCORD_WEB__ || (serverEpoch !== null && serverEpoch > clientEpoch)) {
       const updateBtn = createElement("button", {
         class: "incompatible-notice-update btn-primary",
         type: "button",
