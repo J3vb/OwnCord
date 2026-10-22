@@ -26,6 +26,24 @@ const OPEN = 1;
  *  (`src-tauri/src/ws_proxy.rs`, `CONNECT_TIMEOUT`). */
 const HANDSHAKE_TIMEOUT_MS = 10_000;
 
+/** A plain-http portal (a trusted LAN) is served by a server with no TLS, and
+ *  `lib/ws.ts` builds `wss:` URLs. For the page's own host only, dial `ws:`:
+ *  a page on `http:` may not do better, and another host is never downgraded. */
+function dialUrl(url: string): string {
+  const page = globalThis.location;
+  if (page === undefined || page.protocol !== "http:") return url;
+  try {
+    const target = new URL(url);
+    if (target.protocol === "wss:" && target.host === page.host) {
+      target.protocol = "ws:";
+      return target.href;
+    }
+  } catch {
+    // Not a URL; the constructor reports it.
+  }
+  return url;
+}
+
 function createBrowserSocket(): SocketConnection {
   const messageListeners = new Set<(text: string) => void>();
   const stateListeners = new Set<
@@ -78,7 +96,7 @@ function createBrowserSocket(): SocketConnection {
     if (gen !== generation) return;
     let socket: WebSocket;
     try {
-      socket = new Socket(options.url);
+      socket = new Socket(dialUrl(options.url));
     } catch {
       // A URL the page may not dial: the same outcome as a failed handshake.
       report("disconnected");

@@ -9,6 +9,7 @@
 
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
 import { connectText } from "../../i18n/connect";
+import { portalText } from "../../i18n/portal";
 
 export interface IncompatibleNoticeOptions {
   /** Called when the user chooses to update this client. */
@@ -62,7 +63,13 @@ export function createIncompatibleNotice(opts: IncompatibleNoticeOptions): Incom
         class: "incompatible-notice-update btn-primary",
         type: "button",
       });
-      setText(updateBtn, connectText("incompatible.updateClient"));
+      // The portal is the page itself: updating the client is reloading it.
+      setText(
+        updateBtn,
+        __OWNCORD_WEB__
+          ? portalText("incompatible.reload")
+          : connectText("incompatible.updateClient"),
+      );
       updateBtn.addEventListener("click", () => {
         if (currentHost !== null) opts.onUpdate(currentHost);
       });

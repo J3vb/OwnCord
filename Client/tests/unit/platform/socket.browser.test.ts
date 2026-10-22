@@ -310,3 +310,42 @@ describe("browser socket", () => {
     expect(certs).toEqual([]);
   });
 });
+
+describe("browser socket scheme", () => {
+  function pageAt(protocol: string, host: string): void {
+    vi.stubGlobal("location", { protocol, host });
+  }
+
+  async function dial(url: string): Promise<string> {
+    install();
+    const connection = socket.create();
+    void connection.connect({ url, token: "t" }).catch(() => undefined);
+    const dialled = latest().url;
+    await connection.disconnect();
+    return dialled;
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+  });
+
+  it("http page dials ws:", async () => {
+    pageAt("http:", "chat.example:8080");
+    expect(await dial("wss://chat.example:8080/api/v1/ws")).toBe(
+      "ws://chat.example:8080/api/v1/ws",
+    );
+  });
+
+  it("http page leaves another host's wss: alone", async () => {
+    pageAt("http:", "chat.example:8080");
+    expect(await dial("wss://other.example:8080/api/v1/ws")).toBe(
+      "wss://other.example:8080/api/v1/ws",
+    );
+  });
+
+  it("https page keeps wss:", async () => {
+    pageAt("https:", "chat.example");
+    expect(await dial("wss://chat.example/api/v1/ws")).toBe("wss://chat.example/api/v1/ws");
+  });
+});

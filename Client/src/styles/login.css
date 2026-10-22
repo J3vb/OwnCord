@@ -813,6 +813,11 @@
   margin-bottom: 16px;
   margin-top: -8px;
 }
+/* Beats the flex above: the portal hides this group, and the later, equally
+   specific rule would otherwise keep it on screen. */
+.remember-password-group.form-group--hidden {
+  display: none;
+}
 .remember-password-group input[type="checkbox"] {
   width: 18px;
   height: 18px;

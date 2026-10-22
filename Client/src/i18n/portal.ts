@@ -10,6 +10,10 @@ import { defineCatalog } from "./format";
 export const portalText = /* @__PURE__ */ defineCatalog("portal", {
   "login.stayLoggedIn": "Stay signed in",
 
+  "userBar.signOut": "Sign out",
+
+  "incompatible.reload": "Reload page",
+
   "insecure.title": "A secure connection is required",
   "insecure.body":
     "OwnCord can only sign you in over a secure connection (https). Open this server at its https address, or ask its administrator to turn on https.",
