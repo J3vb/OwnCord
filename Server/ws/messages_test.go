@@ -400,7 +400,7 @@ func TestBuildMemberBan_ValidJSON(t *testing.T) {
 // ─── buildChatEdited ──────────────────────────────────────────────────────────
 
 func TestBuildChatEdited_Type(t *testing.T) {
-	msg := buildChatEdited(10, 20, "new content", "2024-01-01T00:00:00Z", []int64{7}, true, false)
+	msg := buildChatEdited(10, 20, "new content", "2024-01-01T00:00:00Z", []int64{7}, nil, true, false)
 	var env struct {
 		Type string `json:"type"`
 	}
@@ -413,7 +413,7 @@ func TestBuildChatEdited_Type(t *testing.T) {
 }
 
 func TestBuildChatEdited_Payload(t *testing.T) {
-	msg := buildChatEdited(10, 20, "new content", "2024-01-01T00:00:00Z", []int64{7}, true, true)
+	msg := buildChatEdited(10, 20, "new content", "2024-01-01T00:00:00Z", []int64{7}, nil, true, true)
 	var env struct {
 		Payload struct {
 			MessageID        int64   `json:"message_id"`

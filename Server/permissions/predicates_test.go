@@ -320,3 +320,22 @@ func TestCanPinMessage(t *testing.T) {
 		{"zero subject refused", Subject{}, ErrPermissionDenied},
 	})
 }
+
+func TestCanMentionRole(t *testing.T) {
+	runPredicate(t, "CanMentionRole", func(s Subject) error { return CanMentionRole(s, false) }, []predicateCase{
+		{"member without the bit", Subject{RolePerms: memberBits, Channel: text(false)}, ErrPermissionDenied},
+		{"MENTION_EVERYONE and READ", Subject{RolePerms: memberBits | MentionEveryone, Channel: text(false)}, nil},
+		{"MENTION_EVERYONE without READ", Subject{RolePerms: SendMessages | MentionEveryone, Channel: text(false)}, ErrPermissionDenied},
+		{"channel deny of MENTION_EVERYONE", Subject{RolePerms: memberBits | MentionEveryone, Override: deny(MentionEveryone), Channel: text(false)}, ErrPermissionDenied},
+		{"channel allow of MENTION_EVERYONE", Subject{RolePerms: memberBits, Override: allow(MentionEveryone), Channel: text(false)}, nil},
+		{"administrator", Subject{RolePerms: Administrator, Channel: text(false)}, nil},
+		{"no role fails closed", Subject{Channel: text(false)}, ErrPermissionDenied},
+	})
+	// A mentionable role is pingable by anyone, bits or not.
+	if err := CanMentionRole(Subject{RolePerms: memberBits, Channel: text(false)}, true); err != nil {
+		t.Errorf("mentionable role refused a plain member: %v", err)
+	}
+	if err := CanMentionRole(Subject{}, true); err != nil {
+		t.Errorf("mentionable role refused the zero subject: %v", err)
+	}
+}

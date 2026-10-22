@@ -369,14 +369,14 @@ func TestPurgeAfterBan_ReversesMentionBadges(t *testing.T) {
 	ctx := context.Background()
 
 	before := banPurgeMsg(t, f.database, fixtureChannel, fixtureOwner, time.Minute)
-	if _, err := f.database.ReplaceMessageMentions(ctx, before, []int64{fixtureMember}, false); err != nil {
+	if _, err := f.database.ReplaceMessageMentions(ctx, before, []int64{fixtureMember}, false, nil); err != nil {
 		t.Fatalf("ReplaceMessageMentions(before): %v", err)
 	}
 	if err := f.database.IncrementMentionCounts(ctx, fixtureChannel, before, []int64{fixtureMember}); err != nil {
 		t.Fatalf("IncrementMentionCounts(before): %v", err)
 	}
 	spam := banPurgeMsg(t, f.database, fixtureChannel, fixtureMember2, time.Minute)
-	if _, err := f.database.ReplaceMessageMentions(ctx, spam, []int64{fixtureMember}, false); err != nil {
+	if _, err := f.database.ReplaceMessageMentions(ctx, spam, []int64{fixtureMember}, false, nil); err != nil {
 		t.Fatalf("ReplaceMessageMentions(spam): %v", err)
 	}
 	if err := f.database.IncrementMentionCounts(ctx, fixtureChannel, spam, []int64{fixtureMember}); err != nil {

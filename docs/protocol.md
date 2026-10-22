@@ -1216,12 +1216,13 @@ ended at the last time anyone was seen in it when the server next starts, and
 that end is sent like any other. Calls that continue across a restart are not
 carried over: people who rejoin start a new row.
 
-| Field                | Type           | Description                                                                                                                                              |
-| -------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mentions`           | number[]       | User IDs the server resolved from `@username` tokens, plus the replied-to author when `reply_ping` was set. Always present; empty when nothing resolved. |
-| `mentions_everyone`  | bool           | `true` when the message carried `@everyone` or `@here` **and** the author holds `MENTION_EVERYONE` on that channel.                                      |
-| `mentions_here`      | bool           | `true` when `mentions_everyone` came from `@here` rather than `@everyone` (never both).                                                                  |
-| `referenced_message` | object or null | Snippet of the `reply_to` parent, so a reply to a message outside the loaded window still shows who and what. See below.                                 |
+| Field                | Type           | Description                                                                                                                                                                                                                                                                                                                           |
+| -------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mentions`           | number[]       | User IDs the server resolved from `@username` and `<@id>` tokens, plus the replied-to author when `reply_ping` was set. Always present; empty when nothing resolved.                                                                                                                                                                  |
+| `mention_roles`      | number[]       | Role IDs the server resolved from `<@&id>` tokens that cleared the role-mention gate (the role is `mentionable`, or the author holds `READ_MESSAGES` and `MENTION_EVERYONE` on the channel). Always present; empty when nothing resolved. A client counts a role mention only when the role is listed here. An older server omits it. |
+| `mentions_everyone`  | bool           | `true` when the message carried `@everyone` or `@here` **and** the author holds `MENTION_EVERYONE` on that channel.                                                                                                                                                                                                                   |
+| `mentions_here`      | bool           | `true` when `mentions_everyone` came from `@here` rather than `@everyone` (never both).                                                                                                                                                                                                                                               |
+| `referenced_message` | object or null | Snippet of the `reply_to` parent, so a reply to a message outside the loaded window still shows who and what. See below.                                                                                                                                                                                                              |
 
 `referenced_message` is `{id, user: {id, username, avatar}, content, deleted,
 has_attachments}`, computed when the frame is built (never stored). `content`
@@ -1241,11 +1242,22 @@ deleted message is the parent.
 
 Mentions are resolved server-side at send time against existing usernames
 (case-insensitive, whole-word, capped at 20 per message, plus the replied-to
-author when the reply pinged, who never counts against the cap). An `@word` that
-matches no username, and an `@everyone`/`@here` from an author without
-`MENTION_EVERYONE`, resolve to nothing and stay plain text — clients must
-highlight from these fields rather than re-parsing the content. DMs never carry
-`mentions_everyone`.
+author when the reply pinged, who never counts against the cap). The content may
+also carry `<@123>` (a user by id) and `<@&5>` (a role by id) tokens; the server
+stores them as typed. A user id that names no reachable user is ignored. User
+and role tokens share the cap of 20 and at most 60 distinct tokens are looked
+at. An `@word` that matches no username, an unknown id, a `<@&id>` for a role
+that is not `mentionable` from an author without `MENTION_EVERYONE`, and an
+`@everyone`/`@here` from an author without `MENTION_EVERYONE`, resolve to
+nothing and stay plain text — clients must highlight from these fields rather
+than re-parsing the content. DMs never carry `mentions_everyone` or
+`mention_roles`; a `<@&id>` in a DM stays text.
+
+Every holder of a role in `mention_roles` gets the same badge, `channel_activity`
+`mentions_you` flag and push candidacy as a direct `mentions` hit (the author and
+anyone who blocked the author are skipped, and the holder must be able to read
+the channel). The holders are expanded once at send and are not listed in
+`mentions`. An edit re-resolves `mention_roles` but never raises a badge.
 
 `@everyone` and `@here` both raise `mention_count` for every reader except
 `@here` skips a reader with no live connection when the badge is written (the
@@ -1284,13 +1296,14 @@ Own messages only. Max 4000 runes.
     "content": "Hello everyone! (edited)",
     "edited_at": "2026-03-14T10:31:00Z",
     "mentions": [7],
+    "mention_roles": [],
     "mentions_everyone": false,
     "mentions_here": false
   }
 }
 ```
 
-`mentions`/`mentions_everyone`/`mentions_here` are re-resolved from the edited
+`mentions`/`mention_roles`/`mentions_everyone`/`mentions_here` are re-resolved from the edited
 content and replace the stored set, except a reply-ping target, which an
 edit keeps. Editing never raises anyone's
 `mention_count`: a badge is only ever raised by the original send, so
@@ -1751,7 +1764,8 @@ For a **thread** id (WP 6.9c) the audience is narrowed to the thread's followers
 who can read its parent, so an entry never reaches a user who does not follow
 the thread. A forum post is the exception: its entry goes to the forum's whole
 audience, as before (WP 6.9d). A client that finds a thread id here for a thread it does not follow
-can ignore it.
+can ignore it. A role mention (`mention_roles`) in a thread raises the holders' mention badge but
+sends a hint only to those who follow the thread, and does not make them follow it.
 
 - **Audience.** Connected users who may view the channel (the same
   `CanViewChannel` verdict as `ready`), for `text`, `announcement` and `voice` channels

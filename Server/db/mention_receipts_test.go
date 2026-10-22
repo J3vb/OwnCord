@@ -110,7 +110,7 @@ func TestMigration063_BackfillOnlyBadgedRows(t *testing.T) {
 
 	send := func(author int64, content string, mentions []int64, everyone bool) int64 {
 		t.Helper()
-		m, err := database.CreateMessageWithMentions(ctx, ch, author, content, nil, mentions, 0, everyone)
+		m, err := database.CreateMessageWithMentions(ctx, ch, author, content, nil, mentions, 0, everyone, nil)
 		if err != nil {
 			t.Fatalf("CreateMessageWithMentions(%q): %v", content, err)
 		}
@@ -198,7 +198,7 @@ func TestMentionReceipts_CascadeOnMessageHardDelete(t *testing.T) {
 	author := seedUser(t, database, "author")
 	reader := seedUser(t, database, "reader")
 	ch := seedChannelRawSQL(t, database, "general")
-	m, err := database.CreateMessageWithMentions(ctx, ch, author, "hi @reader", nil, []int64{reader}, 0, false)
+	m, err := database.CreateMessageWithMentions(ctx, ch, author, "hi @reader", nil, []int64{reader}, 0, false, nil)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions: %v", err)
 	}

@@ -33,6 +33,7 @@
             "channel_id": 3,
             "content": "hello again",
             "id": "<id:number>",
+            "mention_roles": [],
             "mentions": [],
             "mentions_everyone": false,
             "mentions_here": false,

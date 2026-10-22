@@ -42,6 +42,7 @@
               "source_timestamp": "<ts:string>"
             },
             "id": "<id:number>",
+            "mention_roles": [],
             "mentions": [],
             "mentions_everyone": false,
             "mentions_here": false,
@@ -118,6 +119,7 @@
               "source_timestamp": "<ts:string>"
             },
             "id": "<id:number>",
+            "mention_roles": [],
             "mentions": [],
             "mentions_everyone": false,
             "mentions_here": false,

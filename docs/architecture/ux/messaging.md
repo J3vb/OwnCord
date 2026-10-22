@@ -356,7 +356,9 @@ link to a channel the reader cannot see stays plain text.
 
 The server resolves mentions at send time and ships `mentions` (user IDs) +
 `mentions_everyone` on `chat_message`, `chat_edited` and REST history, plus a
-per-channel `mention_count` in `ready`. The client treats those fields as
+per-channel `mention_count` in `ready`. `<@id>` and `<@&id>` tokens resolve the
+same way; the roles that cleared the ping gate ride as `mention_roles` (WP 6.3f-1),
+and a client counts a role mention only when it is listed there. The client treats those fields as
 authoritative and only falls back to parsing `@tokens` locally when an older
 server omits them.
 

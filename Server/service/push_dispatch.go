@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -227,17 +228,29 @@ func (d *PushDispatcher) Notify(ctx context.Context, channelID, authorID int64, 
 		blockedByAuthor[b] = true
 	}
 
-	coalesced := d.coalesceAudience(ctx, ch, candidateIDs, authorID, blockedByAuthor)
-	if len(coalesced) == 0 {
+	// Cheapest filters first (in memory), then one subscriptions read for the
+	// survivors, then the per-user permission and trust reads only for users
+	// who actually have a subscription: a ping of a 2,000-holder role costs
+	// one query plus reads for the few subscribed users, not 2,000 reads.
+	pre := d.prefilterAudience(candidateIDs, authorID, ch.ID, blockedByAuthor)
+	if len(pre) == 0 {
 		return
 	}
-
 	keyID := d.push.currentKeyID()
-	subs, err := d.st.ListPushSubscriptionsForDispatch(ctx, coalesced, keyID)
+	subs, err := d.st.ListPushSubscriptionsForDispatch(ctx, pre, keyID)
 	if err != nil {
 		slog.Error("PushDispatcher.Notify ListPushSubscriptionsForDispatch", "err", err, "channel_id", channelID)
 		return
 	}
+	coalesced := d.coalesceAudience(ctx, ch, subscribedUserIDs(subs), authorID)
+	if len(coalesced) == 0 {
+		return
+	}
+	allowed := make(map[int64]bool, len(coalesced))
+	for _, uid := range coalesced {
+		allowed[uid] = true
+	}
+	subs = slices.DeleteFunc(subs, func(sub db.PushSubscriptionForDispatch) bool { return !allowed[sub.UserID] })
 
 	// The coalescing window is reserved only once a user has a prepared
 	// request, so a missing subscription or a failed lookup never suppresses
@@ -380,55 +393,6 @@ func (d *PushDispatcher) attemptOne(ctx context.Context, channelID, authorID int
 		return false
 	}
 	return true
-}
-
-// coalesceAudience narrows candidateIDs to the users a push is actually
-// sent to: distinct, not the author, not blocked by (a blocker of) the
-// author, currently eligible (offline and permitted -- see eligibleFor),
-// trusting the author if this is a one-to-one DM (see below), and not
-// inside their coalescing window for ch.
-//
-// Eligibility is checked BEFORE coalescing, not after: an online or
-// unauthorized candidate must not reserve the 60s window for a channel they
-// were never going to be pushed about, or a later, genuinely eligible
-// mention (the recipient came back online, or a mention five seconds after
-// an ineligible one) would silently receive nothing. Eligibility is
-// re-checked again immediately before every delivery attempt in
-// stillEligible, because a bounded but potentially slow dispatch (retries,
-// a worker pool) can take long enough for it to change again in the other
-// direction.
-//
-// For a DM, permission IS participation (permissions.CanViewChannel checks
-// only DMParticipant for a "dm" channel). Notify already refused a group DM
-// before this is ever called (ch.Type == "dm" here always means one-to-one),
-// so a DM push additionally requires that the candidate trusts the author --
-// the same trusted_senders row Message Requests gates on and DMAudience /
-// MessageRequestService.DMDeliveryAudience apply to chat_message delivery
-// (service/message_crud.go, service/message_request.go) -- so a first-contact
-// message from an unknown sender cannot ring a stranger's phone before they
-// have decided to accept it. Fail closed: a lookup error is treated as
-// untrusted, same as every other fail-closed check in this file.
-func (d *PushDispatcher) coalesceAudience(ctx context.Context, ch *db.Channel, candidateIDs []int64, authorID int64, blockedByAuthor map[int64]bool) []int64 {
-	seen := make(map[int64]bool, len(candidateIDs))
-	out := make([]int64, 0, len(candidateIDs))
-	now := time.Now()
-	for _, uid := range candidateIDs {
-		if uid == authorID || uid <= 0 || seen[uid] || blockedByAuthor[uid] {
-			continue
-		}
-		seen[uid] = true
-		if !d.eligibleFor(ctx, ch, uid) {
-			continue
-		}
-		if !d.trustsAuthor(ctx, ch, uid, authorID) {
-			continue
-		}
-		if d.recentlySent(uid, ch.ID, now) {
-			continue
-		}
-		out = append(out, uid)
-	}
-	return out
 }
 
 // trustsAuthor reports whether a one-to-one DM push to uid may proceed:

@@ -3,31 +3,21 @@ package service
 import (
 	"context"
 	"log/slog"
-	"regexp"
 	"slices"
-	"strings"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// maxMentionsPerMessage caps how many usernames one message can resolve.
-// Tokens past the cap stay plain text, bounding both the stored rows and the
-// read-state writes a single send can trigger.
+// maxMentionsPerMessage caps how many mentions one message can resolve, user
+// tokens (@name and <@id>) and role tokens (<@&id>) together. Tokens past the
+// cap stay plain text, bounding both the stored rows and the read-state writes
+// a single send can trigger.
 const maxMentionsPerMessage = 20
 
-// maxMentionCandidates caps how many distinct @tokens are looked up per
-// message, so a wall of @words cannot turn one send into an unbounded query.
+// maxMentionCandidates caps how many distinct tokens (of all three forms) are
+// looked up per message, so a wall of @words cannot turn one send into an unbounded query.
 const maxMentionCandidates = 60
-
-// mentionTokenRe matches an @token that stands alone as a word. Group 1 is the
-// preceding character, which must be start-of-string or a non-word non-@ rune
-// ("mail@example" and "@@name" never resolve); group 2 is the token; group 3
-// captures a trailing "@" so address-shaped text like "@bob@example.com" is
-// rejected as a whole rather than half-matched. The token charset is letters,
-// digits, underscore, dot and hyphen — usernames may hold any printable rune,
-// but only this subset is addressable without an explicit delimiter.
-var mentionTokenRe = regexp.MustCompile(`(^|[^\p{L}\p{N}_@])@([\p{L}\p{N}_.-]{1,64})(@?)`)
 
 // everyoneToken and hereToken are reserved: a user literally named "everyone"
 // is not resolvable by @everyone.
@@ -48,6 +38,15 @@ type mentionSet struct {
 	// HereOnly narrows an Everyone fan-out to users who are not offline. It is
 	// set when @here matched and @everyone did not.
 	HereOnly bool
+	// RoleIDs lists the roles whose <@&id> token resolved and cleared
+	// permissions.CanMentionRole, in order of appearance. They count against
+	// the same cap as UserIDs. Never nil. Empty in a DM, where roles have no
+	// meaning.
+	RoleIDs []int64
+	// RoleUserIDs is every holder of a role in RoleIDs, read once and only when
+	// RoleIDs is non-empty. It feeds the badge, activity and push fan-out and
+	// is never put on the wire: `mentions` stays the explicit user ids.
+	RoleUserIDs []int64
 	// ReplyPingUserID is the replied-to author a reply_ping added to UserIDs,
 	// 0 for none. UserIDs holds at most maxMentionsPerMessage content mentions
 	// plus this one, and the target is never displaced by the cap.
@@ -64,13 +63,14 @@ func (m mentionSet) withReplyPing(targetID int64) mentionSet {
 	m.ReplyPingUserID = targetID
 	ids := make([]int64, 0, len(m.UserIDs)+1)
 	content, named := 0, false
+	room := max(maxMentionsPerMessage-len(m.RoleIDs), 0)
 	for _, id := range m.UserIDs {
 		if targetID != 0 && id == targetID {
 			named = true
 			ids = append(ids, id)
 			continue
 		}
-		if content == maxMentionsPerMessage {
+		if content == room {
 			continue
 		}
 		content++
@@ -83,76 +83,80 @@ func (m mentionSet) withReplyPing(targetID int64) mentionSet {
 	return m
 }
 
-// mentionCandidate is one @token and the username spellings it may resolve to,
-// in preference order. Trailing sentence punctuation is stripped in the second
-// spelling so "@bob." resolves to bob when no user is named "bob.".
-type mentionCandidate struct {
-	spellings []string
+// reachIDs is every user the message pings directly: the explicit mentions
+// plus the holders of a pinged role. MentionReach takes this set.
+func (m mentionSet) reachIDs() []int64 {
+	if len(m.RoleUserIDs) == 0 {
+		return m.UserIDs
+	}
+	return slices.Concat(m.UserIDs, m.RoleUserIDs)
 }
 
-// parseMentionTokens extracts the @tokens of a message. Returned tokens are
-// lowercased, distinct and ordered by first appearance; the reserved
-// @everyone / @here tokens are reported separately and never resolved as
-// usernames.
-func parseMentionTokens(content string) (tokens []mentionCandidate, everyone, here bool) {
-	seen := make(map[string]struct{})
-	for _, m := range mentionTokenRe.FindAllStringSubmatch(content, -1) {
-		if m[3] == "@" {
-			continue // address-shaped, e.g. "@bob@example.com"
-		}
-		// db.LowerASCII, not strings.ToLower: usernames.username is only
-		// COLLATE NOCASE, which folds ASCII A-Z only. A Unicode fold here
-		// (e.g. 'É' -> 'é') would desync this token from GetUserIDsByUsernames'
-		// equally ASCII-folded map key, so a username holding an uppercase
-		// non-ASCII letter could never resolve (OC-0131).
-		raw := db.LowerASCII(m[2])
-		switch raw {
-		case everyoneToken:
-			everyone = true
-			continue
-		case hereToken:
-			here = true
-			continue
-		}
-		if _, dup := seen[raw]; dup {
-			continue
-		}
-		seen[raw] = struct{}{}
-		spellings := []string{raw}
-		if trimmed := strings.TrimRight(raw, ".-"); trimmed != "" && trimmed != raw {
-			spellings = append(spellings, trimmed)
-		}
-		tokens = append(tokens, mentionCandidate{spellings: spellings})
-		if len(tokens) >= maxMentionCandidates {
-			break
-		}
-	}
-	return tokens, everyone, here
+// fill copies the explicit and role mentions and the @everyone verdict onto a
+// send result.
+func (m mentionSet) fill(r *SendMessageResult) {
+	r.Mentions, r.MentionRoles, r.RoleUserIDs = m.UserIDs, m.RoleIDs, m.RoleUserIDs
+	r.MentionsEveryone, r.MentionsHere = m.Everyone, m.HereOnly
+}
+
+// pings reports whether the message can raise any badge or push at all.
+func (m mentionSet) pings() bool {
+	return len(m.UserIDs) > 0 || len(m.RoleUserIDs) > 0 || m.Everyone
 }
 
 // resolveMentions turns sanitized content into a mentionSet. Unknown @words
 // resolve to nothing and stay plain text, and @everyone/@here without the
 // MENTION_EVERYONE bit on this channel does the same. DM channels have no
-// @everyone semantics — there is no permission surface to answer to.
+// @everyone semantics — there is no permission surface to answer to — and no
+// role semantics either, so a <@&id> token in a DM stays text.
+//
+// <@id> tokens resolve like a typed @username: to a user who exists and is not
+// banned. Whether that user can read the channel is decided later, where the
+// badge is raised (mentionReaders), exactly as for @username. They come first
+// in UserIDs, then the @username mentions, each in order of appearance.
+//
+// A <@&id> token resolves to a role that exists and clears
+// permissions.CanMentionRole for the author; otherwise it stays text and is
+// listed nowhere. Holders are read once, and only when a role resolved.
 //
 // Resolution failures are logged and treated as "no mentions": a message must
 // not be rejected because its mention lookup failed.
 //
-// UserIDs may hold one id past maxMentionsPerMessage, for a reply-ping target
-// among them; withReplyPing applies the cap.
+// UserIDs may hold one id past the cap, for a reply-ping target among them;
+// withReplyPing applies the cap.
 func (s *MessageService) resolveMentions(ctx context.Context, content string, authorID, channelID int64, isDM bool) mentionSet {
-	set := mentionSet{UserIDs: []int64{}}
+	set := mentionSet{UserIDs: []int64{}, RoleIDs: []int64{}}
 
-	tokens, everyone, here := parseMentionTokens(content)
-	if (everyone || here) && !isDM &&
+	parsed := parseMentionTokens(content)
+	if (parsed.Everyone || parsed.Here) && !isDM &&
 		s.perms.HasChannelPerm(ctx, authorID, channelID, permissions.ReadMessages|permissions.MentionEveryone) {
 		set.Everyone = true
-		set.HereOnly = here && !everyone
+		set.HereOnly = parsed.Here && !parsed.Everyone
 	}
-	if len(tokens) == 0 {
-		return set
+	if len(parsed.RoleIDs) > 0 && !isDM {
+		s.resolveRoleMentions(ctx, &set, parsed.RoleIDs, authorID, channelID)
 	}
+	room := max(maxMentionsPerMessage-len(set.RoleIDs), 0)
+	seen := make(map[int64]struct{}, len(parsed.Tokens)+len(parsed.UserIDs))
+	add := func(id int64) {
+		if _, dup := seen[id]; !dup && len(set.UserIDs) <= room {
+			seen[id] = struct{}{}
+			set.UserIDs = append(set.UserIDs, id)
+		}
+	}
+	for _, id := range s.resolveIDMentions(ctx, parsed.UserIDs, channelID) {
+		add(id)
+	}
+	s.addNameMentions(ctx, parsed.Tokens, channelID, add)
+	return set
+}
 
+// addNameMentions resolves the legacy @username tokens, in order, through add.
+// A lookup failure is logged and leaves the tokens as text.
+func (s *MessageService) addNameMentions(ctx context.Context, tokens []mentionCandidate, channelID int64, add func(int64)) {
+	if len(tokens) == 0 {
+		return
+	}
 	lookup := make([]string, 0, len(tokens)*2)
 	for _, t := range tokens {
 		lookup = append(lookup, t.spellings...)
@@ -160,27 +164,16 @@ func (s *MessageService) resolveMentions(ctx context.Context, content string, au
 	byName, err := s.st.GetUserIDsByUsernames(ctx, lookup)
 	if err != nil {
 		slog.Error("MessageService.resolveMentions GetUserIDsByUsernames", "err", err, "channel_id", channelID)
-		return set
+		return
 	}
-
-	seen := make(map[int64]struct{}, len(tokens))
 	for _, t := range tokens {
 		for _, spelling := range t.spellings {
-			id, ok := byName[spelling]
-			if !ok {
-				continue
+			if id, ok := byName[spelling]; ok {
+				add(id)
+				break
 			}
-			if _, dup := seen[id]; !dup {
-				seen[id] = struct{}{}
-				set.UserIDs = append(set.UserIDs, id)
-			}
-			break
-		}
-		if len(set.UserIDs) > maxMentionsPerMessage {
-			break
 		}
 	}
-	return set
 }
 
 // MentionReach is the per-reader mention rule: direct when uid is among the
@@ -192,7 +185,22 @@ func (s *MessageService) resolveMentions(ctx context.Context, content string, au
 // for @here; "" means no live connection. The author and the author's blockers
 // are removed by the caller.
 func MentionReach(ids []int64, everyone, hereOnly bool, uid int64, liveStatus string) (direct, broad bool) {
-	direct = slices.Contains(ids, uid)
+	return MentionReachSet(MentionIDSet(ids), everyone, hereOnly, uid, liveStatus)
+}
+
+// MentionIDSet indexes a mention's ids so a fan-out over many readers (a
+// 2,000-holder role) tests each in O(1) with MentionReachSet.
+func MentionIDSet(ids []int64) map[int64]struct{} {
+	set := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		set[id] = struct{}{}
+	}
+	return set
+}
+
+// MentionReachSet is MentionReach over a prebuilt MentionIDSet.
+func MentionReachSet(ids map[int64]struct{}, everyone, hereOnly bool, uid int64, liveStatus string) (direct, broad bool) {
+	_, direct = ids[uid]
 	if everyone {
 		broad = !hereOnly || (liveStatus != "" && db.BroadcastStatus(liveStatus) != db.StatusOffline)
 	}
@@ -213,9 +221,10 @@ func MentionReach(ids []int64, everyone, hereOnly bool, uid int64, liveStatus st
 // The message is already committed by the time this runs, so failures are
 // logged rather than surfaced — a lost badge must not fail a delivered send.
 func (s *MessageService) mentionEntries(ctx context.Context, channelID, msgID, authorID int64, set mentionSet, isDM bool, participantIDs []int64) []db.MentionBatchEntry {
-	if len(set.UserIDs) == 0 && !set.Everyone {
+	if !set.pings() {
 		return nil
 	}
+	reach := MentionIDSet(set.reachIDs())
 
 	readers, err := s.mentionReaders(ctx, channelID, isDM, participantIDs)
 	if err != nil {
@@ -238,7 +247,7 @@ func (s *MessageService) mentionEntries(ctx context.Context, channelID, msgID, a
 				status = s.liveStatus(r.UserID)
 			}
 		}
-		if direct, broad := MentionReach(set.UserIDs, set.Everyone, set.HereOnly, r.UserID, status); direct || broad {
+		if direct, broad := MentionReachSet(reach, set.Everyone, set.HereOnly, r.UserID, status); direct || broad {
 			recipients[r.UserID] = struct{}{}
 		}
 	}

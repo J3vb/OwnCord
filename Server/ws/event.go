@@ -210,6 +210,9 @@ type channelActivityEvt struct {
 	msgID     int64
 	authorID  int64
 	mentions  []int64
+	// roleUsers are the holders of the roles the message pinged; they count
+	// as direct mentions exactly like mentions do.
+	roleUsers []int64
 	everyone  bool
 	hereOnly  bool
 	readBy    int64

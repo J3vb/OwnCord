@@ -167,6 +167,8 @@ type chatEditedPayload struct {
 	// edit that adds or drops a mention updates the highlight too.
 	Mentions         []int64 `json:"mentions"`
 	MentionsEveryone bool    `json:"mentions_everyone"`
+	// MentionRoles: see chatMessagePayload.MentionRoles.
+	MentionRoles []int64 `json:"mention_roles"`
 	// MentionsHere: see chatMessagePayload.MentionsHere.
 	MentionsHere bool `json:"mentions_here"`
 }
@@ -532,9 +534,12 @@ func buildChatSendOK(requestID string, msgID int64, timestamp, clientMessageID s
 }
 
 // buildChatEdited constructs a chat_edited broadcast.
-func buildChatEdited(msgID, channelID int64, content, editedAt string, mentions []int64, mentionsEveryone, mentionsHere bool) []byte {
+func buildChatEdited(msgID, channelID int64, content, editedAt string, mentions, mentionRoles []int64, mentionsEveryone, mentionsHere bool) []byte {
 	if mentions == nil {
 		mentions = []int64{}
+	}
+	if mentionRoles == nil {
+		mentionRoles = []int64{}
 	}
 	return buildJSON(wsMsg{
 		Type: MsgTypeChatEdited,
@@ -544,6 +549,7 @@ func buildChatEdited(msgID, channelID int64, content, editedAt string, mentions 
 			Content:          content,
 			EditedAt:         editedAt,
 			Mentions:         mentions,
+			MentionRoles:     mentionRoles,
 			MentionsEveryone: mentionsEveryone,
 			MentionsHere:     mentionsHere,
 		},

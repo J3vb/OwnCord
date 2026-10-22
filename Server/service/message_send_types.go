@@ -84,7 +84,13 @@ type SendMessageResult struct {
 	// Mentions is the resolved mentioned user ids (never nil) and
 	// MentionsEveryone an authorized @everyone/@here. Both are broadcast so
 	// clients highlight from server-resolved data instead of re-guessing.
-	Mentions         []int64
+	Mentions []int64
+	// MentionRoles lists the roles whose <@&id> token cleared the role-mention
+	// gate (never nil); RoleUserIDs is every holder of those roles. The holders
+	// ride only on the server-side fan-out (channel_activity, badges, push),
+	// never on the wire.
+	MentionRoles     []int64
+	RoleUserIDs      []int64
 	MentionsEveryone bool
 	// ThreadJoined lists the users this send newly made followers of its thread
 	// (WP 6.9c): the author and each direct mention who was not one already. The

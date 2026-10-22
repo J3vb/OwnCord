@@ -59,8 +59,9 @@ type MentionTarget struct {
 // maxMentionsPerMessage and duplicates are ignored. The same transaction
 // advances the author's read state past the message (advanceAuthorReadState).
 // replyPingUserID (0 = none) is the replied-to author a reply_ping adds on top
-// of the capped content mentions; see insertMentionRows.
-func (d *DB) CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, replyPingUserID int64, mentionsEveryone bool) (*Message, error) {
+// of the capped content mentions; see insertMentionRows. mentionedRoleIDs land
+// in message_role_mentions in the same transaction.
+func (d *DB) CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, replyPingUserID int64, mentionsEveryone bool, mentionedRoleIDs []int64) (*Message, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("CreateMessageWithMentions begin tx: %w", err)
@@ -86,7 +87,7 @@ func (d *DB) CreateMessageWithMentions(ctx context.Context, channelID, userID in
 	m.Pinned = pinned != 0
 	m.MentionsEveryone = everyone != 0
 
-	if err := insertMentionRows(ctx, tx, m.ID, mentionedUserIDs, replyPingUserID); err != nil {
+	if err := insertAllMentionRows(ctx, tx, m.ID, mentionedUserIDs, replyPingUserID, mentionedRoleIDs, false); err != nil {
 		return nil, err
 	}
 	advanceAuthorReadState(ctx, d.q.WithTx(tx), userID, channelID, m.ID)
@@ -107,7 +108,7 @@ func (d *DB) CreateMessageWithMentions(ctx context.Context, channelID, userID in
 // content-derived: it survives the rewrite (a content mention of the same user
 // leaves it in place) and its user id is returned, 0 when the message holds
 // none, so the edit broadcast keeps the highlight.
-func (d *DB) ReplaceMessageMentions(ctx context.Context, messageID int64, mentionedUserIDs []int64, mentionsEveryone bool) (int64, error) {
+func (d *DB) ReplaceMessageMentions(ctx context.Context, messageID int64, mentionedUserIDs []int64, mentionsEveryone bool, mentionedRoleIDs []int64) (int64, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("ReplaceMessageMentions begin tx: %w", err)
@@ -135,7 +136,7 @@ func (d *DB) ReplaceMessageMentions(ctx context.Context, messageID int64, mentio
 		return 0, fmt.Errorf("ReplaceMessageMentions reply row: %w", err)
 	}
 	// Passing the kept target lets the content cap skip it, the same as on send.
-	if err := insertMentionRows(ctx, tx, messageID, mentionedUserIDs, replyPingUserID); err != nil {
+	if err := insertAllMentionRows(ctx, tx, messageID, mentionedUserIDs, replyPingUserID, mentionedRoleIDs, true); err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(); err != nil {

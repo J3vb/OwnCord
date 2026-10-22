@@ -18,11 +18,11 @@ func TestMentionQueries_ReportClosedDatabaseErrors(t *testing.T) {
 
 	calls := map[string]func() error{
 		"CreateMessageWithMentions": func() error {
-			_, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi", nil, []int64{2}, 0, false)
+			_, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi", nil, []int64{2}, 0, false, nil)
 			return err
 		},
 		"ReplaceMessageMentions": func() error {
-			_, err := database.ReplaceMessageMentions(ctx, 1, []int64{2}, true)
+			_, err := database.ReplaceMessageMentions(ctx, 1, []int64{2}, true, nil)
 			return err
 		},
 		"GetMentionsByMessageIDs": func() error {
@@ -51,6 +51,18 @@ func TestMentionQueries_ReportClosedDatabaseErrors(t *testing.T) {
 		},
 		"ListBlockersOf": func() error {
 			_, err := database.ListBlockersOf(ctx, 1)
+			return err
+		},
+		"GetRoleMentionsByMessageIDs": func() error {
+			_, err := database.GetRoleMentionsByMessageIDs(ctx, []int64{1})
+			return err
+		},
+		"GetReachableUserIDs": func() error {
+			_, err := database.GetReachableUserIDs(ctx, []int64{1})
+			return err
+		},
+		"ListUserIDsByRoles": func() error {
+			_, err := database.ListUserIDsByRoles(ctx, []int64{1})
 			return err
 		},
 		"GetChannelOverrides": func() error {
