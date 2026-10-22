@@ -231,14 +231,12 @@ type ServerConfig struct {
 	TrustedProxies    []string `yaml:"trusted_proxies"`
 	AdminAllowedCIDRs []string `yaml:"admin_allowed_cidrs"`
 	WAFEnabled        bool     `yaml:"waf_enabled"` // Enable Coraza WAF (default: false)
-	// BrowserClientEnabled is the owner opt-in for hosting a browser client
-	// from this server. It is false by default and this build ships no
-	// browser assets, so enabling it hosts nothing yet — the bundle, its
-	// route and its own CSP are B8's (BG-01, plan decision 10). The key
-	// exists now because a disabled-by-default hosting surface is a security
-	// property, and proving it before the assets exist is far cheaper than
-	// proving it after; Server/api/browser_hosting_posture_test.go is that
-	// proof.
+	// BrowserClientEnabled is the owner opt-in for hosting the browser
+	// client from this server (BG-01, 6.13). It is false by default, and off
+	// nothing is mounted at / or /assets/*. On, the server serves the bundle
+	// embedded in its binary (Server/webclient) with its own CSP; a build that
+	// carries only the placeholder answers GET / with a 404 note.
+	// Server/api/browser_hosting_posture_test.go proves both states.
 	BrowserClientEnabled bool `yaml:"browser_client_enabled"`
 	// ReachabilityReportEnabled is the owner opt-in for the `reachability`
 	// block on GET /api/v1/diagnostics/connectivity (B6-6): the classified
@@ -556,9 +554,9 @@ server:
   #                           # pprof is on (0 disables); sees SQLite writer contention.
   # pprof_mutex_profile_fraction: 5        # sample 1 in N contended mutex events
   #                           # when pprof is on (0 disables).
-  # browser_client_enabled: false  # host a browser client from this server.
-  #                           # Owner opt-in, off by default. This build ships no
-  #                           # browser assets, so turning it on hosts nothing yet.
+  # browser_client_enabled: false  # host the browser client from this server.
+  #                           # Owner opt-in, off by default. Builds without the
+  #                           # browser bundle answer GET / with a 404 note.
   # reachability_report_enabled: false
   #                           # add a "reachability" block to the admin-only
   #                           # GET /api/v1/diagnostics/connectivity: this host's

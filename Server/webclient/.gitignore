@@ -1,0 +1,3 @@
+# The browser client bundle is copied in by release builds, never committed.
+/dist/*
+!/dist/PLACEHOLDER.txt

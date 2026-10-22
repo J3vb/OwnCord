@@ -204,10 +204,10 @@ func openMigrated() (*db.DB, func(), error) {
 }
 
 // genRoutes walks the production router with every optional family switched
-// on — uploads, voice, the GIF proxy and telemetry — so the table is the
-// whole tree rather than the bare-config subset. The scaffolding is a copy of
-// fullRouter in api/absence_contract_test.go plus the telemetry init main.go
-// does; test code stays in the test.
+// on — uploads, voice, the GIF proxy, telemetry and the browser client portal
+// — so the table is the whole tree rather than the bare-config subset. The
+// scaffolding is a copy of fullRouter in api/absence_contract_test.go plus
+// the telemetry init main.go does; test code stays in the test.
 //
 // The index is the superset build: /metrics mounts only when
 // telemetry.PrometheusHandler() returns non-nil, which needs -tags otel, so
@@ -228,7 +228,9 @@ func genRoutes(w io.Writer) error {
 	defer func() { _ = os.RemoveAll(dir) }()
 
 	cfg := &config.Config{
-		Server: config.ServerConfig{Name: "gendocs", Port: 8443, DataDir: dir},
+		// BrowserClientEnabled mounts the browser client portal's GET / and
+		// /assets/* (6.13a), an owner opt-in like the other optional families.
+		Server: config.ServerConfig{Name: "gendocs", Port: 8443, DataDir: dir, BrowserClientEnabled: true},
 		Upload: config.UploadConfig{MaxSizeMB: 1, StorageDir: filepath.Join(dir, "uploads")},
 		//nolint:gosec // G101: placeholder values so the optional voice routes mount; the router is walked, never served.
 		Voice: config.VoiceConfig{
@@ -304,7 +306,7 @@ func genRoutes(w io.Writer) error {
 		r[1] = code(r[1])
 	}
 
-	printf(w, "Generated from the mounted router by %s — do not edit by hand; `make docs-verify` fails when it drifts. %d routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).\n\n",
+	printf(w, "Generated from the mounted router by %s — do not edit by hand; `make docs-verify` fails when it drifts. %d routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).\n\n",
 		code(regenCmd), len(rows))
 	writeTable(w, []string{"Method", "Path"}, rows)
 	return nil

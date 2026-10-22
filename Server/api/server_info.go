@@ -128,8 +128,8 @@ func buildServerInfo(ctx context.Context, cfg *config.Config, deps serverInfoDep
 	// constant; a literal would keep reporting the old number after the
 	// next epoch bump and silently lie to every client.
 	//
-	// Reporting BrowserClientEnabled is not hosting: no route is mounted
-	// and no asset is served either way (browser_hosting_posture_test.go).
+	// Reporting BrowserClientEnabled is not hosting: the portal routes are
+	// mounted by the router, not here (browser_hosting_posture_test.go).
 	return serverInfoResponse{
 		Name:                 name,
 		ProtocolEpoch:        ws.ProtocolEpoch,

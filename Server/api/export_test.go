@@ -172,6 +172,10 @@ func SecurityHeaders(next http.Handler) http.Handler {
 // warning can be asserted without standing up a whole router.
 var WarnOnServerConfigForTest = warnOnServerConfig
 
+// WarnOnBrowserClientForTest exposes warnOnBrowserClient with the bundle's
+// presence as a parameter, so both builds can be asserted from one binary.
+var WarnOnBrowserClientForTest = warnOnBrowserClient
+
 // SetRouteTablePathForTest points the container bridge-gateway lookup at a
 // fixture route table for the duration of the test.
 func SetRouteTablePathForTest(t *testing.T, path string) {
