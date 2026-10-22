@@ -73,7 +73,7 @@ async function renderChannels(){
   return html;
 }
 /* A channel type in words, beside its icon. */
-const CH_TYPE_NAME={text:'Text channel',voice:'Voice channel',announcement:'Announcement channel',dm:'Direct message'};
+const CH_TYPE_NAME={text:'Text channel',voice:'Voice channel',announcement:'Announcement channel',forum:'Forum channel',dm:'Direct message'};
 
 /* <datalist> of the categories currently in use. Purely a suggestion list —
    typing a brand-new name is the supported way to create a category. */
@@ -85,7 +85,13 @@ function categoryDatalist(listId){
 }
 
 function openChannelModal(){
-  openModal('<div class="modal-header"><h3>Create Channel</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div><div class="modal-body"><div class="form-group"><label class="form-label" for="chName">Name <span class="req">*</span></label><input class="form-input" id="chName" placeholder="general"></div><div class="form-group"><label class="form-label" for="chType">Type</label><select class="form-input" id="chType" style="appearance:auto"><option value="text">Text</option><option value="voice">Voice</option><option value="announcement">Announcement</option></select></div><div class="form-group"><label class="form-label" for="chCat">Category</label><input class="form-input" id="chCat" list="chCatList" placeholder="Text Channels" autocomplete="off">'+categoryDatalist('chCatList')+'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Any name works, for voice and text channels alike. Leave blank for no category.</div></div><div class="form-group"><label class="form-label" for="chTopic">Topic</label><input class="form-input" id="chTopic"></div><div class="form-group"><label class="form-label" for="chPos">Position</label><input class="form-input" id="chPos" type="number" value="0" min="0"></div></div><div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-accent" data-action="createChannel">Create</button></div>');
+  openModal('<div class="modal-header"><h3>Create Channel</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div><div class="modal-body"><div class="form-group"><label class="form-label" for="chName">Name <span class="req">*</span></label><input class="form-input" id="chName" placeholder="general"></div><div class="form-group"><label class="form-label" for="chType">Type</label><select class="form-input" id="chType" style="appearance:auto" data-change-action="onChannelTypeChange"><option value="text">Text</option><option value="voice">Voice</option><option value="announcement">Announcement</option><option value="forum">Forum</option></select></div><div class="form-group"><label class="form-label" for="chCat">Category</label><input class="form-input" id="chCat" list="chCatList" placeholder="Text Channels" autocomplete="off">'+categoryDatalist('chCatList')+'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Any name works, for voice and text channels alike. Leave blank for no category.</div></div><div class="form-group"><label class="form-label" for="chTopic">Topic</label><input class="form-input" id="chTopic"><div id="chTopicHint" style="font-size:11px;color:var(--text-muted);margin-top:4px" hidden>For a forum the topic is its guidelines, shown above the posts. Tags are set after creating it, with Edit.</div></div><div class="form-group"><label class="form-label" for="chPos">Position</label><input class="form-input" id="chPos" type="number" value="0" min="0"></div></div><div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-accent" data-action="createChannel">Create</button></div>');
+}
+
+/* A forum's topic is its guidelines, and its tags come after it exists. */
+function onChannelTypeChange(){
+  const hint=document.getElementById('chTopicHint');
+  if(hint)hint.hidden=fsInput(document,'#chType').value!=='forum';
 }
 
 async function createChannel(){
@@ -121,6 +127,7 @@ function openChannelEditModal(id){
   const voiceRows=type!=='voice'?'':
      '<div class="form-group"><label class="form-label" for="chEditMaxUsers">User limit (0 = unlimited)</label><input class="form-input" id="chEditMaxUsers" type="number" min="0" max="99" value="'+esc(maxUsers)+'"></div>'
     +'<div class="form-group"><label class="form-label" for="chEditMaxVideo">Video limit (0 = unlimited)</label><input class="form-input" id="chEditMaxVideo" type="number" min="0" max="99" value="'+esc(maxVideo)+'"></div>';
+  const forumRows=type==='forum'?forumSettingsHtml(id,ch.forum||ch.Forum):'';
   openModal('<div class="modal-header"><h3>Edit Channel</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div>'
     +'<div class="modal-body">'
     +'<div class="form-group"><label class="form-label" for="chEditName">Name</label><input class="form-input" id="chEditName" value="'+esc(name)+'"></div>'
@@ -131,6 +138,7 @@ function openChannelEditModal(id){
     +voiceRows
     +'<div class="setting-row"><div class="setting-info"><div class="setting-name" id="chEditArchived-name">Archived</div><div class="setting-desc">Hide the channel without deleting its messages</div></div><div class="setting-ctrl"><button class="toggle '+(archived?'on':'')+'" id="chEditArchived" role="switch" aria-checked="'+(archived?'true':'false')+'" aria-labelledby="chEditArchived-name" data-action="toggleSwitch"></button></div></div>'
     +'<div class="setting-row"><div class="setting-info"><div class="setting-name" id="chEditNsfw-name">Age-restricted (NSFW)</div><div class="setting-desc">Clients show a one-time warning and mark the channel. The server does not filter or restrict anything.</div></div><div class="setting-ctrl"><button class="toggle '+(nsfw?'on':'')+'" id="chEditNsfw" role="switch" aria-checked="'+(nsfw?'true':'false')+'" aria-labelledby="chEditNsfw-name" data-action="toggleSwitch"></button></div></div>'
+    +forumRows
     +'</div>'
     +'<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-accent" data-action="saveChannelEdit" data-args="'+actArgs(id)+'">Save</button></div>');
 }
@@ -161,6 +169,121 @@ async function saveChannelEdit(id){
   if(maxUsersEl){body.voice_max_users=parseInt(maxUsersEl.value,10)||0}
   if(maxVideoEl){body.voice_max_video=parseInt(maxVideoEl.value,10)||0}
   try{await api('PATCH','/channels/'+id,body);closeModal();showToast('Channel updated');renderContent()}catch(e){showToast(e.message,'error')}
+}
+
+/* ═══ Forum settings (WP 6.9d) ═══ */
+/* PUT /channels/{id}/forum replaces the forum's whole settings: a tag sent with
+   its id is renamed in place (posts keep it), one without an id is created, and
+   a tag the list leaves out is deleted with its links to posts. The list order
+   is the display order. The section sits in the Edit Channel dialog and saves on
+   its own button; the limits below mirror Server/service/forum_settings.go. */
+const FORUM_MAX_TAGS=20,FORUM_MAX_TAG_NAME=20,FORUM_MAX_TAG_EMOJI=34;
+const FORUM_ARCHIVE=[[60,'1 hour'],[1440,'24 hours'],[4320,'3 days'],[10080,'1 week']];
+function forumRuneLen(v){return Array.from(v).length}
+/* The settings as one comparable string: what the dialog opened on, and what
+   the server holds when Save is pressed. */
+function forumKey(f){
+  const tags=((f&&f.tags)||[]).slice().sort((a,b)=>(a.position||0)-(b.position||0)).map(t=>[t.id,t.name,t.emoji||'']);
+  return JSON.stringify([tags,!!(f&&f.require_tag),(f&&f.default_auto_archive_minutes)||4320]);
+}
+function forumTagRowHtml(t,i,n){
+  const label=t.name.trim()||'this tag';
+  return '<div class="fs-row" data-tag-id="'+esc(t.id||0)+'">'
+    +'<input class="form-input fs-emoji" aria-label="Tag '+(i+1)+' emoji" placeholder="Emoji" autocomplete="off" value="'+esc(t.emoji||'')+'">'
+    +'<input class="form-input fs-name" aria-label="Tag '+(i+1)+' name" placeholder="Name" autocomplete="off" value="'+esc(t.name)+'">'
+    +'<button class="act-btn" type="button" title="Move up" aria-label="Move '+esc(label)+' up"'+(i===0?' disabled':'')+' data-focus="fsup-'+i+'" data-action="forumTagMove" data-args="'+actArgs(i,-1)+'">'+I.arrowUp+'</button>'
+    +'<button class="act-btn" type="button" title="Move down" aria-label="Move '+esc(label)+' down"'+(i===n-1?' disabled':'')+' data-focus="fsdown-'+i+'" data-action="forumTagMove" data-args="'+actArgs(i,1)+'">'+I.arrowDown+'</button>'
+    +'<button class="act-btn danger" type="button" title="Remove" aria-label="Remove '+esc(label)+'" data-action="forumTagRemove" data-args="'+actArgs(i)+'">'+I.trash+'</button></div>';
+}
+function forumTagsHtml(rows){
+  const body=rows.length?rows.map((t,i)=>forumTagRowHtml(t,i,rows.length)).join(''):'<div class="fs-hint">No tags yet.</div>';
+  return body+'<div class="fs-foot"><button class="btn btn-outline btn-sm" type="button" data-action="forumTagAdd"'+(rows.length>=FORUM_MAX_TAGS?' disabled':'')+'>'+I.plus+' Add tag</button><span class="fs-hint">'+rows.length+'/'+FORUM_MAX_TAGS+' tags</span></div>';
+}
+function forumSettingsHtml(id,forum){
+  const f=forum||{tags:[],require_tag:false,default_auto_archive_minutes:4320};
+  state.forumEdit={id,key:forumKey(f)};
+  const rows=(f.tags||[]).slice().sort((a,b)=>(a.position||0)-(b.position||0)).map(t=>({id:t.id,name:t.name,emoji:t.emoji||''}));
+  const opts=FORUM_ARCHIVE.map(o=>'<option value="'+o[0]+'"'+(o[0]===f.default_auto_archive_minutes?' selected':'')+'>'+o[1]+'</option>').join('');
+  return '<div class="fs-section" id="forumSettings"><div class="fs-title">Forum settings</div>'
+    +'<div class="form-group"><label class="form-label" id="fsTags-label">Tags</label><div id="fsTags" role="group" aria-labelledby="fsTags-label">'+forumTagsHtml(rows)+'</div>'
+    +'<div class="fs-hint">Members pick up to 5 per post. Renaming a tag keeps it on its posts; removing one takes it off them.</div></div>'
+    +'<div class="setting-row"><div class="setting-info"><div class="setting-name" id="fsRequire-name">Require a tag on new posts</div><div class="setting-desc">A post cannot be created without at least one tag.</div></div><div class="setting-ctrl"><button class="toggle '+(f.require_tag?'on':'')+'" id="fsRequire" role="switch" aria-checked="'+(f.require_tag?'true':'false')+'" aria-labelledby="fsRequire-name" data-action="toggleSwitch"></button></div></div>'
+    +'<div class="form-group"><label class="form-label" for="fsArchive">Default auto-archive</label><select class="form-input" id="fsArchive" style="appearance:auto">'+opts+'</select><div class="fs-hint">How long a new post may sit idle before it is archived.</div></div>'
+    +'<div class="fs-hint">Forum settings save on their own button; the fields above save with Save.</div>'
+    +'<div class="fs-actions"><button class="btn btn-outline" type="button" id="fsSave" data-action="saveForumSettings" data-args="'+actArgs(id)+'">Save forum settings</button></div></div>';
+}
+/** @param {ParentNode} root @param {string} sel @returns {HTMLInputElement} */
+function fsInput(root,sel){return /** @type {HTMLInputElement} */(root.querySelector(sel))}
+function readForumRows(){
+  return [...document.querySelectorAll('#fsTags div.fs-row')].map(r=>({
+    id:parseInt(r instanceof HTMLElement&&r.dataset.tagId||'0',10)||0,
+    name:fsInput(r,'.fs-name').value,
+    emoji:fsInput(r,'.fs-emoji').value}));
+}
+function paintForumRows(rows,focus){
+  document.getElementById('fsTags').innerHTML=forumTagsHtml(rows);
+  markModalDirty();
+  const el=focus&&document.querySelector('#fsTags button[data-focus="'+focus+'"]:not(:disabled)')||(focus==='new'&&[...document.querySelectorAll('#fsTags input.fs-name')].pop());
+  if(el instanceof HTMLElement)el.focus();
+}
+function forumTagAdd(){
+  const rows=readForumRows();
+  if(rows.length>=FORUM_MAX_TAGS)return;
+  rows.push({id:0,name:'',emoji:''});
+  paintForumRows(rows,'new');
+}
+function forumTagRemove(i){
+  const rows=readForumRows();
+  rows.splice(i,1);
+  paintForumRows(rows,'');
+  const next=document.querySelector('#fsTags input.fs-name')||document.querySelector('#fsTags button[data-action="forumTagAdd"]');
+  if(next instanceof HTMLElement)next.focus();
+}
+function forumTagMove(i,delta){
+  const rows=readForumRows();
+  const j=i+delta;
+  if(j<0||j>=rows.length)return;
+  [rows[i],rows[j]]=[rows[j],rows[i]];
+  paintForumRows(rows,(delta<0?'fsup-':'fsdown-')+j);
+}
+/* What the server would refuse, said before the round trip. */
+function forumProblem(rows){
+  const seen=new Set();
+  for(const t of rows){
+    const n=t.name.trim();
+    if(!n||forumRuneLen(n)>FORUM_MAX_TAG_NAME)return'Every tag needs a name of 1 to '+FORUM_MAX_TAG_NAME+' characters';
+    if(seen.has(n.toLowerCase()))return'Tag names must be different';
+    seen.add(n.toLowerCase());
+    const e=t.emoji.trim();
+    if(e&&(forumRuneLen(e)>FORUM_MAX_TAG_EMOJI||/[\u0000-\u001f\u007f]/.test(e)))return'A tag\'s emoji must be a single emoji';
+  }
+  return rows.length>FORUM_MAX_TAGS?'A forum holds at most '+FORUM_MAX_TAGS+' tags':'';
+}
+async function saveForumSettings(id){
+  const rows=readForumRows();
+  const problem=forumProblem(rows);
+  if(problem){showToast(problem,'error');return}
+  const body={
+    tags:rows.map(t=>{const e=t.emoji.trim();const o={name:t.name.trim()};if(t.id)o.id=t.id;if(e)o.emoji=e;return o}),
+    require_tag:document.getElementById('fsRequire').classList.contains('on'),
+    default_auto_archive_minutes:parseInt(fsInput(document,'#fsArchive').value,10)};
+  const btn=/** @type {HTMLButtonElement|null} */(document.getElementById('fsSave'));
+  if(btn)btn.disabled=true;
+  try{
+    /* The write replaces the whole list, so a tag another admin added since this
+       dialog opened would be deleted by it. Refuse instead, and say so. */
+    const fresh=(await api('GET','/channels')).find(c=>(c.id||c.ID)===id);
+    const opened=state.forumEdit&&state.forumEdit.id===id?state.forumEdit.key:null;
+    if(fresh&&opened!==null&&forumKey(fresh.forum)!==opened){
+      state.channelCache[id]=fresh;
+      closeModal();
+      showToast('Another admin changed this forum while you were editing. Reopen it to see their changes.','error');
+      renderContent();
+      return;
+    }
+    await api('PUT','/channels/'+id+'/forum',body);
+    closeModal();showToast('Forum settings saved');renderContent();
+  }catch(e){showToast(e.message,'error');if(btn)btn.disabled=false}
 }
 
 /* Deleting a channel or a role cannot be undone, so it asks for the name to be
@@ -1085,7 +1208,7 @@ async function deleteEmoji(id){
   }catch(e){showToast(e.message,'error')}
 }
 
-Object.assign(ACTIONS,{openCategoryPermsModal,openCategoryPermsPicker,saveCategoryPerms,syncChannelPerms,clearPermOverride,confirmDeleteChannel,confirmDeleteEmoji,confirmDeleteRole,createChannel,
+Object.assign(ACTIONS,{forumTagAdd,forumTagMove,forumTagRemove,onChannelTypeChange,saveForumSettings,openCategoryPermsModal,openCategoryPermsPicker,saveCategoryPerms,syncChannelPerms,clearPermOverride,confirmDeleteChannel,confirmDeleteEmoji,confirmDeleteRole,createChannel,
   deleteEmoji,explainAccess,moveRole,onPermTargetChange,openChannelEditModal,openChannelModal,openChannelPermsModal,openDeleteChannel,
   openDeleteRole,openRoleModal,placeRoleAboveDefault,previewPermChange,renderRolePlacement,
   saveChannelEdit,saveChannelPerms,saveRole,selectChannelTab,syncTypedConfirm,uploadEmoji});
