@@ -22,7 +22,7 @@ func TestVisibleChannelIDs_ThreadUsesParentOverride(t *testing.T) {
 		// An entry keyed by a thread id is ignored: threads have no overrides.
 		10: {Allow: ReadMessages},
 	}
-	got := ck.VisibleChannelIDs(base, channels, overrides)
+	got := ck.VisibleChannelIDs(MemberGrants{Perms: base, Overrides: overrides}, channels)
 	want := map[int64]bool{2: true, 20: true}
 	if len(got) != len(want) {
 		t.Fatalf("visible = %v, want %v", got, want)

@@ -216,7 +216,7 @@ func TestTimeout_RefreshFlipsReactKeepsPinAndDelete(t *testing.T) {
 		permissions.ManageMessages|permissions.AddReactions); err != nil {
 		t.Fatalf("grant Moderator bits: %v", err)
 	}
-	if _, err := f.database.ExecContext(ctx, `UPDATE users SET role_id = 3 WHERE id = ?`, f.targetID); err != nil {
+	if err := f.database.UpdateUserRole(ctx, f.targetID, 3); err != nil {
 		t.Fatalf("promote target: %v", err)
 	}
 

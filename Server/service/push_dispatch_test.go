@@ -1128,7 +1128,7 @@ func TestPushDispatch_RecheckBeforeEachAttempt_LosesAccess(t *testing.T) {
 			return &safefetch.Response{StatusCode: 201}, nil
 		}
 		// Revoke between the first attempt and the retry.
-		if _, err := f.database.ExecContext(ctx, `UPDATE users SET role_id = ? WHERE id = ?`, int64(5), int64(2)); err != nil {
+		if err := f.database.UpdateUserRole(ctx, 2, 5); err != nil {
 			t.Fatal(err)
 		}
 		f.perms.InvalidateAll()

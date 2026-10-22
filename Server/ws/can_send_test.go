@@ -8,6 +8,21 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
+// grantsFor builds the member grants a test case describes: the role's mask
+// and one channel's override (channel id 0, the id of a bare db.Channel). A nil
+// role is the zero grants.
+func grantsFor(role *db.Role, o db.ChannelOverride) permissions.MemberGrants {
+	if role == nil {
+		return permissions.MemberGrants{}
+	}
+	return permissions.MemberGrants{
+		Perms: role.Permissions,
+		Overrides: map[int64]permissions.ChannelOverride{
+			0: {Allow: o.Allow, Deny: o.Deny, UserAllow: o.UserAllow, UserDeny: o.UserDeny},
+		},
+	}
+}
+
 // TestChannelCanSend locks the composer-gating rule the client relies on:
 // it must mirror MessageService.checkSendPermission for non-DM channels.
 func TestChannelCanSend(t *testing.T) {
@@ -44,7 +59,7 @@ func TestChannelCanSend(t *testing.T) {
 		{"timed out beats admin", admin, none, "text", true, false},
 	}
 	for _, c := range cases {
-		if got := channelCanSend(c.role, c.o, c.ctype, c.timedOut); got != c.want {
+		if got := channelCanSend(grantsFor(c.role, c.o), c.ctype, c.timedOut); got != c.want {
 			t.Errorf("%s: channelCanSend = %v, want %v", c.name, got, c.want)
 		}
 		// B2-5 parity: the affordance is the canonical send predicate.
@@ -53,7 +68,7 @@ func TestChannelCanSend(t *testing.T) {
 			bits = c.role.Permissions
 		}
 		want := permissions.CanSendMessage(permissions.Subject{
-			RolePerms: bits, Override: permOverride(c.o), Channel: permissions.ChannelRef{Type: c.ctype}, TimedOut: c.timedOut,
+			RolePerms: bits, Override: grantsFor(c.role, c.o).Overrides[0], Channel: permissions.ChannelRef{Type: c.ctype}, TimedOut: c.timedOut,
 		}) == nil
 		if want != c.want {
 			t.Errorf("%s: CanSendMessage = %v, channelCanSend table says %v", c.name, want, c.want)
@@ -90,7 +105,7 @@ func TestChannelCanModerateVoice(t *testing.T) {
 		{"channel allow without base bit denied", member, db.ChannelOverride{Allow: permissions.MuteMembers}, false},
 	}
 	for _, c := range cases {
-		if got := channelCanModerateVoice(c.role, c.o, "voice"); got != c.want {
+		if got := channelCanModerateVoice(grantsFor(c.role, c.o), "voice"); got != c.want {
 			t.Errorf("%s: channelCanModerateVoice = %v, want %v", c.name, got, c.want)
 		}
 		var bits int64
@@ -98,7 +113,7 @@ func TestChannelCanModerateVoice(t *testing.T) {
 			bits = c.role.Permissions
 		}
 		want := permissions.AuthorizeVoiceModerator(permissions.Subject{
-			RolePerms: bits, Override: permOverride(c.o), Channel: permissions.ChannelRef{Type: "voice"},
+			RolePerms: bits, Override: grantsFor(c.role, c.o).Overrides[0], Channel: permissions.ChannelRef{Type: "voice"},
 		}) == nil
 		if want != c.want {
 			t.Errorf("%s: AuthorizeVoiceModerator = %v, table says %v", c.name, want, c.want)

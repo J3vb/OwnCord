@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -23,7 +24,8 @@ import (
 type VisibilityReader interface {
 	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
 	ListChannels(ctx context.Context) ([]db.Channel, error)
-	GetChannelOverridesFor(ctx context.Context, roleID, userID int64) (map[int64]db.ChannelOverride, error)
+	GetMemberGrants(ctx context.Context, userID int64) (permissions.MemberGrants, error)
+	GetMemberRoles(ctx context.Context, userID int64) (*db.MemberRoles, error)
 	GetRoleByID(ctx context.Context, id int64) (*db.Role, error)
 	GetUserByID(ctx context.Context, id int64) (*db.User, error)
 	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)
@@ -78,17 +80,18 @@ type ReadySnapshotReader interface {
 // may read: the user and role they announce.
 type MemberPayloadReader interface {
 	GetUserByID(ctx context.Context, id int64) (*db.User, error)
-	GetRoleForUser(ctx context.Context, userID int64) (*db.Role, error)
+	GetMemberRoles(ctx context.Context, userID int64) (*db.MemberRoles, error)
 }
 
 // DispatchReader is what command dispatch (deps.go's permission helpers and
 // handlers.go's session/membership checks) may read.
 type DispatchReader interface {
 	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
-	GetRoleForUser(ctx context.Context, userID int64) (*db.Role, error)
+	GetMemberRoles(ctx context.Context, userID int64) (*db.MemberRoles, error)
 	// The bare-hub fallback in voice_join.go's publish-permission derivation
-	// resolves overrides here when no PermissionService cache is wired.
-	GetChannelOverridesFor(ctx context.Context, roleID, userID int64) (map[int64]db.ChannelOverride, error)
+	// resolves every held role's overrides here when no PermissionService
+	// cache is wired.
+	GetMemberGrants(ctx context.Context, userID int64) (permissions.MemberGrants, error)
 	GetSessionWithBanStatus(ctx context.Context, tokenHash string) (*db.SessionWithBanStatus, error)
 	IsDMParticipant(ctx context.Context, userID, channelID int64) (bool, error)
 	// GetAFKChannel backs the AFK sweep (voice_afk.go): the one channel

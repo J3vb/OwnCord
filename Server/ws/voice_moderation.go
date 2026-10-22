@@ -29,25 +29,26 @@ func registerVoiceModerationV2(r *HandlerRegistry, deps VoiceDeps) {
 	r.RegisterV2(MsgTypeVoiceModKick, handleVoiceModKickV2, deps)
 }
 
-// voiceModRole loads a role through the permission cache when one is wired and
+// voiceModRole loads the member's effective role (top role identity, OR of every held mask) through the permission cache when one is wired and
 // falls back to the live DB otherwise. Every failure is a denial: an
 // unresolvable role must never authorize a moderation action.
 func voiceModRole(ctx context.Context, d VoiceDeps, userID int64) (*db.Role, bool) {
 	if d.PermSvc != nil {
 		role, err := d.PermSvc.GetRoleForUser(ctx, userID)
 		if err == nil && role != nil {
-			return role, true
+			return role.Effective(), true
 		}
 		return nil, false
 	}
 	if d.Reader == nil {
 		return nil, false
 	}
-	role, err := d.Reader.GetRoleForUser(ctx, userID)
+	role, err := d.Reader.GetMemberRoles(ctx, userID)
 	if err != nil || role == nil {
 		return nil, false
 	}
-	return role, true
+	// Top role identity (rank) with the OR of every held mask.
+	return role.Effective(), true
 }
 
 // voiceModTarget runs the shared gate and returns the target's live voice

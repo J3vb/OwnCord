@@ -81,20 +81,22 @@ func (s *ChannelService) ListVisibleChannels(ctx context.Context, userID int64) 
 	}
 
 	// Admins skip the override fetch (they bypass all channel checks anyway).
-	// Non-admins get both layers — role and per-user — in one batched fetch.
-	var overrides map[int64]db.ChannelOverride
-	if !permissions.HasAdmin(role.Permissions) {
-		overrides, err = s.st.GetChannelOverridesFor(ctx, role.ID, userID)
+	// Non-admins get every held role's override and the per-user layer in one
+	// batched fetch.
+	grants := permissions.MemberGrants{Perms: role.Perms}
+	if !permissions.HasAdmin(role.Perms) {
+		grants, err = s.st.GetMemberGrants(ctx, userID)
 		if err != nil {
 			// Fail closed — an empty map would return every denied channel.
-			slog.Error("ChannelService.ListVisibleChannels GetChannelOverridesFor", "err", err, "user_id", userID, "role_id", role.ID)
+			slog.Error("ChannelService.ListVisibleChannels GetMemberGrants", "err", err, "user_id", userID, "role_ids", role.IDs)
 			return nil, fmt.Errorf("%w: failed to fetch channel overrides", ErrInternal)
 		}
+		grants.Perms = role.Perms
 	}
 
 	// Single visibility predicate shared with the ws ready payload and reconnect
 	// replay filtering, so REST and WS can never disagree on what a role sees.
-	visibleIDs := s.perms.Checker().VisibleChannelIDs(role.Permissions, channelRefs(all), permOverrides(overrides))
+	visibleIDs := s.perms.Checker().VisibleChannelIDs(grants, channelRefs(all))
 	visible := make([]db.Channel, 0, len(visibleIDs))
 	for i := range all {
 		if visibleIDs[all[i].ID] {
@@ -112,22 +114,6 @@ func channelRefs(channels []db.Channel) []permissions.ChannelRef {
 			NSFW: channels[i].NSFW, AuthorityID: channels[i].Thread.ParentID, ThreadLocked: channels[i].Thread.Locked}
 	}
 	return refs
-}
-
-// permOverrides maps a db override map to the checker's override map, carrying
-// BOTH layers — the role override and the per-user override — so the checker
-// resolves the full order (base -> role -> user) rather than half of it.
-func permOverrides(overrides map[int64]db.ChannelOverride) map[int64]permissions.ChannelOverride {
-	out := make(map[int64]permissions.ChannelOverride, len(overrides))
-	for id, o := range overrides {
-		out[id] = permissions.ChannelOverride{
-			Allow:     o.Allow,
-			Deny:      o.Deny,
-			UserAllow: o.UserAllow,
-			UserDeny:  o.UserDeny,
-		}
-	}
-	return out
 }
 
 // HandleTyping processes a typing start event for a channel.

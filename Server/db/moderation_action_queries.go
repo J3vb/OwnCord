@@ -90,14 +90,14 @@ func moderationActionFromRow(r moderationActionRow) ModerationAction {
 // is therefore atomic with the insert against any concurrent role change.
 var ErrOutranked = errors.New("moderation: actor does not outrank target")
 
-// rolePosition reads userID's role position live, inside tx. A lookup
+// rolePosition reads the position of userID's TOP role live, inside tx. A lookup
 // failure (no such user, no such role) returns ok=false rather than an
 // error — the caller treats "cannot establish a position" as "refuse",
 // exactly as a missing target should.
 func rolePosition(ctx context.Context, tx *sql.Tx, userID int64) (int, bool) {
 	var pos int
 	err := tx.QueryRowContext(ctx,
-		`SELECT r.position FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ?`, userID,
+		`SELECT r.position FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = ? ORDER BY r.position DESC, r.id ASC LIMIT 1`, userID,
 	).Scan(&pos)
 	if err != nil {
 		return 0, false

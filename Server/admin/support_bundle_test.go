@@ -264,7 +264,7 @@ func TestSupportBundle_AuthorizationSessionBindingAndForbiddenSelection(t *testi
 		}
 	}
 	// Permission changes apply between preview and confirmation.
-	if _, err := database.SQLDb().Exec("UPDATE users SET role_id=4 WHERE id=?", owner.ID); err != nil {
+	if err := database.UpdateUserRole(context.Background(), owner.ID, 4); err != nil {
 		t.Fatal(err)
 	}
 	w = doRequest(t, handler, http.MethodPost, "/support-bundles/download", token, map[string]string{"preview_id": p.ID, "sha256": p.SHA256})

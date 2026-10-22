@@ -199,7 +199,8 @@ func (s *ModerationService) roleFor(ctx context.Context, userID int64, which str
 	if err != nil || role == nil {
 		return nil, fmt.Errorf("%w: failed to load %s role", ErrForbidden, which)
 	}
-	return role, nil
+	// Top role identity (rank, ownership) with the OR of every held mask.
+	return role.Effective(), nil
 }
 
 // requirePerm verifies the actor holds perm (or the Administrator bypass) and

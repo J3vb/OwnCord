@@ -126,7 +126,7 @@ UPDATE appeals
 -- (F2/F3 review: an appellant who happens to also hold the bit must never
 -- count as their own alternative reviewer), id 0 (the system actor is never
 -- a reviewer), and anyone effectively banned, who holds perm_bit or the
--- Administrator bit. The ban comparison is normalised the same way
+-- Administrator bit in ANY role they hold (user_roles). The ban comparison is normalised the same way
 -- mention_queries.go's notBannedClause is (P2 review, uniformity): BanUser
 -- writes ISO-8601 'Z' ("2006-01-02T15:04:05Z"), and a raw lexical
 -- "ban_expires <= datetime('now')" compares that against SQLite's space-form
@@ -135,12 +135,14 @@ UPDATE appeals
 -- eligible moderator (the exact bug notBannedClause's own comment
 -- documents). replace() normalises the separator before comparing.
 SELECT COUNT(*) FROM users u
-  JOIN roles r ON r.id = u.role_id
  WHERE u.id != 0
    AND u.id != sqlc.arg(exclude_actor_id)
    AND u.id != sqlc.arg(exclude_appellant_id)
    AND (u.banned = 0 OR (u.ban_expires IS NOT NULL AND replace(u.ban_expires, ' ', 'T') <= strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))
-   AND ((r.permissions & sqlc.arg(perm_bit)) != 0 OR (r.permissions & sqlc.arg(admin_bit)) != 0);
+   AND EXISTS (
+     SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+      WHERE ur.user_id = u.id
+        AND ((r.permissions & sqlc.arg(perm_bit)) != 0 OR (r.permissions & sqlc.arg(admin_bit)) != 0));
 
 -- name: EligibleModeratorExists :one
 -- DecideAppealTx's own self-review escape test (P3 review): the identical
@@ -151,12 +153,14 @@ SELECT COUNT(*) FROM users u
 -- the appeal is not stale/terminal, inside the same transaction.
 SELECT EXISTS (
   SELECT 1 FROM users u
-    JOIN roles r ON r.id = u.role_id
    WHERE u.id != 0
      AND u.id != sqlc.arg(exclude_actor_id)
      AND u.id != sqlc.arg(exclude_appellant_id)
      AND (u.banned = 0 OR (u.ban_expires IS NOT NULL AND replace(u.ban_expires, ' ', 'T') <= strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))
-     AND ((r.permissions & sqlc.arg(perm_bit)) != 0 OR (r.permissions & sqlc.arg(admin_bit)) != 0)
+     AND EXISTS (
+       SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+        WHERE ur.user_id = u.id
+          AND ((r.permissions & sqlc.arg(perm_bit)) != 0 OR (r.permissions & sqlc.arg(admin_bit)) != 0))
 );
 
 -- name: LiftTimeoutByActionID :execrows

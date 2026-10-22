@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -17,14 +18,17 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
-// cachedPerms holds a snapshot of a user's role and channel overrides. It is
+// cachedPerms holds a snapshot of a user's roles and channel grants. It is
 // immutable once built: singleflight hands the same pointer to every waiter
-// of a load, so nothing may write to it (or its overrides map) afterwards.
+// of a load, so nothing may write to it (or its maps and slices) afterwards.
 type cachedPerms struct {
-	roleID      int64
-	rolePerms   int64
-	role        db.Role // copy of the role row, so GetRoleForUser needs no store read
-	overrides   map[int64]permissions.ChannelOverride
+	rolePerms int64          // OR of the held role masks
+	roles     db.MemberRoles // copy of the held roles, so GetRoleForUser needs no store read
+	// grants carries the per-channel overrides and, for the channels where
+	// the member holds two or more roles and one has an override, the
+	// per-role breakdown (grants.Perms == rolePerms; zero for an Administrator,
+	// who needs neither).
+	grants      permissions.MemberGrants
 	populatedAt time.Time
 }
 
@@ -113,7 +117,7 @@ func (s *PermissionService) HasChannelPerm(ctx context.Context, userID, channelI
 	if err != nil {
 		return false
 	}
-	return s.checker.HasChannelPermBatch(cp.rolePerms, cp.overrides, key, perm)
+	return s.checker.HasChannelPermBatch(cp.grants, key, perm)
 }
 
 // HasChannelPermChecked is HasChannelPerm's error-preserving counterpart: it
@@ -138,7 +142,7 @@ func (s *PermissionService) HasChannelPermChecked(ctx context.Context, userID, c
 	if err != nil {
 		return false, err
 	}
-	return s.checker.HasChannelPermBatch(cp.rolePerms, cp.overrides, key, perm), nil
+	return s.checker.HasChannelPermBatch(cp.grants, key, perm), nil
 }
 
 // Subject resolves the user's role bits and both override layers for
@@ -161,7 +165,7 @@ func (s *PermissionService) Subject(ctx context.Context, userID, channelID int64
 	if err != nil {
 		return permissions.Subject{}, err
 	}
-	sub := permissions.Subject{RolePerms: cp.rolePerms, Override: cp.overrides[key]}
+	sub := cp.grants.Subject(key)
 	// TimedOut comes from the timeout mirror, never the 30s role cache
 	// (B5-9): a stale answer would let a just-lifted timeout keep refusing,
 	// or a just-issued one keep landing. The mirror is reloaded synchronously
@@ -272,17 +276,30 @@ func (s *PermissionService) timedOut(ctx context.Context, userID int64) (bool, e
 	return ok && time.Now().Before(until), nil
 }
 
-// GetRoleForUser returns the user's role, using the cache when available.
-func (s *PermissionService) GetRoleForUser(ctx context.Context, userID int64) (*db.Role, error) {
+// GetRoleForUser returns every role the user holds, using the cache when
+// available. The result is deliberate to pick from: Perms is the OR of the
+// held masks (server-level checks), Top.Position / Top.ID the rank (outranks,
+// IsOwner), IDs the held roles. (nil, nil) when the user holds no role.
+func (s *PermissionService) GetRoleForUser(ctx context.Context, userID int64) (*db.MemberRoles, error) {
 	cp, err := s.getOrPopulate(ctx, userID)
 	if err != nil || cp == nil {
 		// Cache miss (or a lookup failure the cache couldn't populate through),
 		// fall back to direct DB query.
-		return s.st.GetRoleForUser(ctx, userID)
+		return s.st.GetMemberRoles(ctx, userID)
 	}
 	// Served from the snapshot: every role edit invalidates the cache. Hand
-	// back a copy so a caller cannot alias (or mutate) the cached row.
-	return cloneRole(&cp.role), nil
+	// back a copy so a caller cannot alias (or mutate) the cached rows.
+	return cloneMemberRoles(&cp.roles), nil
+}
+
+// cloneMemberRoles deep-copies a held-role set, including the top role's Color
+// string and the id slice.
+func cloneMemberRoles(m *db.MemberRoles) *db.MemberRoles {
+	out := *m
+	out.Top = *cloneRole(&m.Top)
+	out.IDs = slices.Clone(m.IDs)
+	out.Masks = slices.Clone(m.Masks)
+	return &out
 }
 
 // cloneRole deep-copies a role row, including its Color string.
@@ -403,37 +420,49 @@ func (s *PermissionService) loadPerms(parent context.Context, userID int64, star
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), permLoadTimeout)
 	defer cancel()
 
-	role, err := s.st.GetRoleForUser(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	if role == nil {
-		return nil, nil
-	}
-	// Admins bypass every channel check, so skip the fetch entirely (mirrors
-	// ChannelService.ListVisibleChannels and ws.buildReady). The fetch pulls
-	// BOTH override layers (role + per-user) in two batch queries, so the
-	// cached snapshot can answer the full Discord resolution order without an
-	// extra query per channel.
-	var overrides map[int64]permissions.ChannelOverride
-	if !permissions.HasAdmin(role.Permissions) {
-		raw, oErr := s.st.GetChannelOverridesFor(ctx, role.ID, userID)
+	// The roles and the grants are separate store reads. Admins bypass every
+	// channel check, so they skip the grants fetch entirely (mirrors
+	// ChannelService.ListVisibleChannels and ws.buildReady). Otherwise the
+	// grants carry the role ids and mask they were composed from, and a role
+	// change landing between the two reads is detected by comparing ids and
+	// re-reading, so the cached mask and layers always come from one read.
+	var roles *db.MemberRoles
+	var grants permissions.MemberGrants
+	for attempt := 0; ; attempt++ {
+		var err error
+		roles, err = s.st.GetMemberRoles(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+		if roles == nil {
+			return nil, nil
+		}
+		grants = permissions.MemberGrants{Perms: roles.Perms, RoleIDs: roles.IDs}
+		if permissions.HasAdmin(roles.Perms) {
+			break
+		}
+		g, oErr := s.st.GetMemberGrants(ctx, userID)
 		if oErr != nil {
 			// Fail closed (for HasChannelPerm/GetRoleForUser): an empty map
 			// would silently drop every deny bit, and caching it would keep
 			// doing so for permCacheTTL. HasChannelPermChecked callers get the
 			// error itself and decide for themselves whether that's a denial.
-			slog.Error("PermissionService.getOrPopulate override fetch failed, denying", "err", oErr, "user_id", userID, "role_id", role.ID)
+			slog.Error("PermissionService.getOrPopulate override fetch failed, denying", "err", oErr, "user_id", userID, "role_ids", roles.IDs)
 			return nil, oErr
 		}
-		overrides = permOverrides(raw)
+		if slices.Equal(g.RoleIDs, roles.IDs) {
+			grants = g
+			break
+		}
+		if attempt >= 2 {
+			return nil, fmt.Errorf("loadPerms: held roles kept changing for user %d", userID)
+		}
 	}
 
 	cp := &cachedPerms{
-		roleID:      role.ID,
-		rolePerms:   role.Permissions,
-		role:        *cloneRole(role),
-		overrides:   overrides,
+		rolePerms:   roles.Perms,
+		roles:       *cloneMemberRoles(roles),
+		grants:      grants,
 		populatedAt: time.Now(),
 	}
 

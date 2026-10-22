@@ -84,8 +84,7 @@ func runBanUserWithActionConcurrentRoleChangeCannotPreempt(t *testing.T, setHook
 	// see or change.
 	roleChangeErr := make(chan error, 1)
 	go func() {
-		_, err := database.ExecContext(ctx, `UPDATE users SET role_id = 1 WHERE id = ?`, memberID)
-		roleChangeErr <- err
+		roleChangeErr <- database.UpdateUserRole(ctx, memberID, 1)
 	}()
 
 	// Best-effort: give the role-change goroutine a moment to actually queue
@@ -165,7 +164,7 @@ func TestBanUserWithAction_RankCheckSeesAPromotionThatLandedBeforeBeginTx(t *tes
 	// The promotion runs on a connection nothing is holding yet (the hook
 	// above blocks BanUserWithAction before it ever calls BeginTx) and
 	// fully commits before the ban's own transaction opens.
-	if _, err := database.ExecContext(ctx, `UPDATE users SET role_id = 1 WHERE id = ?`, memberID); err != nil {
+	if err := database.UpdateUserRole(ctx, memberID, 1); err != nil {
 		t.Fatalf("promote member: %v", err)
 	}
 	close(promoted)

@@ -112,7 +112,8 @@ func (d *DB) CountAdminClassAccounts(ctx context.Context) (int, error) {
 	var n int
 	if err := d.reader.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM users
-		  WHERE role_id IN (SELECT id FROM roles WHERE id IN (?, ?) OR (permissions & ?) != 0)
+		  WHERE EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = users.id AND ur.role_id IN
+		        (SELECT id FROM roles WHERE id IN (?, ?) OR (permissions & ?) != 0))
 		    AND `+notBannedClause+underErasureClause,
 		permissions.OwnerRoleID, permissions.AdminRoleID, permissions.Administrator).Scan(&n); err != nil {
 		return 0, fmt.Errorf("CountAdminClassAccounts: %w", err)
@@ -360,9 +361,11 @@ func erasureDeleteLockouts(ctx context.Context, tx *sql.Tx, userID int64, userna
 func erasureReassignAssets(ctx context.Context, tx *sql.Tx, userID int64) ([]string, error) {
 	var heir int64
 	err := tx.QueryRowContext(ctx,
-		`SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
+		`SELECT u.id FROM users u
 		  WHERE u.id != ?
-		  ORDER BY CASE WHEN r.id IN (?, ?) OR (r.permissions & ?) != 0 THEN 0 ELSE 1 END, u.id
+		  ORDER BY CASE WHEN EXISTS (
+		      SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+		       WHERE ur.user_id = u.id AND (r.id IN (?, ?) OR (r.permissions & ?) != 0)) THEN 0 ELSE 1 END, u.id
 		  LIMIT 1`,
 		userID, permissions.OwnerRoleID, permissions.AdminRoleID, permissions.Administrator,
 	).Scan(&heir)

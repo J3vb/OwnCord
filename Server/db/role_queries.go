@@ -9,6 +9,7 @@ import (
 	"slices"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // roleFromGen maps the sqlc-generated Role row to the domain Role model,
@@ -32,6 +33,36 @@ type MemberRoles struct {
 	Top   Role
 	Perms int64
 	IDs   []int64
+	// Masks holds each held role's own permission mask, in the same order as
+	// IDs, for the callers that must resolve a role's channel override against
+	// that role's mask (Held).
+	Masks []int64
+}
+
+// Held returns the held roles as permission grants carrying only the role id
+// and mask (no override), top role first: the shape permissions.Checker.Subject
+// takes.
+func (m *MemberRoles) Held() []permissions.RoleGrant {
+	out := make([]permissions.RoleGrant, len(m.IDs))
+	for i, id := range m.IDs {
+		out[i] = permissions.RoleGrant{RoleID: id, Perms: m.Masks[i]}
+	}
+	return out
+}
+
+// Effective collapses the held roles to one Role for the callers that carry a
+// single *Role for an authority decision: the identity (ID, Name, Position) is
+// the TOP role, which is what rank and ownership checks read, and Permissions
+// is the OR of every held mask, which is what server-level permission checks
+// read. It is not a real role row and must never be written back.
+func (m *MemberRoles) Effective() *Role {
+	r := m.Top
+	if m.Top.Color != nil {
+		c := *m.Top.Color
+		r.Color = &c
+	}
+	r.Permissions = m.Perms
+	return &r
 }
 
 // ErrLastRole is returned when removing a role would leave a member with none.
@@ -61,6 +92,7 @@ func (d *DB) GetMemberRoles(ctx context.Context, userID int64) (*MemberRoles, er
 	for _, r := range rows {
 		m.Perms |= r.Permissions
 		m.IDs = append(m.IDs, r.ID)
+		m.Masks = append(m.Masks, r.Permissions)
 	}
 	return m, nil
 }
@@ -148,10 +180,10 @@ func (d *DB) ListRoles(ctx context.Context) ([]*Role, error) {
 	return roles, nil
 }
 
-// GetRoleForUser returns only the role for a given user via a single JOIN.
-// Unlike GetUserWithRole, this does not fetch sensitive user columns (password,
-// TOTP secret). Use this on hot paths like permission checks.
-// Returns (nil, nil) when the user is not found.
+// GetRoleForUser returns only the member's TOP role (the one users.role_id
+// mirrors): fine for a name, colour or position, never for a permission mask,
+// which is the OR over every held role (GetMemberRoles.Perms). Returns
+// (nil, nil) when the user holds no role.
 func (d *DB) GetRoleForUser(ctx context.Context, userID int64) (*Role, error) {
 	r, err := d.q.GetRoleForUser(ctx, userID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -278,14 +310,16 @@ func (d *DB) SetRolePositions(ctx context.Context, positions map[int64]int) erro
 	return nil
 }
 
-// DeleteRoleReassigning deletes roleID after moving every member onto
-// fallbackRoleID and dropping the role's channel_overrides rows, all in one
-// writer transaction: a member must never be observable pointing at a role row
-// that no longer exists, and a stale override would silently apply to whichever
-// role reused the id.
+// DeleteRoleReassigning deletes roleID, drops its channel_overrides rows and
+// its user_roles rows, gives fallbackRoleID to every member left with no role,
+// and re-mirrors users.role_id (syncTopRoleTx) for every member who held
+// roleID, all in one writer transaction: a member must never be observable
+// pointing at a role row that no longer exists or holding no role, and a stale
+// override would silently apply to whichever role reused the id. A member who
+// holds another role keeps it and is NOT given the fallback.
 //
-// Returns the ids of the reassigned members so the caller can invalidate their
-// cached permissions and re-sync their clients.
+// Returns the ids of every member who held roleID so the caller can invalidate
+// their cached permissions and re-sync their clients.
 func (d *DB) DeleteRoleReassigning(ctx context.Context, roleID, fallbackRoleID int64) ([]int64, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -298,15 +332,20 @@ func (d *DB) DeleteRoleReassigning(ctx context.Context, roleID, fallbackRoleID i
 	if err != nil {
 		return nil, fmt.Errorf("DeleteRoleReassigning list members: %w", err)
 	}
-	// One UPDATE for every member, not one per member.
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE users SET role_id = ? WHERE role_id = ?`, fallbackRoleID, roleID,
-	); err != nil {
-		return nil, fmt.Errorf("DeleteRoleReassigning reassign: %w", err)
+	// A member whose mirror still names the role but who has no user_roles row
+	// for it (an inconsistent pre-067 write) is reassigned too.
+	stale, err := d.usersMirroringRoleTx(ctx, tx, roleID)
+	if err != nil {
+		return nil, err
 	}
-	// channel_overrides cascades on delete in the production schema, but the
-	// delete is explicit so the behaviour does not depend on the foreign-key
-	// pragma being on for this connection.
+	for _, id := range stale {
+		if !slices.Contains(moved, id) {
+			moved = append(moved, id)
+		}
+	}
+	// channel_overrides and user_roles cascade on delete in the production
+	// schema, but both deletes are explicit so the behaviour does not depend on
+	// the foreign-key pragma being on for this connection.
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM channel_overrides WHERE role_id = ?`, roleID,
 	); err != nil {
@@ -318,6 +357,25 @@ func (d *DB) DeleteRoleReassigning(ctx context.Context, roleID, fallbackRoleID i
 	); err != nil {
 		return nil, fmt.Errorf("DeleteRoleReassigning drop category overrides: %w", err)
 	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM user_roles WHERE role_id = ?`, roleID,
+	); err != nil {
+		return nil, fmt.Errorf("DeleteRoleReassigning drop holders: %w", err)
+	}
+	for _, uid := range moved {
+		n, err := q.CountUserRoles(ctx, uid)
+		if err != nil {
+			return nil, fmt.Errorf("DeleteRoleReassigning count roles: %w", err)
+		}
+		if n == 0 {
+			if err := q.AddUserRole(ctx, dbgen.AddUserRoleParams{UserID: uid, RoleID: fallbackRoleID}); err != nil {
+				return nil, fmt.Errorf("DeleteRoleReassigning give fallback: %w", err)
+			}
+		}
+		if err := syncTopRoleTx(ctx, q, uid); err != nil {
+			return nil, fmt.Errorf("DeleteRoleReassigning: %w", err)
+		}
+	}
 	if err := q.DeleteRole(ctx, roleID); err != nil {
 		return nil, fmt.Errorf("DeleteRoleReassigning delete: %w", err)
 	}
@@ -327,36 +385,23 @@ func (d *DB) DeleteRoleReassigning(ctx context.Context, roleID, fallbackRoleID i
 	return moved, nil
 }
 
-// GetUserWithRole returns the user and their role in a single query.
-// Returns (nil, nil, nil) when the user is not found.
-func (d *DB) GetUserWithRole(ctx context.Context, userID int64) (*User, *Role, error) {
-	row := d.reader.QueryRowContext(ctx,
-		`SELECT u.id, u.username, u.password, u.avatar, u.role_id,
-		        u.totp_secret, u.status, u.created_at, u.last_seen,
-		        u.banned, u.ban_reason, u.ban_expires,
-		        r.id, r.name, r.color, r.permissions, r.position, r.is_default
-		 FROM users u
-		 JOIN roles r ON u.role_id = r.id
-		 WHERE u.id = ?`,
-		userID,
-	)
-
-	u := &User{}
-	r := &Role{}
-	var banned, isDefault int
-	err := row.Scan(
-		&u.ID, &u.Username, &u.PasswordHash, &u.Avatar, &u.RoleID,
-		&u.TOTPSecret, &u.Status, &u.CreatedAt, &u.LastSeen,
-		&banned, &u.BanReason, &u.BanExpires,
-		&r.ID, &r.Name, &r.Color, &r.Permissions, &r.Position, &isDefault,
-	)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil, nil
-	}
+// usersMirroringRoleTx lists the users whose users.role_id mirror names roleID.
+func (d *DB) usersMirroringRoleTx(ctx context.Context, tx *sql.Tx, roleID int64) ([]int64, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM users WHERE role_id = ?`, roleID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("GetUserWithRole: %w", err)
+		return nil, fmt.Errorf("DeleteRoleReassigning list mirrors: %w", err)
 	}
-	u.Banned = banned != 0
-	r.IsDefault = isDefault != 0
-	return u, r, nil
+	defer rows.Close() //nolint:errcheck
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("DeleteRoleReassigning scan mirror: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("DeleteRoleReassigning mirrors rows: %w", err)
+	}
+	return ids, nil
 }

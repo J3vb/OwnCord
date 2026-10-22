@@ -405,20 +405,20 @@ func (h *Hub) voiceJoinPublishPerms(ctx context.Context, userID, channelID int64
 		canPublish = h.perms.HasChannelPerm(ctx, userID, channelID, permissions.SpeakVoice)
 		canVideo = h.perms.HasChannelPerm(ctx, userID, channelID, permissions.UseVideo)
 		canScreenShare = h.perms.HasChannelPerm(ctx, userID, channelID, permissions.ShareScreen)
-	} else if role, roleErr := h.readers.Dispatch.GetRoleForUser(ctx, userID); roleErr == nil && role != nil {
+	} else if role, roleErr := h.readers.Dispatch.GetMemberRoles(ctx, userID); roleErr == nil && role != nil {
 		// Admins bypass overrides, so skip the fetch for them (mirrors
 		// computeAllowedChannels); HasChannelPermBatch answers true from
 		// the role bits alone.
-		var overrides map[int64]db.ChannelOverride
+		grants := permissions.MemberGrants{Perms: role.Perms}
 		var oErr error
-		if !permissions.HasAdmin(role.Permissions) {
-			overrides, oErr = h.readers.Dispatch.GetChannelOverridesFor(ctx, role.ID, userID)
+		if !permissions.HasAdmin(role.Perms) {
+			grants, oErr = h.readers.Dispatch.GetMemberGrants(ctx, userID)
+			grants.Perms = role.Perms
 		}
 		if oErr == nil {
-			po := permOverrides(overrides)
-			canPublish = h.permChecker.HasChannelPermBatch(role.Permissions, po, channelID, permissions.SpeakVoice)
-			canVideo = h.permChecker.HasChannelPermBatch(role.Permissions, po, channelID, permissions.UseVideo)
-			canScreenShare = h.permChecker.HasChannelPermBatch(role.Permissions, po, channelID, permissions.ShareScreen)
+			canPublish = h.permChecker.HasChannelPermBatch(grants, channelID, permissions.SpeakVoice)
+			canVideo = h.permChecker.HasChannelPermBatch(grants, channelID, permissions.UseVideo)
+			canScreenShare = h.permChecker.HasChannelPermBatch(grants, channelID, permissions.ShareScreen)
 		}
 	}
 	return canPublish, canVideo, canScreenShare

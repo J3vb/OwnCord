@@ -181,3 +181,34 @@ func EffectiveChannelPerms(basePerms int64, o ChannelOverride) int64 {
 	roleLayer := EffectivePerms(basePerms, o.Allow, o.Deny)
 	return EffectivePerms(roleLayer, o.UserAllow, o.UserDeny)
 }
+
+// RoleGrant is one held role's contribution to a channel: the role's base
+// mask and that role's own channel override (Allow/Deny, zero when the role
+// has none there).
+type RoleGrant struct {
+	Perms int64
+	Allow int64
+	Deny  int64
+	// RoleID names the role for traces (Explain); the formula ignores it.
+	RoleID int64
+}
+
+// MemberChannelPerms resolves a member's permissions in ONE channel when they
+// hold several roles. Each held role is resolved with its OWN override, the
+// results are OR'd, and only then does the member's override apply:
+//
+//	roleLayer = OR over held roles r of ((perms_r & ^deny_r) | allow_r)
+//	effective = (roleLayer & ^userDeny) | userAllow
+//
+// A role therefore only ever adds permissions: a restrictive role (Member with
+// READ denied on a private channel) cannot take away a bit another held role
+// (Moderator) grants. For a single grant this is exactly EffectiveChannelPerms.
+// ADMINISTRATOR is not handled here, as in EffectiveChannelPerms: callers
+// short-circuit on HasAdmin of the OR of the held masks.
+func MemberChannelPerms(layers []RoleGrant, userAllow, userDeny int64) int64 {
+	var roleLayer int64
+	for _, g := range layers {
+		roleLayer |= EffectivePerms(g.Perms, g.Allow, g.Deny)
+	}
+	return EffectivePerms(roleLayer, userAllow, userDeny)
+}

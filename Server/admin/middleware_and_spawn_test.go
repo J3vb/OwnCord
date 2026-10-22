@@ -69,6 +69,18 @@ CREATE TABLE IF NOT EXISTS users (
     banner_id TEXT,
     banner_color TEXT
 );
+CREATE TABLE IF NOT EXISTS user_roles (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, role_id)
+) WITHOUT ROWID;
+
+CREATE TRIGGER IF NOT EXISTS user_roles_on_user_insert AFTER INSERT ON users
+BEGIN
+    INSERT OR IGNORE INTO user_roles (user_id, role_id)
+    SELECT NEW.id, r.id FROM roles r WHERE r.id = NEW.role_id;
+END;
+
 CREATE TABLE IF NOT EXISTS erasure_jobs (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
@@ -369,6 +381,10 @@ func TestAdminAuthMiddleware_RoleNotFound(t *testing.T) {
 	}
 	if _, err := database.ExecContext(context.Background(), `UPDATE users SET role_id = 9999 WHERE id = ?`, uid); err != nil {
 		t.Fatalf("UPDATE role_id: %v", err)
+	}
+	// The member holds no existing role at all: drop the user_roles row too.
+	if _, err := database.ExecContext(context.Background(), `DELETE FROM user_roles WHERE user_id = ?`, uid); err != nil {
+		t.Fatalf("DELETE user_roles: %v", err)
 	}
 	if _, err := database.ExecContext(context.Background(), `PRAGMA foreign_keys=ON`); err != nil {
 		t.Fatalf("re-enable FK: %v", err)

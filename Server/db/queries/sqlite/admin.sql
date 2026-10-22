@@ -29,9 +29,6 @@ WHERE u.registration_status = 'active'
 ORDER BY u.id ASC
 LIMIT sqlc.arg(limit) OFFSET sqlc.arg(offset);
 
--- name: UpdateUserRole :exec
-UPDATE users SET role_id = ? WHERE id = ?;
-
 -- name: ForceLogoutUser :exec
 DELETE FROM sessions WHERE user_id = ?;
 

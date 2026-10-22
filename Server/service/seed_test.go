@@ -76,6 +76,11 @@ func seedUserRole(t *testing.T, database *db.DB, userID, roleID int64) {
 	if err != nil {
 		t.Fatalf("seedUserRole(%d,%d): %v", userID, roleID, err)
 	}
+	// The upsert above only names the user's mirror column on conflict: replace
+	// the held roles too, so user_roles and users.role_id agree.
+	if err := database.UpdateUserRole(context.Background(), userID, roleID); err != nil {
+		t.Fatalf("seedUserRole(%d,%d) roles: %v", userID, roleID, err)
+	}
 }
 
 // seedUser upserts a user's identity fields by id without clobbering a role_id

@@ -62,14 +62,12 @@ func deleteAccountAdminGuard(ctx context.Context, tx *sql.Tx, userID int64) erro
 	if len(adminRoleIDs) == 0 {
 		// No admin-class roles defined; skip the guard.
 	} else {
-		var userRoleID int64
-		if err := tx.QueryRowContext(ctx,
-			`SELECT role_id FROM users WHERE id = ?`, userID,
-		).Scan(&userRoleID); err != nil {
-			return fmt.Errorf("DeleteAccount fetch role: %w", err)
+		// Admin-class when ANY held role is: an Administrator role below the
+		// top role still makes the account one of the last admins.
+		isAdminClass, err := holdsAnyRole(ctx, tx, userID, adminRoleIDs)
+		if err != nil {
+			return err
 		}
-
-		isAdminClass := slices.Contains(adminRoleIDs, userRoleID)
 
 		if isAdminClass {
 			// Build IN clause dynamically for the admin role IDs.
@@ -86,7 +84,7 @@ func deleteAccountAdminGuard(ctx context.Context, tx *sql.Tx, userID int64) erro
 			// (rather than joined into it) because it contains strftime
 			// verbs like %Y and %H that fmt.Sprintf would otherwise try to
 			// parse as its own format directives.
-			query := fmt.Sprintf(`SELECT COUNT(*) FROM users WHERE role_id IN (%s) AND id != ? AND `,
+			query := fmt.Sprintf(`SELECT COUNT(*) FROM users WHERE EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = users.id AND ur.role_id IN (%s)) AND id != ? AND `,
 				strings.Join(placeholders, ",")) + notBannedClause + underErasureClause
 			if err := tx.QueryRowContext(ctx, query,
 				args...,
@@ -195,4 +193,35 @@ func deleteAccountCloseDMChannels(ctx context.Context, tx *sql.Tx, userID int64,
 		}
 	}
 	return nil
+}
+
+// holdsAnyRole reports whether the user holds at least one of roleIDs. The
+// mirror role counts too, so a member with no user_roles row at all is judged
+// by users.role_id instead of slipping past the guard. A missing user is an
+// error.
+func holdsAnyRole(ctx context.Context, tx *sql.Tx, userID int64, roleIDs []int64) (bool, error) {
+	var mirror int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT role_id FROM users WHERE id = ?`, userID,
+	).Scan(&mirror); err != nil {
+		return false, fmt.Errorf("DeleteAccount fetch role: %w", err)
+	}
+	held := slices.Contains(roleIDs, mirror)
+	heldRows, err := tx.QueryContext(ctx,
+		`SELECT role_id FROM user_roles WHERE user_id = ?`, userID)
+	if err != nil {
+		return false, fmt.Errorf("DeleteAccount fetch roles: %w", err)
+	}
+	defer heldRows.Close() //nolint:errcheck
+	for heldRows.Next() {
+		var rid int64
+		if scanErr := heldRows.Scan(&rid); scanErr != nil {
+			return false, fmt.Errorf("DeleteAccount scan role: %w", scanErr)
+		}
+		held = held || slices.Contains(roleIDs, rid)
+	}
+	if err := heldRows.Err(); err != nil {
+		return false, fmt.Errorf("DeleteAccount roles rows: %w", err)
+	}
+	return held, nil
 }

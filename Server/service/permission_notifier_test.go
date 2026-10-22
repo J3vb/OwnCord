@@ -68,7 +68,7 @@ func roleProbe(t *testing.T, perms *PermissionService, userID int64) func() any 
 			t.Errorf("GetRoleForUser(%d): %v", userID, err)
 			return nil
 		}
-		return [3]any{role.Name, role.Permissions, role.Position}
+		return [3]any{role.Top.Name, role.Perms, role.Top.Position}
 	}
 }
 
@@ -155,7 +155,7 @@ func TestUpdateRole_UnreadableMemberListFlushesAllAndFansOutToEveryone(t *testin
 
 	// Warm an UNRELATED user's cache, then change that user's role behind the
 	// cache's back: only a full flush can make the change visible.
-	if r, _ := svc.perms.GetRoleForUser(ctx, 5); r == nil || r.ID != permissions.MemberRoleID {
+	if r, _ := svc.perms.GetRoleForUser(ctx, 5); r == nil || r.Top.ID != permissions.MemberRoleID {
 		t.Fatalf("warm role = %+v", r)
 	}
 	if err := database.UpdateUserRole(ctx, 5, permissions.ModeratorRoleID); err != nil {
@@ -167,7 +167,7 @@ func TestUpdateRole_UnreadableMemberListFlushesAllAndFansOutToEveryone(t *testin
 	}); err != nil {
 		t.Fatalf("UpdateRole: %v", err)
 	}
-	if r, _ := svc.perms.GetRoleForUser(ctx, 5); r == nil || r.ID != permissions.ModeratorRoleID {
+	if r, _ := svc.perms.GetRoleForUser(ctx, 5); r == nil || r.Top.ID != permissions.ModeratorRoleID {
 		t.Errorf("unrelated user's cache survived an unreadable-member-list edit: %+v", r)
 	}
 	want := RoleFanout{Roles: true, AllConnected: true}
@@ -403,7 +403,7 @@ func TestRoleOverride_UnreadableMemberListFlushesEveryCachedMask(t *testing.T) {
 	// An unrelated user, cached, then changed behind the cache's back.
 	seedUser(t, database, &db.User{ID: 33})
 	seedUserRole(t, database, 33, permissions.MemberRoleID)
-	if r, _ := svc.perms.GetRoleForUser(ctx, 33); r == nil || r.ID != permissions.MemberRoleID {
+	if r, _ := svc.perms.GetRoleForUser(ctx, 33); r == nil || r.Top.ID != permissions.MemberRoleID {
 		t.Fatalf("warm role = %+v", r)
 	}
 	if err := database.UpdateUserRole(ctx, 33, permissions.ModeratorRoleID); err != nil {
@@ -414,7 +414,7 @@ func TestRoleOverride_UnreadableMemberListFlushesEveryCachedMask(t *testing.T) {
 	if err != nil || !res.AffectedAll {
 		t.Fatalf("PutRoleOverride = %+v, %v; want AffectedAll", res, err)
 	}
-	if r, _ := svc.perms.GetRoleForUser(ctx, 33); r == nil || r.ID != permissions.ModeratorRoleID {
+	if r, _ := svc.perms.GetRoleForUser(ctx, 33); r == nil || r.Top.ID != permissions.ModeratorRoleID {
 		t.Errorf("cache survived an unreadable-member-list override: %+v", r)
 	}
 	if len(rec.events) != 1 || rec.events[0].kind != "audience" {

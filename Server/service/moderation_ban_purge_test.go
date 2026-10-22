@@ -209,8 +209,8 @@ func TestPurgeAfterBan_PermissionLookupErrorSkipsChannel(t *testing.T) {
 
 type overrideFailStore struct{ Store }
 
-func (overrideFailStore) GetChannelOverridesFor(context.Context, int64, int64) (map[int64]db.ChannelOverride, error) {
-	return nil, errors.New("override read failed")
+func (overrideFailStore) GetMemberGrants(context.Context, int64) (permissions.MemberGrants, error) {
+	return permissions.MemberGrants{}, errors.New("override read failed")
 }
 
 func TestPurgeAfterBan_ChannelWithoutManageMessagesUntouched(t *testing.T) {

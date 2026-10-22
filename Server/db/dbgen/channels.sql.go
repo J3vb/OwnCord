@@ -556,6 +556,50 @@ func (q *Queries) ListChannels(ctx context.Context) ([]ListChannelsRow, error) {
 	return items, nil
 }
 
+const listHeldRoleChannelOverrides = `-- name: ListHeldRoleChannelOverrides :many
+SELECT co.channel_id, co.role_id, co.allow, co.deny
+FROM channel_overrides co
+JOIN user_roles ur ON ur.role_id = co.role_id
+WHERE ur.user_id = ?
+`
+
+type ListHeldRoleChannelOverridesRow struct {
+	ChannelID int64 `json:"channelId"`
+	RoleID    int64 `json:"roleId"`
+	Allow     int64 `json:"allow"`
+	Deny      int64 `json:"deny"`
+}
+
+// Every channel override of every role the member holds, one row per
+// (channel, role). The per-role rows are what GetMemberGrants composes.
+func (q *Queries) ListHeldRoleChannelOverrides(ctx context.Context, userID int64) ([]ListHeldRoleChannelOverridesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listHeldRoleChannelOverrides, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListHeldRoleChannelOverridesRow{}
+	for rows.Next() {
+		var i ListHeldRoleChannelOverridesRow
+		if err := rows.Scan(
+			&i.ChannelID,
+			&i.RoleID,
+			&i.Allow,
+			&i.Deny,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setChannelAFK = `-- name: SetChannelAFK :execrows
 UPDATE channels SET afk = 1 WHERE id = ? AND type = 'voice' AND archived = 0
 `

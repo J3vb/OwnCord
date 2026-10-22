@@ -273,9 +273,7 @@ func TestVoiceState_NotDeliveredToRolesDeniedRead(t *testing.T) {
 	insider := newMember("vs-insider")
 	outsiderRole := int64(3) // Moderator: a distinct role so the deny is role-scoped
 	outsider := newMember("vs-outsider")
-	if _, err := database.ExecContext(context.Background(),
-		`UPDATE users SET role_id = ? WHERE id = ?`, outsiderRole, outsider.ID,
-	); err != nil {
+	if err := database.UpdateUserRole(context.Background(), outsider.ID, outsiderRole); err != nil {
 		t.Fatalf("reassign outsider role: %v", err)
 	}
 	if err := database.UpsertChannelOverride(context.Background(), vcID, outsiderRole, 0,

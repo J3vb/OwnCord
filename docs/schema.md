@@ -133,6 +133,7 @@ CREATE TABLE IF NOT EXISTS schema_versions (
 | `074_threads.sql`                              | Adds the thread columns to `channels`: `parent_channel_id` (`ON DELETE CASCADE`, index `idx_channels_parent`), `thread_starter_message_id` (`ON DELETE SET NULL`, unique partial index `idx_channels_thread_starter`), `thread_owner_id` (`ON DELETE SET NULL`), `thread_archived`, `thread_locked`, `thread_auto_archive_minutes` (60, 1440, 4320 or 10080) and `thread_last_activity_at` (index `idx_channels_thread_open_activity`). Allows type `thread`, and adds shape triggers: a thread has a text parent, never its own nsfw, archive, category, AFK or slow mode, and its type, parent and starter never change. (WP 6.9c)              |
 | `075_forums.sql`                               | Adds the forum channel type (WP 6.9d). `channels` gains `forum_require_tag`, `forum_default_auto_archive_minutes` (60, 1440, 4320 or 10080) and `thread_post_message_id` (`ON DELETE SET NULL`). Adds `forum_tags` (unique per forum ignoring case), `thread_tags` and index `idx_channels_thread_list_activity`. Widens the type and thread shape triggers: a thread's parent may be a text channel or a forum, a post has no starter, its opening-message pointer is set once, and a type change to or from `forum` is refused. `trg_messages_not_in_forum` refuses a message in a forum, and tag triggers keep tags on their forum.            |
 | `076_category_permissions.sql`                 | Adds `category_overrides(category_id, role_id, allow, deny)` and `category_user_overrides(category_id, user_id, allow, deny)` (both `UNIQUE` per pair and cascading on both parents, index `idx_category_user_overrides_user` for account erasure), and `channels.permissions_synced INTEGER NOT NULL DEFAULT 0`. The category rows are a template that is **copied** onto the channels synced to the category; `permissions.EffectiveChannelPerms` never reads them. The backfill syncs nothing, so an upgraded server keeps exactly the overrides it had. (WP 6.5d)                                                                             |
+| `077_user_roles_reconcile.sql`                 | Data only. Resets `user_roles` to exactly the role `users.role_id` names for every member whose rows had drifted (a demoted member still holding the old role, or a member left with no row), and moves a member whose role was missing onto the default role. (WP 6.3b)                                                                                                                                                                                                                                                                                                                                                                          |
 
 ---
 
@@ -367,12 +368,15 @@ Owner/Admin/Moderator). Not fixed at runtime — see _Role semantics_ below:
   `/admin/api/roles` (`MANAGE_ROLES` + hierarchy; see `docs/api.md`). Deleting
   a role reassigns its members and drops its `channel_overrides` rows in one
   transaction. `users.role_id` stays the member's top role (highest
-  `position`, ties by lowest `id`) and is the only role every permission check
-  reads today. `user_roles` (067) is the membership table behind it. Its rows
-  are written only through `db.AddUserRole` and `db.RemoveUserRole` (which
-  re-mirror `role_id` in the same transaction) and by the user-insert trigger.
-  The existing role-change writers (`UpdateUserRole`, `DeleteRoleReassigning`)
-  do not touch it yet.
+  `position`, ties by lowest `id`) as a display and rank mirror. Permission
+  checks read `user_roles` (067), the membership table behind it: a member's
+  server-level permissions are the OR of every held role's mask, and
+  `ADMINISTRATOR` in any held role bypasses. Rows are written through
+  `db.AddUserRole`, `db.RemoveUserRole`, `db.UpdateUserRole` (replaces every
+  role with one) and `db.DeleteRoleReassigning` (members left with no role get
+  the default role), each re-mirroring `role_id` in the same transaction, and
+  by the user-insert trigger. Migration 073 reconciled any database where the
+  two had drifted apart.
 
 ---
 
@@ -667,7 +671,7 @@ CREATE TABLE channel_user_overrides (
 
 The shape mirrors `channel_overrides` (allow/deny masks, cascade on both
 parents) so both layers are fetched and merged by the same code
-(`db.GetChannelOverridesFor`). The composite PRIMARY KEY replaces the surrogate
+(`db.GetMemberGrants`). The composite PRIMARY KEY replaces the surrogate
 `id` + `UNIQUE` pair `channel_overrides` carries — nothing references an
 override row by id.
 
@@ -1237,10 +1241,17 @@ and `permissions.EffectivePerms` the one-layer primitive it is built from. The
 the formula — it is a bypass, not a bit that survives an override.
 
 Both layers are fetched together and per member, never per channel:
-`db.GetChannelOverridesFor(roleID, userID)` runs two batch queries and merges
-them, which is what keeps `buildReady`, REST `ListVisibleChannels`, reconnect
-replay filtering and the cached `service.PermissionService` free of N+1 lookups
-and unable to drift from each other.
+`db.GetMemberGrants(userID)` reads the held roles, their channel overrides and
+the member overrides in three batch queries, which is what keeps `buildReady`, REST
+`ListVisibleChannels`, reconnect replay filtering and the cached
+`service.PermissionService` free of N+1 lookups and unable to drift from each other.
+
+A member holding several roles is composed per role: each held role is resolved
+with its own override in the channel (`(perms &^ deny) | allow`), the results are
+OR'd, then the member layer applies (`(roleLayer &^ userDeny) | userAllow`);
+`ADMINISTRATOR` in any held role bypasses. A member with one role resolves
+exactly as the table above. `permissions.MemberChannelPerms` is the
+implementation, fed by `Subject.Layers`.
 
 DM channels bypass role permissions entirely and use participant-based authorization instead.
 

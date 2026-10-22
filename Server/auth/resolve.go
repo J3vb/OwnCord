@@ -14,7 +14,7 @@ type tokenStore interface {
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (*db.Session, error)
 	GetActiveAPIToken(ctx context.Context, tokenHash string) (*db.APIToken, error)
 	GetUserByID(ctx context.Context, id int64) (*db.User, error)
-	GetRoleByID(ctx context.Context, id int64) (*db.Role, error)
+	GetMemberRoles(ctx context.Context, userID int64) (*db.MemberRoles, error)
 }
 
 // Sentinel outcomes, so each caller can reproduce its existing 401/403 responses
@@ -69,14 +69,17 @@ func ResolveTokenHash(ctx context.Context, store tokenStore, hash string) (*db.U
 		return nil, nil, nil, ErrUserNotFound
 	}
 
-	// A dangling role_id returns (nil, nil): the nil check is load-bearing so a
-	// nil role never reaches the context and every downstream permission check.
-	role, err := store.GetRoleByID(ctx, user.RoleID)
+	// A member holding no role returns (nil, nil): the nil check is
+	// load-bearing so a nil role never reaches the context and every downstream
+	// permission check. The role handed back carries the TOP role's identity
+	// (rank, ownership) with the OR of every held role's permissions, which is
+	// what the server-level checks read.
+	held, err := store.GetMemberRoles(ctx, user.ID)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if role == nil {
+	if held == nil {
 		return nil, nil, nil, ErrRoleNotFound
 	}
-	return user, role, sess, nil
+	return user, held.Effective(), sess, nil
 }

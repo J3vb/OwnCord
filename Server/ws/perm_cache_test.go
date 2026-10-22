@@ -70,8 +70,7 @@ func TestPermCache_RoleChangeInvalidationIsImmediate(t *testing.T) {
 	); err != nil {
 		t.Fatalf("seed novoice role: %v", err)
 	}
-	if _, err := database.ExecContext(context.Background(),
-		`UPDATE users SET role_id = 150 WHERE id = ?`, user.ID); err != nil {
+	if err := database.UpdateUserRole(context.Background(), user.ID, 150); err != nil {
 		t.Fatalf("reassign user role: %v", err)
 	}
 	svc.Permissions.InvalidateUser(user.ID)
@@ -83,16 +82,16 @@ func TestPermCache_RoleChangeInvalidationIsImmediate(t *testing.T) {
 	}
 }
 
-// countingStore wraps a service.Store and counts GetRoleForUser calls — the
+// countingStore wraps a service.Store and counts GetMemberRoles calls — the
 // query every uncached ws-side permission check must issue.
 type countingStore struct {
 	service.Store
 	roleLookups atomic.Int64
 }
 
-func (s *countingStore) GetRoleForUser(ctx context.Context, userID int64) (*db.Role, error) {
+func (s *countingStore) GetMemberRoles(ctx context.Context, userID int64) (*db.MemberRoles, error) {
 	s.roleLookups.Add(1)
-	return s.Store.GetRoleForUser(ctx, userID)
+	return s.Store.GetMemberRoles(ctx, userID)
 }
 
 // TestPermCache_SecondCheckServedFromCache proves the ws gates actually use the

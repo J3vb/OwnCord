@@ -344,7 +344,10 @@ func (s *ReportService) resolveAttachmentTarget(ctx context.Context, p FileRepor
 		return nil, 0, "", nil, errTargetNotFound
 	}
 	actor, _ := s.st.GetUserByID(ctx, p.ReporterID)
-	role, _ := s.perms.GetRoleForUser(ctx, p.ReporterID)
+	var role *db.Role
+	if held, _ := s.perms.GetRoleForUser(ctx, p.ReporterID); held != nil {
+		role = held.Effective()
+	}
 	if err := s.uploads.Authorize(ctx, aa, actor, role); err != nil {
 		return nil, 0, "", nil, errTargetNotFound
 	}
@@ -423,7 +426,7 @@ func requireModerate(ctx context.Context, perms *PermissionService, actorID int6
 	if err != nil || role == nil {
 		return fmt.Errorf("%w: failed to load role", ErrForbidden)
 	}
-	if err := permissions.CanModerate(permissions.Subject{RolePerms: role.Permissions}); err != nil {
+	if err := permissions.CanModerate(permissions.Subject{RolePerms: role.Perms}); err != nil {
 		return fmt.Errorf("%w: missing MODERATE_MEMBERS permission", ErrForbidden)
 	}
 	return nil

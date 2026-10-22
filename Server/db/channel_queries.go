@@ -270,28 +270,6 @@ func (d *DB) GetAllChannelPermissionsForUser(ctx context.Context, userID int64) 
 	return result, nil
 }
 
-// GetChannelOverridesFor returns the merged role + user override layers for one
-// member, keyed by channel ID: two batch queries, never per channel. It is the
-// single fetch every "what can this member do here" site uses, so the role and
-// user layers can never be loaded by one site and forgotten by another.
-func (d *DB) GetChannelOverridesFor(ctx context.Context, roleID, userID int64) (map[int64]ChannelOverride, error) {
-	merged, err := d.GetAllChannelPermissionsForRole(ctx, roleID)
-	if err != nil {
-		return nil, err
-	}
-	userOv, err := d.GetAllChannelPermissionsForUser(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	for chID, o := range userOv {
-		existing := merged[chID]
-		existing.UserAllow = o.UserAllow
-		existing.UserDeny = o.UserDeny
-		merged[chID] = existing
-	}
-	return merged, nil
-}
-
 // UpsertChannelUserOverride inserts or updates the allow/deny permission
 // override for a single user on a channel. Like UpsertChannelOverride it
 // unsyncs the channel in the same transaction.

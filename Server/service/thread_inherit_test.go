@@ -54,11 +54,11 @@ func TestThreadPermissionsAreParents(t *testing.T) {
 
 	// The live Checker reads the same answer from the store.
 	ck := permissions.NewChecker(database)
-	role, err := database.GetRoleForUser(ctx, 2)
+	held, err := database.GetMemberRoles(ctx, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ck.HasChannelPerm(ctx, role.Permissions, role.ID, 2, 21, permissions.ReadMessages) {
+	if ck.HasChannelPerm(ctx, held.Held(), 2, 21, permissions.ReadMessages) {
 		t.Error("Checker: bob's user deny on the parent does not reach its thread")
 	}
 }

@@ -167,43 +167,28 @@ func channelRefs(channels []db.Channel) []permissions.ChannelRef {
 	return refs
 }
 
-// permOverrides maps a db override map to the checker's override map, carrying
-// BOTH layers — the role override and the per-user override — so the checker
-// resolves the full order (base -> role -> user) rather than half of it.
-func permOverrides(overrides map[int64]db.ChannelOverride) map[int64]permissions.ChannelOverride {
-	out := make(map[int64]permissions.ChannelOverride, len(overrides))
-	for id, o := range overrides {
-		out[id] = permOverride(o)
-	}
-	return out
+// readyAffordances resolves one ready channel's subject from the member's
+// grants (the OR of their held roles, every held role's override in that
+// channel and the member layer) and the caller's timeout verdict (resolved
+// once per payload via subjectFor, administrators exempt), then asks
+// affordancesFor. Zero grants fail closed to all false.
+func readyAffordances(grants permissions.MemberGrants, ch *db.Channel, timedOut bool) channelAffordances {
+	sub := grants.Subject(ch.AuthorityID())
+	sub.Channel = channelRef(ch)
+	sub.TimedOut = timedOut
+	return affordancesFor(sub)
 }
 
-// readyAffordances resolves one ready channel's subject from the role, the
-// per-channel override and the caller's timeout verdict (resolved once per
-// payload via subjectFor, administrators exempt), then asks affordancesFor.
-// A nil role fails closed to all false.
-func readyAffordances(role *db.Role, o db.ChannelOverride, ch *db.Channel, timedOut bool) channelAffordances {
-	if role == nil {
-		return channelAffordances{}
-	}
-	return affordancesFor(permissions.Subject{
-		RolePerms: role.Permissions,
-		Override:  permOverride(o),
-		Channel:   channelRef(ch),
-		TimedOut:  timedOut,
-	})
-}
-
-// channelCanSend is the ready payload's can_send verdict for a role, override
+// channelCanSend is the ready payload's can_send verdict for a member's grants
 // and channel type; a one-line delegation to affordancesFor (S-12, OC-0434).
-func channelCanSend(role *db.Role, o db.ChannelOverride, chanType string, timedOut bool) bool {
-	return readyAffordances(role, o, &db.Channel{Type: chanType}, timedOut).CanSend
+func channelCanSend(grants permissions.MemberGrants, chanType string, timedOut bool) bool {
+	return readyAffordances(grants, &db.Channel{Type: chanType}, timedOut).CanSend
 }
 
 // channelCanModerateVoice is the ready payload's can_moderate_voice verdict
 // (B9 Q5); a one-line delegation to affordancesFor.
-func channelCanModerateVoice(role *db.Role, o db.ChannelOverride, chanType string) bool {
-	return readyAffordances(role, o, &db.Channel{Type: chanType}, false).CanModerateVoice
+func channelCanModerateVoice(grants permissions.MemberGrants, chanType string) bool {
+	return readyAffordances(grants, &db.Channel{Type: chanType}, false).CanModerateVoice
 }
 
 // channelRef maps one db channel to the predicates' db-agnostic ChannelRef.
@@ -212,32 +197,32 @@ func channelRef(ch *db.Channel) permissions.ChannelRef {
 		AuthorityID: ch.Thread.ParentID, ThreadLocked: ch.Thread.Locked}
 }
 
-// permOverride maps one db override (both layers) to the checker's type.
-func permOverride(o db.ChannelOverride) permissions.ChannelOverride {
-	return permissions.ChannelOverride{Allow: o.Allow, Deny: o.Deny, UserAllow: o.UserAllow, UserDeny: o.UserDeny}
-}
-
 // readyVisibleChannels resolves the channels the user may see for the ready
-// payload, returning the per-channel override map it fetched alongside them so
-// buildReady can reuse it for the can_send affordance without a second query.
-func (h *Hub) readyVisibleChannels(ctx context.Context, database ReadySnapshotReader, userID int64, role *db.Role, channels []db.Channel) ([]db.Channel, map[int64]db.ChannelOverride, error) {
+// payload, returning the member grants it fetched alongside them so buildReady
+// can reuse them for the can_send affordance without a second query. role is
+// the member's effective role (top role identity, OR of every held mask).
+func (h *Hub) readyVisibleChannels(ctx context.Context, database ReadySnapshotReader, userID int64, role *db.Role, channels []db.Channel) ([]db.Channel, permissions.MemberGrants, error) {
 	// Filter channels by READ_MESSAGES through the single permissions.Checker
 	// predicate shared with REST ListVisibleChannels and reconnect replay
-	// filtering (computeAllowedChannels). The overrides map is fetched once and
+	// filtering (computeAllowedChannels). The grants are fetched once and
 	// reused below for the per-channel can_send affordance. DM channels are
 	// excluded by the checker — they are delivered via the dm_channels field.
-	overrides := map[int64]db.ChannelOverride{}
-	if role != nil && !permissions.HasAdmin(role.Permissions) {
-		var oErr error
-		overrides, oErr = database.GetChannelOverridesFor(ctx, role.ID, userID)
-		if oErr != nil {
-			return nil, nil, fmt.Errorf("buildReady GetChannelOverridesFor: %w", oErr)
+	var grants permissions.MemberGrants
+	if role != nil {
+		grants.Perms = role.Permissions
+		if !permissions.HasAdmin(role.Permissions) {
+			var oErr error
+			grants, oErr = database.GetMemberGrants(ctx, userID)
+			if oErr != nil {
+				return nil, permissions.MemberGrants{}, fmt.Errorf("buildReady GetMemberGrants: %w", oErr)
+			}
+			grants.Perms = role.Permissions
 		}
 	}
 	var visibleChannels []db.Channel
 	if role != nil {
 		// Nil role = zero access (fail closed), handled by skipping the filter.
-		visibleIDs := h.permChecker.VisibleChannelIDs(role.Permissions, channelRefs(channels), permOverrides(overrides))
+		visibleIDs := h.permChecker.VisibleChannelIDs(grants, channelRefs(channels))
 		for i := range channels {
 			if visibleIDs[channels[i].ID] {
 				visibleChannels = append(visibleChannels, channels[i])
@@ -247,7 +232,7 @@ func (h *Hub) readyVisibleChannels(ctx context.Context, database ReadySnapshotRe
 	if visibleChannels == nil {
 		visibleChannels = []db.Channel{}
 	}
-	return visibleChannels, overrides, nil
+	return visibleChannels, grants, nil
 }
 
 // readyDMChannels loads the user's open DM channels and reconciles them with
@@ -351,7 +336,7 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 		return nil, fmt.Errorf("buildReady ListMembers: %w", err)
 	}
 
-	visibleChannels, overrides, err := h.readyVisibleChannels(ctx, database, userID, role, channels)
+	visibleChannels, grants, err := h.readyVisibleChannels(ctx, database, userID, role, channels)
 	if err != nil {
 		return nil, err
 	}
@@ -390,7 +375,7 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 	// The lock is cosmetic: a failed read must not fail ready (nothing is
 	// private then, as on the single-channel frames).
 	privacy := h.privacySnapshot(ctx)
-	channelPayloads := readyChannelPayloads(feat.filterChannels(visibleChannels), overrides, unreadMap, role, ackMap, sub.TimedOut, privacy)
+	channelPayloads := readyChannelPayloads(feat.filterChannels(visibleChannels), grants, unreadMap, ackMap, sub.TimedOut, privacy)
 
 	// Load open DM channels for this user. Hoisted above the voice-state
 	// filter below so DM channel IDs can seed visibleSet — permissions.Checker
@@ -474,12 +459,15 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	// Look up role for permission-filtered ready payload.
 	// Fail closed: if the role lookup fails, disconnect rather than serving
 	// a permissive ready payload with nil role (BUG-094).
-	userRole, roleErr := database.GetRoleByID(ctx, c.user.RoleID)
-	if roleErr != nil || userRole == nil {
+	heldRoles, roleErr := database.GetMemberRoles(ctx, c.userID)
+	if roleErr != nil || heldRoles == nil {
 		slog.Error("ws: role lookup failed, disconnecting", "user_id", c.userID, "role_id", c.user.RoleID, "err", roleErr)
 		_ = conn.Close(websocket.StatusInternalError, "role lookup failed")
 		return fmt.Errorf("role lookup failed for user %d: %w", c.userID, roleErr)
 	}
+	// Top role identity with the OR of every held mask: what the ready
+	// payload's permission-filtered fields resolve from.
+	userRole := heldRoles.Effective()
 
 	// Register BEFORE writing auth_ok + ready so broadcasts that arrive during
 	// the write window are queued in the client's send buffer instead of

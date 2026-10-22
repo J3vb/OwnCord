@@ -360,22 +360,6 @@ func (d *DB) AssignAppealForced(ctx context.Context, id, assigneeID, observedAss
 	})
 }
 
-// deciderAuthority reads userID's role permissions and ban state fresh,
-// inside tx (P2 review): the shared re-read DecideAppealTx, AssignAppealTx
-// and forceReassignGuarded's checkAuthority all use, so a bit revoked or a
-// ban landed between a caller's earlier authorization and this write is
-// caught here rather than trusted stale. ok=false means the user no longer
-// resolves to a role at all (erased, or a dangling role_id).
-func deciderAuthority(ctx context.Context, tx *sql.Tx, userID int64) (rolePerms int64, banned bool, banExpires *string, ok bool) {
-	err := tx.QueryRowContext(ctx,
-		`SELECT r.permissions, u.banned, u.ban_expires FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ?`, userID,
-	).Scan(&rolePerms, &banned, &banExpires)
-	if err != nil {
-		return 0, false, nil, false
-	}
-	return rolePerms, banned, banExpires, true
-}
-
 // WithdrawAppeal withdraws appeal id — the appellant only, guarded to
 // open/assigned states. Returns whether a row was affected; zero means
 // CONFLICT.

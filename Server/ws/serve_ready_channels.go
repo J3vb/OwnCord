@@ -2,6 +2,7 @@ package ws
 
 import (
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -33,7 +34,7 @@ func (f clientFeatures) filterChannels(chs []db.Channel) []db.Channel {
 // gets one) reads as false, which is correct either way — nothing needs
 // acknowledging there. timedOut is the caller's current timeout verdict,
 // fed into every channel's affordances — see readyAffordances (OC-0434).
-func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.ChannelOverride, unreadMap map[int64]db.ChannelUnread, role *db.Role, ackMap map[int64]bool, timedOut bool, privacy service.ChannelPrivacySnapshot) []map[string]any {
+func readyChannelPayloads(visibleChannels []db.Channel, grants permissions.MemberGrants, unreadMap map[int64]db.ChannelUnread, ackMap map[int64]bool, timedOut bool, privacy service.ChannelPrivacySnapshot) []map[string]any {
 	channelPayloads := make([]map[string]any, 0, len(visibleChannels))
 	for i := range visibleChannels {
 		entry := map[string]any{
@@ -75,7 +76,7 @@ func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.C
 		// can_delete_others, can_pin, can_react): the predicates' verdicts
 		// over one subject, asked only in affordancesFor. The server remains
 		// the authority; these only pre-disable controls.
-		readyAffordances(role, overrides[visibleChannels[i].ID], &visibleChannels[i], timedOut).spreadInto(entry)
+		readyAffordances(grants, &visibleChannels[i], timedOut).spreadInto(entry)
 		if visibleChannels[i].Forum != nil {
 			// The forum's settings and tags. can_send above means "may create
 			// posts"; a forum has no unread state (it holds no messages).

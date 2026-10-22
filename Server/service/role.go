@@ -87,10 +87,11 @@ func (s *RoleService) actorRole(ctx context.Context, actorID int64) (*db.Role, e
 	if err != nil || role == nil {
 		return nil, fmt.Errorf("%w: failed to load actor role", ErrForbidden)
 	}
-	if !permissions.HasServerPerm(role.Permissions, permissions.ManageRoles) {
+	if !permissions.HasServerPerm(role.Perms, permissions.ManageRoles) {
 		return nil, fmt.Errorf("%w: missing %s permission", ErrForbidden, permissions.Name(permissions.ManageRoles))
 	}
-	return role, nil
+	// Top role identity (rank) with the OR of every held mask.
+	return role.Effective(), nil
 }
 
 // requireBelowActor enforces the hierarchy rule shared by edit, delete and
@@ -455,9 +456,9 @@ func (s *RoleService) deleteRoleLocked(ctx context.Context, actorID, roleID int6
 	}
 
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "role_delete", "role", role.ID,
-		fmt.Sprintf("deleted role %s (%d members reassigned to %s)", role.Name, len(movedUserIDs), fallback.Name))
+		fmt.Sprintf("deleted role %s (%d members held it; those left with no role now have %s)", role.Name, len(movedUserIDs), fallback.Name))
 	slog.Warn("role deleted", "actor_id", actorID, "role_id", role.ID, "name", role.Name,
-		"members_reassigned", len(movedUserIDs))
+		"members_affected", len(movedUserIDs))
 	return role, fallback, movedUserIDs, nil
 }
 

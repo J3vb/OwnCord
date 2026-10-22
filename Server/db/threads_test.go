@@ -196,14 +196,14 @@ func TestThreadOverrideReadsResolveParent(t *testing.T) {
 	if allow, deny, err := f.db.GetUserChannelPermissions(ctx, f.thread, f.user); err != nil || allow != 0x40 || deny != 0x80 {
 		t.Errorf("user override on thread = %#x/%#x, %v, want the parent's 0x40/0x80", allow, deny, err)
 	}
-	m, err := f.db.GetChannelOverridesFor(ctx, role, f.user)
+	grants, err := f.db.GetMemberGrants(ctx, f.user)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := m[f.thread]; ok {
+	if _, ok := grants.Overrides[f.thread]; ok {
 		t.Error("the batch override map has a thread key, want parent keys only")
 	}
-	if o := m[f.parent]; o.Allow != 0x10 || o.UserDeny != 0x80 {
+	if o := grants.Overrides[f.parent]; o.Allow != 0x10 || o.UserDeny != 0x80 {
 		t.Errorf("parent entry = %+v", o)
 	}
 }

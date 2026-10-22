@@ -168,7 +168,7 @@ func TestRoleRefresh_SlowClientIsKickedNotBanned(t *testing.T) {
 
 type failingRoleReader struct{ DispatchReader }
 
-func (failingRoleReader) GetRoleForUser(context.Context, int64) (*db.Role, error) {
+func (failingRoleReader) GetMemberRoles(context.Context, int64) (*db.MemberRoles, error) {
 	return nil, errors.New("role lookup down")
 }
 

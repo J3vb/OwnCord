@@ -44,8 +44,7 @@ func seedDemotedRole(t *testing.T, database *db.DB) {
 
 func reassignRole(t *testing.T, database *db.DB, uid, roleID int64) {
 	t.Helper()
-	if _, err := database.ExecContext(context.Background(),
-		`UPDATE users SET role_id = ? WHERE id = ?`, roleID, uid); err != nil {
+	if err := database.UpdateUserRole(context.Background(), uid, roleID); err != nil {
 		t.Fatalf("reassign role: %v", err)
 	}
 }
