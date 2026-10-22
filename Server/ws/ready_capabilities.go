@@ -17,5 +17,6 @@ func readyCapabilities(retryFloorMS int64, threads, forums bool) map[string]any 
 		"polls":                        true,
 		"threads":                      threads, // WP 6.9c: thread_* commands and frames
 		"forums":                       forums,  // WP 6.9d: forum_post_create and a forum's posts
+		"multi_role":                   true,    // WP 6.3c: role_ids, hoist, role add/remove
 	}
 }

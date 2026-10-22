@@ -410,8 +410,7 @@ func waitSendDrain(ctx context.Context, c *Client, limit int) bool {
 
 // roleNameNow reads uid's current role name at send time, so a coalesced or
 // overtaken enqueue announces the committed name.
-func (h *Hub) roleNameNow(ctx context.Context, uid int64) (string, bool) {
-	var name string
+func (h *Hub) roleNameNow(ctx context.Context, uid int64) (name string, roleIDs []int64, ok bool) {
 	var err error
 	found := false
 	switch {
@@ -419,20 +418,20 @@ func (h *Hub) roleNameNow(ctx context.Context, uid int64) (string, bool) {
 		role, rerr := h.perms.GetRoleForUser(ctx, uid)
 		err = rerr
 		if role != nil {
-			name, found = role.Top.Name, true
+			name, roleIDs, found = role.Top.Name, role.IDs, true
 		}
 	case h.readers.Members != nil:
 		role, rerr := h.readers.Members.GetMemberRoles(ctx, uid)
 		err = rerr
 		if role != nil {
-			name, found = role.Top.Name, true
+			name, roleIDs, found = role.Top.Name, role.IDs, true
 		}
 	}
 	if err != nil || !found {
 		slog.Warn("hub: role refresh member_update skipped, role unreadable", "user_id", uid, "err", err)
-		return "", false
+		return "", nil, false
 	}
-	return name, true
+	return name, slices.Clone(roleIDs), true
 }
 
 // sendMemberUpdates enqueues one member_update per user, connected or not, in
@@ -447,12 +446,12 @@ func (h *Hub) sendMemberUpdates(ctx context.Context, ids []int64) {
 			return
 		}
 		rctx, cancel := context.WithTimeout(ctx, roleRefreshUserBudget)
-		name, ok := h.roleNameNow(rctx, uid)
+		name, roleIDs, ok := h.roleNameNow(rctx, uid)
 		cancel()
 		if !ok {
 			continue
 		}
-		bm := broadcastMsg{channelID: 0, msg: buildMemberUpdate(uid, name)}
+		bm := broadcastMsg{channelID: 0, msg: buildMemberUpdate(uid, name, roleIDs)}
 		if !h.enqueue(bm, "member_update") {
 			_ = h.awaitDispatch(ctx)
 			h.enqueue(bm, "member_update")

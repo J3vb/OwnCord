@@ -74,7 +74,7 @@ func newModQueueActTestDB(t *testing.T) *db.DB {
 // user holding it.
 func mintModerator(t *testing.T, database *db.DB, username string, position int, perms int64) int64 {
 	t.Helper()
-	role, err := database.CreateRole(context.Background(), username+"-role", nil, perms|permissions.ReadMessages, position)
+	role, err := database.CreateRole(context.Background(), username+"-role", nil, perms|permissions.ReadMessages, position, false, false)
 	if err != nil {
 		t.Fatalf("CreateRole: %v", err)
 	}

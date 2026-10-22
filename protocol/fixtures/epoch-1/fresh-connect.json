@@ -33,6 +33,9 @@
               "display_name": "Alice Fixture",
               "id": "<id:number>",
               "role": "member",
+              "role_ids": [
+                4
+              ],
               "status": "online",
               "username": "alice"
             }
@@ -50,6 +53,7 @@
               "message_deduplication": true,
               "message_retry_floor_ms": 0,
               "message_retry_window_seconds": 86400,
+              "multi_role": true,
               "polls": true,
               "profile_banners": true,
               "read_pointer": true,
@@ -122,6 +126,9 @@
                 "id": "<id:number>",
                 "identity_public_key": "YWxpY2UtaWRlbnRpdHktcHVibGljLWtleS1maXh0dXJl",
                 "role": "member",
+                "role_ids": [
+                  4
+                ],
                 "status": "online",
                 "username": "alice"
               },
@@ -133,6 +140,9 @@
                 "display_name": null,
                 "id": "<id:number>",
                 "role": "member",
+                "role_ids": [
+                  4
+                ],
                 "status": "offline",
                 "username": "bob"
               }
@@ -142,32 +152,40 @@
             "roles": [
               {
                 "color": "#E74C3C",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": false,
+                "mentionable": false,
                 "name": "Owner",
                 "permissions": 2147483647,
                 "position": 100
               },
               {
                 "color": "#F39C12",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": false,
+                "mentionable": false,
                 "name": "Admin",
                 "permissions": 1073741823,
                 "position": 80
               },
               {
                 "color": "#3498DB",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": false,
+                "mentionable": false,
                 "name": "Moderator",
                 "permissions": 7340031,
                 "position": 60
               },
               {
                 "color": null,
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": true,
+                "mentionable": false,
                 "name": "Member",
                 "permissions": 7779,
                 "position": 40
@@ -193,6 +211,9 @@
               "id": "<id:number>",
               "identity_public_key": "YWxpY2UtaWRlbnRpdHktcHVibGljLWtleS1maXh0dXJl",
               "role": "member",
+              "role_ids": [
+                4
+              ],
               "username": "alice"
             }
           },
@@ -229,6 +250,9 @@
               "created_at": "<ts:string>",
               "id": "<id:number>",
               "role": "member",
+              "role_ids": [
+                4
+              ],
               "username": "bob"
             }
           },
@@ -299,6 +323,9 @@
               "display_name": null,
               "id": "<id:number>",
               "role": "member",
+              "role_ids": [
+                4
+              ],
               "status": "online",
               "username": "bob"
             }
@@ -316,6 +343,7 @@
               "message_deduplication": true,
               "message_retry_floor_ms": 0,
               "message_retry_window_seconds": 86400,
+              "multi_role": true,
               "polls": true,
               "profile_banners": true,
               "read_pointer": true,
@@ -388,6 +416,9 @@
                 "id": "<id:number>",
                 "identity_public_key": "YWxpY2UtaWRlbnRpdHktcHVibGljLWtleS1maXh0dXJl",
                 "role": "member",
+                "role_ids": [
+                  4
+                ],
                 "status": "online",
                 "username": "alice"
               },
@@ -399,6 +430,9 @@
                 "display_name": null,
                 "id": "<id:number>",
                 "role": "member",
+                "role_ids": [
+                  4
+                ],
                 "status": "online",
                 "username": "bob"
               }
@@ -408,32 +442,40 @@
             "roles": [
               {
                 "color": "#E74C3C",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": false,
+                "mentionable": false,
                 "name": "Owner",
                 "permissions": 2147483647,
                 "position": 100
               },
               {
                 "color": "#F39C12",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": false,
+                "mentionable": false,
                 "name": "Admin",
                 "permissions": 1073741823,
                 "position": 80
               },
               {
                 "color": "#3498DB",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": false,
+                "mentionable": false,
                 "name": "Moderator",
                 "permissions": 7340031,
                 "position": 60
               },
               {
                 "color": null,
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": true,
+                "mentionable": false,
                 "name": "Member",
                 "permissions": 7779,
                 "position": 40
@@ -457,6 +499,9 @@
               "created_at": "<ts:string>",
               "id": "<id:number>",
               "role": "member",
+              "role_ids": [
+                4
+              ],
               "username": "bob"
             }
           },

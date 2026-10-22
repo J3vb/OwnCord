@@ -8,6 +8,9 @@
           "cseq": 5,
           "payload": {
             "role": "Moderator",
+            "role_ids": [
+              3
+            ],
             "user_id": "<id:number>"
           },
           "seq": "<seq:number>",
@@ -20,6 +23,9 @@
           "cseq": 6,
           "payload": {
             "role": "Member",
+            "role_ids": [
+              4
+            ],
             "user_id": "<id:number>"
           },
           "seq": "<seq:number>",
@@ -110,6 +116,9 @@
           "cseq": 3,
           "payload": {
             "role": "Moderator",
+            "role_ids": [
+              3
+            ],
             "user_id": "<id:number>"
           },
           "seq": "<seq:number>",
@@ -185,6 +194,9 @@
           "cseq": 4,
           "payload": {
             "role": "Member",
+            "role_ids": [
+              4
+            ],
             "user_id": "<id:number>"
           },
           "seq": "<seq:number>",

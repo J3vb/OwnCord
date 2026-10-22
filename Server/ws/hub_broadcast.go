@@ -238,8 +238,9 @@ func (h *Hub) BroadcastMemberUnban(userID int64) {
 		return
 	}
 	roleName := ""
+	var roleIDs []int64
 	if role, err := h.readers.Members.GetMemberRoles(ctx, userID); err == nil && role != nil {
-		roleName = role.Top.Name
+		roleName, roleIDs = role.Top.Name, role.IDs
 	}
 	// A lapsed temporary ban lets the user reconnect while users.banned is
 	// still 1, so they can be online at unban time. Report the live status
@@ -252,7 +253,7 @@ func (h *Hub) BroadcastMemberUnban(userID int64) {
 	} else {
 		user.Status = db.StatusOffline
 	}
-	h.BroadcastToAll(buildMemberJoin(user, roleName))
+	h.BroadcastToAll(buildMemberJoin(user, roleName, roleIDs))
 }
 
 // BroadcastUserUpdate sends a user_update message to all connected clients
@@ -265,7 +266,7 @@ func (h *Hub) BroadcastUserUpdate(u UserUpdate) {
 // BroadcastMemberUpdate sends a member_update message to all connected clients
 // and re-evaluates the reassigned user's live channel subscriptions.
 func (h *Hub) BroadcastMemberUpdate(userID int64, roleName string) {
-	h.BroadcastToAll(buildMemberUpdate(userID, roleName))
+	h.BroadcastToAll(buildMemberUpdate(userID, roleName, nil))
 	h.revokeUnreadableChannels(userID)
 }
 

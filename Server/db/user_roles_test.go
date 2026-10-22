@@ -208,3 +208,26 @@ func TestRemoveUserRole_NotHeldIsNoOp(t *testing.T) {
 		t.Errorf("member roles after no-op removal = %+v, want only role 4", mr)
 	}
 }
+
+func TestGrantAndRevokeUserRole_ReportRowsChanged(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	execAll(t, database,
+		`INSERT INTO users (id, username, password, role_id) VALUES (1, 'u', 'h', 4)`)
+
+	for i, want := range []bool{true, false} {
+		got, err := database.GrantUserRole(ctx, 1, 3)
+		if err != nil || got != want {
+			t.Fatalf("GrantUserRole #%d = %v, %v; want %v, nil", i+1, got, err, want)
+		}
+	}
+	for i, want := range []bool{true, false} {
+		got, err := database.RevokeUserRole(ctx, 1, 3)
+		if err != nil || got != want {
+			t.Fatalf("RevokeUserRole #%d = %v, %v; want %v, nil", i+1, got, err, want)
+		}
+	}
+	if got, err := database.RevokeUserRole(ctx, 1, 4); !errors.Is(err, db.ErrLastRole) || got {
+		t.Errorf("RevokeUserRole of the only role = %v, %v; want false, ErrLastRole", got, err)
+	}
+}

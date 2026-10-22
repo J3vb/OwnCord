@@ -45,6 +45,10 @@ type roleRequest struct {
 	Color       *string `json:"color"`
 	Permissions *int64  `json:"permissions"`
 	Position    *int    `json:"position"`
+	// Hoist and Mentionable (WP 6.3c): absent leaves them unchanged on PATCH
+	// and false on POST.
+	Hoist       *bool `json:"hoist"`
+	Mentionable *bool `json:"mentionable"`
 	// ExpectedPermissions (PATCH only) is the mask the editor loaded; a
 	// stored mask that differs answers 409 ROLE_CONFLICT. Absent skips it.
 	ExpectedPermissions *int64 `json:"expected_permissions"`
@@ -56,6 +60,8 @@ func (r roleRequest) toInput() service.RoleInput {
 		Color:       r.Color,
 		Permissions: r.Permissions,
 		Position:    r.Position,
+		Hoist:       r.Hoist,
+		Mentionable: r.Mentionable,
 
 		ExpectedPermissions: r.ExpectedPermissions,
 	}

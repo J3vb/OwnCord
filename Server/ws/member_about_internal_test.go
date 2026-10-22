@@ -15,7 +15,7 @@ func TestEncodeRoster_SplicesWithAbout(t *testing.T) {
 	about := `"status":"" and "custom_status":null} tricks`
 	custom := "busy"
 	members := []db.MemberSummary{{
-		ID: 1, Username: "alice", Status: db.StatusOnline, Role: "member",
+		ID: 1, Username: "alice", Status: db.StatusOnline, MemberRoleSet: &db.MemberRoleSet{Role: "member"},
 		About: &about, CreatedAt: "2026-10-15T13:04:05Z", CustomStatus: &custom,
 	}}
 	roster, err := encodeRoster(members)
@@ -59,7 +59,7 @@ func TestChatMessage_UserHasNoAbout(t *testing.T) {
 
 func TestBuildMemberJoin_CarriesAboutAndCreatedAt(t *testing.T) {
 	about := "hi"
-	raw := buildMemberJoin(&db.User{ID: 2, Username: "bob", About: &about, CreatedAt: "2026-10-15 13:04:05", Status: db.StatusOnline}, "member")
+	raw := buildMemberJoin(&db.User{ID: 2, Username: "bob", About: &about, CreatedAt: "2026-10-15 13:04:05", Status: db.StatusOnline}, "member", nil)
 	var env struct {
 		Payload struct {
 			User map[string]any `json:"user"`

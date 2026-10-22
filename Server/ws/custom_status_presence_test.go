@@ -146,7 +146,7 @@ func TestAuthOK_CustomStatusExpiresAt(t *testing.T) {
 				User map[string]any `json:"user"`
 			} `json:"payload"`
 		}
-		if err := json.Unmarshal(hub.buildAuthOK(context.Background(), u, "owner", "none"), &env); err != nil {
+		if err := json.Unmarshal(hub.buildAuthOK(context.Background(), u, "owner", nil, "none"), &env); err != nil {
 			t.Fatal(err)
 		}
 		return env.Payload.User
