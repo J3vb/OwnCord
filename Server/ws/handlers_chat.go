@@ -180,7 +180,11 @@ func handleForumPostCreateV2(ctx context.Context, cmd Command, info ClientInfo, 
 	if err != nil {
 		return serviceErrorToResult(err)
 	}
-	reply := buildForumPostCreateOK(info.ReqID, res.Thread, res.MessageID, post.ClientMessageID, res.Duplicate)
+	var skipped []string
+	if res.Send != nil {
+		skipped = res.Send.SkippedAttachmentIDs
+	}
+	reply := buildForumPostCreateOK(info.ReqID, res.Thread, res.MessageID, post.ClientMessageID, res.Duplicate, skipped)
 	if res.Duplicate {
 		return Result{Reply: reply}
 	}

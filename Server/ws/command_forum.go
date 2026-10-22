@@ -70,21 +70,27 @@ func parseForumPostCreate(userID int64, reqID string, raw json.RawMessage) (Comm
 }
 
 type forumPostCreateOKPayload struct {
-	Thread          *service.ThreadInfo `json:"thread"`
+	// Thread is absent on a retry answered for a caller who can no longer see
+	// the forum.
+	Thread          *service.ThreadInfo `json:"thread,omitempty"`
 	MessageID       int64               `json:"message_id"`
 	ClientMessageID string              `json:"client_message_id"`
 	Deduplicated    bool                `json:"deduplicated"`
+	// SkippedAttachmentIDs are requested uploads the post did not attach, as in
+	// chat_send_ok; absent when every one was attached.
+	SkippedAttachmentIDs []string `json:"skipped_attachment_ids,omitempty"`
 }
 
 // buildForumPostCreateOK answers a forum_post_create to its sender with the
 // post as it stands. deduplicated is true when a retry was answered from the
 // receipt and nothing new was posted.
-func buildForumPostCreateOK(requestID string, t *service.ThreadInfo, msgID int64, clientMessageID string, duplicate bool) []byte {
+func buildForumPostCreateOK(requestID string, t *service.ThreadInfo, msgID int64, clientMessageID string, duplicate bool, skipped []string) []byte {
 	return buildJSON(wsMsg{
 		Type: MsgTypeForumPostCreateOK,
 		ID:   requestID,
 		Payload: forumPostCreateOKPayload{
 			Thread: t, MessageID: msgID, ClientMessageID: clientMessageID, Deduplicated: duplicate,
+			SkippedAttachmentIDs: skipped,
 		},
 	})
 }

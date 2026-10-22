@@ -162,7 +162,7 @@ func TestForumPostUnknownTagWritesNothing(t *testing.T) {
 // never a link to a missing tag.
 func TestForumPostTagDeleteRace(t *testing.T) {
 	ctx := context.Background()
-	for round := 0; round < 25; round++ {
+	for round := range 25 {
 		f := newForumFixture(t)
 		start := make(chan struct{})
 		var wg sync.WaitGroup

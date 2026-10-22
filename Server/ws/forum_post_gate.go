@@ -39,6 +39,18 @@ func isForumPost(ctx context.Context, g channelGetter, ch *db.Channel) bool {
 	return parent == nil || parent.Type == channelTypeForum
 }
 
+// isForumScoped reports whether ch is a forum or one of its posts: the
+// channels a socket without the forums feature is sent nothing about. It is the
+// channel-level half of withholdsForumPost, for a loop over many recipients to
+// decide once per channel (a failed parent read counts as a post, as in
+// isForumPost, and costs one lookup rather than one per recipient).
+func isForumScoped(ctx context.Context, g channelGetter, ch *db.Channel) bool {
+	return ch != nil && (ch.Type == channelTypeForum || isForumPost(ctx, g, ch))
+}
+
+// lacksForums reports whether c is a live socket that never declared forums.
+func lacksForums(c *Client) bool { return c != nil && !c.features.forums }
+
 // withholdsForumPost reports whether a socket with c's features must not be
 // sent frames for ch because ch is a forum or one of its posts. A client that
 // declared the feature costs no lookup.

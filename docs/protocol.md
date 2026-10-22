@@ -1859,21 +1859,21 @@ A forum holds no messages. A post is a thread whose parent is the forum, with no
     "channel_id": 9,
     "name": "Dark mode",
     "content": "Please add a dark theme.",
-    "attachment_ids": [],
+    "attachments": [],
     "tag_ids": [3]
   }
 }
 ```
 
-`channel_id` is the forum. `name` is the title, 1 to 100 runes after sanitising. `content` and `attachment_ids` follow the `chat_send` rules and the opening message needs one of them. `tag_ids` holds at most 5 distinct tags of the forum, and at least one when the forum has `require_tag`. The caller needs `READ_MESSAGES` and `SEND_MESSAGES` in the forum (and `ATTACH_FILES` with attachments), is subject to the forum's slow mode, and shares the `thread_create` budget (5 per 10 minutes, `RATE_LIMITED`). The post's `auto_archive_minutes` is the forum's default. The post and its opening message commit in one transaction.
+`channel_id` is the forum. `name` is the title, 1 to 100 runes after sanitising. `content` and `attachments` follow the `chat_send` rules and the opening message needs one of them. `tag_ids` holds at most 5 distinct tags of the forum, and at least one when the forum has `require_tag`. The caller needs `READ_MESSAGES` and `SEND_MESSAGES` in the forum (and `ATTACH_FILES` with attachments), is subject to the forum's slow mode, and shares the `thread_create` budget (5 per 10 minutes, `RATE_LIMITED`). The post's `auto_archive_minutes` is the forum's default. The post and its opening message commit in one transaction.
 
-The request is idempotent on `client_message_id`, as `chat_send` is: a retry of a post that committed is answered with the same `forum_post_create_ok` and `deduplicated: true`, before the rate gate, even if the post has since been archived or deleted.
+The request is idempotent on `client_message_id`, as `chat_send` is: a retry of a post that committed is answered with the same `forum_post_create_ok` and `deduplicated: true`, before the `thread_create` budget is spent and even if the post has since been archived. A retry of a post that has since been deleted answers `ALREADY_DELETED`; a retry whose payload differs from the original answers `CONFLICT`. A retry from a caller who can no longer see the forum is acknowledged without the `thread` field. A malformed request (title, tag shape) is refused before it costs a token.
 
-Errors: `BAD_REQUEST` (title, tags, empty message, a channel that is not a forum), `NOT_FOUND`, `FORBIDDEN`, `RATE_LIMITED`, `SLOW_MODE`.
+Errors: `BAD_REQUEST` (title, tags, empty message, a channel that is not a forum), `NOT_FOUND`, `FORBIDDEN`, `RATE_LIMITED`, `SLOW_MODE`, `ALREADY_DELETED`, `CONFLICT`.
 
 #### forum_post_create_ok (Server -> Client, direct)
 
-`{ "thread": ThreadInfo, "message_id": 5120, "client_message_id": "...", "deduplicated": false }`, with the request `id`. The new post reaches other sockets that have the forum focused as `thread_changed`, and the opening message reaches sockets with the post open (`thread_focus`) as an ordinary `chat_message`. Editing or deleting the opening message sends `thread_changed` for the post (its preview).
+`{ "thread": ThreadInfo, "message_id": 5120, "client_message_id": "...", "deduplicated": false, "skipped_attachment_ids"?: string[] }`, with the request `id`. `skipped_attachment_ids` lists requested uploads that were not attached, as in `chat_send_ok`, and is absent when every one was. `thread` is absent on a deduplicated acknowledgement to a caller who can no longer see the forum. The new post reaches other sockets that have the forum focused as `thread_changed`, and the opening message reaches sockets with the post open (`thread_focus`) as an ordinary `chat_message`. Editing or deleting the opening message sends `thread_changed` for the post (its preview).
 
 ### Idle archive
 

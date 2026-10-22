@@ -666,6 +666,12 @@ func TestReconnectPrecheck_ComputeReadableChannelsErrorFallsBackToFullReady(t *t
 // auth_ok, up to a short idle timeout.
 func dialAndResume(t *testing.T, hub *Hub, token string, lastSeq uint64) [][]byte {
 	t.Helper()
+	return dialAndResumeWith(t, hub, token, lastSeq, nil)
+}
+
+// dialAndResumeWith is dialAndResume for a client that declares features.
+func dialAndResumeWith(t *testing.T, hub *Hub, token string, lastSeq uint64, features []string) [][]byte {
+	t.Helper()
 	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
 	defer srv.Close()
 
@@ -680,10 +686,11 @@ func dialAndResume(t *testing.T, hub *Hub, token string, lastSeq uint64) [][]byt
 	}
 	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "auth",
-		"payload": map[string]any{"token": token, "last_seq": lastSeq},
-	})
+	authPayload := map[string]any{"token": token, "last_seq": lastSeq}
+	if features != nil {
+		authPayload["features"] = features
+	}
+	raw, _ := json.Marshal(map[string]any{"type": "auth", "payload": authPayload})
 	if err := conn.Write(dialCtx, websocket.MessageText, raw); err != nil {
 		t.Fatalf("write auth: %v", err)
 	}

@@ -102,7 +102,7 @@ func TestCreateForumPost_Happy(t *testing.T) {
 func TestCreateForumPost_RefusalsWriteNothing(t *testing.T) {
 	f := newForumPostFixture(t)
 	seedChannel(t, f.database, &db.Channel{ID: 41, Name: "text", Type: "text"})
-	var tooMany []int
+	tooMany := make([]int, 0, 6)
 	for i := range 6 {
 		tooMany = append(tooMany, i)
 	}
@@ -238,6 +238,59 @@ func TestCreateForumPost_RetryAfterDelete(t *testing.T) {
 	}
 	if t1, _, _ := f.counts(t); t1 != t0 {
 		t.Fatal("the retry recreated the post")
+	}
+}
+
+// A retry of a post that has since been archived is still a retry: it gets the
+// same post back and nothing is written.
+func TestCreateForumPost_RetryAfterArchive(t *testing.T) {
+	f := newForumPostFixture(t)
+	p := f.req(thrOwner, "quiet", "body")
+	first, err := f.limited.CreateForumPost(bg(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archived := true
+	if _, err := f.threads.Update(bg(), UpdateThreadParams{UserID: thrOwner, ThreadID: first.Thread.ID, Archived: &archived}); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	t0, m0, r0 := f.counts(t)
+	again, err := f.limited.CreateForumPost(bg(), p)
+	if err != nil || !again.Duplicate || again.MessageID != first.MessageID || again.Thread == nil || !again.Thread.Archived {
+		t.Fatalf("retry after archive = %+v, %v", again, err)
+	}
+	if t1, m1, r1 := f.counts(t); t1 != t0 || m1 != m0 || r1 != r0 {
+		t.Fatalf("the retry wrote: threads %d->%d msgs %d->%d receipts %d->%d", t0, t1, m0, m1, r0, r1)
+	}
+}
+
+// A retry from a caller who has since lost the forum is acknowledged without
+// the post's body.
+func TestCreateForumPost_RetryAfterLosingView(t *testing.T) {
+	f := newForumPostFixture(t)
+	p := f.req(thrOwner, "hidden", "body")
+	first, err := f.limited.CreateForumPost(bg(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedChannelOverride(t, f.database, permissions.MemberRoleID, frmForum, 0, permissions.ReadMessages)
+	f.perms.InvalidateAll()
+	r, err := f.limited.CreateForumPost(bg(), p)
+	if err != nil || !r.Duplicate || r.MessageID != first.MessageID || r.Thread != nil {
+		t.Fatalf("retry after losing view = %+v, %v", r, err)
+	}
+}
+
+// A malformed request never spends the shared create budget.
+func TestCreateForumPost_ShapeErrorsCostNoToken(t *testing.T) {
+	f := newForumPostFixture(t)
+	for range 8 {
+		if _, err := f.limited.CreateForumPost(bg(), f.req(thrOwner, " ", "body")); !errors.Is(err, ErrBadRequest) {
+			t.Fatalf("empty title: err = %v, want ErrBadRequest", err)
+		}
+	}
+	if _, err := f.limited.CreateForumPost(bg(), f.req(thrOwner, "fine", "body")); err != nil {
+		t.Fatalf("a valid post after bad ones: %v", err)
 	}
 }
 

@@ -135,12 +135,9 @@ func (d *DB) CreateMessageDelivery(ctx context.Context, p MessageDeliveryParams)
 			return nil, err
 		}
 	}
-	msgChannel := p.ChannelID
-	if p.ForumPost != nil {
-		now := time.Now().UTC().Format(ThreadActivityLayout)
-		if msgChannel, err = insertForumPost(ctx, q, p.ChannelID, p.UserID, p.ForumPost, now); err != nil {
-			return nil, err
-		}
+	msgChannel, err := deliveryTargetChannel(ctx, q, p)
+	if err != nil {
+		return nil, err
 	}
 	r, err := q.CreateMessageForDelivery(ctx, dbgen.CreateMessageForDeliveryParams{
 		ChannelID: msgChannel, UserID: p.UserID, Content: p.Content,
@@ -172,19 +169,36 @@ func (d *DB) CreateMessageDelivery(ctx context.Context, p MessageDeliveryParams)
 	if err := touchThreadOnPost(ctx, q, msgChannel); err != nil {
 		return nil, fmt.Errorf("message delivery: %w", err)
 	}
-	var thread *ThreadInfo
-	if p.ForumPost != nil {
-		if err := linkForumPost(ctx, q, msgChannel, r.ID, p.ForumPost.TagIDs); err != nil {
-			return nil, err
-		}
-		if thread, err = d.getThread(ctx, q, msgChannel); err != nil {
-			return nil, err
-		}
+	thread, err := d.finishForumPost(ctx, q, p, msgChannel, r.ID)
+	if err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("message delivery commit: %w", err)
 	}
 	return &MessageDelivery{Message: messageFromGen(r), LinkedAttachmentIDs: linked, Thread: thread}, nil
+}
+
+// deliveryTargetChannel is the channel the message row goes into: the send's
+// channel, or for a forum post the new thread this call creates under the forum.
+func deliveryTargetChannel(ctx context.Context, q *dbgen.Queries, p MessageDeliveryParams) (int64, error) {
+	if p.ForumPost == nil {
+		return p.ChannelID, nil
+	}
+	now := time.Now().UTC().Format(ThreadActivityLayout)
+	return insertForumPost(ctx, q, p.ChannelID, p.UserID, p.ForumPost, now)
+}
+
+// finishForumPost links a forum post's tags and opening message once the
+// message exists and returns the post's thread; nil for any other send.
+func (d *DB) finishForumPost(ctx context.Context, q *dbgen.Queries, p MessageDeliveryParams, threadID, messageID int64) (*ThreadInfo, error) {
+	if p.ForumPost == nil {
+		return nil, nil
+	}
+	if err := linkForumPost(ctx, q, threadID, messageID, p.ForumPost.TagIDs); err != nil {
+		return nil, err
+	}
+	return d.getThread(ctx, q, threadID)
 }
 
 // insertMessageSideRows writes the forward block or poll a message carries.

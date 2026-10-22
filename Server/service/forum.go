@@ -69,7 +69,8 @@ func (p ForumPostParams) fingerprint() (string, error) {
 // and distinct, at most db.MaxPostTags, and at least one when the forum
 // requires a tag. Whether each id is a tag of the forum is the writer
 // transaction's check (db.ErrForumTagUnknown), so a delete that commits first
-// wins.
+// wins. A nil forum checks the shape only (count, ids), which a caller can do
+// before it has read the forum.
 func cleanPostTags(forum *db.Channel, ids []int64) ([]int64, error) {
 	if len(ids) > db.MaxPostTags {
 		return nil, fmt.Errorf("%w: a post takes at most %d tags", ErrBadRequest, db.MaxPostTags)
@@ -81,7 +82,7 @@ func cleanPostTags(forum *db.Channel, ids []int64) ([]int64, error) {
 		}
 		seen[id] = true
 	}
-	if forum.Forum != nil && forum.Forum.RequireTag && len(ids) == 0 {
+	if forum != nil && forum.Forum != nil && forum.Forum.RequireTag && len(ids) == 0 {
 		return nil, fmt.Errorf("%w: this forum requires a tag on every post", ErrBadRequest)
 	}
 	if ids == nil {
@@ -139,7 +140,15 @@ func (s *MessageService) CreateForumPost(ctx context.Context, p ForumPostParams)
 		return nil, err
 	}
 	if retry != nil {
-		return s.forumPostReplay(ctx, retry.MessageID)
+		return s.forumPostReplay(ctx, p.UserID, retry.MessageID)
+	}
+	// Shape checks cost no token: a malformed request never spends the budget,
+	// as in ThreadService.Create. The forum-dependent ones follow the gates.
+	if _, err := cleanThreadName(p.Name); err != nil {
+		return nil, err
+	}
+	if _, err := cleanPostTags(nil, p.TagIDs); err != nil {
+		return nil, err
 	}
 	if s.limiter != nil && !s.limiter.Allow(auth.Key("thread_create", p.UserID), threadCreateLimit, threadCreateWindow) {
 		return nil, ErrRateLimited
@@ -159,7 +168,7 @@ func (s *MessageService) CreateForumPost(ctx context.Context, p ForumPostParams)
 		return nil, forumPostError(err)
 	}
 	if saved.Duplicate {
-		return s.forumPostReplay(ctx, saved.Message.ID)
+		return s.forumPostReplay(ctx, p.UserID, saved.Message.ID)
 	}
 	return s.forumPostResult(ctx, sp, saved, content, mentions), nil
 }
@@ -209,8 +218,10 @@ func (s *MessageService) forumPostGates(ctx context.Context, p ForumPostParams) 
 const DefaultForumAutoArchiveMinutes = 4320
 
 // forumPostReplay answers a retry of a committed post: the receipt names the
-// opening message, whose channel is the post. The thread is read as it is now.
-func (s *MessageService) forumPostReplay(ctx context.Context, messageID int64) (*ForumPostResult, error) {
+// opening message, whose channel is the post. The thread is read as it is now,
+// but only for a caller who can still see the forum: one who has lost it gets
+// the acknowledgement without the thread body, as ThreadService.Create does.
+func (s *MessageService) forumPostReplay(ctx context.Context, userID, messageID int64) (*ForumPostResult, error) {
 	msg, err := s.st.GetMessage(ctx, messageID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: read forum post: %w", ErrInternal, err)
@@ -225,7 +236,21 @@ func (s *MessageService) forumPostReplay(ctx context.Context, messageID int64) (
 	if t == nil {
 		return nil, ErrDeletedMessage
 	}
+	if !s.canViewForum(ctx, userID, t.ParentID) {
+		return &ForumPostResult{Duplicate: true, MessageID: messageID}, nil
+	}
 	return &ForumPostResult{Duplicate: true, MessageID: messageID, Thread: t}, nil
+}
+
+// canViewForum reports whether the user can still see the forum. Any read
+// failure answers false: the caller then gets the bare acknowledgement.
+func (s *MessageService) canViewForum(ctx context.Context, userID, forumID int64) bool {
+	forum, err := s.st.GetChannel(ctx, forumID)
+	if err != nil || forum == nil {
+		return false
+	}
+	sub, err := channelSubject(ctx, s.st, s.perms, userID, forum, false)
+	return err == nil && permissions.CanViewChannel(sub) == nil
 }
 
 // forumPostResult builds the result of a committed post and runs its
@@ -275,10 +300,17 @@ func (s *MessageService) forumPostResult(ctx context.Context, sp SendMessagePara
 
 // isPostOpening reports whether msgID is the opening message of the forum post
 // ch (WP 6.9d): an edit of it changes the preview the forum list shows, so the
-// post's viewers hear a thread_changed. A thread read failure answers false; the
+// post's viewers hear a thread_changed. A read failure answers false; the
 // edit is already committed and the list catches up on the next change.
 func (s *MessageService) isPostOpening(ctx context.Context, ch *db.Channel, msgID int64) bool {
 	if s.threads == nil || !ch.IsThread() {
+		return false
+	}
+	// Only a forum's posts have an opening message: a parent-type read is
+	// cheaper than the thread read with its post block, and most edits are not
+	// in a thread at all.
+	parent, err := s.st.GetChannel(ctx, ch.Thread.ParentID)
+	if err != nil || parent == nil || parent.Type != db.ForumTypeName {
 		return false
 	}
 	t, err := s.threads.GetThread(ctx, ch.ID)

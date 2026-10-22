@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
@@ -398,5 +399,99 @@ func TestRoleRefresh_ReadsFeaturesAtSendTime(t *testing.T) {
 		if json.Unmarshal(f, &env) == nil && env.Type == MsgTypeChannelCreate && int64(env.Payload.ID) == e.forum {
 			t.Fatalf("a client that never declared forums was sent the forum: %s", f)
 		}
+	}
+}
+
+// The real reconnect path: an older client resuming behind a thread_changed
+// that was sequenced on a forum is replayed the rest and is not forced onto a
+// full ready; a client that declared forums is replayed the forum's frame.
+//
+// The synthetic frame carries payload.channel_id, which the real thread_changed
+// does not: the replay content gate reads that key (payloadChannelID), so the
+// frame here stands for "a content frame on the forum" to exercise the gate this
+// test is about.
+func TestReconnect_ForumFrameIsNotReplayedToOldClient(t *testing.T) {
+	setup := func(t *testing.T) (*Hub, string) {
+		t.Helper()
+		database := newTeardownTestDB(t)
+		ctx := context.Background()
+		userID, err := database.CreateUser(ctx, "resume-forum-user", "hash", int(permissions.MemberRoleID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		text, err := database.CreateChannel(ctx, "resume-text", "text", "", "", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		forum, err := database.CreateChannel(ctx, "resume-forum", "forum", "", "", 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		token, err := auth.GenerateToken()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
+			t.Fatal(err)
+		}
+		hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
+		go hub.Run()
+		t.Cleanup(hub.Stop)
+		rb := hub.ReplayBuffer()
+		rb.Push(98, text, []byte(`{"seq":98,"type":"chat_message","payload":{"channel_id":`+itoaTest(text)+`,"content":"pre-existing"}}`))
+		rb.Push(99, text, []byte(`{"seq":99,"type":"chat_message","payload":{"channel_id":`+itoaTest(text)+`,"content":"anchor"}}`))
+		rb.Push(100, forum, []byte(`{"seq":100,"type":"thread_changed","payload":{"channel_id":`+itoaTest(forum)+`,"thread":{"id":9,"parent_id":`+itoaTest(forum)+`}}}`))
+		rb.Push(101, text, []byte(`{"seq":101,"type":"chat_message","payload":{"channel_id":`+itoaTest(text)+`,"content":"AFTER-THE-FORUM-FRAME"}}`))
+		return hub, token
+	}
+	has := func(frames [][]byte, needle string) bool {
+		for _, f := range frames {
+			if strings.Contains(string(f), needle) {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("old client", func(t *testing.T) {
+		hub, token := setup(t)
+		frames := dialAndResume(t, hub, token, 99)
+		if has(frames, `"thread_changed"`) {
+			t.Fatalf("an old client was replayed a forum frame: %q", frames)
+		}
+		if !has(frames, "AFTER-THE-FORUM-FRAME") || has(frames, `"type":"ready"`) {
+			t.Fatalf("the resume should replay the rest without a full ready: %q", frames)
+		}
+	})
+	t.Run("client with forums", func(t *testing.T) {
+		hub, token := setup(t)
+		frames := dialAndResumeWith(t, hub, token, 99, []string{"forums"})
+		if !has(frames, `"thread_changed"`) || !has(frames, "AFTER-THE-FORUM-FRAME") {
+			t.Fatalf("a forums client should be replayed the forum frame: %q", frames)
+		}
+	})
+}
+
+// forum_post_create_ok carries skipped_attachment_ids as chat_send_ok does, and
+// leaves the thread out of a bare acknowledgement.
+func TestBuildForumPostCreateOK_SkippedAndBareAck(t *testing.T) {
+	var got struct {
+		Payload map[string]json.RawMessage `json:"payload"`
+	}
+	if err := json.Unmarshal(buildForumPostCreateOK("r", nil, 7, "c", true, []string{"a", "b"}), &got); err != nil {
+		t.Fatal(err)
+	}
+	if _, has := got.Payload["thread"]; has {
+		t.Errorf("a bare acknowledgement carried a thread: %v", got.Payload)
+	}
+	if string(got.Payload["skipped_attachment_ids"]) != `["a","b"]` {
+		t.Errorf("skipped_attachment_ids = %s", got.Payload["skipped_attachment_ids"])
+	}
+	got.Payload = nil // json.Unmarshal merges into an existing map
+	if err := json.Unmarshal(buildForumPostCreateOK("r", nil, 7, "c", false, nil), &got); err != nil {
+		t.Fatal(err)
+	}
+	if _, has := got.Payload["skipped_attachment_ids"]; has {
+		t.Error("skipped_attachment_ids present when nothing was skipped")
 	}
 }

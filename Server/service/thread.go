@@ -295,20 +295,9 @@ func (s *ThreadService) Update(ctx context.Context, p UpdateThreadParams) (*db.T
 	if p.Name == nil && p.Archived == nil && p.Locked == nil && p.AutoArchiveMinutes == nil && p.TagIDs == nil {
 		return nil, fmt.Errorf("%w: nothing to update", ErrBadRequest)
 	}
-	patch := db.ThreadPatch{Archived: p.Archived, Locked: p.Locked}
-	if p.Name != nil {
-		name, nerr := cleanThreadName(*p.Name)
-		if nerr != nil {
-			return nil, nerr
-		}
-		patch.Name = &name
-	}
-	if p.AutoArchiveMinutes != nil {
-		minutes, merr := validAutoArchive(*p.AutoArchiveMinutes)
-		if merr != nil || *p.AutoArchiveMinutes == 0 {
-			return nil, fmt.Errorf("%w: auto_archive_minutes must be one of %v", ErrBadRequest, db.ThreadAutoArchiveMinutes)
-		}
-		patch.AutoArchiveMinutes = &minutes
+	patch, err := cleanThreadPatch(p)
+	if err != nil {
+		return nil, err
 	}
 	cur, isOwner, isMod, err := s.threadActor(ctx, ts, p.UserID, p.ThreadID)
 	if err != nil {
@@ -322,12 +311,8 @@ func (s *ThreadService) Update(ctx context.Context, p UpdateThreadParams) (*db.T
 	case cur.Locked && !isMod:
 		return nil, denial(permissions.ErrThreadLocked)
 	}
-	if p.TagIDs != nil {
-		ids, terr := s.postTags(ctx, cur, *p.TagIDs)
-		if terr != nil {
-			return nil, terr
-		}
-		patch.TagIDs = &ids
+	if patch.TagIDs, err = s.postTagsPatch(ctx, cur, p.TagIDs); err != nil {
+		return nil, err
 	}
 	out, err := ts.UpdateThread(ctx, p.ThreadID, patch, isMod)
 	if err != nil {
