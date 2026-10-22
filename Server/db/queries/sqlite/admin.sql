@@ -11,18 +11,19 @@ SELECT COUNT(*) FROM channels;
 SELECT COUNT(*) FROM invites WHERE revoked = 0;
 
 -- name: ListAllUsers :many
--- The admin Members page. query is a case-insensitive username substring
--- (instr, so no wildcard escaping; empty matches everyone). role_id 0 means any
+-- The admin Members page. query is a case-insensitive substring of the username
+-- or the nickname (instr, so no wildcard escaping; empty matches everyone). role_id 0 means any
 -- role; otherwise it keeps every member who HOLDS that role (user_roles), not
 -- only those whose top role it is. banned_only 1 keeps only effective bans:
 -- the negation of db.notBannedClause, so a lapsed temporary ban is not listed as banned.
-SELECT u.id, u.username, u.avatar, u.role_id,
+SELECT u.id, u.username, u.display_name, u.avatar, u.role_id,
        u.status, u.created_at, u.last_seen, u.banned, u.ban_reason, u.ban_expires,
        COALESCE(r.name, '') AS role_name, COALESCE(r.position, 0) AS role_position
 FROM users u
 LEFT JOIN roles r ON r.id = u.role_id
 WHERE u.registration_status = 'active'
-  AND instr(lower(u.username), lower(sqlc.arg(query))) > 0
+  AND (instr(lower(u.username), lower(sqlc.arg(query))) > 0
+       OR instr(lower(COALESCE(u.display_name, '')), lower(sqlc.arg(query))) > 0)
   AND (CAST(sqlc.arg(role_id) AS INTEGER) = 0
        OR EXISTS (SELECT 1 FROM user_roles ur
                   WHERE ur.user_id = u.id AND ur.role_id = sqlc.arg(role_id)))

@@ -75,11 +75,14 @@ type PermissionInvalidator interface {
 // adminUserResponse is the safe public shape returned by user-listing and
 // user-patch endpoints. It deliberately excludes PasswordHash and TOTPSecret.
 type adminUserResponse struct {
-	ID       int64   `json:"id"`
-	Username string  `json:"username"`
-	Avatar   *string `json:"avatar,omitempty"`
-	RoleID   int64   `json:"role_id"`
-	RoleName string  `json:"role_name"`
+	ID       int64  `json:"id"`
+	Username string `json:"username"`
+	// DisplayName is the member's nickname; only the users list sets it, and
+	// it is omitted when unset.
+	DisplayName *string `json:"display_name,omitempty"`
+	Avatar      *string `json:"avatar,omitempty"`
+	RoleID      int64   `json:"role_id"`
+	RoleName    string  `json:"role_name"`
 	// RolePosition is the role's hierarchy position; only the users list
 	// sets it.
 	RolePosition *int `json:"role_position,omitempty"`

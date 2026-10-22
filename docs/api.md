@@ -4327,8 +4327,8 @@ the query, so they narrow every page, not just the one returned.
 
 **Auth:** Admin perimeter
 **Query params:** `limit` (default 50, min 1, max 500), `offset` (default 0),
-`q` (case-insensitive username substring, at most 64 characters; longer is
-`400`), `role_id` (members who hold this role; omitted or `0` means any), `banned=1` (only
+`q` (case-insensitive substring of the username or the nickname, at most 64
+characters; longer is `400`), `role_id` (members who hold this role; omitted or `0` means any), `banned=1` (only
 effective bans: a lapsed temporary ban is not listed)
 
 #### Response 200 OK
@@ -4339,6 +4339,7 @@ Array of:
 | --------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `id`            | int     |                                                                                                                                                                                                 |
 | `username`      | string  |                                                                                                                                                                                                 |
+| `display_name`  | string? | the member's nickname; omitted when unset                                                                                                                                                       |
 | `avatar`        | string? | omitted when unset                                                                                                                                                                              |
 | `role_id`       | int     |                                                                                                                                                                                                 |
 | `role_name`     | string  |                                                                                                                                                                                                 |

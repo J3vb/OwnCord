@@ -95,7 +95,7 @@ async function apiRes(method,path,body,headers){
    role mask; tabs and row actions hide what it cannot use. Hiding is an
    affordance only — every route re-checks the bit server-side. */
 const PERM={MANAGE_CHANNELS:0x20000,KICK_MEMBERS:0x40000,BAN_MEMBERS:0x80000,
-  MUTE_MEMBERS:0x100000,MANAGE_ROLES:0x1000000,MANAGE_SERVER:0x2000000,
+  MUTE_MEMBERS:0x100000,MANAGE_NICKNAMES:0x800000,MANAGE_ROLES:0x1000000,MANAGE_SERVER:0x2000000,
   MANAGE_INVITES:0x4000000,VIEW_AUDIT_LOG:0x8000000,ADMINISTRATOR:0x40000000};
 function can(bit){
   const p=(state.me&&state.me.permissions)||0;

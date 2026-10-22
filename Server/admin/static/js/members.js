@@ -89,7 +89,7 @@ async function renderUsers(){
     const roles=await membersRoleList();
     html+='<div class="filter-bar members-filter" role="search">'
       +'<label class="sr-only" for="membersSearch">Search members</label>'
-      +'<input class="filter-search" id="membersSearch" type="search" maxlength="64" autocomplete="off" spellcheck="false" placeholder="Search by username" value="'+esc(state.membersQuery)+'" data-input-action="searchMembers">'
+      +'<input class="filter-search" id="membersSearch" type="search" maxlength="64" autocomplete="off" spellcheck="false" placeholder="Search by username or nickname" value="'+esc(state.membersQuery)+'" data-input-action="searchMembers">'
       +'<label class="sr-only" for="membersRole">Filter by role</label>'
       +'<select class="filter-select" id="membersRole" data-change-action="filterMembersRole"><option value="0">All roles</option>'
       +roles.map(r=>'<option value="'+r.id+'"'+(state.membersRole===r.id?' selected':'')+'>'+esc(r.name)+'</option>').join('')+'</select></div>';
@@ -180,7 +180,7 @@ function memberRowHtml(u){
   const name=esc(u.username);
   const more=guard?MEMBER_GUARD_TEXT[guard]:items.length?'More actions for '+u.username:'No other actions available for '+u.username;
   const role=memberChipsHtml(u,null);
-  return'<tr><td><div class="member-cell"><span class="avatar" aria-hidden="true" style="background:var(--accent)">'+esc(initial)+'</span><div><strong>'+name+'</strong>'+(guard?' <span class="badge '+(guard==='self'?'badge-accent':'badge-muted')+'" title="'+esc(MEMBER_GUARD_TEXT[guard])+'">'+MEMBER_GUARD_BADGE[guard]+'</span>':'')+'<div class="member-role-inline">'+role+'</div></div></div></td>'
+  return'<tr><td><div class="member-cell"><span class="avatar" aria-hidden="true" style="background:var(--accent)">'+esc(initial)+'</span><div><strong>'+name+'</strong>'+(guard?' <span class="badge '+(guard==='self'?'badge-accent':'badge-muted')+'" title="'+esc(MEMBER_GUARD_TEXT[guard])+'">'+MEMBER_GUARD_BADGE[guard]+'</span>':'')+(u.display_name?'<div class="member-sub member-nick">'+esc(u.display_name)+'</div>':'')+'<div class="member-role-inline">'+role+'</div></div></div></td>'
     +'<td class="col-role">'+role+'</td>'
     +'<td>'+memberStatusHtml(u)+'</td>'
     +'<td class="col-actions"><div class="act-group member-actions">'
@@ -332,9 +332,10 @@ async function openEditUser(uid,uname,currentRole){
   const head='<div class="modal-header"><h3>Manage '+esc(uname)+'</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div><div class="modal-body">'
     +'<div class="member-card"><span class="avatar" aria-hidden="true" style="background:var(--accent)">'+esc((uname||'?')[0].toUpperCase())+'</span><div><div class="member-card-name">'+esc(uname)+'</div>'
     +'<div class="member-card-meta"><span class="role-badge"><span class="role-dot" style="background:'+esc(roleColor(currentRole))+'"></span>'+esc(roleName(currentRole,u.role_name))+'</span> '+memberStatusHtml(u)+'</div></div></div>';
-  const done='<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Close</button></div>';
-  if(guard){openModal(head+'<p class="member-note">'+esc(MEMBER_GUARD_TEXT[guard])+'</p></div>'+done);return}
-  if(!can(PERM.MANAGE_ROLES)){openModal(head+'<p class="member-note">Changing roles needs the Manage Roles permission. The other actions are in the row’s ⋮ menu.</p></div>'+done);return}
+  const done='<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModalAndRefresh">Close</button></div>';
+  const nick=memberNicknameHtml(u,uid,!guard&&can(PERM.MANAGE_NICKNAMES));
+  if(guard){openModal(head+nick+'<p class="member-note">'+esc(MEMBER_GUARD_TEXT[guard])+'</p></div>'+done);return}
+  if(!can(PERM.MANAGE_ROLES)){openModal(head+nick+'<p class="member-note">Changing roles needs the Manage Roles permission. The other actions are in the row’s ⋮ menu.</p></div>'+done);return}
   const myPos=(state.me&&state.me.role_position)||0;
   let roles;
   try{roles=await api('GET','/roles');state.roleList=roles||[]}
@@ -357,8 +358,62 @@ async function openEditUser(uid,uname,currentRole){
     :'<p class="member-note">No other role is below your rank to add.</p>';
   /* The footer's Close refreshes the list behind the dialog, which now shows
      whatever chips changed. */
-  openModal(head+chipsHtml+add+'</div><div class="modal-footer"><button class="btn btn-ghost" data-action="closeModalAndRefresh">Close</button></div>');
+  openModal(head+nick+chipsHtml+add+'</div><div class="modal-footer"><button class="btn btn-ghost" data-action="closeModalAndRefresh">Close</button></div>');
 }
+
+/* WP 6.4d: the nickname (users.display_name) in the Manage drawer. The field is
+   offered only when the actor holds MANAGE_NICKNAMES and strictly outranks the
+   member (the same memberGuard as the role picker); otherwise the nickname is
+   shown read-only. The route re-checks both, and its message is shown inline.
+   The 32-rune cap counts code points, as the server does. */
+const NICKNAME_MAX_RUNES=32;
+function memberNicknameHtml(u,uid,editable){
+  const cur=u.display_name||'';
+  if(!editable)return'<div class="form-group"><div class="form-label">Nickname</div><div id="memberNickRo">'+(cur?esc(cur):'<span class="rc-hint">No nickname set</span>')+'</div></div>';
+  return'<div class="form-group"><label class="form-label" for="memberNickInput">Nickname</label><div style="display:flex;gap:8px">'
+    +'<input class="form-input" id="memberNickInput" type="text" autocomplete="off" value="'+esc(cur)+'" placeholder="'+esc(u.username||'')+'">'
+    +'<button class="btn btn-accent" id="memberNickSave" data-action="saveMemberNickname" data-args="'+actArgs(uid)+'">Save</button>'
+    +'<button class="btn btn-ghost" id="memberNickReset" data-action="resetMemberNickname" data-args="'+actArgs(uid)+'">Reset</button></div>'
+    +'<div class="rc-hint" id="memberNickMsg" role="status" aria-live="polite"></div></div>';
+}
+/* PUT /api/v1/moderation/users/{id}/nickname: an ordinary member-API route, so
+   it is called with the panel's token as invites.js does. */
+async function memberNicknameApi(uid,name){
+  const res=await fetch('/api/v1/moderation/users/'+uid+'/nickname',{method:'PUT',
+    headers:{'Authorization':'Bearer '+state.token,'Content-Type':'application/json'},body:JSON.stringify({display_name:name})});
+  if(res.status===401){handleSessionExpired();throw new Error('Your session expired — sign in again.')}
+  const text=await res.text();
+  let data=null;
+  if(text){try{data=JSON.parse(text)}catch(e){data=null}}
+  if(!res.ok)throw new Error((data&&(data.message||data.error))||text.trim()||res.statusText);
+  return data;
+}
+function setNicknameMsg(text,isError){
+  const el=document.getElementById('memberNickMsg');if(!el)return;
+  el.textContent=text;el.style.color=isError?'var(--text-danger)':'';
+}
+async function changeMemberNickname(uid,reset){
+  const input=/** @type {HTMLInputElement|null} */(document.getElementById('memberNickInput'));if(!input)return;
+  let name=null;
+  if(!reset){
+    name=input.value.replace(/\s+/g,' ').trim();
+    if([...name].length>NICKNAME_MAX_RUNES){setNicknameMsg('A nickname can be at most '+NICKNAME_MAX_RUNES+' characters.',true);return}
+    if(name==='')name=null;
+  }
+  const btns=/** @type {HTMLButtonElement[]} */([...document.querySelectorAll('#memberNickSave,#memberNickReset')]);
+  btns.forEach(b=>{b.disabled=true});
+  setNicknameMsg('',false);
+  let data;
+  try{data=await memberNicknameApi(uid,name)}
+  catch(e){btns.forEach(b=>{b.disabled=false});setNicknameMsg(e.message,true);return}
+  btns.forEach(b=>{b.disabled=false});
+  const shown=(data&&data.display_name)||'';
+  const u=membersRows[uid];if(u)u.display_name=shown||null;
+  input.value=shown;
+  setNicknameMsg(shown?'Nickname saved':'Nickname reset',false);
+}
+function saveMemberNickname(uid){return changeMemberNickname(uid,false)}
+function resetMemberNickname(uid){return changeMemberNickname(uid,true)}
 
 /* Add or remove one role. The server is the authority (MANAGE_ROLES, outrank,
    below-own-rank, 409 LAST_ROLE): its message is shown as is on a refusal. */
@@ -452,7 +507,7 @@ async function confirmForceLogout(uid){
 }
 
 Object.assign(ACTIONS,{confirmBan,confirmDenyRegistration,confirmEraseUser,confirmForceLogout,confirmIssueRecovery,decideRegistration,
-  forceLogout,openBanUser,openEditUser,openEraseUser,openIssueRecovery,addMemberRole,removeMemberRole,unbanUser,
+  forceLogout,openBanUser,openEditUser,openEraseUser,openIssueRecovery,addMemberRole,removeMemberRole,saveMemberNickname,resetMemberNickname,unbanUser,
   setMembersTab,toggleMemberMenu,searchMembers,filterMembersRole,
   turnUsersPage(delta){state.usersPage+=delta;renderContent()},
   turnPendingPage(delta){state.pendingPage=Math.max(1,state.pendingPage+delta);renderContent()}});
