@@ -14,6 +14,12 @@
       "reason": "Hosts with a probe in flight, removed in the probe's finally; moved verbatim from main.ts"
     },
     {
+      "file": "stores/followedThreads.store.ts",
+      "binding": "followedThreadsStore",
+      "category": "reset-elsewhere",
+      "reason": "Projection of threads.store, which publishes the empty view from its own registered reset; it holds nothing until that store has loaded"
+    },
+    {
       "file": "components/ChannelSidebar.ts",
       "binding": "volumeMenuAttempts",
       "category": "dom-owned",
@@ -204,6 +210,12 @@
       "binding": "ringbackInterval",
       "category": "transient",
       "reason": "Ringtone timer handles; stopped by their own stop functions, not session data"
+    },
+    {
+      "file": "lib/read-state.ts",
+      "binding": "threadPointers",
+      "category": "reset-elsewhere",
+      "reason": "Last read pointer per thread id; cleared by resetReadPointerState, which the dispatcher runs per session"
     },
     {
       "file": "lib/read-state.ts",

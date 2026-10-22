@@ -35,6 +35,8 @@ import { getUserLocalMute, getUserVolume } from "@lib/livekitSession";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import { attachCategoryContextMenu } from "./channel-sidebar/category-menu";
 import { attachChannelContextMenu, CHANNEL_MUTE_CHANGED } from "./channel-sidebar/context-menu";
+import { attachThreadContextMenu } from "./channel-sidebar/thread-menu";
+import { followedThreadsStore, type FollowedThreadsView } from "@stores/followedThreads.store";
 import { attachCategoryDragHandlers, attachDragHandlers } from "./channel-sidebar/drag-reorder";
 import { attachVoiceUserDrag, markVoiceDropTarget } from "../features/voice/dragMove";
 import { openIdentityMismatchModal } from "../features/voice/peerVerification";
@@ -49,18 +51,25 @@ import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup"
 import {
   drawCategoryGroup,
   drawTextChannelRow,
+  drawThreadMoreRow,
+  drawThreadRow,
   type CategoryGroupModel,
+  type ThreadMoreRowModel,
+  type ThreadRowModel,
 } from "../features/channels/channelRow.view";
 import {
   categoryGroupModel,
   channelAccess,
   channelGroups,
-  channelRowModel,
+  entryKey,
+  sidebarEntries,
+  sidebarRowModel,
   visibleRows,
   type ChannelGroup,
   type ChannelListContext,
   type ChannelListInputs,
-  type ChannelRowModel,
+  type SidebarEntry,
+  type SidebarRowModel,
 } from "../features/channels/channelRowModel";
 import {
   drawVoiceChannelChrome,
@@ -167,6 +176,14 @@ export interface ChannelSidebarOptions {
   readonly onInviteFromChannel?: (channel: Channel) => void;
   /** Called when the user clicks a voice user row to watch their stream. */
   readonly onWatchStream?: (userId: number) => void;
+  /** A followed thread's row was clicked: open its parent channel and the thread panel (WP 6.9c). */
+  readonly onOpenThread?: (threadId: number, parentId: number) => void;
+  /** A parent's "N more" row was clicked: open its channel and the Threads list. */
+  readonly onOpenThreadList?: (parentId: number) => void;
+  /** The row menu's Unfollow. */
+  readonly onUnfollowThread?: (threadId: number) => void;
+  /** The row menu's Mark as Read. */
+  readonly onMarkThreadRead?: (threadId: number) => void;
 }
 
 /** Moderation section for one participant row, from the channel's
@@ -312,6 +329,7 @@ function projectSidebarInputs(
   localMute: object,
   mute: object,
   hideMuted: boolean,
+  followed: FollowedThreadsView,
 ): SidebarInputs {
   return {
     voice: projectVoiceInputs(voice, members, auth, channels, ui, safety, localMute),
@@ -325,6 +343,8 @@ function projectSidebarInputs(
       collapsed: ui.collapsedCategories,
       hideMuted,
       mute,
+      threads: followed.byParent,
+      focusedThreadId: followed.focusedId,
     },
     serverName: auth.serverName,
   };
@@ -341,7 +361,9 @@ function sameListInputs(a: ChannelListInputs, b: ChannelListInputs): boolean {
     a.categories === b.categories &&
     a.collapsed === b.collapsed &&
     a.hideMuted === b.hideMuted &&
-    a.mute === b.mute
+    a.mute === b.mute &&
+    a.threads === b.threads &&
+    a.focusedThreadId === b.focusedThreadId
   );
 }
 
@@ -353,6 +375,13 @@ function sameSidebarInputs(a: SidebarInputs, b: SidebarInputs): boolean {
     sameListInputs(a.list, b.list) &&
     a.serverName === b.serverName
   );
+}
+
+/** A row's reconcile key, from what it draws: a thread row, an "N more" row or a channel. */
+function rowKeyOf(el: HTMLElement): string {
+  if (el.dataset.threadId !== undefined) return `t${el.dataset.threadId}`;
+  if (el.dataset.moreParentId !== undefined) return `m${el.dataset.moreParentId}`;
+  return el.dataset.channelId ?? "";
 }
 
 export function createChannelSidebar(options: ChannelSidebarOptions): MountableComponent {
@@ -372,6 +401,10 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     onVoiceModerate,
     onPurgeChannel,
     onInviteFromChannel,
+    onOpenThread,
+    onOpenThreadList,
+    onUnfollowThread,
+    onMarkThreadRead,
   } = options;
   const disposable = new Disposable();
   // renderChannels() keys every row (B9-21): an unchanged row is reused and its
@@ -720,6 +753,44 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
   const UNCATEGORIZED_KEY = "\u0000uncategorized";
   const groupKeyOf = (key: string | null): string => key ?? UNCATEGORIZED_KEY;
 
+  /** A followed thread's row: a click opens its parent and the panel; the menu offers Mark as Read and Unfollow. */
+  function createThreadRow(model: ThreadRowModel): HTMLDivElement {
+    const el = drawThreadRow(model);
+    const owner = new Disposable();
+    ownerByEl.set(el, owner);
+    const { signal } = owner;
+    const { threadId, parentId } = model;
+    el.addEventListener("click", () => onOpenThread?.(threadId, parentId), { signal });
+    attachThreadContextMenu(
+      el,
+      {
+        hasUnread: () => {
+          const row = followedThreadsStore
+            .getState()
+            .byParent.get(parentId)
+            ?.find((r) => r.id === threadId);
+          return row !== undefined && (row.unread > 0 || row.mentions > 0);
+        },
+        onMarkRead: () => onMarkThreadRead?.(threadId),
+        onUnfollow: () => onUnfollowThread?.(threadId),
+      },
+      signal,
+      disposable.signal,
+    );
+    return el;
+  }
+
+  /** A parent's "N more" row: opens its channel and the Threads list. */
+  function createThreadMoreRow(model: ThreadMoreRowModel): HTMLDivElement {
+    const el = drawThreadMoreRow(model);
+    const owner = new Disposable();
+    ownerByEl.set(el, owner);
+    el.addEventListener("click", () => onOpenThreadList?.(model.parentId), {
+      signal: owner.signal,
+    });
+    return el;
+  }
+
   function drawChannels(): void {
     // sidebarSel exists from mount() on, which is also when channelList does.
     if (channelList === null || sidebarSel === null) {
@@ -802,18 +873,25 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
           : holder.matches(".channel-item")
             ? (holder as HTMLElement)
             : holder.querySelector<HTMLElement>(":scope > .channel-item");
-      const losesFocus =
-        focusedRow !== null && !rows.some((ch) => String(ch.id) === focusedRow.dataset.channelId);
+      const entries = sidebarEntries(rows, g, list);
+      const entryKeys = new Set(entries.map(entryKey));
+      const losesFocus = focusedRow !== null && !entryKeys.has(rowKeyOf(focusedRow));
       const lostIndex = losesFocus
         ? Array.from(container.querySelectorAll(".channel-item")).indexOf(focusedRow)
         : -1;
-      reconcileModels<Channel, ChannelRowModel>(container, rows, {
-        key: (ch) => String(ch.id),
-        model: (ch) => channelRowModel(ch, g, list, listCtx),
+      reconcileModels<SidebarEntry, SidebarRowModel>(container, entries, {
+        key: entryKey,
+        model: (entry) => sidebarRowModel(entry, g, list, listCtx),
         create: (model, atEvent) => {
+          if (model.kind === "thread") return createThreadRow(model);
+          if (model.kind === "threadMore") return createThreadMoreRow(model);
           const ch = byId.get(model.channelId);
           // i18n-exempt: developer-facing invariant error, never shown to a user
           if (ch === undefined) throw new Error("channel row built for a channel not in the pass");
+          const liveChannel = (): Channel => {
+            const entry = atEvent();
+            return entry.kind === "channel" ? entry.channel : ch;
+          };
           const owner = new Disposable();
           const { signal } = owner;
           const el =
@@ -832,14 +910,16 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
             disposable.signal,
             // A row now outlives a channel edit, so the actions take the live
             // channel, not the one this row was built for.
-            onEditChannel === undefined ? undefined : () => onEditChannel(atEvent()),
-            onDeleteChannel === undefined ? undefined : () => onDeleteChannel(atEvent()),
+            onEditChannel === undefined ? undefined : () => onEditChannel(liveChannel()),
+            onDeleteChannel === undefined ? undefined : () => onDeleteChannel(liveChannel()),
             onPurgeChannel === undefined
               ? undefined
-              : (_channel, count) => onPurgeChannel(atEvent(), count),
+              : (_channel, count) => onPurgeChannel(liveChannel(), count),
             shown,
             onReorderChannel,
-            onInviteFromChannel === undefined ? undefined : () => onInviteFromChannel(atEvent()),
+            onInviteFromChannel === undefined
+              ? undefined
+              : () => onInviteFromChannel(liveChannel()),
             model.access,
           );
           attachDragHandlers(
@@ -856,8 +936,8 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
           return el;
         },
         // A reused voice wrapper brings its chrome and participants up to date.
-        update: (el, ch, model) => {
-          if (model.kind === "voice") updateVoiceRow(el, ch);
+        update: (el, entry, model) => {
+          if (model.kind === "voice" && entry.kind === "channel") updateVoiceRow(el, entry.channel);
         },
         dispose: disposeOwned,
       });
@@ -994,6 +1074,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
         localMuteSource,
         muteSource,
         hideMutedSource,
+        followedThreadsStore,
       ],
       projectSidebarInputs,
       (next, prev) => {

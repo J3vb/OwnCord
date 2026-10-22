@@ -70,3 +70,10 @@ export function sendThreadDelete(ws: WsClient, threadId: number): boolean {
   ws.send({ type: "thread_delete", payload: { thread_id: threadId } });
   return true;
 }
+
+/** Send a `thread_follow`; false when the socket is down. The new state arrives as `thread_follow_update`. */
+export function sendThreadFollow(ws: WsClient, threadId: number, follow: boolean): boolean {
+  if (!isConnected()) return false;
+  ws.send({ type: "thread_follow", payload: { thread_id: threadId, follow } });
+  return true;
+}
