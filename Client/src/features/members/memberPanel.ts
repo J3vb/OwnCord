@@ -14,13 +14,14 @@ import type { buildVoiceModOptions, VoiceModerationCallbacks } from "@components
 import { parseTimestamp } from "@lib/formatting";
 import { authStore } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";
-import { membersStore } from "@stores/members.store";
+import { membersStore, memberDisplayName } from "@stores/members.store";
 import { currentUserRoleHasPermission } from "@lib/permissions";
 import { Permission, type AdminUser } from "@lib/types";
 import { type ApiClient, ApiClientError, errorText } from "@lib/api";
 import type { ToastContainer } from "@components/Toast";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { shellText } from "../../i18n/shell";
+import { moderationText } from "../../i18n/moderation";
 import type { BlockDeps } from "../blocks/blockActions";
 import {
   addMemberRole,
@@ -260,6 +261,27 @@ export function createMemberPanel(opts: MemberPanelOptions): MemberPanel {
           });
         },
         () => getToast()?.show(shellText("members.banFailed"), "error"),
+      );
+    },
+    // Loaded on first use, like the Ban dialog. The row changes when the
+    // server's user_update arrives, not when the request answers.
+    onChangeNickname: (userId, username, current) => {
+      const member = membersStore.getState().members.get(userId);
+      const name = member === undefined ? username : memberDisplayName(member);
+      import("../../features/moderation/NicknameDialog").then(
+        ({ openNicknameDialog }) => {
+          if (owner.signal.aborted) return;
+          openNicknameDialog({
+            name,
+            username,
+            current,
+            submit: (displayName) => api.setMemberNickname(userId, displayName),
+            notify: (msg, type) => getToast()?.show(msg, type),
+            signal: owner.signal,
+            fallbackFocus: () => memberList.focusMember(userId),
+          });
+        },
+        () => getToast()?.show(moderationText("nicknameDialog.failed"), "error"),
       );
     },
     // Loaded on first use: the dialog and request code stay out of MainPage.

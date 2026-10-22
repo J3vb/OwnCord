@@ -41,6 +41,7 @@ export const shellText = defineCatalog("shell", {
   "member.unblocking": "Unblocking...",
   "member.blocking": "Blocking...",
   "member.changeRole": "Change Role",
+  "member.changeNickname": "Change Nickname",
   "member.forceLogout": "Force Logout",
   "member.forceLogoutConfirm": "Log them out?",
   "member.loggingOut": "Logging out...",

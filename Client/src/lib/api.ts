@@ -1163,6 +1163,24 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       );
     },
 
+    /**
+     * Set (or, with null, clear) another member's nickname (MANAGE_NICKNAMES,
+     * outrank). Idempotent: the same name twice answers 200 both times. 400
+     * INVALID_INPUT (length, taken by a username), 403, 404, 429 carry a message.
+     */
+    setMemberNickname(
+      userId: number,
+      displayName: string | null,
+      signal?: AbortSignal,
+    ): Promise<{ readonly user_id: number; readonly display_name: string | null }> {
+      return request<{ readonly user_id: number; readonly display_name: string | null }>(
+        "PUT",
+        `/moderation/users/${userId}/nickname`,
+        { display_name: displayName },
+        signal,
+      );
+    },
+
     /** End a member's active timeout early: 404 when they have none. */
     liftTimeout(userId: number, signal?: AbortSignal): Promise<void> {
       return request<void>("POST", `/moderation/users/${userId}/untimeout`, undefined, signal);

@@ -479,6 +479,12 @@ export interface ReadyPayload {
      * one. Absent means an older server, where `role` is the only role.
      */
     readonly multi_role?: boolean;
+    /**
+     * A moderator holding MANAGE_NICKNAMES can set another member's nickname
+     * over `PUT /moderation/users/{id}/nickname` (WP 6.4). Absent means an
+     * older server, where the bit may exist but the route does not.
+     */
+    readonly manage_nicknames?: boolean;
   };
   readonly channels: readonly ReadyChannel[];
   /**

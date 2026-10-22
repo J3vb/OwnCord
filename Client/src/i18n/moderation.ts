@@ -171,6 +171,17 @@ export const moderationText = defineCatalog("moderation", {
     one: "{name} is banned. Only {count} message was deleted before the dialog closed.",
     other: "{name} is banned. Only {count} messages were deleted before the dialog closed.",
   },
+  "nicknameDialog.title": "Change nickname for {name}",
+  "nicknameDialog.body":
+    "Everyone on this server will see this name instead of their own. Leave it empty or use Reset to remove it.",
+  "nicknameDialog.label": "Nickname",
+  "nicknameDialog.save": "Save",
+  "nicknameDialog.saving": "Saving...",
+  "nicknameDialog.reset": "Reset",
+  "nicknameDialog.tooLong": "A nickname can have at most {max} characters.",
+  "nicknameDialog.failed": "Could not change the nickname. Try again.",
+  "nicknameDialog.changed": "Changed the nickname of {username}.",
+  "nicknameDialog.cleared": "Removed the nickname of {username}.",
   "banDialog.retryExpired":
     "Too much time has passed to continue the deletion. Check the fields and ban again.",
   "banDialog.purgeUnsupported":

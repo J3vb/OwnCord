@@ -19,6 +19,7 @@ export interface ReadyCapabilityFlags {
   readonly polls?: boolean;
   readonly threads?: boolean;
   readonly multi_role?: boolean;
+  readonly manage_nicknames?: boolean;
 }
 
 /** The last full `ready`'s capabilities; null until one arrives. */
@@ -102,4 +103,14 @@ export function threadsEnabled(): boolean {
  */
 export function multiRoleEnabled(): boolean {
   return caps?.multi_role === true;
+}
+
+/**
+ * Whether the server lets a moderator set another member's nickname (WP 6.4):
+ * `PUT /moderation/users/{id}/nickname`. An older server can still hold the
+ * MANAGE_NICKNAMES bit in an Admin mask without the route, so the menu item
+ * needs this flag as well as the bit.
+ */
+export function manageNicknamesEnabled(): boolean {
+  return caps?.manage_nicknames === true;
 }

@@ -36,6 +36,9 @@ export interface MemberContextMenuOptions {
   /** MODERATE_MEMBERS plus outrank; defaults to `showAdminActions`. The items
    *  also need their callbacks, so a caller that wires none shows none. */
   canTimeout?: boolean;
+  /** MANAGE_NICKNAMES plus outrank plus the server capability; defaults to
+   *  `showAdminActions`. The item also needs `onChangeNickname`. */
+  canManageNicknames?: boolean;
   /** The menu's target is the signed-in user: no Block and no moderation. */
   isSelf?: boolean;
   /** Whether the target is timed out, from the server's timeout view: `unknown`
@@ -54,6 +57,8 @@ export interface MemberContextMenuOptions {
   /** Time the member out for `seconds` (one of the six presets). */
   onTimeout?(seconds: number): Promise<void>;
   onRemoveTimeout?(): Promise<void>;
+  /** Opens the Change Nickname dialog. The menu closes first. */
+  onChangeNickname?(): void;
   /** Runs once when the menu goes away, by any path. */
   onClosed?(): void;
   /** Where focus goes on close when the opener row is gone. */
@@ -379,6 +384,7 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
   const canKick = adminGate && (options.canKick ?? options.showAdminActions);
   const canBan = adminGate && (options.canBan ?? options.showAdminActions);
   const canTimeout = adminGate && (options.canTimeout ?? options.showAdminActions);
+  const canManageNicknames = adminGate && (options.canManageNicknames ?? options.showAdminActions);
 
   // Role submenu trigger
   if (canManageRoles) {
@@ -417,6 +423,20 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
       signal,
     );
     manage.appendChild(roleItem);
+  }
+
+  if (canManageNicknames && options.onChangeNickname !== undefined) {
+    const onChangeNickname = options.onChangeNickname;
+    appendRow(
+      manage,
+      shellText("member.changeNickname"),
+      () => {
+        closeMenu();
+        onChangeNickname();
+      },
+      signal,
+      { testId: "member-menu-change-nickname" },
+    );
   }
 
   // Timeout presets, or Remove Timeout when the server says one is active. An
