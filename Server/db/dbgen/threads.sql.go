@@ -32,6 +32,34 @@ func (q *Queries) ArchiveThreadIfDue(ctx context.Context, arg ArchiveThreadIfDue
 	return result.RowsAffected()
 }
 
+const countForumTagsIn = `-- name: CountForumTagsIn :one
+SELECT COUNT(*) FROM forum_tags
+WHERE forum_id = ?1 AND id IN (/*SLICE:tag_ids*/?)
+`
+
+type CountForumTagsInParams struct {
+	ForumID int64   `json:"forumId"`
+	TagIds  []int64 `json:"tagIds"`
+}
+
+func (q *Queries) CountForumTagsIn(ctx context.Context, arg CountForumTagsInParams) (int64, error) {
+	query := countForumTagsIn
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.ForumID)
+	if len(arg.TagIds) > 0 {
+		for _, v := range arg.TagIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:tag_ids*/?", strings.Repeat(",?", len(arg.TagIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:tag_ids*/?", "NULL", 1)
+	}
+	row := q.db.QueryRowContext(ctx, query, queryParams...)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deleteThreadRow = `-- name: DeleteThreadRow :execrows
 DELETE FROM channels WHERE id = ? AND type = 'thread'
 `
@@ -42,6 +70,15 @@ func (q *Queries) DeleteThreadRow(ctx context.Context, id int64) (int64, error) 
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const deleteThreadTags = `-- name: DeleteThreadTags :exec
+DELETE FROM thread_tags WHERE thread_id = ?
+`
+
+func (q *Queries) DeleteThreadTags(ctx context.Context, threadID int64) error {
+	_, err := q.db.ExecContext(ctx, deleteThreadTags, threadID)
+	return err
 }
 
 const getThreadInfo = `-- name: GetThreadInfo :one
@@ -166,6 +203,31 @@ func (q *Queries) InsertThread(ctx context.Context, arg InsertThreadParams) (sql
 		arg.AutoArchiveMinutes,
 		arg.LastActivityAt,
 	)
+}
+
+const insertThreadTag = `-- name: InsertThreadTag :exec
+INSERT INTO thread_tags (thread_id, tag_id) VALUES (?, ?)
+`
+
+type InsertThreadTagParams struct {
+	ThreadID int64 `json:"threadId"`
+	TagID    int64 `json:"tagId"`
+}
+
+func (q *Queries) InsertThreadTag(ctx context.Context, arg InsertThreadTagParams) error {
+	_, err := q.db.ExecContext(ctx, insertThreadTag, arg.ThreadID, arg.TagID)
+	return err
+}
+
+const isForumChannel = `-- name: IsForumChannel :one
+SELECT EXISTS(SELECT 1 FROM channels WHERE id = ? AND type = 'forum')
+`
+
+func (q *Queries) IsForumChannel(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, isForumChannel, id)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const isThreadChannel = `-- name: IsThreadChannel :one
@@ -341,6 +403,109 @@ func (q *Queries) ListThreadInfosByStarters(ctx context.Context, starterIds []*i
 	return items, nil
 }
 
+const listThreadPosts = `-- name: ListThreadPosts :many
+SELECT c.id AS thread_id, c.thread_post_message_id AS post_message_id,
+       m.user_id AS author_id, COALESCE(m.content, '') AS content,
+       COALESCE(m.deleted, 0) AS deleted,
+       EXISTS(SELECT 1 FROM attachments a WHERE a.message_id = c.thread_post_message_id) AS has_attachments
+FROM channels c
+JOIN channels p ON p.id = c.parent_channel_id AND p.type = 'forum'
+LEFT JOIN messages m ON m.id = c.thread_post_message_id
+WHERE c.type = 'thread' AND c.id IN (/*SLICE:thread_ids*/?)
+`
+
+type ListThreadPostsRow struct {
+	ThreadID       int64  `json:"threadId"`
+	PostMessageID  *int64 `json:"postMessageId"`
+	AuthorID       *int64 `json:"authorId"`
+	Content        string `json:"content"`
+	Deleted        int64  `json:"deleted"`
+	HasAttachments int64  `json:"hasAttachments"`
+}
+
+// The opening message of each listed post. Only threads whose parent is a
+// forum match, so a text-channel thread never carries a post block.
+func (q *Queries) ListThreadPosts(ctx context.Context, threadIds []int64) ([]ListThreadPostsRow, error) {
+	query := listThreadPosts
+	var queryParams []interface{}
+	if len(threadIds) > 0 {
+		for _, v := range threadIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:thread_ids*/?", strings.Repeat(",?", len(threadIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:thread_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListThreadPostsRow{}
+	for rows.Next() {
+		var i ListThreadPostsRow
+		if err := rows.Scan(
+			&i.ThreadID,
+			&i.PostMessageID,
+			&i.AuthorID,
+			&i.Content,
+			&i.Deleted,
+			&i.HasAttachments,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listThreadTagLinks = `-- name: ListThreadTagLinks :many
+SELECT tt.thread_id, tt.tag_id
+FROM thread_tags tt
+JOIN forum_tags ft ON ft.id = tt.tag_id
+WHERE tt.thread_id IN (/*SLICE:thread_ids*/?)
+ORDER BY tt.thread_id ASC, ft.position ASC, ft.id ASC
+`
+
+func (q *Queries) ListThreadTagLinks(ctx context.Context, threadIds []int64) ([]ThreadTag, error) {
+	query := listThreadTagLinks
+	var queryParams []interface{}
+	if len(threadIds) > 0 {
+		for _, v := range threadIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:thread_ids*/?", strings.Repeat(",?", len(threadIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:thread_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ThreadTag{}
+	for rows.Next() {
+		var i ThreadTag
+		if err := rows.Scan(&i.ThreadID, &i.TagID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listThreadsDueForArchive = `-- name: ListThreadsDueForArchive :many
 SELECT id, COALESCE(parent_channel_id, 0) AS parent_id
 FROM channels
@@ -396,6 +561,27 @@ func (q *Queries) NextThreadArchiveDue(ctx context.Context) (interface{}, error)
 	var due_at interface{}
 	err := row.Scan(&due_at)
 	return due_at, err
+}
+
+const setThreadPostMessage = `-- name: SetThreadPostMessage :execrows
+
+UPDATE channels SET thread_post_message_id = ?1
+WHERE id = ?2 AND type = 'thread' AND thread_post_message_id IS NULL
+`
+
+type SetThreadPostMessageParams struct {
+	MessageID *int64 `json:"messageId"`
+	ID        int64  `json:"id"`
+}
+
+// Forum posts (WP 6.9d). A post is a thread under a forum with no starter;
+// InsertThread writes it with a NULL starter_message_id.
+func (q *Queries) SetThreadPostMessage(ctx context.Context, arg SetThreadPostMessageParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setThreadPostMessage, arg.MessageID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const touchThreadOnPost = `-- name: TouchThreadOnPost :exec

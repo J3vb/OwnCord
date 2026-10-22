@@ -159,6 +159,20 @@ func TestForumsRollback(t *testing.T) {
 	if _, err := database.LinkAttachmentsToMessage(ctx, opening, u, []string{"att-forum"}); err != nil {
 		t.Fatal(err)
 	}
+	// What else hangs off the opening message: a poll with a vote, the send
+	// receipt of the create (keyed on the forum), and a reply elsewhere.
+	for _, q := range []string{
+		`INSERT INTO polls (message_id, question, expires_at) VALUES (?1, 'q', '2999-01-01T00:00:00Z')`,
+		`INSERT INTO poll_answers (message_id, answer_id, text) VALUES (?1, 1, 'yes')`,
+		`INSERT INTO poll_votes (message_id, answer_id, user_id) VALUES (?1, 1, ?3)`,
+		`INSERT INTO message_delivery_receipts (user_id, client_message_id, channel_id, payload_hash, message_id, timestamp, expires_at_ms)
+		 VALUES (?3, 'forum-receipt', ?4, x'00', ?1, 't', 9999999999999)`,
+		`UPDATE messages SET reply_to = ?1 WHERE id = ?5`,
+	} {
+		if _, err := database.ExecContext(ctx, q, opening, post, u, forum, kept); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
 
 	if _, err := database.writer.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
 		t.Fatal(err)
@@ -203,6 +217,17 @@ func TestForumsRollback(t *testing.T) {
 	}
 	if n := count(`SELECT COUNT(*) FROM reactions WHERE message_id = ?`, opening); n != 0 {
 		t.Error("a reaction on the opening message survived the reversal")
+	}
+	for _, q := range []string{
+		`SELECT COUNT(*) FROM polls`, `SELECT COUNT(*) FROM poll_answers`, `SELECT COUNT(*) FROM poll_votes`,
+		`SELECT COUNT(*) FROM message_delivery_receipts`,
+	} {
+		if n := count(q); n != 0 {
+			t.Errorf("%s = %d after the reversal, want 0", q, n)
+		}
+	}
+	if n := count(`SELECT COUNT(*) FROM messages WHERE id = ? AND reply_to IS NULL`, kept); n != 1 {
+		t.Error("a reply to a deleted opening message kept its target")
 	}
 	if n := count(`SELECT COUNT(*) FROM attachments WHERE id = 'att-forum' AND message_id IS NULL`); n != 1 {
 		t.Error("the opening message's attachment was not unlinked")

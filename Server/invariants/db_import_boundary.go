@@ -172,6 +172,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"ws/replay.go":                    {Disposition: "adapter", Note: "PersistedEvent type in the cold-tier filter; the resume path's reads bind the VisibilityReader seam and its status stamp goes through PresenceStamper"},
 	"ws/serve_auth.go":                {Disposition: "adapter", Note: "db.User on the handshake result and the pure StatusOffline const; SessionService resolves the token and writes the connect audit"},
 	"ws/serve_pumps.go":               {Disposition: "adapter", Note: "pure StatusOffline const; the disconnect write goes through the PresenceStamper seam (readers.go)"},
+	"ws/forum_post_gate.go":           {Disposition: "adapter", Note: "db.Channel type and the one GetChannel lookup that tells a forum post from a thread; withholds the post from a socket without the forums feature"},
 	"ws/serve_ready.go":               {Disposition: "adapter", Note: "ready snapshot reads through ReadySnapshotReader; fresh-connect stale-voice cleanup through VoiceService"},
 	"ws/serve_ready_channels.go":      {Disposition: "adapter", Note: "narrows the visible db.Channel rows to the ready payload's channel objects; no reads"},
 	"ws/serve_ready_encode.go":        {Disposition: "adapter", Note: "encodes the ready frame buildReady read (P5-O01); db row types and the status vocabulary only"},

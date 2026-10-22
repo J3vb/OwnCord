@@ -217,7 +217,7 @@ so the erased user's messages in a post go as in any thread, and a post they ope
 stays for its other participants (`thread_owner_id` goes `NULL`). The opening-message
 pointer `thread_post_message_id` goes `NULL` when that message is hard-deleted by erasure
 or retention, and the post stays. Forum tags carry no personal data: they belong to the
-forum and go with it, and `thread_tags` rows go with their post or their tag.
+forum and go with it, and `thread_tags` rows go with their post or their tag. The post's title and tags are written with its opening message in one transaction, and the idempotency receipt for that message is keyed on the forum, so it follows the same expiry and erasure rules as any send receipt. The 075 rollback removes post messages together with their polls, receipts and reply references.
 
 After commit the runner broadcasts `member_ban` (every client drops the
 user; the subject's socket is closed) and then purges the replay pipeline

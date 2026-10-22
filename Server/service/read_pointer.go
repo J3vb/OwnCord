@@ -57,8 +57,15 @@ func (s *MessageService) MoveReadPointer(ctx context.Context, userID, channelID 
 	if op != db.ReadAtLatest && messageID <= 0 {
 		return db.ReadPointer{}, fmt.Errorf("%w: message_id must be positive", ErrBadRequest)
 	}
-	if _, err := admitReadState(ctx, s.st, s.perms, userID, channelID); err != nil {
+	ch, err := admitReadState(ctx, s.st, s.perms, userID, channelID)
+	if err != nil {
 		return db.ReadPointer{}, err
+	}
+	// A forum holds no messages, so it has no read state to move: mark_read and
+	// mark_unread on one write no read_states row, as channel_focus does. The
+	// answer is NOT_FOUND (mark_read drops it silently, mark_unread reports it).
+	if ch.Type == db.ForumTypeName {
+		return db.ReadPointer{}, fmt.Errorf("%w: a forum holds no messages, so it has no read state", ErrNotFound)
 	}
 
 	// The wait for the lock honours ctx: the mention worker holds it across a
