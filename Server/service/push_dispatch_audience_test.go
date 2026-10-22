@@ -49,19 +49,19 @@ func TestPushDispatch_EligibilityOnlyForSubscribedUsers(t *testing.T) {
 	d := NewPushDispatcher(st, f.perms, f.push, online, newRecordingPushFetcher())
 	d.mu.Lock()
 	for uid := int64(31); uid <= 34; uid++ { // 4 inside their window
-		d.lastSent[pushCoalesceKey{uid, 10}] = timeNowForTest()
+		d.lastSent[pushCoalesceKey{uid, 10}] = time.Now()
 	}
 	d.mu.Unlock()
 
 	d.Notify(context.Background(), 10, author, candidates)
 
-	// 15 subscribed - 5 connected - 4 coalesced = 6 users reach the checks.
+	// 15 subscribed - 5 connected - 4 coalesced = 6 users reach the checks. The
+	// count holds because no subscriber acknowledged the label, so all six fail
+	// at eligibleFor.
 	if got := st.acks.Load(); got != 6 {
 		t.Errorf("eligibility reads = %d, want 6 (only subscribed, offline, uncoalesced users)", got)
 	}
 }
-
-func timeNowForTest() time.Time { return time.Now() }
 
 // A subscribed role holder who cannot read the channel is never pushed.
 func TestPushDispatch_RoleHolderWhoCannotReadGetsNoPush(t *testing.T) {
@@ -86,5 +86,32 @@ func TestPushDispatch_RoleHolderWhoCannotReadGetsNoPush(t *testing.T) {
 	}
 	if fetch.bodyFor("https://push.example.net/can-read") == nil {
 		t.Error("holder with a user allow was not pushed")
+	}
+}
+
+// Eligibility is checked before the coalescing window is reserved: an offline
+// subscriber who cannot read the channel gets nothing and no window, so once
+// granted access the next Notify delivers exactly once.
+func TestPushDispatch_IneligibleSubscriberReservesNoWindow(t *testing.T) {
+	f := newPushDispatchFixture(t)
+	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "staff", Type: "text"})
+	seedUserRole(t, f.database, 1, 4)
+	seedUserRole(t, f.database, 2, 4)
+	seedChannelOverride(t, f.database, 4, 10, 0, permissions.ReadMessages)
+	f.subscribe(t, 2, "https://push.example.net/later")
+	fetch := newRecordingPushFetcher()
+	d := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+
+	d.Notify(context.Background(), 10, 1, []int64{2})
+	if len(fetch.urls()) != 0 {
+		t.Fatalf("pushed to a user who cannot read: %v", fetch.urls())
+	}
+	if err := f.database.UpsertChannelUserOverride(context.Background(), 10, 2, permissions.ReadMessages, 0); err != nil {
+		t.Fatal(err)
+	}
+	f.perms.InvalidateAll()
+	d.Notify(context.Background(), 10, 1, []int64{2})
+	if got := len(fetch.urls()); got != 1 {
+		t.Errorf("pushes after access was granted = %d, want exactly 1", got)
 	}
 }
