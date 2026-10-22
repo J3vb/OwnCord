@@ -17,6 +17,7 @@ import {
   clearPeerWatching,
 } from "../../stores/voice.store";
 import { focusPayload } from "../../lib/last-channel";
+import { deleteCredential } from "../../lib/credentials";
 import { PROTOCOL_EPOCH, ServerRestartReason } from "../../lib/protocolTypes";
 import type { ServerRestartReasonValue } from "../../lib/protocolTypes";
 import { safetyText } from "../../i18n/safety";
@@ -89,6 +90,13 @@ export function handleAuthError(
         clientEpoch: PROTOCOL_EPOCH,
       });
     }
+  }
+  // The portal's resume fails here, before auth, so isAuthenticated never
+  // flips and the logout teardown never deletes the token: a stale one would
+  // come back on every reload. Delete it now (both copies).
+  if (__OWNCORD_WEB__ && !epochRefusal) {
+    const host = api?.getConfig?.().host;
+    if (host) void deleteCredential(host);
   }
   // A protocol refusal is not a bad token: say so, so main.ts keeps the
   // stored credential for the relaunch after the update.
