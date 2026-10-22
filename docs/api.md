@@ -3233,9 +3233,9 @@ own nickname with `PATCH /api/v1/users/me`, never this route.
 
 `MANAGE_NICKNAMES` is granted automatically only to an untouched, default
 Moderator role (the untouched Admin and the Owner already hold it). A
-Moderator role that was renamed or had its permissions edited gets nothing:
-grant "Manage Nicknames" to the role that should have it by hand, in the
-admin panel's role grid.
+Moderator or Admin role that was renamed or had its permissions edited does
+not hold it: grant "Manage Nicknames" to the role that should have it by hand,
+in the admin panel's role grid.
 
 #### Request
 
@@ -3260,12 +3260,13 @@ minute per actor, spent only after authorization.
 
 #### Errors
 
-| Status | Code            | Cause                                                                                |
-| ------ | --------------- | ------------------------------------------------------------------------------------ |
-| 400    | `INVALID_INPUT` | invalid id, self-target, `display_name` absent or not a string/null, or name refused |
-| 403    | `FORBIDDEN`     | caller lacks `MANAGE_NICKNAMES`, or does not outrank the target                      |
-| 404    | `NOT_FOUND`     | no such user, or a pending account (only after the permission check)                 |
-| 429    | `RATE_LIMITED`  | over 10 changes a minute                                                             |
+| Status | Code            | Cause                                                                    |
+| ------ | --------------- | ------------------------------------------------------------------------ |
+| 400    | `BAD_REQUEST`   | `{id}` is not a positive integer                                         |
+| 400    | `INVALID_INPUT` | self-target, `display_name` absent or not a string/null, or name refused |
+| 403    | `FORBIDDEN`     | caller lacks `MANAGE_NICKNAMES`, or does not outrank the target          |
+| 404    | `NOT_FOUND`     | no such user, or a pending account (only after the permission check)     |
+| 429    | `RATE_LIMITED`  | over 10 changes a minute                                                 |
 
 ---
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
@@ -316,8 +317,10 @@ func handleModerationNickname(svc *service.Services, broadcaster ProfileBroadcas
 		}
 		updated, err := svc.Moderation.SetNickname(r.Context(), actorID, targetID, name)
 		if errors.Is(err, service.ErrBadRequest) {
-			// Same code and messages as the member's own PATCH /users/me.
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: err.Error()})
+			// Same code as the member's own PATCH /users/me; the message is the
+			// validator's text without the sentinel prefix.
+			msg := strings.TrimPrefix(err.Error(), service.ErrBadRequest.Error()+": ")
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: msg})
 			return
 		}
 		if err != nil {

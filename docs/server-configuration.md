@@ -294,7 +294,8 @@ the admin panel's role grid to the roles that should have it:
 
 Migration 078 also clears `MANAGE_NICKNAMES` from every role other than the
 Owner, the untouched Admin and the untouched Moderator, so only the intended
-roles hold it until you grant it. "Manage Nicknames" lets a role change the
+roles hold it until you grant it. A renamed Admin role loses it too, so tick
+it again on that role. "Manage Nicknames" lets a role change the
 nickname of any member it outranks.
 
 ### Admin attention panel (`attention`)

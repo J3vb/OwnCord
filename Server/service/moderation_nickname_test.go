@@ -417,3 +417,12 @@ func TestSetNickname_RateLimitedAfterAuthorization(t *testing.T) {
 		t.Fatalf("a rate-limited call wrote %q", got)
 	}
 }
+
+// The nickname write serializes with the member's own profile edit only when
+// both go through one UserService, and so one profileLocks.
+func TestSetNickname_SharesUserServiceWithSelfEdit(t *testing.T) {
+	svcs := New(newTestDB(t), nil)
+	if svcs.Moderation.users != svcs.Users {
+		t.Fatal("Moderation.users must be the same UserService as Services.Users")
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 
 	"github.com/J3vb/OwnCord/Server/db"
 )
@@ -63,11 +64,11 @@ func (s *UserService) setDisplayNameAsModerator(ctx context.Context, actorID, ta
 	return user, nil
 }
 
-// quoteNickname renders a nickname for an audit detail: the value in double
-// quotes, or (none) when unset.
+// quoteNickname renders a nickname for an audit detail: the value Go-quoted
+// (so a quote or " -> " inside it stays unambiguous), or (none) when unset.
 func quoteNickname(n *string) string {
 	if n == nil || *n == "" {
 		return "(none)"
 	}
-	return `"` + *n + `"`
+	return strconv.Quote(*n)
 }
