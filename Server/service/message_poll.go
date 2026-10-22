@@ -178,7 +178,7 @@ func (s *MessageService) pollResult(ctx context.Context, sp SendMessageParams, m
 	isDM := ch.Type == "dm"
 	result := &SendMessageResult{
 		MessageID: msg.ID, Timestamp: msg.Timestamp, Content: content,
-		IsDM: isDM, Channel: ch, Mentions: []int64{},
+		IsDM: isDM, Channel: ch, Mentions: []int64{}, ThreadJoined: msg.ThreadJoined,
 	}
 	// The write is committed; a failed read-back only costs the live block.
 	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), pollReadBackTimeout)

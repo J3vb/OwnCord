@@ -133,6 +133,16 @@ account; the per-role rows hold no personal data. No new data class beyond that.
 A new channel in a category copies the template without an actor check: every
 template row was guarded when it was written, and template rows stay in force
 after their writer is demoted.
+
+**Amended 2026-10-22 (thread follows):** `079_thread_members.sql` adds
+`thread_members(thread_id, user_id, joined_at)` (WP 6.9c), the users who follow a
+thread. It is keyed by user, so it joins the account-erasure inventory and is
+deleted with the account (`ON DELETE CASCADE`), and it goes with its thread. A
+follow is never permission: no gate reads the table, and every read that hands a
+follow to a user is joined with what the thread's parent lets them see, so a row
+for a user who lost the parent stays and is ignored until access returns.
+Auto-follow is limited to the author and each direct `@user` mention (never
+`@everyone` or `@here`). No new data class beyond that.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each
 service are documented"). **Input to:** HP-5, and to the retention and
 erasure obligations every B5 step carries.

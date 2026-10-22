@@ -166,7 +166,8 @@ func (d *DB) CreateMessageDelivery(ctx context.Context, p MessageDeliveryParams)
 		return nil, fmt.Errorf("message delivery receipt insert: %w", err)
 	}
 	advanceAuthorReadState(ctx, q, p.UserID, msgChannel, r.ID)
-	if err := touchThreadOnPost(ctx, q, msgChannel); err != nil {
+	joined, err := threadPostEffects(ctx, q, msgChannel, p.UserID, p.MentionedUserIDs, p.ReplyPingUserID)
+	if err != nil {
 		return nil, fmt.Errorf("message delivery: %w", err)
 	}
 	thread, err := d.finishForumPost(ctx, q, p, msgChannel, r.ID)
@@ -176,7 +177,9 @@ func (d *DB) CreateMessageDelivery(ctx context.Context, p MessageDeliveryParams)
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("message delivery commit: %w", err)
 	}
-	return &MessageDelivery{Message: messageFromGen(r), LinkedAttachmentIDs: linked, Thread: thread}, nil
+	msg := messageFromGen(r)
+	msg.ThreadJoined = joined
+	return &MessageDelivery{Message: msg, LinkedAttachmentIDs: linked, Thread: thread}, nil
 }
 
 // deliveryTargetChannel is the channel the message row goes into: the send's

@@ -182,13 +182,13 @@ type Message struct {
 	Deleted   bool
 	Pinned    bool
 	Timestamp string
-	// MentionsEveryone is set when the message resolved an @everyone or @here
-	// token and the author held MENTION_EVERYONE. Per-user mentions live in
-	// message_mentions.
+	// MentionsEveryone: an @everyone or @here resolved and the author held
+	// MENTION_EVERYONE. Per-user mentions live in message_mentions.
 	MentionsEveryone bool
 	// Kind is MessageKindUser for an ordinary message. Every other value is a
 	// row only the server writes: a call log row or a group event row.
-	Kind int64
+	Kind         int64
+	ThreadJoined []int64 // WP 6.9c: users this send newly made thread followers; send transactions only
 }
 
 // The stored values of messages.kind. 0 is a message a user wrote, 1 a call

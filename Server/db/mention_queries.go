@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 )
@@ -91,9 +90,11 @@ func (d *DB) CreateMessageWithMentions(ctx context.Context, channelID, userID in
 		return nil, err
 	}
 	advanceAuthorReadState(ctx, d.q.WithTx(tx), userID, channelID, m.ID)
-	if err := touchThreadOnPost(ctx, d.q.WithTx(tx), channelID); err != nil {
+	joined, err := threadPostEffects(ctx, d.q.WithTx(tx), channelID, userID, mentionedUserIDs, replyPingUserID)
+	if err != nil {
 		return nil, fmt.Errorf("CreateMessageWithMentions: %w", err)
 	}
+	m.ThreadJoined = joined
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("CreateMessageWithMentions commit: %w", err)
 	}
@@ -151,13 +152,7 @@ func (d *DB) ReplaceMessageMentions(ctx context.Context, messageID int64, mentio
 // most maxMentionsPerMessage+1 rows. When the content also names the target
 // the one row ends up flagged reply_ping = 1.
 func insertMentionRows(ctx context.Context, tx mentionExecer, messageID int64, mentionedUserIDs []int64, replyPingUserID int64) error {
-	if replyPingUserID != 0 {
-		mentionedUserIDs = slices.DeleteFunc(slices.Clone(mentionedUserIDs), func(id int64) bool { return id == replyPingUserID })
-	}
-	if len(mentionedUserIDs) > maxMentionsPerMessage {
-		mentionedUserIDs = mentionedUserIDs[:maxMentionsPerMessage]
-	}
-	for _, uid := range mentionedUserIDs {
+	for _, uid := range contentMentionIDs(mentionedUserIDs, replyPingUserID) {
 		if _, err := tx.ExecContext(ctx,
 			`INSERT OR IGNORE INTO message_mentions (message_id, mentioned_user_id) VALUES (?, ?)`,
 			messageID, uid,

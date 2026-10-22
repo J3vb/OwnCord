@@ -241,6 +241,7 @@ var commandPayloadSeeds = []struct {
 	{MsgTypeThreadUpdate, `{"thread_id":1,"tag_ids":[1,2]}`},
 	{MsgTypeForumPostCreate, `{"client_message_id":"1:x","channel_id":1,"name":"t","content":"c","attachments":["a"],"tag_ids":[1]}`},
 	{MsgTypeForumPostCreate, `{"client_message_id":"","channel_id":"1","tag_ids":"x","attachments":null}`},
+	{MsgTypeThreadFollow, `{"thread_id":1,"follow":true}`},
 	{MsgTypeChatDelete, `{"message_id":1}`},
 	{MsgTypeTypingStart, `{"channel_id":0}`},
 	{MsgTypeMarkRead, `{"channel_id":-1}`},

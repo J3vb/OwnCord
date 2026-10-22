@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/service"
@@ -146,6 +147,93 @@ func (h *Hub) flushThreadChanged(threadID int64, e *threadTimer) {
 	h.broadcastChannelEvent(ctx, 0, channelEvt{
 		evType: MsgTypeThreadChanged, channelID: t.ParentID, payload: buildThreadChanged(t),
 	})
+	h.sendThreadFollowUpdates(ctx, t, e)
+}
+
+// threadFollowBeforeSendHook, when non-nil, runs in sendThreadFollowUpdates
+// after the audience is resolved and before the final live check, so a test can
+// land an unfollow or a delete in exactly that window.
+var threadFollowBeforeSendHook func()
+
+// sendThreadFollowUpdates tells each connected follower of t that they follow
+// it, with its current state, so a rename, archive, lock or new message reaches
+// the sidebar row of a client that did not hear thread_changed (its parent is
+// not the focused channel), and a user a post just made a follower hears it
+// from the flush that post raised. A follower is only a candidate: it must also
+// be in the parent's read audience (and have acknowledged an NSFW parent), so a
+// user who lost the parent hears nothing and the follow row stays for when they
+// regain it. The audience read is not atomic with the send, so the entry is
+// checked live and the followers read again after it: an unfollow or a delete
+// that committed meanwhile has already sent its own following:false, and this
+// frame must not follow it. A failed read drops the frames, since ready is
+// authoritative.
+func (h *Hub) sendThreadFollowUpdates(ctx context.Context, t *service.ThreadInfo, e *threadTimer) {
+	audience := h.threadFollowAudience(ctx, t)
+	if len(audience) == 0 {
+		return
+	}
+	if threadFollowBeforeSendHook != nil {
+		threadFollowBeforeSendHook()
+	}
+	h.mu.RLock()
+	live := !h.threadHub.stopped && h.threadHub.timers[t.ID] == e
+	h.mu.RUnlock()
+	if !live {
+		return
+	}
+	now, err := h.threadHub.svc.Followers(ctx, t.ID)
+	if err != nil {
+		if ctx.Err() == nil {
+			slog.Warn("ws: thread follow read failed, dropping follow updates", "thread_id", t.ID, "err", err)
+		}
+		return
+	}
+	payload := buildThreadFollowUpdate(t.ID, true, t)
+	for _, uid := range now {
+		if slices.Contains(audience, uid) {
+			h.SendToUserLow(uid, payload)
+		}
+	}
+}
+
+// threadFollowAudience is the connected followers of t who may read it: the
+// followers intersected with the parent's read audience and, for an NSFW
+// parent, with the users who acknowledged it (one batch read, as
+// resolveChannelActivity does). A failed read yields nobody.
+func (h *Hub) threadFollowAudience(ctx context.Context, t *service.ThreadInfo) []int64 {
+	vis := h.readers.Visibility
+	if vis == nil {
+		return nil
+	}
+	followers, err := h.threadHub.svc.Followers(ctx, t.ID)
+	if err != nil {
+		if ctx.Err() == nil {
+			slog.Warn("ws: thread follow read failed, dropping follow updates", "thread_id", t.ID, "err", err)
+		}
+		return nil
+	}
+	if len(followers) == 0 {
+		return nil
+	}
+	ch, err := vis.GetChannel(ctx, t.ID)
+	if err != nil || ch == nil {
+		return nil
+	}
+	var acked map[int64]bool
+	if ch.NSFW {
+		acked = activityAcknowledged(ctx, vis, ch.Thread.ParentID)
+	}
+	forumScoped := isForumScoped(ctx, vis, ch) // a forum's posts go only to clients that know forums
+	var out []int64
+	for _, uid := range h.channelReadAudienceFor(ctx, t.ID, ch, false) {
+		if forumScoped && lacksForums(h.GetClient(uid)) {
+			continue
+		}
+		if slices.Contains(followers, uid) && (!ch.NSFW || acked[uid]) {
+			out = append(out, uid)
+		}
+	}
+	return out
 }
 
 // forgetThread drops a deleted thread's coalescing state, so no timer fires a

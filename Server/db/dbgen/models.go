@@ -527,6 +527,12 @@ type Setting struct {
 	Value string `json:"value"`
 }
 
+type ThreadMember struct {
+	ThreadID int64  `json:"threadId"`
+	UserID   int64  `json:"userId"`
+	JoinedAt string `json:"joinedAt"`
+}
+
 type ThreadTag struct {
 	ThreadID int64 `json:"threadId"`
 	TagID    int64 `json:"tagId"`

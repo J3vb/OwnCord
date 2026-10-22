@@ -27,6 +27,8 @@ export const ServerMessageType = {
   POLL_END_OK: "poll_end_ok",
   THREAD_CREATE_OK: "thread_create_ok",
   THREAD_UPDATE_OK: "thread_update_ok",
+  THREAD_FOLLOW_OK: "thread_follow_ok",
+  THREAD_FOLLOW_UPDATE: "thread_follow_update", // WP 6.9c: your follow of a thread changed {thread_id, following, thread?}; unsequenced, low queue, never authoritative (ready.threads is)
   FORUM_POST_CREATE_OK: "forum_post_create_ok", // WP 6.9d: the post exists; {thread, message_id, client_message_id, deduplicated}, to the sender only
   THREAD_CHANGED: "thread_changed", // WP 6.9c: a thread was created, renamed, archived, locked or took a message; absolute ThreadInfo, sequenced on the parent channel, at most one per thread per 2 s
   THREAD_DELETED: "thread_deleted", // WP 6.9c: a thread was deleted; {channel_id (parent), thread_id}, sequenced on the parent channel
@@ -97,6 +99,7 @@ export const ClientMessageType = {
   THREAD_DELETE: "thread_delete",
   THREAD_FOCUS: "thread_focus", // the second subscription slot: the thread open beside the focused channel, or null to close it (WP 6.9c)
   FORUM_POST_CREATE: "forum_post_create", // create a forum post and its opening message in one step, idempotent on client_message_id (WP 6.9d)
+  THREAD_FOLLOW: "thread_follow", // follow or unfollow a thread {thread_id, follow}; idempotent (WP 6.9c)
   CHAT_EDIT: "chat_edit",
   CHAT_DELETE: "chat_delete",
   REACTION_ADD: "reaction_add",

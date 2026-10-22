@@ -23,6 +23,7 @@ const (
 	MsgTypeThreadDelete      = "thread_delete"
 	MsgTypeThreadFocus       = "thread_focus"      // the second subscription slot: the thread open beside the focused channel, or null to close it (WP 6.9c)
 	MsgTypeForumPostCreate   = "forum_post_create" // create a forum post and its opening message in one step, idempotent on client_message_id (WP 6.9d)
+	MsgTypeThreadFollow      = "thread_follow"     // follow or unfollow a thread {thread_id, follow}; idempotent (WP 6.9c)
 	MsgTypeChatEdit          = "chat_edit"
 	MsgTypeChatDelete        = "chat_delete"
 	MsgTypeReactionAdd       = "reaction_add"
@@ -65,6 +66,8 @@ const (
 	MsgTypePollEndOK           = "poll_end_ok"
 	MsgTypeThreadCreateOK      = "thread_create_ok"
 	MsgTypeThreadUpdateOK      = "thread_update_ok"
+	MsgTypeThreadFollowOK      = "thread_follow_ok"
+	MsgTypeThreadFollowUpdate  = "thread_follow_update" // WP 6.9c: your follow of a thread changed {thread_id, following, thread?}; unsequenced, low queue, never authoritative (ready.threads is)
 	MsgTypeForumPostCreateOK   = "forum_post_create_ok" // WP 6.9d: the post exists; {thread, message_id, client_message_id, deduplicated}, to the sender only
 	MsgTypeThreadChanged       = "thread_changed"       // WP 6.9c: a thread was created, renamed, archived, locked or took a message; absolute ThreadInfo, sequenced on the parent channel, at most one per thread per 2 s
 	MsgTypeThreadDeleted       = "thread_deleted"       // WP 6.9c: a thread was deleted; {channel_id (parent), thread_id}, sequenced on the parent channel
