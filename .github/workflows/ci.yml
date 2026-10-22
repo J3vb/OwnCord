@@ -1243,16 +1243,9 @@ jobs:
         working-directory: Client/
         run: npm ci
 
-      - name: Cache Playwright browser
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('Client/package-lock.json') }}
-
       - name: Install Playwright browser
-        timeout-minutes: 8
-        working-directory: Client/
-        run: bash ../scripts/ci/playwright-install.sh
+        timeout-minutes: 12
+        uses: ./.github/actions/playwright-install # zizmor: ignore[self-repository] actionlint 1.7.7 rejects the $/ form
 
       # The pinned livekit-server archive (~60 MB) is the slow, flaky part of
       # this job. install-livekit.mjs still verifies the pinned sha256 on every
@@ -1313,15 +1306,9 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      - name: Cache Playwright browser
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('Client/package-lock.json') }}
-
       - name: Install Playwright browser
-        timeout-minutes: 8
-        run: bash ../scripts/ci/playwright-install.sh
+        timeout-minutes: 12
+        uses: ./.github/actions/playwright-install # zizmor: ignore[self-repository] actionlint 1.7.7 rejects the $/ form
 
       # Fast feedback: this job runs the smoke set
       # (Client/playwright.config.smoke.ts) against the Vite dev server.
@@ -1376,15 +1363,9 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      - name: Cache Playwright browser
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('Client/package-lock.json') }}
-
       - name: Install Playwright browser
-        timeout-minutes: 8
-        run: bash ../scripts/ci/playwright-install.sh
+        timeout-minutes: 12
+        uses: ./.github/actions/playwright-install # zizmor: ignore[self-repository] actionlint 1.7.7 rejects the $/ form
 
       - name: Run admin-panel journey
         run: npm run test:e2e:admin
@@ -1429,15 +1410,9 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      - name: Cache Playwright browser
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('Client/package-lock.json') }}
-
       - name: Install Playwright browser
-        timeout-minutes: 8
-        run: bash ../scripts/ci/playwright-install.sh
+        timeout-minutes: 12
+        uses: ./.github/actions/playwright-install # zizmor: ignore[self-repository] actionlint 1.7.7 rejects the $/ form
 
       - name: Run production e2e specs
         run: npm run test:e2e:prod
@@ -1635,14 +1610,9 @@ jobs:
           cache: npm
           cache-dependency-path: Client/package-lock.json
       - run: npm ci
-      - name: Cache Playwright browser
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('Client/package-lock.json') }}
       - name: Install Playwright browser
-        timeout-minutes: 8
-        run: bash ../scripts/ci/playwright-install.sh
+        timeout-minutes: 12
+        uses: ./.github/actions/playwright-install # zizmor: ignore[self-repository] actionlint 1.7.7 rejects the $/ form
       - name: Cache livekit-server archive
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
@@ -1696,14 +1666,9 @@ jobs:
           cache: npm
           cache-dependency-path: Client/package-lock.json
       - run: npm ci
-      - name: Cache Playwright browser
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('Client/package-lock.json') }}
       - name: Install Playwright browser
-        timeout-minutes: 8
-        run: bash ../scripts/ci/playwright-install.sh
+        timeout-minutes: 12
+        uses: ./.github/actions/playwright-install # zizmor: ignore[self-repository] actionlint 1.7.7 rejects the $/ form
       - name: Test the web portal against a real server
         run: npm run test:e2e:web
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
