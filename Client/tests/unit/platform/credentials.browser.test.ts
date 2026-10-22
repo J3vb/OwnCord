@@ -142,6 +142,44 @@ describe("browser credentials", () => {
     await expect(browserBinding.load("chat.example")).resolves.toBeNull();
   });
 
+  it("delete with a token removes only the copies that hold it", async () => {
+    install();
+    local.setItem("owncord:credential:chat.example", '{"username":"a","token":"other-tab"}');
+    session.setItem("owncord:credential:chat.example", '{"username":"a","token":"mine"}');
+    await expect(browserBinding.delete("chat.example", "mine")).resolves.toBe(true);
+    expect(session.keys()).toEqual([]);
+    expect(local.keys()).toEqual(["owncord:credential:chat.example"]);
+    await expect(browserBinding.load("chat.example")).resolves.toMatchObject({
+      token: "other-tab",
+    });
+  });
+
+  it("delete with a token leaves a record it cannot read alone", async () => {
+    install();
+    local.setItem("owncord:credential:chat.example", "{not json");
+    await expect(browserBinding.delete("chat.example", "mine")).resolves.toBe(true);
+    expect(local.keys()).toEqual(["owncord:credential:chat.example"]);
+  });
+
+  it("a save that does not say leaves the other area's different token alone", async () => {
+    install();
+    // This tab holds one token session-only; another tab kept a different one.
+    session.setItem("owncord:credential:chat.example", '{"username":"a","token":"mine"}');
+    local.setItem("owncord:credential:chat.example", '{"username":"a","token":"other-tab"}');
+    await expect(browserBinding.save("chat.example", "a2", "mine-2")).resolves.toBe(true);
+    expect(JSON.parse(session.getItem("owncord:credential:chat.example")!)).toEqual({
+      username: "a2",
+      token: "mine-2",
+    });
+    expect(JSON.parse(local.getItem("owncord:credential:chat.example")!).token).toBe("other-tab");
+
+    // And the same from a kept token: the session-only copy is not this tab's.
+    install();
+    local.setItem("owncord:credential:chat.example", '{"username":"a","token":"kept"}');
+    await browserBinding.save("chat.example", "a", "kept-2");
+    expect(session.keys()).toEqual([]);
+  });
+
   it("keys credentials by host", async () => {
     install();
     await browserBinding.save("a.example", "alice", "tok-a");

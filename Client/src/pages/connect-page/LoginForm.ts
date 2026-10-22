@@ -8,6 +8,7 @@ import { normaliseInviteCode } from "@lib/deep-link";
 import type { RegistrationMode } from "@lib/types";
 import type { RecoverContext } from "./RecoverOverlay";
 import { connectText } from "../../i18n/connect";
+import { portalText } from "../../i18n/portal";
 import {
   attachLimitHint,
   checkNewUsername,
@@ -111,6 +112,12 @@ export interface LoginFormOptions {
   readonly onHostSettled?: (host: string) => void;
   /** The host box was edited; the owner may apply a matching saved profile's settings. */
   readonly onHostInput?: (host: string) => void;
+  /**
+   * The one host this page signs in to (the web portal, WP 6.13e). Read only
+   * in `__OWNCORD_WEB__` builds: the host box is filled and hidden, a host
+   * given later is ignored, and the form offers "Stay signed in" only.
+   */
+  readonly fixedHost?: string;
 }
 
 export interface LoginFormApi {
@@ -206,6 +213,8 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     onHostSettled,
     onHostInput,
   } = opts;
+  // Written literally at every use so the desktop build drops each branch.
+  const fixedHost = __OWNCORD_WEB__ ? opts.fixedHost : undefined;
 
   // Debounce token: only the latest scheduled host-settled call fires.
   let hostSettledSeq = 0;
@@ -392,6 +401,10 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       "localhost:8443",
     );
     hostInput = qs("input", hostGroup)!;
+    if (__OWNCORD_WEB__ && fixedHost !== undefined) {
+      hostInput.value = fixedHost;
+      hostGroup.classList.add("form-group--hidden");
+    }
     // Registration policy is per host, so a manually edited address re-derives
     // the mode (and the invite requirement) as the user types.
     hostInput.addEventListener(
@@ -412,6 +425,9 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       "",
     );
     usernameInput = qs("input", usernameGroup)!;
+    if (__OWNCORD_WEB__ && fixedHost !== undefined) {
+      usernameInput.setAttribute("autocomplete", "username");
+    }
     usernameHint = attachLimitHint(usernameInput, {
       max: MAX_USERNAME_LEN,
       hint: usernameHintText(),
@@ -445,6 +461,10 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       connectText("login.rememberPassword"),
     );
     appendChildren(rememberGroup, rememberPasswordCheckbox, rememberLabel);
+    // The portal keeps no password: the token alone is kept, by Stay signed in.
+    if (__OWNCORD_WEB__ && fixedHost !== undefined) {
+      rememberGroup.classList.add("form-group--hidden");
+    }
 
     // Auto connect checkbox
     const autoConnectGroup = createElement("div", { class: "form-group remember-password-group" });
@@ -457,7 +477,9 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
         for: "auto-connect",
         class: "remember-password-label",
       },
-      connectText("login.autoConnect"),
+      __OWNCORD_WEB__ && fixedHost !== undefined
+        ? portalText("login.stayLoggedIn")
+        : connectText("login.autoConnect"),
     );
     appendChildren(autoConnectGroup, autoConnectCheckbox, autoConnectLabel);
 
@@ -1427,6 +1449,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     },
 
     setRememberPassword(enabled: boolean): void {
+      if (__OWNCORD_WEB__ && fixedHost !== undefined) return;
       rememberPasswordCheckbox.checked = enabled;
     },
 
@@ -1439,6 +1462,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     },
 
     setHost(host: string): void {
+      if (__OWNCORD_WEB__ && fixedHost !== undefined) return;
       writeHost(host);
       // The host's registration mode may differ from the previous one.
       updateRegistrationUi();
@@ -1481,12 +1505,13 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
      * which case the user still needs to enter the server address.
      */
     applyInviteLink(code: string, host?: string): void {
-      if (host) writeHost(host);
+      const hostFixed = __OWNCORD_WEB__ && fixedHost !== undefined;
+      if (host && !hostFixed) writeHost(host);
       if (formMode !== "register") handleToggleMode();
       inviteInput.value = code;
       updateRegistrationUi();
       // Focus the first field the user still has to fill in.
-      if (host) usernameInput.focus();
+      if (host || hostFixed) usernameInput.focus();
       else hostInput.focus();
     },
 
@@ -1495,7 +1520,8 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     },
 
     focusHost(): void {
-      hostInput.focus();
+      if (__OWNCORD_WEB__ && fixedHost !== undefined) usernameInput.focus();
+      else hostInput.focus();
     },
 
     destroy(): void {

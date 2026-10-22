@@ -20,8 +20,9 @@ export async function saveCredential(
   token: string,
   password?: string,
   clearPassword = false,
+  sessionOnly?: boolean,
 ): Promise<boolean> {
-  return desktop.credentials.save(host, username, token, password, clearPassword);
+  return desktop.credentials.save(host, username, token, password, clearPassword, sessionOnly);
 }
 
 /**
@@ -35,10 +36,15 @@ export async function saveCredential(
  * is supplied. This used to carry the session's plaintext password purely so
  * that omitting it would not wipe the saved one — the reason the password was
  * returned over IPC at all.
+ *
+ * `onSaveFailed` (the web portal only) runs when the re-save answers false: a
+ * browser save that moves the token can drop the old copy and still fail, which
+ * leaves the user with no stored sign-in, so the caller must say so.
  */
 export function createUserUpdateCredentialSaver(
   host: string,
   rememberPassword: boolean,
+  onSaveFailed?: () => void,
 ): (payload: { readonly user_id: number; readonly username: string }) => void {
   return (payload) => {
     if (!rememberPassword) return;
@@ -46,7 +52,15 @@ export function createUserUpdateCredentialSaver(
     if (payload.user_id !== currentUserId) return;
     const currentToken = authStore.getState().token;
     if (!currentToken) return;
-    void saveCredential(host, payload.username, currentToken);
+    const saved = saveCredential(host, payload.username, currentToken);
+    if (__OWNCORD_WEB__ && onSaveFailed !== undefined) {
+      void saved.then(
+        (ok) => {
+          if (!ok) onSaveFailed();
+        },
+        () => onSaveFailed(),
+      );
+    }
   };
 }
 
@@ -117,6 +131,8 @@ export async function loadCredential(host: string): Promise<SavedCredential | nu
 }
 
 /** Delete the credential stored for `host`. */
-export async function deleteCredential(host: string): Promise<boolean> {
-  return desktop.credentials.delete(host);
+export async function deleteCredential(host: string, token?: string): Promise<boolean> {
+  return __OWNCORD_WEB__
+    ? desktop.credentials.delete(host, token)
+    : desktop.credentials.delete(host);
 }
