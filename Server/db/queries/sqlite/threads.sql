@@ -178,3 +178,50 @@ FROM thread_tags tt
 JOIN forum_tags ft ON ft.id = tt.tag_id
 WHERE tt.thread_id IN (sqlc.slice('thread_ids'))
 ORDER BY tt.thread_id ASC, ft.position ASC, ft.id ASC;
+
+-- Thread follows (WP 6.9c, migration 079). A row is never permission: every
+-- read below is for the caller to join with the parent's visibility.
+
+-- The insert path checks the type, so a row can only name a thread. rows
+-- affected is 1 when the user was newly joined and 0 when they already were.
+-- name: JoinThread :execrows
+INSERT OR IGNORE INTO thread_members (thread_id, user_id)
+SELECT c.id, sqlc.arg(user_id) FROM channels c
+WHERE c.id = sqlc.arg(thread_id) AND c.type = 'thread';
+
+-- name: LeaveThread :execrows
+DELETE FROM thread_members WHERE thread_id = ? AND user_id = ?;
+
+-- name: IsThreadFollower :one
+SELECT EXISTS(SELECT 1 FROM thread_members WHERE thread_id = ? AND user_id = ?);
+
+-- name: ListThreadFollowerIDs :many
+SELECT user_id FROM thread_members WHERE thread_id = ? ORDER BY user_id ASC;
+
+-- The user's followed open threads with their read position, newest activity
+-- first. Unread counts stop at 100, as a channel's do.
+-- name: ListFollowedThreadStates :many
+SELECT c.id, COALESCE(c.parent_channel_id, 0) AS parent_id, c.name, c.thread_owner_id,
+       c.thread_starter_message_id, c.thread_archived, c.thread_locked,
+       c.thread_auto_archive_minutes,
+       (SELECT COUNT(*) FROM messages m
+         WHERE m.channel_id = c.id AND m.deleted = 0 AND m.kind = 0) AS message_count,
+       (SELECT MAX(m.timestamp) FROM messages m
+         WHERE m.channel_id = c.id AND m.deleted = 0) AS last_message_at,
+       c.created_at,
+       (SELECT COALESCE(MAX(m.id), 0) FROM messages m
+         WHERE m.channel_id = c.id AND m.deleted = 0) AS last_message_id,
+       COALESCE((SELECT rs.last_message_id FROM read_states rs
+                  WHERE rs.channel_id = c.id AND rs.user_id = tm.user_id), 0) AS last_read_message_id,
+       (SELECT COUNT(*) FROM (SELECT 1 FROM messages m
+         WHERE m.channel_id = c.id AND m.deleted = 0
+           AND m.id > COALESCE((SELECT rs.last_message_id FROM read_states rs
+                                 WHERE rs.channel_id = c.id AND rs.user_id = tm.user_id), 0)
+         LIMIT 100)) AS unread_count,
+       COALESCE((SELECT rs.mention_count FROM read_states rs
+                  WHERE rs.channel_id = c.id AND rs.user_id = tm.user_id), 0) AS mention_count
+FROM thread_members tm
+JOIN channels c ON c.id = tm.thread_id AND c.type = 'thread'
+WHERE tm.user_id = sqlc.arg(user_id) AND c.thread_archived = 0
+ORDER BY COALESCE(c.thread_last_activity_at, '') DESC, c.id DESC
+LIMIT sqlc.arg(row_limit);

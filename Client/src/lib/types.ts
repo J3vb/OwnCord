@@ -479,6 +479,13 @@ export interface ReadyPayload {
      * one. Absent means an older server, where `role` is the only role.
      */
     readonly multi_role?: boolean;
+    /**
+     * Content may carry `<@id>` and `<@&id>` mention tokens (WP 6.3f): the
+     * composer sends the ones the user picked, the server resolves them and
+     * lists honoured roles in `mention_roles`. Absent means an older server,
+     * where a mention is the plain `@name` text.
+     */
+    readonly id_mentions?: boolean;
   };
   readonly channels: readonly ReadyChannel[];
   /**
@@ -775,6 +782,12 @@ export interface ChatMessagePayload {
    */
   readonly mentions?: readonly number[];
   /**
+   * Role IDs this message mentions that resolved and cleared the sender's gate
+   * (WP 6.3f). Authoritative when present; absent from older servers, where
+   * the `<@&id>` tokens in `content` stand in.
+   */
+  readonly mention_roles?: readonly number[];
+  /**
    * Whether an @everyone/@here in the content cleared the sender's
    * MENTION_EVERYONE gate. A token without the bit carries no mention
    * semantics at all. Absent from older servers.
@@ -827,6 +840,8 @@ export interface ChatEditedPayload {
   readonly edited_at: string | null;
   /** Re-resolved mentions for the new content. An edit never re-notifies. */
   readonly mentions?: readonly number[];
+  /** See ChatMessagePayload.mention_roles. */
+  readonly mention_roles?: readonly number[];
   readonly mentions_everyone?: boolean;
   /** See ChatMessagePayload.mentions_here. */
   readonly mentions_here?: boolean;
@@ -1677,6 +1692,8 @@ export interface MessageResponse {
   readonly timestamp: string;
   /** Server-resolved mentioned user IDs. Absent from older servers. */
   readonly mentions?: readonly number[];
+  /** See ChatMessagePayload.mention_roles. */
+  readonly mention_roles?: readonly number[];
   readonly mentions_everyone?: boolean;
   readonly kind?: string;
   readonly call?: CallInfo;

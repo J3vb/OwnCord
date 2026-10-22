@@ -44,6 +44,8 @@ func deliveryClassCases() []deliveryClassCase {
 			map[int64]string{6: "low"}},
 		{"TypingDMEvent", TypingDMEvent{targetUserID: 2, payload: p}, classTypingDM, true,
 			map[int64]string{2: "low"}},
+		{"threadFollowEvt", threadFollowEvt{targetUserID: 2, payload: p}, classTypingDM, true,
+			map[int64]string{2: "low"}},
 		{"PresenceEvent", PresenceEvent{userID: 2, payload: p}, classPresence, true,
 			map[int64]string{1: "normal", 2: "normal", 3: "normal", 4: "normal", 6: "normal"}},
 		{"PresenceOthersEvent", PresenceOthersEvent{excludeUserID: 2, payload: p}, classPresenceOthers, true,

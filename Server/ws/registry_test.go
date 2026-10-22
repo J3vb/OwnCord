@@ -150,6 +150,7 @@ func TestHandlerRegistry_AllExpectedTypesRegistered(t *testing.T) {
 		"thread_delete",
 		"thread_focus",
 		"forum_post_create",
+		"thread_follow",
 	}
 
 	registered := r.RegisteredV2Types()
@@ -247,6 +248,7 @@ func TestAllV2Types_SmokeDispatch(t *testing.T) {
 		MsgTypeThreadDelete:      ThreadDeleteCmd{userID: 1, ThreadID: 1},
 		MsgTypeThreadFocus:       ThreadFocusCmd{userID: 1, ThreadID: 1},
 		MsgTypeForumPostCreate:   ForumPostCreateCmd{userID: 1, ChannelID: 1, Name: "p"},
+		MsgTypeThreadFollow:      ThreadFollowCmd{userID: 1, ThreadID: 1, Follow: true},
 	}
 
 	for _, typ := range r.RegisteredV2Types() {

@@ -373,7 +373,11 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
     text.appendChild(
       renderMessageContent(
         msg.content,
-        { mentions: msg.mentions, mentionsEveryone: msg.mentionsEveryone },
+        {
+          mentions: msg.mentions,
+          mentionsEveryone: msg.mentionsEveryone,
+          mentionRoles: msg.mentionRoles,
+        },
         msg.id === 0 ? undefined : `${msg.id}\u0000${msg.editedAt ?? ""}`,
       ),
     );

@@ -8,6 +8,7 @@ import (
 	"io"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // readyFields is everything one viewer's ready carries, every read done.
@@ -51,11 +52,26 @@ type readyHead struct {
 }
 
 type readyTail struct {
-	MOTD        string               `json:"motd"`
-	Notices     []readyNoticePayload `json:"notices"`
-	Roles       []*db.Role           `json:"roles"`
-	ServerName  string               `json:"server_name"`
-	VoiceStates []db.VoiceState      `json:"voice_states"`
+	MOTD       string               `json:"motd"`
+	Notices    []readyNoticePayload `json:"notices"`
+	Roles      []*db.Role           `json:"roles"`
+	ServerName string               `json:"server_name"`
+	// Threads (WP 6.9c) is the viewer's followed open threads, present
+	// whenever the server has the thread service (a pointer so an empty list
+	// still encodes as [] there while a server without it omits the key).
+	// "threads" sorts between "server_name" and "voice_states".
+	Threads     *[]readyThreadPayload `json:"threads,omitempty"`
+	VoiceStates []db.VoiceState       `json:"voice_states"`
+}
+
+// readyThreadPayload is one followed thread of ready.threads: the thread, the
+// last message in it, and the viewer's read position and counts.
+type readyThreadPayload struct {
+	Thread            *service.ThreadInfo `json:"thread"`
+	LastMessageID     int64               `json:"last_message_id"`
+	LastReadMessageID int64               `json:"last_read_message_id"`
+	UnreadCount       int64               `json:"unread_count"`
+	MentionCount      int64               `json:"mention_count"`
 }
 
 // writeReady writes the ready frame to w and returns its length.

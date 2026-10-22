@@ -175,11 +175,8 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 	// legitimate UTF-8 value at the rune bound. UpdateProfile is the one
 	// function every transport reaches (see ProfilePatch's doc comment), so
 	// the guard belongs here rather than only in the REST handler.
-	if patch.DisplayName != nil && len(*patch.DisplayName) > MaxDisplayNameLen*4 {
-		return nil, fmt.Errorf("%w: display_name must be at most %d characters", ErrBadRequest, MaxDisplayNameLen)
-	}
-	if patch.About != nil && len(*patch.About) > MaxAboutLen*4 {
-		return nil, fmt.Errorf("%w: about must be at most %d characters", ErrBadRequest, MaxAboutLen)
+	if err := checkProfileByteBounds(patch); err != nil {
+		return nil, err
 	}
 
 	// Display name is single-line visible text: collapse, character-check and
@@ -215,6 +212,9 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 	current, err := s.st.GetUserByID(ctx, userID)
 	if err != nil || current == nil {
 		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+	if err := s.checkTimedOutProfileEdit(ctx, userID, current, cleanDisplayName, patch.Username); err != nil {
+		return nil, err
 	}
 	// An empty Username means "unspecified", the same as a nil
 	// DisplayName/About pointer — merged against the current row rather
@@ -276,7 +276,7 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 	}
 	// Audit rows must survive a request canceled after the write committed.
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "profile_update", "user", userID,
-		fmt.Sprintf("username=%s", username))
+		fmt.Sprintf("username=%s", username)+displayNameAuditSuffix(current.DisplayName, displayName))
 	slog.Info("profile updated", "user_id", userID, "username", username)
 	return user, nil
 }

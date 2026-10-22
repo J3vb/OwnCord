@@ -300,7 +300,9 @@ func TestHandleThreadDelete_ModeratorOnlyAndReleasesHolders(t *testing.T) {
 	}
 
 	res := handleThreadDeleteV2(ctx, ThreadDeleteCmd{userID: e.mod, ThreadID: e.thread}, ClientInfo{UserID: e.mod}, e.deps)
-	if res.Error != nil || len(res.Events) != 2 {
+	// The note, the sequenced frame, and one following:false for the owner, who
+	// follows the thread they started (WP 6.9c).
+	if res.Error != nil || len(res.Events) != 3 {
 		t.Fatalf("moderator delete = %+v", res)
 	}
 	note, ok := res.Events[0].(threadNoteEvt)

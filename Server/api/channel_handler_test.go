@@ -185,6 +185,12 @@ CREATE TABLE IF NOT EXISTS channel_user_overrides (
     deny       INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (channel_id, user_id)
 );
+CREATE TABLE IF NOT EXISTS thread_members (
+    thread_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    joined_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    PRIMARY KEY (thread_id, user_id)
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS messages (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
