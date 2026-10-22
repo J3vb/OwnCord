@@ -89,7 +89,7 @@ import type { NativeControl as WindowControlNativeControl } from "./window.suite
 
 const failEveryTest = { expectEveryTestToFail: true };
 
-describeCredentialStoreSuite(async () => {
+const nullCredentialStore = async () => {
   const subject = {
     save: async () => undefined,
     load: async () => undefined,
@@ -102,7 +102,8 @@ describeCredentialStoreSuite(async () => {
     unavailable: () => undefined,
   };
   return { subject, native };
-}, failEveryTest);
+};
+describeCredentialStoreSuite(nullCredentialStore, failEveryTest);
 
 describeIdentityStoreSuite(async () => {
   const subject = {
@@ -215,7 +216,7 @@ describeHttpClientSuite(async () => {
   return { subject, native };
 }, failEveryTest);
 
-describeSocketTransportSuite(async () => {
+const nullSocketTransport = async () => {
   const subject = {
     connect: async () => undefined,
     disconnect: async () => undefined,
@@ -242,9 +243,10 @@ describeSocketTransportSuite(async () => {
     accepted: () => [],
   };
   return { transport, subject, native };
-}, failEveryTest);
+};
+describeSocketTransportSuite(nullSocketTransport, failEveryTest);
 
-describePendingMessagesSuite(async () => {
+const nullPendingMessages = async () => {
   const subject = {
     load: async () => undefined,
     save: async () => undefined,
@@ -258,7 +260,8 @@ describePendingMessagesSuite(async () => {
     deleted: () => [],
   };
   return { subject, native };
-}, failEveryTest);
+};
+describePendingMessagesSuite(nullPendingMessages, failEveryTest);
 
 describeFileSaverSuite(async () => {
   const subject = {
@@ -496,3 +499,13 @@ describeExternalContentSuite(async () => {
   };
   return { subject, native };
 }, failEveryTest);
+
+// The browser bindings (6.13c) run three suites with a declared capability
+// difference: a token-only credential store, a transport whose host keeps
+// certificate trust itself, and a memory-only draft store. Each variant swaps
+// some cases for others, so each must fail against the null subject too. The
+// http, settings and identity bindings run their suites unchanged, which the
+// runs above already cover.
+describeCredentialStoreSuite(nullCredentialStore, { ...failEveryTest, savedPasswords: false });
+describeSocketTransportSuite(nullSocketTransport, { ...failEveryTest, certificates: false });
+describePendingMessagesSuite(nullPendingMessages, { ...failEveryTest, memoryOnly: true });
