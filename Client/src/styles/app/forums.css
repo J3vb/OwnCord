@@ -252,3 +252,60 @@
 .thread-panel-tags {
   margin-top: 2px;
 }
+
+/* Forum settings in the Edit Channel dialog (WP 6.9d-b2) */
+.forum-tag-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.forum-tag-row,
+.forum-tag-editor-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.forum-tag-row-emoji {
+  width: 64px;
+  flex: none;
+}
+.forum-tag-row-name {
+  flex: 1;
+  min-width: 0;
+}
+.forum-tag-add {
+  padding: 4px 12px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-normal);
+}
+.forum-tag-add:hover:not(:disabled) {
+  background: var(--bg-modifier-hover);
+}
+.forum-tag-add:disabled {
+  opacity: 0.5;
+}
+.forum-tag-row-btn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+}
+.forum-tag-row-btn:hover:not(:disabled) {
+  color: var(--text-normal);
+  background: var(--bg-modifier-hover);
+}
+.forum-tag-row-btn:disabled {
+  opacity: 0.35;
+}
+.forum-settings-error {
+  color: var(--text-danger);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
