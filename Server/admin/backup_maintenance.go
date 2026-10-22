@@ -31,7 +31,7 @@ import (
 //
 // The returned error feeds the maintenance loop's circuit breaker; settings
 // simply not existing (fresh DB mid-migration) is not an error.
-func MaintainBackups(ctx context.Context, database *db.DB, settings *service.SettingsService) error {
+func MaintainBackups(ctx context.Context, database *db.DB, settings *service.SettingsService, backupDir string) error {
 	schedule, err := settings.Setting(ctx, "backup_schedule")
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
@@ -43,19 +43,19 @@ func MaintainBackups(ctx context.Context, database *db.DB, settings *service.Set
 	interval := service.BackupScheduleInterval(schedule)
 	var firstErr error
 	if interval > 0 {
-		if err := runScheduledBackup(ctx, database, interval); err != nil {
+		if err := runScheduledBackup(ctx, database, backupDir, interval); err != nil {
 			slog.Warn("scheduled backup failed", "error", err)
 			firstErr = err
 		}
 	}
 
-	if err := pruneExpiredBackups(ctx, database, settings); err != nil {
+	if err := pruneExpiredBackups(ctx, database, settings, backupDir); err != nil {
 		slog.Warn("backup retention pruning failed", "error", err)
 		if firstErr == nil {
 			firstErr = err
 		}
 	}
-	pruneStaleBackupTemps()
+	pruneStaleBackupTemps(backupDir)
 	return firstErr
 }
 
@@ -69,8 +69,8 @@ const staleBackupTempAge = 24 * time.Hour
 // and the work dirs of archive builds a killed process never cleaned up.
 // BackupToSafe removes its temp on every error it returns, so only a process
 // that died mid-VACUUM leaves one, and no *.db scan would ever reclaim it.
-func pruneStaleBackupTemps() {
-	entries, err := os.ReadDir(backupBaseDir)
+func pruneStaleBackupTemps(backupDir string) {
+	entries, err := os.ReadDir(backupDir)
 	if err != nil {
 		return
 	}
@@ -86,7 +86,7 @@ func pruneStaleBackupTemps() {
 		if infoErr != nil || !info.ModTime().Before(cutoff) {
 			continue
 		}
-		path := filepath.Join(backupBaseDir, e.Name())
+		path := filepath.Join(backupDir, e.Name())
 		if rmErr := os.RemoveAll(path); rmErr != nil {
 			slog.Warn("backup maintenance: failed to remove stale backup temp", "path", path, "error", rmErr)
 			continue
@@ -100,8 +100,8 @@ func pruneStaleBackupTemps() {
 
 // runScheduledBackup takes a backup when the newest existing one is older
 // than interval (or none exists).
-func runScheduledBackup(ctx context.Context, database *db.DB, interval time.Duration) error {
-	newest, _, err := scanBackups()
+func runScheduledBackup(ctx context.Context, database *db.DB, backupDir string, interval time.Duration) error {
+	newest, _, err := scanBackups(backupDir)
 	if err != nil {
 		return err
 	}
@@ -109,14 +109,14 @@ func runScheduledBackup(ctx context.Context, database *db.DB, interval time.Dura
 		return nil
 	}
 
-	if err := os.MkdirAll(backupBaseDir, 0o750); err != nil {
+	if err := os.MkdirAll(backupDir, 0o750); err != nil {
 		return fmt.Errorf("creating backup dir: %w", err)
 	}
 	// VACUUM INTO refuses an existing destination, and the timestamp only has
 	// second resolution — suffix on collision instead of failing the tick.
 	base := "scheduled_" + time.Now().UTC().Format("20060102_150405")
 	name := base + ".db"
-	path := filepath.Join(backupBaseDir, name)
+	path := filepath.Join(backupDir, name)
 	for i := 2; ; i++ {
 		if _, err := os.Stat(path); err != nil {
 			// ENOENT is the free-slot case. Any OTHER stat error (EACCES on
@@ -129,9 +129,9 @@ func runScheduledBackup(ctx context.Context, database *db.DB, interval time.Dura
 			return fmt.Errorf("scheduled backup: no free filename after %s (tried 100 suffixes)", base)
 		}
 		name = fmt.Sprintf("%s_%d.db", base, i)
-		path = filepath.Join(backupBaseDir, name)
+		path = filepath.Join(backupDir, name)
 	}
-	if err := database.BackupToSafe(ctx, path, backupBaseDir); err != nil {
+	if err := database.BackupToSafe(ctx, path, backupDir); err != nil {
 		return err
 	}
 	if err := db.CheckBackupIntegrity(ctx, path); err != nil {
@@ -291,7 +291,7 @@ func safetyCopiesNewestFirst(entries []os.DirEntry, prefix string) []string {
 // pruneExpiredBackups deletes *.db backups whose mtime is older than the
 // backup_retention window (in days), always keeping the newest one and never
 // touching the pre_restore_* or pre_migrate_* safety copies.
-func pruneExpiredBackups(ctx context.Context, database *db.DB, settings *service.SettingsService) error {
+func pruneExpiredBackups(ctx context.Context, database *db.DB, settings *service.SettingsService, backupDir string) error {
 	retStr, err := settings.Setting(ctx, "backup_retention")
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
@@ -312,7 +312,7 @@ func pruneExpiredBackups(ctx context.Context, database *db.DB, settings *service
 		return nil
 	}
 
-	newest, entries, err := scanBackups()
+	newest, entries, err := scanBackups(backupDir)
 	if err != nil || len(entries) == 0 {
 		return err
 	}
@@ -341,8 +341,8 @@ func pruneExpiredBackups(ctx context.Context, database *db.DB, settings *service
 // NewestBackup returns the newest backup's mtime — the last successful
 // backup, since a failed one never leaves a file behind — or the zero time
 // when there is none. The admin attention panel reads it.
-func NewestBackup() (time.Time, error) {
-	newest, _, err := scanBackups()
+func NewestBackup(backupDir string) (time.Time, error) {
+	newest, _, err := scanBackups(backupDir)
 	return newest, err
 }
 
@@ -353,8 +353,8 @@ type backupFile struct {
 
 // scanBackups lists *.db files in the backup dir, returning the newest mtime
 // and all entries. A missing directory is "no backups", not an error.
-func scanBackups() (newest time.Time, files []backupFile, err error) {
-	entries, err := os.ReadDir(backupBaseDir)
+func scanBackups(backupDir string) (newest time.Time, files []backupFile, err error) {
+	entries, err := os.ReadDir(backupDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return time.Time{}, nil, nil
@@ -370,7 +370,7 @@ func scanBackups() (newest time.Time, files []backupFile, err error) {
 			continue
 		}
 		mt := info.ModTime()
-		files = append(files, backupFile{path: filepath.Join(backupBaseDir, e.Name()), mtime: mt})
+		files = append(files, backupFile{path: filepath.Join(backupDir, e.Name()), mtime: mt})
 		if mt.After(newest) {
 			newest = mt
 		}

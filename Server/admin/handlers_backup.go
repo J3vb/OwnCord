@@ -17,59 +17,11 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// backupBaseDir is the directory for backup files, resolved to an absolute
-// path at package init time so handlers don't depend on the process CWD (L14).
-// Overridden at startup via SetBackupDir with cfg.Backup.Dir.
-var backupBaseDir string
-
-func init() {
-	backupBaseDir = absOrRaw(filepath.Join("data", "backups"))
-}
-
-// SetBackupDir points every backup handler and the scheduled-backup
-// maintenance at the operator-configured directory. Call once at startup with
-// cfg.Backup.Dir (main.go, next to SetDatabasePath); tests use it to isolate
-// a temp dir. Mirrors SetDatabasePath: without it, a configured backup.dir
-// would be ignored while backups keep landing in the default location.
-func SetBackupDir(dir string) {
-	if dir == "" {
-		return
-	}
-	backupBaseDir = absOrRaw(dir)
-}
-
-// BackupDir is the resolved backup directory SetBackupDir configured.
-func BackupDir() string { return backupBaseDir }
-
-func absOrRaw(p string) string {
-	if abs, err := filepath.Abs(p); err == nil {
-		return abs
-	}
-	return p
-}
-
-// dbFilePath is the live SQLite database file that "Restore backup" stages a
-// copy beside. It defaults to the historical "data/chatserver.db" but must be
-// pointed at cfg.Database.Path via SetDatabasePath before the server starts
-// serving requests (main.go, right after db.Open): without that call, a
-// server configured with a non-default database.path would open its real
-// database at cfg.Database.Path while restore keeps staging backups beside an
-// unrelated (possibly newly created) file at the default path, reporting
-// success while the live database is never replaced.
-var dbFilePath = filepath.Join("data", "chatserver.db")
-
-// SetDatabasePath points the restore handler at the SQLite file the server
-// actually opened. Call once at startup with cfg.Database.Path; tests use it
-// to point restore at an isolated temp file.
-func SetDatabasePath(path string) {
-	dbFilePath = path
-}
-
 // ─── Backup Handlers ─────────────────────────────────────────────────────────
 
-func handleBackup(database *db.DB) http.Handler {
+func handleBackup(database *db.DB, paths backupPaths) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		backupDir := backupBaseDir
+		backupDir := paths.dir
 		if err := os.MkdirAll(backupDir, 0o750); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create backup directory")
 			return
@@ -82,8 +34,8 @@ func handleBackup(database *db.DB) http.Handler {
 		// the VACUUM on the reader pool and publishes the result with an
 		// atomic rename, so an interrupted backup leaves a .tmp the listing
 		// ignores rather than a truncated .db it would present as restorable.
-		// It is rooted at the configured backup dir (SetBackupDir), not the
-		// historical hardcoded default.
+		// It is rooted at the configured backup dir (SetupOptions.BackupDir), not
+		// the historical hardcoded default.
 		if err := database.BackupToSafe(context.WithoutCancel(r.Context()), backupPath, backupDir); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "backup failed")
 			return
@@ -118,9 +70,9 @@ type backupEntry struct {
 	Date string `json:"date"`
 }
 
-func handleListBackups() http.HandlerFunc {
+func handleListBackups(paths backupPaths) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		backupDir := backupBaseDir
+		backupDir := paths.dir
 		entries, err := os.ReadDir(backupDir)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -160,23 +112,23 @@ func handleListBackups() http.HandlerFunc {
 // resolveBackupName reads the {name} path parameter and joins it onto the
 // backup directory, refusing a name that could leave it. On false it has
 // already written the 400.
-func resolveBackupName(w http.ResponseWriter, r *http.Request) (string, string, bool) {
+func resolveBackupName(w http.ResponseWriter, r *http.Request, backupDir string) (string, string, bool) {
 	name := chi.URLParam(r, "name")
 	if name == "" || strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid backup name")
 		return "", "", false
 	}
-	target := filepath.Join(backupBaseDir, name)
-	if !strings.HasPrefix(target, backupBaseDir+string(filepath.Separator)) {
+	target := filepath.Join(backupDir, name)
+	if !strings.HasPrefix(target, backupDir+string(filepath.Separator)) {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid backup name")
 		return "", "", false
 	}
 	return name, target, true
 }
 
-func handleDeleteBackup(database *db.DB) http.Handler {
+func handleDeleteBackup(database *db.DB, paths backupPaths) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		name, target, ok := resolveBackupName(w, r)
+		name, target, ok := resolveBackupName(w, r, paths.dir)
 		if !ok {
 			return
 		}
@@ -238,9 +190,9 @@ const restoreCarryTimeout = 10 * time.Second
 // never writes over the open database: the staged copy and a marker (written
 // last) are applied by db.ApplyStagedRestore before the database opens again,
 // and the restart goes through the normal shutdown path.
-func handleRestoreBackup(database *db.DB) http.Handler {
+func handleRestoreBackup(database *db.DB, paths backupPaths) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		name, target, ok := resolveBackupName(w, r)
+		name, target, ok := resolveBackupName(w, r, paths.dir)
 		if !ok {
 			return
 		}
@@ -265,7 +217,7 @@ func handleRestoreBackup(database *db.DB) http.Handler {
 			return
 		}
 
-		dbPath := dbFilePath
+		dbPath := paths.dbFile
 		ctx := context.WithoutCancel(r.Context())
 
 		actor := actorFromContext(r)
@@ -279,10 +231,10 @@ func handleRestoreBackup(database *db.DB) http.Handler {
 		}
 
 		// Safety: create a pre-restore backup first. WithoutCancel: the safety
-		// copy must not be skippable by a canceled request ctx. backupBaseDir,
+		// copy must not be skippable by a canceled request ctx. paths.dir,
 		// not a cwd-relative path, so it lands beside the rest of the backups.
-		preRestore := filepath.Join(backupBaseDir, PreRestoreBackupPrefix+time.Now().UTC().Format("20060102_150405")+".db")
-		if err := database.BackupToSafe(ctx, preRestore, backupBaseDir); err != nil {
+		preRestore := filepath.Join(paths.dir, PreRestoreBackupPrefix+time.Now().UTC().Format("20060102_150405")+".db")
+		if err := database.BackupToSafe(ctx, preRestore, paths.dir); err != nil {
 			// Fail closed. The admin panel promises "a pre-restore backup will
 			// be created"; proceeding without one takes away the safety net the
 			// operator was shown, exactly when they need it.
@@ -340,8 +292,8 @@ func handleRestoreBackup(database *db.DB) http.Handler {
 		// restores from a pre_restore_ copy). A prune failure is logged and
 		// never changes the outcome. The staged copy is not in backup.dir, so
 		// it can never be pruned.
-		if removed, pruneErr := PruneSafetyCopies(backupBaseDir, SafetyCopiesKept, preRestore, target); pruneErr != nil {
-			slog.Warn("could not prune old safety copies", "dir", backupBaseDir, "error", pruneErr)
+		if removed, pruneErr := PruneSafetyCopies(paths.dir, SafetyCopiesKept, preRestore, target); pruneErr != nil {
+			slog.Warn("could not prune old safety copies", "dir", paths.dir, "error", pruneErr)
 		} else if len(removed) > 0 {
 			slog.Info("pruned old safety copies", "count", len(removed), "names", removed)
 		}

@@ -32,6 +32,15 @@ type SetupOptions struct {
 	// leaves the endpoints answering 503, which is the direct-construction
 	// test path and the one place no *slog.LevelVar exists to retune.
 	LogLevel *LogLevelController
+	// BackupDir is the directory the backup, restore and archive handlers use
+	// (cfg.Backup.Dir). Empty keeps the default, data/backups, resolved to an
+	// absolute path when the API is built.
+	BackupDir string
+	// DatabasePath is the SQLite file "Restore backup" stages a copy beside
+	// (cfg.Database.Path). Empty keeps the historical data/chatserver.db. Without
+	// the real path, a server with a non-default database.path would report a
+	// restore staged while its live database is never replaced.
+	DatabasePath string
 	// Background is the app's request-path job group (ARCH-034). The update
 	// apply tail runs on it, so a shutdown aborts the countdown and joins the
 	// tail before the database closes. Nil runs the tail on an unowned group
