@@ -12,6 +12,10 @@
  *     server's) drops its mentions but never the DMs: a DM is a person writing
  *     to you, not server chatter.
  *
+ *   - a followed thread contributes its mentions, judged by its parent: the
+ *     parent must be a channel the reader still lists, and a parent at
+ *     `nothing` drops them (WP 6.9c).
+ *
  * The count is pushed to the native host when it changes, and again when the
  * window is shown or focused (Windows drops the overlay when the taskbar
  * button is recreated), so a message that does not move it costs no IPC call.
@@ -19,6 +23,7 @@
 
 import { channelsStore } from "../../stores/channels.store";
 import { dmStore } from "../../stores/dm.store";
+import { followedThreadsStore } from "../../stores/followedThreads.store";
 import { isChannelMuted } from "../../lib/channel-mutes";
 import { channelLevelResolver } from "../../lib/notificationLevel";
 import { Disposable } from "../../lib/disposable";
@@ -42,6 +47,11 @@ export function unreadBadgeCount(): number {
     // Muted or not, a guild channel's mentions count: "excluding muted
     // channels" in D6 excludes their plain unread, never their mentions.
     if (ch.type !== "dm" && levelOf(ch.id) !== "nothing") count += ch.mentionCount;
+  }
+  const channels = channelsStore.getState().channels;
+  for (const [parentId, rows] of followedThreadsStore.getState().byParent) {
+    if (!channels.has(parentId) || levelOf(parentId) === "nothing") continue;
+    for (const row of rows) count += row.mentions;
   }
   for (const dm of dmStore.getState().channels) {
     count += isChannelMuted(dm.channelId) ? dm.mentionCount : dm.unreadCount;
@@ -75,6 +85,7 @@ export function startUnreadBadge(badge: Pick<Notifier, "setUnreadBadge">): () =>
 
   owner.addCleanup(channelsStore.subscribe(sync));
   owner.addCleanup(dmStore.subscribe(sync));
+  owner.addCleanup(followedThreadsStore.subscribe(sync));
   // Mutes and the notification level are prefs; every write announces itself.
   window.addEventListener("owncord:pref-change", sync, { signal: owner.signal });
   window.addEventListener("focus", resync, { signal: owner.signal });

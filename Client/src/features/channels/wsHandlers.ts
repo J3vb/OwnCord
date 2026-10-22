@@ -29,7 +29,7 @@ import { dmStore, updateDmParticipant } from "../../stores/dm.store";
 import { emojiStore, setCustomEmoji } from "../../stores/emoji.store";
 import { uiStore } from "../../stores/ui.store";
 import { getChannelMessages } from "../../stores/messages.store";
-import { isTextLikeChannel } from "../../lib/types";
+import { isTextLikeChannel, type ChannelActivityEntry } from "../../lib/types";
 import { loadLastChannel } from "../../lib/last-channel";
 import {
   acceptReadState,
@@ -47,7 +47,16 @@ import {
   readPointerEnabled,
 } from "../../lib/serverCapabilities";
 import { showToast } from "../../lib/toast";
-import { notifyChannelActivity, notifyMention } from "../../lib/notifications";
+import {
+  notifyChannelActivity,
+  notifyMention,
+  type ThreadNotifyContext,
+} from "../../lib/notifications";
+import {
+  loadedThreadsStore,
+  threadsStoreInUse,
+  withThreadsStore,
+} from "../../stores/threadsLoader";
 import type { DispatchApi, Payload } from "../connection/dispatchContext";
 import { log } from "../connection/dispatchContext";
 import { connectText } from "../../i18n/connect";
@@ -201,7 +210,19 @@ export function handleReadState(payload: Payload<"read_state">): void {
   if (!hasReceivedReady()) return;
   const id = payload.channel_id;
   const ch = channelsStore.getState().channels.get(id);
-  if (ch === undefined && !dmStore.getState().channels.some((c) => c.channelId === id)) return;
+  if (ch === undefined && !dmStore.getState().channels.some((c) => c.channelId === id)) {
+    // A followed thread's pointer moved (another device read it).
+    if (threadsStoreInUse()) {
+      withThreadsStore((m) =>
+        m.applyFollowedReadState(id, {
+          lastReadId: payload.last_read_message_id,
+          unread: payload.unread_count,
+          mentions: payload.mention_count,
+        }),
+      );
+    }
+    return;
+  }
   if (!acceptReadState(id, payload.last_read_message_id)) return;
   // Not a channel just marked unread: that one keeps its counts, or the click
   // would leave no badge once the reader leaves.
@@ -330,7 +351,11 @@ export function handleNsfwAck(payload: Payload<"nsfw_ack">): void {
  */
 export function handleMentionCount(payload: Payload<"mention_count">): void {
   const ch = channelsStore.getState().channels.get(payload.channel_id);
-  if (ch === undefined || ch.type === "dm") return;
+  if (ch === undefined) {
+    if (threadsStoreInUse()) withThreadsStore((m) => handleThreadMentionCount(m, payload));
+    return;
+  }
+  if (ch.type === "dm") return;
   if (payload.channel_id === channelsStore.getState().activeChannelId) {
     if (!isChannelAway(payload.channel_id)) return;
     setMentionCount(payload.channel_id, Math.min(ch.mentionCount, payload.count));
@@ -348,6 +373,30 @@ export function handleMentionCount(payload: Payload<"mention_count">): void {
   if (payload.count > previous) deferMentionAlert(payload.channel_id, payload.count - previous);
   else if (payload.count < previous)
     withdrawMentionAlert(payload.channel_id, previous - payload.count);
+}
+
+/** A followed thread's mention_count: the total repaints its row, a rise alerts like a channel's. */
+function handleThreadMentionCount(
+  m: NonNullable<ReturnType<typeof loadedThreadsStore>>,
+  payload: Payload<"mention_count">,
+): void {
+  const previous = m.setFollowedMentions(payload.channel_id, payload.count);
+  if (previous === undefined) return;
+  if (payload.count > previous) deferMentionAlert(payload.channel_id, payload.count - previous);
+  else if (payload.count < previous)
+    withdrawMentionAlert(payload.channel_id, previous - payload.count);
+}
+
+/** Who an alert for `id` is for when `id` is a followed thread: its parent, name and whether it is open. */
+function threadNotifyContext(id: number): ThreadNotifyContext | undefined {
+  const m = loadedThreadsStore();
+  const t = m?.getThread(id);
+  if (m === null || t === undefined) return undefined;
+  return {
+    parentId: t.parent_id,
+    name: t.name,
+    watching: m.threadsStore.getState().focusedThreadId === id,
+  };
 }
 
 /**
@@ -405,7 +454,9 @@ function deferMentionAlert(channelId: number, rises: number): void {
     owed,
     timer: setTimeout(() => {
       pendingMentionAlerts.delete(channelId);
-      notifyMention(channelId);
+      const thread = threadNotifyContext(channelId);
+      if (thread === undefined) notifyMention(channelId);
+      else notifyMention(channelId, thread);
     }, MENTION_ALERT_GRACE_MS),
   });
 }
@@ -474,13 +525,29 @@ export function handleChannelActivity(payload: Payload<"channel_activity">): voi
   for (const entry of payload.channels) {
     if (entry.channel_id === activeId) continue;
     const ch = channelsStore.getState().channels.get(entry.channel_id);
-    if (ch === undefined || ch.type === "dm") continue;
+    if (ch === undefined) {
+      // Not a channel: a followed thread's hint (the server sends them to
+      // followers only), or a DM's, which the thread store ignores.
+      if (threadsStoreInUse()) withThreadsStore((m) => handleThreadActivity(m, entry));
+      continue;
+    }
+    if (ch.type === "dm") continue;
     if (ch.lastMessageId !== null && entry.message_id <= ch.lastMessageId) continue;
     if (entry.message_id <= newestLoadedId(entry.channel_id)) continue;
     noteChannelMessage(entry.channel_id, entry.message_id, false);
     if (entry.mentions_you || entry.mentions_everyone) matchMentionEntry(entry.channel_id);
     notifyChannelActivity(entry);
   }
+}
+
+/** A followed thread's activity entry: counted on its row, then announced as its parent would. */
+function handleThreadActivity(
+  m: NonNullable<ReturnType<typeof loadedThreadsStore>>,
+  entry: ChannelActivityEntry,
+): void {
+  if (!m.noteFollowedActivity(entry.channel_id, entry.message_id)) return;
+  if (entry.mentions_you || entry.mentions_everyone) matchMentionEntry(entry.channel_id);
+  notifyChannelActivity(entry, threadNotifyContext(entry.channel_id));
 }
 
 export function handleChannelDelete(payload: Payload<"channel_delete">): void {

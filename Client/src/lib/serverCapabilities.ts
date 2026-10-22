@@ -21,6 +21,7 @@ export interface ReadyCapabilityFlags {
   readonly multi_role?: boolean;
   readonly manage_nicknames?: boolean;
   readonly id_mentions?: boolean;
+  readonly thread_follows?: boolean;
 }
 
 /** The last full `ready`'s capabilities; null until one arrives. */
@@ -123,4 +124,13 @@ export function manageNicknamesEnabled(): boolean {
  */
 export function idMentionsEnabled(): boolean {
   return caps?.id_mentions === true;
+}
+
+/**
+ * Whether the server lets a member follow a thread (WP 6.9c): `thread_follow`,
+ * `thread_follow_update` and `ready.threads`. False hides the panel's Follow
+ * toggle and the sidebar's thread rows.
+ */
+export function threadFollowsEnabled(): boolean {
+  return caps?.thread_follows === true && caps.threads === true;
 }
