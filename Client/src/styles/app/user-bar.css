@@ -440,3 +440,13 @@
 .self-profile-card .spc-durations[hidden] {
   display: none;
 }
+
+@media (pointer: coarse) {
+  .user-bar .ub-controls button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .user-bar .ub-profile-btn {
+    min-height: 44px;
+  }
+}

@@ -429,17 +429,22 @@ SELECT c.id, COALESCE(c.parent_channel_id, 0) AS parent_id, c.name, c.thread_own
 FROM channels c
 WHERE c.parent_channel_id = ?1 AND c.type = 'thread'
   AND c.thread_archived = ?2
-  AND (CAST(?3 AS INTEGER) = 0
-       OR COALESCE(c.thread_last_activity_at, '') < CAST(?4 AS TEXT)
-       OR (COALESCE(c.thread_last_activity_at, '') = CAST(?4 AS TEXT)
-           AND c.id < CAST(?3 AS INTEGER)))
+  AND (CAST(?3 AS INTEGER) = 1
+       OR EXISTS (SELECT 1 FROM thread_tags tt
+                  WHERE tt.thread_id = c.id AND instr(CAST(?4 AS TEXT), ',' || tt.tag_id || ',') > 0))
+  AND (CAST(?5 AS INTEGER) = 0
+       OR COALESCE(c.thread_last_activity_at, '') < CAST(?6 AS TEXT)
+       OR (COALESCE(c.thread_last_activity_at, '') = CAST(?6 AS TEXT)
+           AND c.id < CAST(?5 AS INTEGER)))
 ORDER BY COALESCE(c.thread_last_activity_at, '') DESC, c.id DESC
-LIMIT ?5
+LIMIT ?7
 `
 
 type ListThreadInfosByParentParams struct {
 	ParentID       *int64 `json:"parentId"`
 	Archived       int64  `json:"archived"`
+	NoTagFilter    int64  `json:"noTagFilter"`
+	TagIds         string `json:"tagIds"`
 	BeforeID       int64  `json:"beforeId"`
 	BeforeActivity string `json:"beforeActivity"`
 	RowLimit       int64  `json:"rowLimit"`
@@ -463,11 +468,15 @@ type ListThreadInfosByParentRow struct {
 // Newest activity first, a keyset page on (thread_last_activity_at, id). The
 // cursor is the (before_activity, before_id) pair read off the previous page's
 // last row, never re-read from the table, so a post in that thread between
-// pages cannot move the page. before_id 0 is the first page.
+// pages cannot move the page. before_id 0 is the first page. tag_ids is a
+// comma-wrapped list such as ',3,7,' matched any-of (forum posts), and
+// no_tag_filter 1 skips it.
 func (q *Queries) ListThreadInfosByParent(ctx context.Context, arg ListThreadInfosByParentParams) ([]ListThreadInfosByParentRow, error) {
 	rows, err := q.db.QueryContext(ctx, listThreadInfosByParent,
 		arg.ParentID,
 		arg.Archived,
+		arg.NoTagFilter,
+		arg.TagIds,
 		arg.BeforeID,
 		arg.BeforeActivity,
 		arg.RowLimit,
@@ -479,6 +488,99 @@ func (q *Queries) ListThreadInfosByParent(ctx context.Context, arg ListThreadInf
 	items := []ListThreadInfosByParentRow{}
 	for rows.Next() {
 		var i ListThreadInfosByParentRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ParentID,
+			&i.Name,
+			&i.ThreadOwnerID,
+			&i.ThreadStarterMessageID,
+			&i.ThreadArchived,
+			&i.ThreadLocked,
+			&i.ThreadAutoArchiveMinutes,
+			&i.MessageCount,
+			&i.LastMessageAt,
+			&i.CreatedAt,
+			&i.ActivityAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listThreadInfosByParentCreated = `-- name: ListThreadInfosByParentCreated :many
+SELECT c.id, COALESCE(c.parent_channel_id, 0) AS parent_id, c.name, c.thread_owner_id,
+       c.thread_starter_message_id, c.thread_archived, c.thread_locked,
+       c.thread_auto_archive_minutes,
+       (SELECT COUNT(*) FROM messages m
+         WHERE m.channel_id = c.id AND m.deleted = 0 AND m.kind = 0) AS message_count,
+       (SELECT MAX(m.timestamp) FROM messages m
+         WHERE m.channel_id = c.id AND m.deleted = 0) AS last_message_at,
+       c.created_at,
+       COALESCE(c.thread_last_activity_at, '') AS activity_at
+FROM channels c
+WHERE c.parent_channel_id = ?1 AND c.type = 'thread'
+  AND c.thread_archived = ?2
+  AND (CAST(?3 AS INTEGER) = 1
+       OR EXISTS (SELECT 1 FROM thread_tags tt
+                  WHERE tt.thread_id = c.id AND instr(CAST(?4 AS TEXT), ',' || tt.tag_id || ',') > 0))
+  AND (CAST(?5 AS INTEGER) = 0 OR c.id < CAST(?5 AS INTEGER))
+ORDER BY c.id DESC
+LIMIT ?6
+`
+
+type ListThreadInfosByParentCreatedParams struct {
+	ParentID    *int64 `json:"parentId"`
+	Archived    int64  `json:"archived"`
+	NoTagFilter int64  `json:"noTagFilter"`
+	TagIds      string `json:"tagIds"`
+	BeforeID    int64  `json:"beforeId"`
+	RowLimit    int64  `json:"rowLimit"`
+}
+
+type ListThreadInfosByParentCreatedRow struct {
+	ID                       int64       `json:"id"`
+	ParentID                 int64       `json:"parentId"`
+	Name                     string      `json:"name"`
+	ThreadOwnerID            *int64      `json:"threadOwnerId"`
+	ThreadStarterMessageID   *int64      `json:"threadStarterMessageId"`
+	ThreadArchived           int64       `json:"threadArchived"`
+	ThreadLocked             int64       `json:"threadLocked"`
+	ThreadAutoArchiveMinutes int64       `json:"threadAutoArchiveMinutes"`
+	MessageCount             int64       `json:"messageCount"`
+	LastMessageAt            interface{} `json:"lastMessageAt"`
+	CreatedAt                string      `json:"createdAt"`
+	ActivityAt               string      `json:"activityAt"`
+}
+
+// The same page in creation order (sort=created): newest id first, a keyset
+// page on id alone. Ids only grow, so id order is creation order. tag_ids is
+// a comma-wrapped list such as ',3,7,' matched any-of, and
+// no_tag_filter 1 skips it. (Not sqlc.slice: its bare ? placeholders collide
+// with the reused numbered ones.) before_id 0 is the first page.
+func (q *Queries) ListThreadInfosByParentCreated(ctx context.Context, arg ListThreadInfosByParentCreatedParams) ([]ListThreadInfosByParentCreatedRow, error) {
+	rows, err := q.db.QueryContext(ctx, listThreadInfosByParentCreated,
+		arg.ParentID,
+		arg.Archived,
+		arg.NoTagFilter,
+		arg.TagIds,
+		arg.BeforeID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListThreadInfosByParentCreatedRow{}
+	for rows.Next() {
+		var i ListThreadInfosByParentCreatedRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ParentID,

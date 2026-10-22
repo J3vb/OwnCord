@@ -280,6 +280,9 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
         runGlobal(e, "toggle-camera", handlers.onToggleCamera);
         break;
       case "toggleScreenshare":
+        if (__OWNCORD_WEB__ && typeof navigator.mediaDevices?.getDisplayMedia !== "function") {
+          break;
+        }
         runGlobal(e, "toggle-screenshare", () => handlers.onToggleScreenshare?.());
         break;
       case "disconnect":

@@ -15,7 +15,7 @@
   position: absolute;
   /* Drops down below the chat header, so the header's pin button stays
      clickable to close it (the member column puts that button under it). */
-  top: var(--header-height, 48px);
+  top: calc(var(--header-height, 48px) + env(safe-area-inset-top));
   right: 0;
   z-index: 200;
   width: 420px;

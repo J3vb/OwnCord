@@ -38,7 +38,7 @@
   .member-column {
     position: fixed;
     /* Below the chat header, so its Member List toggle stays clickable. */
-    top: var(--header-height, 48px);
+    top: calc(var(--header-height, 48px) + env(safe-area-inset-top));
     bottom: 0;
     right: 0;
     /* Beats the width MemberColumn sets inline for the in-flow column. */
@@ -313,4 +313,23 @@
 }
 .member-item.offline .mi-avatar {
   filter: saturate(0.3);
+}
+
+@media (max-width: 899px) {
+  .member-column {
+    padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) 0;
+  }
+}
+/* Phones: the overlay takes the whole width. */
+@media (max-width: 600px) {
+  .member-column {
+    width: 100% !important;
+  }
+}
+
+@media (pointer: coarse) {
+  .member-item {
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
 }

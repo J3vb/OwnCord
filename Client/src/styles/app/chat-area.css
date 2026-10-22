@@ -675,3 +675,13 @@
   overflow-wrap: anywhere;
   color: var(--text-normal);
 }
+
+@media (pointer: coarse) {
+  .chat-header .ch-tools {
+    align-items: center;
+  }
+  .chat-header .ch-tools button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}

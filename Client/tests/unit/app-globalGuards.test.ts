@@ -11,6 +11,7 @@ const guardMaskedLink = vi.hoisted(() => vi.fn());
 const showToast = vi.hoisted(() => vi.fn());
 const warn = vi.hoisted(() => vi.fn());
 const installFileDropGuard = vi.hoisted(() => vi.fn());
+const installTouchInput = vi.hoisted(() => vi.fn());
 
 vi.mock("../../src/platform/desktop", () => ({
   desktop: { urlOpener: { open }, devTools: { open: devToolsOpen } },
@@ -21,6 +22,7 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() }),
 }));
 vi.mock("@components/MaskedLinkGuard", () => ({ guardMaskedLink }));
+vi.mock("@lib/touchInput", () => ({ installTouchInput }));
 
 import { installGlobalGuards } from "../../src/app/globalGuards";
 import { connectText } from "../../src/i18n/connect";
@@ -163,5 +165,43 @@ describe("installGlobalGuards", () => {
     expect(showToast).toHaveBeenCalledExactlyOnceWith(connectText("link.openFailed"), "error");
     expect(guardMaskedLink).not.toHaveBeenCalled();
     vi.doUnmock("@components/MaskedLinkGuard");
+  });
+
+  describe("touch input", () => {
+    function stubPointer(coarse: boolean): void {
+      vi.stubGlobal(
+        "matchMedia",
+        vi.fn((q: string) => ({ matches: coarse && q === "(any-pointer: coarse)" })),
+      );
+    }
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("loads and installs the touch module when a coarse pointer exists", async () => {
+      stubPointer(true);
+      installGlobalGuards();
+      await vi.waitFor(() => expect(installTouchInput).toHaveBeenCalledOnce());
+      expect(installTouchInput.mock.calls[0]![0]).toBeInstanceOf(AbortSignal);
+    });
+
+    it("never loads it on a fine-pointer device", async () => {
+      stubPointer(false);
+      installGlobalGuards();
+      await Promise.resolve();
+      expect(installTouchInput).not.toHaveBeenCalled();
+    });
+
+    it("logs and ignores a failed chunk load", async () => {
+      stubPointer(true);
+      vi.resetModules();
+      vi.doMock("@lib/touchInput", () => {
+        throw new Error("chunk failed");
+      });
+      const fresh = await import("../../src/app/globalGuards");
+      expect(() => fresh.installGlobalGuards()).not.toThrow();
+      await vi.waitFor(() =>
+        expect(warn).toHaveBeenCalledWith("touch input failed to load", expect.any(Error)),
+      );
+      vi.doMock("@lib/touchInput", () => ({ installTouchInput }));
+    });
   });
 });

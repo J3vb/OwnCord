@@ -243,3 +243,9 @@
 .dm-item .dm-mention-badge {
   background: var(--danger-fill);
 }
+
+@media (pointer: coarse) {
+  .dm-item {
+    min-height: 44px;
+  }
+}

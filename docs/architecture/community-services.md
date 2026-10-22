@@ -122,7 +122,7 @@ data class is the tag: a name and an optional emoji owned by the forum, editable
 only with MANAGE_CHANNELS, carrying no personal data, and deleted with the forum.
 A post's tag links go with the post or the tag. A client that did not declare the
 `forums` feature is sent no forum row, so an NSFW-labelled forum's name and topic
-reach only sockets that can read it and render it. A post is created by `forum_post_create` (WP 6.9d-a2): the title, tags and opening message are the same content classes as a thread name and a message, and a client without the feature is sent no frame about a post. It adds no other data class.
+reach only sockets that can read it and render it. A post is created by `forum_post_create` (WP 6.9d-a2): the title, tags and opening message are the same content classes as a thread name and a message, and a client without the feature is sent no frame about a post. It adds no other data class. The post list (WP 6.9d-a3) is the thread list route with `sort`, repeatable `tag` and a per-sort cursor; it reads the same content under the channel's read gate and adds no data class.
 
 **Amended 2026-10-21 (category permissions):** `076_category_permissions.sql` adds
 `category_overrides`, `category_user_overrides` and `channels.permissions_synced`
