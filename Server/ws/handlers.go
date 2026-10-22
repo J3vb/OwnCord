@@ -349,6 +349,10 @@ func (h *Hub) applySetChannelID(c *Client, newChID int64) {
 	if newChID <= 0 {
 		return
 	}
+	if h.refusesForumTopic(c, newChID) {
+		h.unwindChannelFocus(c, newChID)
+		return
+	}
 	h.pubsub.Subscribe(c, ChannelTopic(newChID))
 	// The re-validation is permissions.CanAdmitSession — the same predicate
 	// as HandleChannelFocus's admission gate (S-12): DMs are participant-gated
@@ -364,6 +368,11 @@ func (h *Hub) applySetChannelID(c *Client, newChID int64) {
 		return
 	}
 	if ch != nil {
+		// A socket without the forums feature never holds a forum's topic.
+		if ch.Type == channelTypeForum && !c.features.forums {
+			h.unwindChannelFocus(c, newChID)
+			return
+		}
 		sub, subErr := h.subjectFor(c.ctx, c.userID, newChID)
 		if subErr != nil {
 			return
@@ -380,9 +389,14 @@ func (h *Hub) applySetChannelID(c *Client, newChID int64) {
 			return
 		}
 	}
-	h.pubsub.Unsubscribe(c, ChannelTopic(newChID))
+	h.unwindChannelFocus(c, newChID)
+}
+
+// unwindChannelFocus drops the topic and the slot a refused focus took.
+func (h *Hub) unwindChannelFocus(c *Client, chID int64) {
+	h.pubsub.Unsubscribe(c, ChannelTopic(chID))
 	c.mu.Lock()
-	if c.channelID == newChID {
+	if c.channelID == chID {
 		c.channelID = 0
 	}
 	c.mu.Unlock()

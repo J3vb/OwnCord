@@ -109,3 +109,42 @@ LIMIT sqlc.arg(row_limit);
 UPDATE channels SET thread_archived = 1
 WHERE id = sqlc.arg(id) AND type = 'thread' AND thread_archived = 0 AND thread_last_activity_at IS NOT NULL
   AND CAST(strftime('%s', thread_last_activity_at) AS INTEGER) + thread_auto_archive_minutes * 60 <= CAST(sqlc.arg(now_unix) AS INTEGER);
+
+-- Forum posts (WP 6.9d). A post is a thread under a forum with no starter;
+-- InsertThread writes it with a NULL starter_message_id.
+
+-- name: SetThreadPostMessage :execrows
+UPDATE channels SET thread_post_message_id = sqlc.arg(message_id)
+WHERE id = sqlc.arg(id) AND type = 'thread' AND thread_post_message_id IS NULL;
+
+-- name: IsForumChannel :one
+SELECT EXISTS(SELECT 1 FROM channels WHERE id = ? AND type = 'forum');
+
+-- name: CountForumTagsIn :one
+SELECT COUNT(*) FROM forum_tags
+WHERE forum_id = sqlc.arg(forum_id) AND id IN (sqlc.slice('tag_ids'));
+
+-- name: InsertThreadTag :exec
+INSERT INTO thread_tags (thread_id, tag_id) VALUES (?, ?);
+
+-- name: DeleteThreadTags :exec
+DELETE FROM thread_tags WHERE thread_id = ?;
+
+-- The opening message of each listed post. Only threads whose parent is a
+-- forum match, so a text-channel thread never carries a post block.
+-- name: ListThreadPosts :many
+SELECT c.id AS thread_id, c.thread_post_message_id AS post_message_id,
+       m.user_id AS author_id, COALESCE(m.content, '') AS content,
+       COALESCE(m.deleted, 0) AS deleted,
+       EXISTS(SELECT 1 FROM attachments a WHERE a.message_id = c.thread_post_message_id) AS has_attachments
+FROM channels c
+JOIN channels p ON p.id = c.parent_channel_id AND p.type = 'forum'
+LEFT JOIN messages m ON m.id = c.thread_post_message_id
+WHERE c.type = 'thread' AND c.id IN (sqlc.slice('thread_ids'));
+
+-- name: ListThreadTagLinks :many
+SELECT tt.thread_id, tt.tag_id
+FROM thread_tags tt
+JOIN forum_tags ft ON ft.id = tt.tag_id
+WHERE tt.thread_id IN (sqlc.slice('thread_ids'))
+ORDER BY tt.thread_id ASC, ft.position ASC, ft.id ASC;

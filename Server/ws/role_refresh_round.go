@@ -41,6 +41,9 @@ type roleFrame struct {
 	channelID int64
 	remove    bool
 	msg       []byte
+	// chType is the channel's type, for a create frame: the client features
+	// are checked against it when the frame is sent (sendRoleRefreshFrames).
+	chType string
 }
 
 // roleChannels is a round's channel snapshot.
@@ -290,13 +293,6 @@ func (h *Hub) roleRefreshVerdicts(ctx context.Context, uid int64, rc *roleChanne
 	defer cancel()
 	allowed = h.heldDMs(uid, rc)
 	frames = make([]roleFrame, 0, len(rc.servers))
-	// A socket without the forums feature is sent no forum row (see
-	// client_features.go). A reconnect replaces the client with its own
-	// declaration, so the live one is read here.
-	var feat clientFeatures
-	if c := h.GetClient(uid); c != nil {
-		feat = c.features
-	}
 	for _, e := range rc.servers {
 		sub, err := h.subjectFor(ctx, uid, e.ch.ID)
 		if err != nil {
@@ -308,10 +304,7 @@ func (h *Hub) roleRefreshVerdicts(ctx context.Context, uid int64, rc *roleChanne
 			continue
 		}
 		allowed[e.ch.ID] = true
-		if !feat.allowsType(e.ch.Type) {
-			continue
-		}
-		frames = append(frames, roleFrame{channelID: e.ch.ID, msg: buildChannelCreateFor(e.ch, e.private, affordancesFor(sub))})
+		frames = append(frames, roleFrame{channelID: e.ch.ID, chType: e.ch.Type, msg: buildChannelCreateFor(e.ch, e.private, affordancesFor(sub))})
 	}
 	// A channel created after the snapshot and held by this user is resolved
 	// now, so it is kept and sent when the user may view it.
@@ -352,10 +345,7 @@ func (h *Hub) roleRefreshVerdicts(ctx context.Context, uid int64, rc *roleChanne
 			continue
 		}
 		allowed[chID] = true
-		if !feat.allowsType(ch.Type) {
-			continue
-		}
-		frames = append(frames, roleFrame{channelID: chID, msg: buildChannelCreateFor(ch, h.channelIsPrivate(ctx, chID, ch.Type), affordancesFor(sub))})
+		frames = append(frames, roleFrame{channelID: chID, chType: ch.Type, msg: buildChannelCreateFor(ch, h.channelIsPrivate(ctx, chID, ch.Type), affordancesFor(sub))})
 	}
 	return frames, allowed, true
 }
@@ -383,6 +373,13 @@ func (h *Hub) sendRoleRefreshFrames(ctx context.Context, uid int64, frames []rol
 			return
 		}
 		for _, f := range frames[start:min(start+roleRefreshChunk, len(frames))] {
+			// A socket without the forums feature is sent no forum row (see
+			// client_features.go). The client is read here, at send time and
+			// from the same value that gets the frame: a reconnect during the
+			// round's lookups replaced it with one that made its own declaration.
+			if !f.remove && !live.features.allowsType(f.chType) {
+				continue
+			}
 			live.sendMsg(f.msg)
 		}
 	}

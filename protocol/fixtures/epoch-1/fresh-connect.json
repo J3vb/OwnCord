@@ -46,6 +46,7 @@
           "payload": {
             "capabilities": {
               "dm_privacy": true,
+              "forums": true,
               "message_deduplication": true,
               "message_retry_floor_ms": 0,
               "message_retry_window_seconds": 86400,
@@ -311,6 +312,7 @@
           "payload": {
             "capabilities": {
               "dm_privacy": true,
+              "forums": true,
               "message_deduplication": true,
               "message_retry_floor_ms": 0,
               "message_retry_window_seconds": 86400,

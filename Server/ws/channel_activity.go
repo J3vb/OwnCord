@@ -360,6 +360,9 @@ func (h *Hub) resolveChannelActivity(ctx context.Context, chID int64, pc *pendin
 		if focused[uid] || uid == pc.latestAuthorID {
 			continue
 		}
+		if withholdsForumPost(ctx, vis, h.GetClient(uid), ch) {
+			continue
+		}
 		perUser[uid] = append(perUser[uid],
 			h.activityUserEntries(uid, chID, pc, mentions, blockers, ch.NSFW && !acked[uid])...)
 	}

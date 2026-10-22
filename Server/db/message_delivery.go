@@ -51,6 +51,12 @@ type MessageDeliveryParams struct {
 	// answers commit with the message and the receipt. Content is the readable
 	// fallback text the service built from the same fields.
 	Poll *PollInput
+	// ForumPost, when set, makes this send a forum post (WP 6.9d-a2).
+	// ChannelID is the forum: the receipt is keyed on it, but the message is
+	// written into a thread the transaction creates under the forum, so the
+	// post, its opening message, its tags and the receipt commit or fail
+	// together.
+	ForumPost *ForumPostInput
 }
 
 // MessageDelivery is the committed result. A duplicate carries only the
@@ -61,6 +67,9 @@ type MessageDelivery struct {
 	// LinkedAttachmentIDs are the requested uploads this send attached, set
 	// only on a fresh commit (a duplicate does not re-link).
 	LinkedAttachmentIDs []string
+	// Thread is the post a forum-post send created, set only on a fresh
+	// commit. Message.ChannelID is then that thread, not the forum.
+	Thread *ThreadInfo
 }
 
 // FindMessageDelivery answers a retry from the sender's own receipt. The
@@ -126,8 +135,15 @@ func (d *DB) CreateMessageDelivery(ctx context.Context, p MessageDeliveryParams)
 			return nil, err
 		}
 	}
+	msgChannel := p.ChannelID
+	if p.ForumPost != nil {
+		now := time.Now().UTC().Format(ThreadActivityLayout)
+		if msgChannel, err = insertForumPost(ctx, q, p.ChannelID, p.UserID, p.ForumPost, now); err != nil {
+			return nil, err
+		}
+	}
 	r, err := q.CreateMessageForDelivery(ctx, dbgen.CreateMessageForDeliveryParams{
-		ChannelID: p.ChannelID, UserID: p.UserID, Content: p.Content,
+		ChannelID: msgChannel, UserID: p.UserID, Content: p.Content,
 		ReplyTo: p.ReplyTo, MentionsEveryone: b2i64(p.MentionsEveryone),
 	})
 	if err != nil {
@@ -152,14 +168,23 @@ func (d *DB) CreateMessageDelivery(ctx context.Context, p MessageDeliveryParams)
 	}); err != nil {
 		return nil, fmt.Errorf("message delivery receipt insert: %w", err)
 	}
-	advanceAuthorReadState(ctx, q, p.UserID, p.ChannelID, r.ID)
-	if err := touchThreadOnPost(ctx, q, p.ChannelID); err != nil {
+	advanceAuthorReadState(ctx, q, p.UserID, msgChannel, r.ID)
+	if err := touchThreadOnPost(ctx, q, msgChannel); err != nil {
 		return nil, fmt.Errorf("message delivery: %w", err)
+	}
+	var thread *ThreadInfo
+	if p.ForumPost != nil {
+		if err := linkForumPost(ctx, q, msgChannel, r.ID, p.ForumPost.TagIDs); err != nil {
+			return nil, err
+		}
+		if thread, err = d.getThread(ctx, q, msgChannel); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("message delivery commit: %w", err)
 	}
-	return &MessageDelivery{Message: messageFromGen(r), LinkedAttachmentIDs: linked}, nil
+	return &MessageDelivery{Message: messageFromGen(r), LinkedAttachmentIDs: linked, Thread: thread}, nil
 }
 
 // insertMessageSideRows writes the forward block or poll a message carries.

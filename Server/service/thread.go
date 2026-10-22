@@ -245,6 +245,9 @@ type UpdateThreadParams struct {
 	Archived           *bool
 	Locked             *bool
 	AutoArchiveMinutes *int
+	// TagIDs replaces a forum post's tags (WP 6.9d); BAD_REQUEST on any other
+	// thread.
+	TagIDs *[]int64
 }
 
 // threadActor resolves who is asking about a thread: the thread, its owner
@@ -289,7 +292,7 @@ func (s *ThreadService) Update(ctx context.Context, p UpdateThreadParams) (*db.T
 	if err != nil {
 		return nil, err
 	}
-	if p.Name == nil && p.Archived == nil && p.Locked == nil && p.AutoArchiveMinutes == nil {
+	if p.Name == nil && p.Archived == nil && p.Locked == nil && p.AutoArchiveMinutes == nil && p.TagIDs == nil {
 		return nil, fmt.Errorf("%w: nothing to update", ErrBadRequest)
 	}
 	patch := db.ThreadPatch{Archived: p.Archived, Locked: p.Locked}
@@ -319,11 +322,30 @@ func (s *ThreadService) Update(ctx context.Context, p UpdateThreadParams) (*db.T
 	case cur.Locked && !isMod:
 		return nil, denial(permissions.ErrThreadLocked)
 	}
+	if p.TagIDs != nil {
+		ids, terr := s.postTags(ctx, cur, *p.TagIDs)
+		if terr != nil {
+			return nil, terr
+		}
+		patch.TagIDs = &ids
+	}
 	out, err := ts.UpdateThread(ctx, p.ThreadID, patch, isMod)
 	if err != nil {
 		return nil, mapThreadErr(err)
 	}
 	return out, nil
+}
+
+// postTags validates a tag edit of a forum post against its forum's rules.
+func (s *ThreadService) postTags(ctx context.Context, cur *db.ThreadInfo, ids []int64) ([]int64, error) {
+	if cur.Post == nil {
+		return nil, fmt.Errorf("%w: only forum posts take tags", ErrBadRequest)
+	}
+	forum, err := s.st.GetChannel(ctx, cur.ParentID)
+	if err != nil || forum == nil {
+		return nil, fmt.Errorf("%w: thread not found", ErrNotFound)
+	}
+	return cleanPostTags(forum, ids)
 }
 
 // Delete removes a thread and, by cascade, its messages. Moderators only.
@@ -450,6 +472,8 @@ func mapThreadErr(err error) error {
 		return fmt.Errorf("%w: thread not found", ErrNotFound)
 	case errors.Is(err, db.ErrThreadLockedForActor):
 		return denial(permissions.ErrThreadLocked)
+	case errors.Is(err, db.ErrForumTagUnknown):
+		return fmt.Errorf("%w: unknown tag", ErrBadRequest)
 	case errors.Is(err, db.ErrAccountErasing):
 		return fmt.Errorf("%w: account is being deleted", ErrForbidden)
 	default:

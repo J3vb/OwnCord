@@ -720,6 +720,7 @@ func TestEpoch1Fixtures(t *testing.T) {
 		{"voice-mod-denied", journeyVoiceModDenied},
 		{"chat-forward-pin", journeyChatForwardPin},
 		{"chat-poll", journeyChatPoll},
+		{"chat-forum-post", journeyChatForumPost},
 		{"chat-bulk-delete", journeyChatBulkDelete},
 		{"mention-count-nsfw-ack", journeyMentionCountNSFWAck},
 		{"chat-command-unknown", journeyChatCommandUnknown},
@@ -1860,6 +1861,48 @@ func journeyChatPoll(t *testing.T, r *epochRig) {
 	b.expect("poll_update")
 	a.barrier()
 	b.barrier()
+}
+
+// journeyChatForumPost records a forum post's creation: a declares the forums
+// feature and posts to a forum with one tag. The creator gets forum_post_create_ok
+// carrying the thread, its post block and the opening message; nothing is
+// broadcast to a connection that is not subscribed to the new thread or the
+// forum, so the transcript ends with the barrier.
+func journeyChatForumPost(t *testing.T, r *epochRig) {
+	_, _, aliceTok, _ := r.seedBaseline(t)
+	ctx := context.Background()
+	forumID, err := r.db.CreateChannel(ctx, "ideas", "forum", "", "", 2)
+	if err != nil {
+		t.Fatalf("CreateChannel(ideas): %v", err)
+	}
+	tags, err := r.db.ReplaceForumSettings(ctx, forumID, db.ForumSettingsWrite{
+		DefaultAutoArchiveMinutes: 1440, Tags: []db.ForumTagWrite{{Name: "idea"}},
+	})
+	if err != nil {
+		t.Fatalf("ReplaceForumSettings: %v", err)
+	}
+	a := r.dial(t, "a")
+	a.send(map[string]any{
+		"type":    "auth",
+		"id":      "req-auth-a",
+		"payload": map[string]any{"token": aliceTok, "last_seq": 0, "features": []string{"forums"}},
+	})
+	a.drain("auth_ok", "ready", "member_join", "presence_batch")
+
+	a.record = true
+	a.send(map[string]any{
+		"type": "forum_post_create",
+		"id":   "req-forum-post-1",
+		"payload": map[string]any{
+			"client_message_id": fmt.Sprintf("%d:%s", time.Now().UnixMilli(), fixtureClientMessageUUID),
+			"channel_id":        forumID,
+			"name":              "Dark mode",
+			"content":           "Please add a dark theme.",
+			"tag_ids":           []int64{tags[0].ID},
+		},
+	})
+	a.expect("forum_post_create_ok")
+	a.barrier()
 }
 
 // journeyChatBulkDelete records the single chat_bulk_deleted a purge sends in

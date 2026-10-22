@@ -246,6 +246,12 @@ func (h *Hub) reconnectPrecheck(
 			"user_id", c.userID, "err", err)
 		return nil, nil, false
 	}
+	// A socket without the forums feature replays nothing sequenced on a forum.
+	if err := h.dropForumChannels(ctx, database, c, allowedChannelIDs, nsfwReadableChannelIDs); err != nil {
+		slog.Warn("ws handleReconnect: dropForumChannels failed, falling back to full ready",
+			"user_id", c.userID, "err", err)
+		return nil, nil, false
+	}
 	return allowedChannelIDs, nsfwReadableChannelIDs, true
 }
 

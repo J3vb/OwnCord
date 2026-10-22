@@ -326,9 +326,9 @@ first such declaration. Names the server does not know are ignored, the list is
 capped (32 names of at most 32 bytes each), and it grants nothing: it only
 narrows what the socket is sent.
 
-| Feature  | Declared by            | Effect on a socket that does **not** declare it                                                                                                                                                                                                         |
-| -------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `forums` | clients from WP 6.9d-b | No `type: "forum"` row in `ready.channels`, and no forum `channel_create` (channel creation, visibility refresh, timeout refresh and role refresh alike). Those frames are per recipient and unsequenced, so skipping one allocates no sequence number. |
+| Feature  | Declared by            | Effect on a socket that does **not** declare it                                                                                                                                                                                                                                                                                      |
+| -------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `forums` | clients from WP 6.9d-b | No `type: "forum"` row in `ready.channels`, and no forum `channel_create` (channel creation, visibility refresh, timeout refresh and role refresh alike). Those frames are per recipient and unsequenced, so skipping one allocates no sequence number. It also gets no frame for a forum's posts (see [Forum posts](#forum-posts)). |
 
 `channel_update` for a forum is **not** filtered: it is one shared sequenced
 frame, and dropping it for some sockets would allocate a sequence number and
@@ -1797,6 +1797,8 @@ A thread is a discussion started on one message of a text channel. It is a chann
 }
 ```
 
+A forum post's `ThreadInfo` also carries `post`: `{ "tag_ids": [3, 7], "first_message": { "id": 5120, "author_id": 12, "preview": "...", "deleted": false, "has_attachments": false } }`. It is absent on a thread of a text channel. `first_message` is `null` after the opening message is hard-deleted; a soft-deleted one reads `deleted: true` with an empty preview. See [Forum posts](#forum-posts).
+
 `owner_id` and `starter_message_id` are `null` once the user or message is erased. `last_message_at` is `null` for a thread with no replies. `message_count` counts user messages. History rows and `chat_message` carry `thread` only on the starter message. A live `chat_message` for a message that has just been sent never has it; the thread arrives as `thread_create_ok` and `thread_changed`.
 
 ### thread_create (Client -> Server)
@@ -1824,7 +1826,7 @@ Errors: `THREAD_EXISTS` (the message already has a thread that the caller did no
 
 ### thread_update (Client -> Server)
 
-`{ "thread_id": 91, "name"?: string, "archived"?: bool, "locked"?: bool, "auto_archive_minutes"?: int }`; an absent field is unchanged. The thread's owner may rename, archive, unarchive and change the idle period. Only a user with `MANAGE_MESSAGES` may set `locked`. A locked thread belongs to moderators: the owner's change is `THREAD_LOCKED`. Answered with `thread_update_ok` (`{ "thread_id": 91 }`); the new state reaches everyone as `thread_changed`.
+`{ "thread_id": 91, "name"?: string, "archived"?: bool, "locked"?: bool, "auto_archive_minutes"?: int, "tag_ids"?: int[] }`; an absent field is unchanged. `tag_ids` replaces a forum post's tags (at most 5, all tags of that forum, at least one when the forum requires a tag) and is `BAD_REQUEST` on any other thread; the owner or a user with `MANAGE_MESSAGES` may set it. The thread's owner may rename, archive, unarchive and change the idle period. Only a user with `MANAGE_MESSAGES` may set `locked`. A locked thread belongs to moderators: the owner's change is `THREAD_LOCKED`. Answered with `thread_update_ok` (`{ "thread_id": 91 }`); the new state reaches everyone as `thread_changed`.
 
 ### thread_delete (Client -> Server)
 
@@ -1841,6 +1843,37 @@ Errors: `THREAD_EXISTS` (the message already has a thread that the caller did no
 ### thread_deleted (Server -> Client, broadcast)
 
 `{ "channel_id": 5, "thread_id": 91 }`, sequenced on the parent. A socket that had the thread open also receives an unsequenced copy, because it need not be subscribed to the parent. A client ignores a `thread_changed` for a thread id it has already seen deleted: a change read just before the delete may be sequenced after it.
+
+### Forum posts
+
+A forum holds no messages. A post is a thread whose parent is the forum, with no starter message; its first message is the opening message, which `channels.thread_post_message_id` points at. Sockets that did not declare the [`forums` feature](#client-features) are sent nothing about a forum's posts: no `thread_changed` for a post, and `channel_focus` / `thread_focus` on a post (or its forum) is refused before the subscription. A socket that loses the feature to a role refresh stops receiving them, because the feature set is read again at send time.
+
+#### forum_post_create (Client -> Server)
+
+```json
+{
+  "type": "forum_post_create",
+  "id": "req-uuid",
+  "payload": {
+    "client_message_id": "1760000000000:6f1c0c5e-0000-4000-8000-000000000000",
+    "channel_id": 9,
+    "name": "Dark mode",
+    "content": "Please add a dark theme.",
+    "attachment_ids": [],
+    "tag_ids": [3]
+  }
+}
+```
+
+`channel_id` is the forum. `name` is the title, 1 to 100 runes after sanitising. `content` and `attachment_ids` follow the `chat_send` rules and the opening message needs one of them. `tag_ids` holds at most 5 distinct tags of the forum, and at least one when the forum has `require_tag`. The caller needs `READ_MESSAGES` and `SEND_MESSAGES` in the forum (and `ATTACH_FILES` with attachments), is subject to the forum's slow mode, and shares the `thread_create` budget (5 per 10 minutes, `RATE_LIMITED`). The post's `auto_archive_minutes` is the forum's default. The post and its opening message commit in one transaction.
+
+The request is idempotent on `client_message_id`, as `chat_send` is: a retry of a post that committed is answered with the same `forum_post_create_ok` and `deduplicated: true`, before the rate gate, even if the post has since been archived or deleted.
+
+Errors: `BAD_REQUEST` (title, tags, empty message, a channel that is not a forum), `NOT_FOUND`, `FORBIDDEN`, `RATE_LIMITED`, `SLOW_MODE`.
+
+#### forum_post_create_ok (Server -> Client, direct)
+
+`{ "thread": ThreadInfo, "message_id": 5120, "client_message_id": "...", "deduplicated": false }`, with the request `id`. The new post reaches other sockets that have the forum focused as `thread_changed`, and the opening message reaches sockets with the post open (`thread_focus`) as an ordinary `chat_message`. Editing or deleting the opening message sends `thread_changed` for the post (its preview).
 
 ### Idle archive
 

@@ -141,21 +141,29 @@ func (s *MessageService) ChannelIsDM(ctx context.Context, channelID int64) (bool
 // SendMessage, EditMessage, CanPost, and typing via ChannelService — asks that
 // one predicate, so none can drift (S-01, S-12).
 func (s *MessageService) checkSendPermission(ctx context.Context, userID int64, ch *db.Channel) error {
-	sub, err := channelSubject(ctx, s.st, s.perms, userID, ch, true)
-	if err != nil {
-		return err
-	}
-	if err := denial(permissions.CanSendMessage(sub)); err != nil {
+	if err := s.checkSendVerdict(ctx, userID, ch); err != nil {
 		return err
 	}
 	// A forum holds no messages: its posts are threads, and a post is created
-	// through the forum post path. Refused after the permission verdict so a
-	// caller who cannot read the forum learns nothing about its type; the
-	// messages trigger (migration 075) is the schema-level backstop.
+	// through the forum post path (checkSendVerdict alone). Refused after the
+	// permission verdict so a caller who cannot read the forum learns nothing
+	// about its type; the messages trigger (migration 075) is the
+	// schema-level backstop.
 	if ch.Type == db.ForumTypeName {
 		return fmt.Errorf("%w: a forum holds no messages, post in one of its posts", ErrBadRequest)
 	}
 	return nil
+}
+
+// checkSendVerdict is CanSendMessage over ch for userID, mapped onto the
+// service's error kinds: the part of checkSendPermission a forum post create
+// shares with a send.
+func (s *MessageService) checkSendVerdict(ctx context.Context, userID int64, ch *db.Channel) error {
+	sub, err := channelSubject(ctx, s.st, s.perms, userID, ch, true)
+	if err != nil {
+		return err
+	}
+	return denial(permissions.CanSendMessage(sub))
 }
 
 // channelSubject resolves what the channel predicates need for userID in ch:

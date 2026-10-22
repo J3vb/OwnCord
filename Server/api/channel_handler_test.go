@@ -151,9 +151,23 @@ CREATE TABLE IF NOT EXISTS channels (
     thread_last_activity_at TEXT,
     forum_require_tag INTEGER NOT NULL DEFAULT 0,
     forum_default_auto_archive_minutes INTEGER NOT NULL DEFAULT 4320,
+    thread_post_message_id INTEGER,
     is_group         INTEGER NOT NULL DEFAULT 0,
     dm_owner_id      INTEGER,
     dm_icon      TEXT
+);
+CREATE TABLE IF NOT EXISTS forum_tags (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    forum_id   INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    name       TEXT NOT NULL,
+    emoji      TEXT,
+    position   INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+CREATE TABLE IF NOT EXISTS thread_tags (
+    thread_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    tag_id    INTEGER NOT NULL REFERENCES forum_tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (thread_id, tag_id)
 );
 CREATE TABLE IF NOT EXISTS channel_overrides (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
