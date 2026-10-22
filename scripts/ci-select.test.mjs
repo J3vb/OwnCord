@@ -222,6 +222,31 @@ test("the Linux native-voice build scripts run the Rust suite", () => {
   }
 });
 
+test("the web portal suite runs for the bundle, the portal and its harness only", () => {
+  // client-web builds the browser bundle and drives it against a real server,
+  // so it follows the client source, the web build, the suite and the portal
+  // handler. A unit-test-only or Rust-only change must not spend it.
+  for (const p of [
+    "Client/src/pages/MainPage.ts",
+    "Client/vite.config.web.ts",
+    "Client/tests/e2e/web/portal.spec.ts",
+    "Client/tests/e2e/support/server.ts",
+    "Client/tests/e2e/scripts/build-server.mjs",
+    "Server/webclient/webclient.go",
+    "Server/api/portal.go",
+  ]) {
+    assert.equal(runs(`M\t${p}`, "webclient"), true, `${p} must run the web portal suite`);
+  }
+  for (const p of [
+    "Client/tests/unit/web-build.test.ts",
+    "Client/src-tauri/src/lib.rs",
+    "Server/db/queries/sqlite/users.sql",
+    "docs/architecture/README.md",
+  ]) {
+    assert.equal(runs(`M\t${p}`, "webclient"), false, `${p} must not run the web portal suite`);
+  }
+});
+
 test("a native-voice interop spec runs the Rust suite", () => {
   // The only job that runs tests/e2e/native-voice is rust-tests (ci.yml's
   // `npm run test:e2e:native-voice` step). Client/ alone selects client/
