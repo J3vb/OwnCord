@@ -8,11 +8,12 @@ live in the [changelog](../CHANGELOG.md) and the linked pages.
 builds (`scripts/verify-release-status.mjs`), so add the row in the release PR,
 together with the changelog section.
 
-_Last updated 2026-10-15._
+_Last updated 2026-10-22._
 
 ## Current release
 
-**v2.3.0-beta.1**, published 2026-10-14. It is still a beta and a hobby
+**v2.3.0-beta.1**, published 2026-10-14. **v2.4.0-beta.1** is prepared on
+`dev` and is tagged once the owner gives the go. It is still a beta and a hobby
 project: desktop only (Windows and Linux, x64 and ARM64). Update the server and
 the desktop app together.
 
@@ -24,6 +25,7 @@ Newest first, one line each. The full notes are the matching section of
 <!-- prettier-ignore -->
 | Version | Date | What it brought |
 | --- | --- | --- |
+| v2.4.0-beta.1 | 2026-10-22 | Threads, forum channels, polls, forwarding, several roles per member, nicknames, real categories, an AFK channel, fuller group DMs, Discord-style chat and Linux on par with Windows. |
 | v2.3.0-beta.1 | 2026-10-14 | A call view with tiles and pop-out, Input Mode and Push to Talk on modifier keys, a stream card with Change source, What's new after an update, faster channel switching. |
 | v2.2.0-beta.3 | 2026-10-11 | Click-to-watch streams, GIF favorites, inline video, member actions behind a reverse proxy, steadier scrolling and speaking rings. |
 | v2.2.0-beta.2 | 2026-10-10 | Clearer voice, steadier DM calls, a pop-out window for streams and cameras, a screen-share source picker, Linux voice fixes. |
@@ -47,16 +49,16 @@ Newest first, one line each. The full notes are the matching section of
 
 Work follows a phased roadmap set on 2026-10-10. In plain words:
 
-| Phase | Goal                                                            | State                    |
-| ----- | --------------------------------------------------------------- | ------------------------ |
-| 0     | Releases gated on real signals; small defects cleared           | In progress              |
-| 1     | Voice that feels like Discord, without state bugs               | Done (v2.3.0-beta.1)     |
-| 2     | Nothing disappears without an error; notifications that work    | In progress              |
-| 3     | Chat, DMs, members, navigation and settings on par with Discord | Planned                  |
-| 4     | Larger servers and sturdier self-hosting                        | Later                    |
-| 5     | One owner for each piece of shared state                        | Later                    |
-| 6     | New features                                                    | After the stable release |
-| 7     | Docs that cannot drift; safe protocol changes                   | Ongoing                  |
+| Phase | Goal                                                            | State                                             |
+| ----- | --------------------------------------------------------------- | ------------------------------------------------- |
+| 0     | Releases gated on real signals; small defects cleared           | Done (v2.4.0-beta.1)                              |
+| 1     | Voice that feels like Discord, without state bugs               | Done (v2.3.0-beta.1)                              |
+| 2     | Nothing disappears without an error; notifications that work    | Done (v2.4.0-beta.1)                              |
+| 3     | Chat, DMs, members, navigation and settings on par with Discord | Done (v2.4.0-beta.1)                              |
+| 4     | Larger servers and sturdier self-hosting                        | Done (v2.4.0-beta.1)                              |
+| 5     | One owner for each piece of shared state                        | Done (v2.4.0-beta.1)                              |
+| 6     | New features                                                    | Mostly done (v2.4.0-beta.1); browser client later |
+| 7     | Docs that cannot drift; safe protocol changes                   | Ongoing                                           |
 
 The older B0–B10 phase plans in [plans/](plans/README.md) are history: B9 was
 the last of them, and the betas above shipped after it.
