@@ -103,6 +103,9 @@ export const messagingText = defineCatalog("messaging", {
   "mention.everyone": "Notify everyone in this channel",
   "mention.here": "Notify everyone who is online",
   "mention.userDetail": "@{username} · {role}",
+  "mention.roleDetail": "Role",
+  "mention.unknownUser": "@unknown-user",
+  "mention.deletedRole": "@deleted-role",
   "channelMention.voice": "Voice channel",
 
   "slash.listLabel": "Commands",

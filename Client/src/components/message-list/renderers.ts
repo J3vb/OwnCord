@@ -570,7 +570,11 @@ export function renderMessage(
       : msg.status === "failed"
         ? " failed"
         : "";
-  const mentionInfo = { mentions: msg.mentions, mentionsEveryone: msg.mentionsEveryone };
+  const mentionInfo = {
+    mentions: msg.mentions,
+    mentionsEveryone: msg.mentionsEveryone,
+    mentionRoles: msg.mentionRoles,
+  };
   // A deleted row shows no content, so it must not keep the mention accent.
   const mentionedClass =
     !msg.deleted && highlightsCurrentUser(msg.content, mentionInfo) ? " mentioned" : "";

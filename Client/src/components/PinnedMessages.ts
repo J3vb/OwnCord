@@ -23,6 +23,7 @@ export interface PinnedMessage {
   /** Server-resolved mentioned user ids; absent from an older server. */
   readonly mentions?: readonly number[];
   readonly mentionsEveryone?: boolean;
+  readonly mentionRoles?: readonly number[];
 }
 
 export interface PinnedMessagesOptions {
@@ -81,6 +82,7 @@ function renderPinnedItem(msg: PinnedMessage, canUnpin: boolean): HTMLDivElement
     renderMessageContent(msg.content, {
       ...(msg.mentions !== undefined ? { mentions: msg.mentions } : {}),
       ...(msg.mentionsEveryone !== undefined ? { mentionsEveryone: msg.mentionsEveryone } : {}),
+      ...(msg.mentionRoles !== undefined ? { mentionRoles: msg.mentionRoles } : {}),
     }),
   );
   // The panel opens no profiles, so mention chips are plain text here.

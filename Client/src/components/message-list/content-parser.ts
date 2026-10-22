@@ -17,8 +17,12 @@ import { normalizeHostForCertCompare } from "@lib/hostNormalize";
 import { requestInviteJoin } from "@lib/invite-navigation";
 import { jumpToMessage } from "@lib/message-navigation";
 import { authStore } from "@stores/auth.store";
+import { channelsStore, type ChannelsState } from "@stores/channels.store";
 import { memberDisplayName, membersStore } from "@stores/members.store";
 import {
+  ID_MENTION_REGEX,
+  currentUserHeldRoleIds,
+  ROLE_MENTION_REGEX,
   CHANNEL_TOKEN_REGEX,
   MENTION_TOKEN_REGEX,
   isEveryoneToken,
@@ -341,6 +345,94 @@ function buildMentionNode(raw: string, token: string, info?: MentionInfo): HTMLS
   return span;
 }
 
+/** `<@5>` / `<@&5>` in full: group 1 is the role marker, group 2 the id. */
+const ID_TOKEN_FULL = /^<@(&?)(\d{1,15})>$/;
+
+/** The only role colours a pill applies: `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`. */
+const HEX_COLOR = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+
+type RosterRole = ChannelsState["roles"][number];
+
+/** Roles by id, built once per roster snapshot: a token is then a map read. */
+const rolesById = new WeakMap<ChannelsState["roles"], ReadonlyMap<number, RosterRole>>();
+
+function rosterRole(id: number): RosterRole | undefined {
+  const roles = channelsStore.getState().roles;
+  let byId = rolesById.get(roles);
+  if (byId === undefined) {
+    byId = new Map(roles.map((r) => [r.id, r]));
+    rolesById.set(roles, byId);
+  }
+  return byId.get(id);
+}
+
+/** A mention the reader sees as plain text: nothing to click, nothing to ping. */
+function buildPlainMention(raw: string, text: string): HTMLSpanElement {
+  const span = createElement("span", { class: "mention-plain", "data-mention": raw });
+  setText(span, text);
+  return span;
+}
+
+/** `<@id>`: the member's current name, or `@unknown-user` for one nobody can name. */
+function buildUserIdNode(raw: string, userId: number, info?: MentionInfo): HTMLSpanElement {
+  const me = authStore.getState().user;
+  const member = membersStore.getState().members.get(userId);
+  // The signed-in user is not always in the member map (DM-only views).
+  const named =
+    member ??
+    (me?.id === userId
+      ? { username: me.username, displayName: me.display_name ?? undefined }
+      : undefined);
+  if (named === undefined) return buildPlainMention(raw, messagingText("mention.unknownUser"));
+  const span = createElement("span", {
+    class:
+      me?.id === userId && (info?.mentions === undefined || info.mentions.includes(userId))
+        ? "mention mention-self"
+        : "mention",
+    role: "button",
+    tabindex: "0",
+    "data-user-id": String(userId),
+    "data-mention": raw,
+    title: `@${named.username}`,
+  });
+  setText(span, `@${memberDisplayName(named)}`);
+  return span;
+}
+
+/** `<@&id>`: the role's name in its colour, `@deleted-role` once it is gone. */
+function buildRoleIdNode(raw: string, roleId: number, info?: MentionInfo): HTMLSpanElement {
+  const role = rosterRole(roleId);
+  if (role === undefined) return buildPlainMention(raw, messagingText("mention.deletedRole"));
+  // The server dropped this ping (the sender could not mention the role): it
+  // reads as the text it is, never as a mention.
+  if (info?.mentionRoles !== undefined && !info.mentionRoles.includes(roleId)) {
+    return buildPlainMention(raw, `@${role.name}`);
+  }
+  const span = createElement("span", {
+    class:
+      info?.mentionRoles?.includes(roleId) === true && currentUserHeldRoleIds().includes(roleId)
+        ? "mention mention-role mention-self"
+        : "mention mention-role",
+    "data-role-id": String(roleId),
+    "data-mention": raw,
+  });
+  setText(span, `@${role.name}`);
+  // Only a hex literal reaches the style; anything else leaves the default pill.
+  if (role.color != null && HEX_COLOR.test(role.color)) {
+    span.dataset["roleColor"] = role.color;
+    span.style.setProperty("--role-pill", role.color);
+  }
+  return span;
+}
+
+/** Build the pill (or plain stand-in) for a `<@id>` / `<@&id>` token, or null if `raw` is neither. */
+function buildIdMentionNode(raw: string, info?: MentionInfo): HTMLSpanElement | null {
+  const match = ID_TOKEN_FULL.exec(raw);
+  if (match === null) return null;
+  const id = Number(match[2]);
+  return match[1] === "&" ? buildRoleIdNode(raw, id, info) : buildUserIdNode(raw, id, info);
+}
+
 /** Build the clickable chip for a `#name` that resolves, or null. */
 function buildChannelNode(name: string): HTMLSpanElement | null {
   const channel = findChannelByName(name);
@@ -489,6 +581,16 @@ export function renderMentionSegment(text: string, info?: MentionInfo): Document
     if (node !== null) matches.push({ start: idx, end: idx + match[0].length, node });
   }
 
+  for (const regex of [ID_MENTION_REGEX, ROLE_MENTION_REGEX]) {
+    for (const match of text.matchAll(regex)) {
+      const idx = match.index;
+      const node = idx === undefined ? null : buildIdMentionNode(match[0], info);
+      if (idx !== undefined && node !== null) {
+        matches.push({ start: idx, end: idx + match[0].length, node });
+      }
+    }
+  }
+
   for (const match of text.matchAll(MENTION_TOKEN_REGEX)) {
     const idx = match.index;
     const lead = match[1];
@@ -545,11 +647,16 @@ export function renderMentionSegment(text: string, info?: MentionInfo): Document
  *  `[text](url)` link does get mentions rendered inside it, so `.masked` links
  *  stay transparent. */
 const MENTION_OPAQUE_SELECTOR =
-  "code, .msg-codeblock, .mention, .channel-mention, .message-link-chip, .msg-link-raw, .msg-link:not(.masked)";
+  "code, .msg-codeblock, .mention, .mention-plain, .channel-mention, .message-link-chip, .msg-link-raw, .msg-link:not(.masked)";
 
 /** Whether a rebuilt pill is identical to the one already in the DOM. */
 function sameMention(a: HTMLElement, b: HTMLElement): boolean {
-  return a.className === b.className && (a.dataset["userId"] ?? "") === (b.dataset["userId"] ?? "");
+  return (
+    a.className === b.className &&
+    (a.dataset["userId"] ?? "") === (b.dataset["userId"] ?? "") &&
+    (a.dataset["roleId"] ?? "") === (b.dataset["roleId"] ?? "") &&
+    (a.dataset["roleColor"] ?? "") === (b.dataset["roleColor"] ?? "")
+  );
 }
 
 /**
@@ -596,11 +703,14 @@ export function resyncMentions(root: ParentNode, info?: MentionInfo): void {
   for (const content of root.querySelectorAll(".msg-text, .sm-text")) {
     // querySelectorAll returns a static list, so replacing a span as we go does
     // not disturb the walk.
-    for (const span of content.querySelectorAll<HTMLElement>(".mention")) {
+    for (const span of content.querySelectorAll<HTMLElement>(".mention, .mention-plain")) {
       // The typed token lives in data-mention; the text may be a display name.
       const raw = span.dataset["mention"] ?? span.textContent ?? "";
       const token = raw.startsWith("@") ? raw.slice(1) : raw;
-      const replacement = buildMentionNode(raw, token, info);
+      // An id token always rebuilds to a pill or its plain stand-in, so a
+      // rename, a role rename, recolour or deletion, or a member leaving or
+      // returning shows at once (MessageList resyncs on member and role changes).
+      const replacement = buildIdMentionNode(raw, info) ?? buildMentionNode(raw, token, info);
       // A mention that labels a masked link stays plain link content when it is
       // rebuilt, as at first render (buildMaskedLink).
       if (replacement !== null && span.closest("a.msg-link.masked") !== null) {
