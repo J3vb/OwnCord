@@ -579,3 +579,26 @@ func TestModerateMembersIsOutsideTheAdminPerimeter(t *testing.T) {
 		t.Errorf("Name(ModerateMembers) = %q", got)
 	}
 }
+
+// TestManageNicknamesBit_DefinedNamedInAllPerms locks WP 6.4a's bit 23: it is a
+// single bit, named, and masked in by AllPerms so a role write can carry it.
+func TestManageNicknamesBit_DefinedNamedInAllPerms(t *testing.T) {
+	if permissions.ManageNicknames != 0x800000 {
+		t.Errorf("ManageNicknames = 0x%X, want 0x800000 (bit 23)", permissions.ManageNicknames)
+	}
+	if permissions.AllPerms&permissions.ManageNicknames == 0 {
+		t.Error("AllPerms must include ManageNicknames")
+	}
+	if got := permissions.Name(permissions.ManageNicknames); got != "MANAGE_NICKNAMES" {
+		t.Errorf("Name(ManageNicknames) = %q, want MANAGE_NICKNAMES", got)
+	}
+}
+
+// TestAdminPerimeterExcludesManageNicknames keeps the bit server-wide and out
+// of the /admin/api perimeter, so a role holding only it gains no read
+// surface.
+func TestAdminPerimeterExcludesManageNicknames(t *testing.T) {
+	if permissions.AdminPerimeter&permissions.ManageNicknames != 0 {
+		t.Error("ManageNicknames must not admit to the admin perimeter")
+	}
+}

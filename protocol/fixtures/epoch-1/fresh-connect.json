@@ -50,6 +50,7 @@
             "capabilities": {
               "dm_privacy": true,
               "forums": true,
+              "manage_nicknames": true,
               "message_deduplication": true,
               "message_retry_floor_ms": 0,
               "message_retry_window_seconds": 86400,
@@ -177,7 +178,7 @@
                 "is_default": false,
                 "mentionable": false,
                 "name": "Moderator",
-                "permissions": 7340031,
+                "permissions": 15728639,
                 "position": 60
               },
               {
@@ -340,6 +341,7 @@
             "capabilities": {
               "dm_privacy": true,
               "forums": true,
+              "manage_nicknames": true,
               "message_deduplication": true,
               "message_retry_floor_ms": 0,
               "message_retry_window_seconds": 86400,
@@ -467,7 +469,7 @@
                 "is_default": false,
                 "mentionable": false,
                 "name": "Moderator",
-                "permissions": 7340031,
+                "permissions": 15728639,
                 "position": 60
               },
               {

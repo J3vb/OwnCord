@@ -346,6 +346,7 @@ var deadlineBound = []string{
 	"PUT /api/v1/gif/favorites",
 	"PUT /api/v1/moderation/channels/{id}/forum",
 	"PUT /api/v1/moderation/members/{id}/roles/{roleId}",
+	"PUT /api/v1/moderation/users/{id}/nickname",
 	"PUT /api/v1/users/me/notes/{userId}",
 	"PUT /api/v1/users/me/password",
 	"PUT /api/v1/users/me/privacy",
