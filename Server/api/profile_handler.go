@@ -153,7 +153,7 @@ const revokeAllSessionsRateLimitPerMinute = 5
 // production the router always passes the running config, so the guard compares
 // against the server's own configured hosts rather than anything the client
 // supplied.
-func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, store FileStore, limiter *auth.RateLimiter, trustedProxies []string, broadcaster ProfileBroadcaster, cfg *config.Config) {
+func MountProfileRoutes(r chi.Router, svc *service.Services, store FileStore, limiter *auth.RateLimiter, trustedProxies []string, broadcaster ProfileBroadcaster, cfg *config.Config) {
 	selfHosts := configuredSelfHosts(cfg)
 	r.Route("/api/v1/users/me", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))

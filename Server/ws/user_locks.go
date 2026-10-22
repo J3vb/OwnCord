@@ -19,16 +19,20 @@ import (
 //     produced. It is held across a LiveKit RPC.
 //   - voiceMember (WP 1D-10) serializes every change to a user's voice
 //     membership. It lives in voiceRegistry; the lock order for both
-//     instances is written down in voice_registry.go. voiceMod comes right
+//     instances is written down in lock_order.go. voiceMod comes right
 //     after voiceMember in that order, and a path holding voiceMod never
 //     calls a membership path.
+//
+// R is the rank the instance's entries carry (lock_order.go): voiceMember and
+// voiceMod are the same type with different ranks, so the deadlock build
+// tells them apart. The map's own mu is a leaf whatever R is.
 //
 // Entries are reference-counted and evicted once nobody holds or is waiting
 // on them (round 5, Codex review P3): a long-lived server with a large,
 // ever-churning population must not grow this map forever.
-type userLocks struct {
-	mu    syncutil.Mutex
-	locks map[int64]*userLockEntry
+type userLocks[R syncutil.LockRank] struct {
+	mu    syncutil.Ranked[lockRankLeaf]
+	locks map[int64]*userLockEntry[R]
 }
 
 // userLockEntry is one userID's lock plus how many callers currently
@@ -36,25 +40,25 @@ type userLocks struct {
 // entry's own lock — it must be adjusted at the same time as the map lookup
 // so a concurrent lock() and the unlocking eviction check can never race
 // each other into deleting an entry someone is about to wait on.
-type userLockEntry struct {
-	mu   syncutil.Mutex
+type userLockEntry[R syncutil.LockRank] struct {
+	mu   syncutil.Ranked[R]
 	refs int
 }
 
-func newUserLocks() *userLocks {
-	return &userLocks{locks: make(map[int64]*userLockEntry)}
+func newUserLocks[R syncutil.LockRank]() *userLocks[R] {
+	return &userLocks[R]{locks: make(map[int64]*userLockEntry[R])}
 }
 
 // lock acquires the per-userID lock, blocking until held, and returns a
 // func that releases it — `defer h.voiceMod.lock(userID)()`.
-func (v *userLocks) lock(userID int64) func() {
+func (v *userLocks[R]) lock(userID int64) func() {
 	v.mu.Lock()
 	if v.locks == nil {
-		v.locks = make(map[int64]*userLockEntry)
+		v.locks = make(map[int64]*userLockEntry[R])
 	}
 	e, ok := v.locks[userID]
 	if !ok {
-		e = &userLockEntry{}
+		e = &userLockEntry[R]{}
 		v.locks[userID] = e
 	}
 	e.refs++
@@ -66,23 +70,26 @@ func (v *userLocks) lock(userID int64) func() {
 
 // tryLock lets periodic reconciliation skip users with moderation in flight.
 // It never queues behind SFU work outside the sweep's time budget.
-func (v *userLocks) tryLock(userID int64) (func(), bool) {
+func (v *userLocks[R]) tryLock(userID int64) (func(), bool) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if _, busy := v.locks[userID]; busy {
 		return nil, false
 	}
 	if v.locks == nil {
-		v.locks = make(map[int64]*userLockEntry)
+		v.locks = make(map[int64]*userLockEntry[R])
 	}
-	e := &userLockEntry{refs: 1}
-	// The entry is private until it is inserted, so this lock cannot block.
-	e.mu.Lock()
+	e := &userLockEntry[R]{refs: 1}
+	// The entry is private until it is inserted, so the try always succeeds
+	// and its result carries nothing. It is a try, not a Lock, because v.mu
+	// (a leaf) is held: the rank check flags a blocking acquire under it,
+	// never a try.
+	e.mu.TryLock()
 	v.locks[userID] = e
 	return func() { v.unlock(userID, e) }, true
 }
 
-func (v *userLocks) unlock(userID int64, e *userLockEntry) {
+func (v *userLocks[R]) unlock(userID int64, e *userLockEntry[R]) {
 	e.mu.Unlock()
 	v.mu.Lock()
 	e.refs--
@@ -93,7 +100,7 @@ func (v *userLocks) unlock(userID int64, e *userLockEntry) {
 }
 
 // refsForTest reports how many callers hold or wait on userID's lock.
-func (v *userLocks) refsForTest(userID int64) int {
+func (v *userLocks[R]) refsForTest(userID int64) int {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if e, ok := v.locks[userID]; ok {

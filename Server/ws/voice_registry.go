@@ -39,8 +39,8 @@ import "github.com/J3vb/OwnCord/Server/syncutil"
 // membership lock and the reconnect grace window. Both zero values are ready
 // to use, so a Hub literal in a test needs no constructor.
 type voiceRegistry struct {
-	voiceMember userLocks       // per-user voice membership lock (Hub.begin)
-	voiceGrace  voiceGraceState // RT-8 grace window (voice_grace.go)
+	voiceMember userLocks[lockRankVoiceMember] // per-user voice membership lock (Hub.begin)
+	voiceGrace  voiceGraceState                // RT-8 grace window (voice_grace.go)
 }
 
 // close ends the registry's life at shutdown: it stops every grace timer and
@@ -76,7 +76,7 @@ type modFlags struct {
 // voiceMu. The zero value is "not in voice", so a &Client{} literal in a test
 // has a usable slot without a constructor.
 type voiceSlot struct {
-	voiceMu        syncutil.Mutex
+	voiceMu        syncutil.Ranked[lockRankLeaf]
 	voiceChID      int64  // voice channel the user is in (0 = not in voice)
 	voiceJoinToken string // opaque join-instance token for the current voice session
 	// voiceJoinCompleted is true once voiceJoinComplete's supersession guard

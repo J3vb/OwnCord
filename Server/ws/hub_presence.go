@@ -91,7 +91,7 @@ type presenceRepairState struct {
 	// announces on the next connect. A restart needs no copy: every client
 	// then takes a full ready listing every member. mu is a leaf lock:
 	// nothing is acquired while holding it.
-	mu    syncutil.Mutex
+	mu    syncutil.Ranked[lockRankLeaf]
 	users map[int64]struct{}
 	joins map[int64]struct{}
 }

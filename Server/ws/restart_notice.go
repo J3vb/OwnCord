@@ -13,7 +13,7 @@ const restartNoticeDedupeWindow = 10 * time.Second
 // restartNoticeGate remembers the last restart announcement. Its mutex is a
 // leaf lock: nothing is acquired while it is held.
 type restartNoticeGate struct {
-	mu           syncutil.Mutex
+	mu           syncutil.Ranked[lockRankLeaf]
 	reason       RestartReason
 	delaySeconds int
 	at           time.Time

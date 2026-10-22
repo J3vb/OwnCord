@@ -22,7 +22,7 @@ import (
 // All exported methods are safe to call from multiple goroutines.
 type Hub struct {
 	clients   map[int64]*Client
-	mu        syncutil.RWMutex
+	mu        syncutil.RankedRW[lockRankHub]
 	db        *db.DB
 	limiter   *auth.RateLimiter
 	broadcast chan broadcastMsg
@@ -61,12 +61,12 @@ type Hub struct {
 
 	restartGate restartNoticeGate // dedupes BroadcastServerRestart
 
-	seq            uint64           // atomic monotonic sequence counter
-	seqMu          syncutil.Mutex   // seq assignment + replay + delivery order; order: lock_order.go
-	timeoutView    timeoutViewState // member_timeouts delivery; lock order in member_timeouts_delivery.go
-	replayBuf      *EventRingBuffer // recent broadcast events for reconnection replay
-	broadcastDrops atomic.Uint64    // counts messages dropped due to full broadcast channel
-	queueDrops     queueDropState   // SRV-03 (hub_stats.go)
+	seq            uint64                       // atomic monotonic sequence counter
+	seqMu          syncutil.Ranked[lockRankSeq] // seq assignment + replay + delivery order; order: lock_order.go
+	timeoutView    timeoutViewState             // member_timeouts delivery; lock order in member_timeouts_delivery.go
+	replayBuf      *EventRingBuffer             // recent broadcast events for reconnection replay
+	broadcastDrops atomic.Uint64                // counts messages dropped due to full broadcast channel
+	queueDrops     queueDropState               // SRV-03 (hub_stats.go)
 
 	// latency is the shipped in-process metrics surface (SRE-M1): broadcast
 	// and dispatch-lag histograms, the max seqMu hold, the chat-ack histogram
@@ -213,21 +213,21 @@ type Hub struct {
 	// Part B) — see user_locks.go. Always non-nil (initialized in
 	// NewHub, never a setter): a hub built without it would let the
 	// timeout path and the manual voice-mute endpoint interleave.
-	voiceMod *userLocks
+	voiceMod *userLocks[lockRankVoiceMod]
 
-	settingsMu         syncutil.RWMutex
+	settingsMu         syncutil.RankedRW[lockRankHubCache]
 	settingsName       string
 	settingsMotd       string
 	settingsUpload     UploadPolicy // auth_ok's upload_policy; the lists refresh with the cache
 	settingsLastUpdate time.Time
-	uploadPolicyMu     syncutil.Mutex // orders BroadcastUploadPolicy's saves (hub_settings.go)
+	uploadPolicyMu     syncutil.Ranked[lockRankSerialiser] // orders BroadcastUploadPolicy's saves (hub_settings.go)
 
 	// voiceKeyHolders maps channelID → userID of the current key holder, the connected
 	// participant with the lowest userID in the channel. Protected by keyHolderMu.
-	keyHolderMu     syncutil.RWMutex
+	keyHolderMu     syncutil.RankedRW[lockRankHubCache]
 	voiceKeyHolders map[int64]int64
 	// Presence coalescer (QueuePresence): latest presence per user, flush armed. Guarded by presenceMu.
-	presenceMu         syncutil.Mutex
+	presenceMu         syncutil.Ranked[lockRankFeed]
 	presenceQueue      map[int64]pendingPresence
 	presenceFlushArmed bool
 	presenceRepair     presenceRepairState // dropped presence and its repair (hub_presence.go)

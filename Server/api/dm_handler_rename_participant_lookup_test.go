@@ -96,7 +96,7 @@ func TestRenameGroupDM_FanOutSurvivesContextCancelledAfterCommit(t *testing.T) {
 	// itself.
 	setupRouter := chi.NewRouter()
 	setupSvc := service.New(database, auth.NewRateLimiter())
-	api.MountDMRoutes(setupRouter, database, setupSvc, bc, nil, nil)
+	api.MountDMRoutes(setupRouter, setupSvc, bc, nil, nil)
 	tokens := []string{
 		dmCreateToken(t, database, "rn_alice", 4),
 		dmCreateToken(t, database, "rn_bob", 4),
@@ -114,7 +114,7 @@ func TestRenameGroupDM_FanOutSurvivesContextCancelledAfterCommit(t *testing.T) {
 	renameRouter := chi.NewRouter()
 	renameSvc := service.New(database, auth.NewRateLimiter())
 	renameSvc.DMs = service.NewDMService(&cancelAfterRenameStore{DB: database, reqCtx: reqCtx}, renameSvc.Permissions)
-	api.MountDMRoutes(renameRouter, database, renameSvc, bc, nil, nil)
+	api.MountDMRoutes(renameRouter, renameSvc, bc, nil, nil)
 
 	body, _ := json.Marshal(map[string]any{"name": "Renamed after disconnect"})
 	req := httptest.NewRequest(http.MethodPatch, fmt.Sprintf("/api/v1/dms/%d", group.ChannelID), bytes.NewReader(body))

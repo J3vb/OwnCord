@@ -32,7 +32,7 @@ type inviteResponse struct {
 
 // MountInviteRoutes registers invite endpoints on the given router.
 // All routes require authentication and MANAGE_INVITES permission.
-func MountInviteRoutes(r chi.Router, database *db.DB, svc *service.Services) {
+func MountInviteRoutes(r chi.Router, svc *service.Services) {
 	r.Route("/api/v1/invites", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
 		r.Use(RequirePermission(permissions.ManageInvites))

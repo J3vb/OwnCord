@@ -39,7 +39,7 @@ const voiceReconcileGraceTicks = 2
 // from its room. Keyed by identity so a rejoin (a new joinedAt) starts a fresh
 // count, and a member who left voice has its entry pruned.
 type voiceReconcileState struct {
-	mu      syncutil.Mutex
+	mu      syncutil.Ranked[lockRankLeaf]
 	missing map[string]int
 }
 

@@ -20,7 +20,7 @@ import (
 func buildUserNoteRouter(database *db.DB) http.Handler {
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
-	api.MountProfileRoutes(r, database, service.New(database, limiter), nil, limiter, nil, nil, nil)
+	api.MountProfileRoutes(r, service.New(database, limiter), nil, limiter, nil, nil, nil)
 	return r
 }
 

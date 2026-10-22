@@ -175,7 +175,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// account deletion can broadcast member_ban like the admin ban path does.
 
 	// Invite management routes (require MANAGE_INVITES permission).
-	MountInviteRoutes(r, database, svc)
+	MountInviteRoutes(r, svc)
 
 	// Channel and message REST routes are mounted after hub creation (below)
 	// so the hub can fan a bulk delete out as one chat_bulk_deleted event.
@@ -228,24 +228,24 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	if store != nil {
 		profileStore = store
 	}
-	MountProfileRoutes(r, database, svc, profileStore, limiter, cfg.Server.TrustedProxies, hub, cfg)
+	MountProfileRoutes(r, svc, profileStore, limiter, cfg.Server.TrustedProxies, hub, cfg)
 
 	// DM (direct message) REST routes, and the message request inbox (B5-6)
 	// beside them — mounted after hub creation so real-time
 	// dm_channel_close/dm_channel_open/dm_request events reach WebSocket
 	// clients.
-	routerDMRoutes(r, database, svc, hub, limiter, profileStore)
+	routerDMRoutes(r, svc, hub, limiter, profileStore)
 
 	// Channel, message and NSFW-acknowledgement REST routes — mounted after hub
 	// creation so a message purge or an nsfw_ack can broadcast through it.
-	routerChannelRoutes(r, database, svc, limiter, cfg, hub)
+	routerChannelRoutes(r, svc, limiter, cfg, hub)
 
 	// Custom emoji REST routes — mounted after hub creation so an upload or a
 	// delete can fan the new set out as an emoji_update. Requires the same file
 	// storage the attachment routes use; without it the emoji endpoints are not
 	// mounted at all (a 404 the client reads as "this server has no emoji").
 	if store != nil {
-		MountEmojiRoutes(r, database, svc, store, limiter, hub)
+		MountEmojiRoutes(r, svc, store, limiter, hub)
 	}
 
 	// Report intake, moderator actions and appeals (B5-8/B5-9/B5-10) —
@@ -422,13 +422,13 @@ func routerUploadRoutes(r chi.Router, sessions *service.SessionService, limiter 
 // routerChannelRoutes mounts the channel/message REST surface and B5-7's NSFW
 // acknowledgement toggle beside it — both need the hub to fan out real-time
 // events (chat_bulk_deleted, nsfw_ack).
-func routerDMRoutes(r chi.Router, database *db.DB, svc *service.Services, hub *ws.Hub, limiter *auth.RateLimiter, store FileStore) {
-	MountDMRoutes(r, database, svc, hub, limiter, store)
+func routerDMRoutes(r chi.Router, svc *service.Services, hub *ws.Hub, limiter *auth.RateLimiter, store FileStore) {
+	MountDMRoutes(r, svc, hub, limiter, store)
 	MountDMRequestRoutes(r, svc, hub)
 }
 
-func routerChannelRoutes(r chi.Router, database *db.DB, svc *service.Services, limiter *auth.RateLimiter, cfg *config.Config, hub *ws.Hub) {
-	MountChannelRoutes(r, database, svc, limiter, cfg.Server.TrustedProxies, hub)
+func routerChannelRoutes(r chi.Router, svc *service.Services, limiter *auth.RateLimiter, cfg *config.Config, hub *ws.Hub) {
+	MountChannelRoutes(r, svc, limiter, cfg.Server.TrustedProxies, hub)
 	MountNSFWRoutes(r, svc, hub)
 	MountThreadRoutes(r, svc)
 }

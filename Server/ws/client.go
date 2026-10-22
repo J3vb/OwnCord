@@ -69,29 +69,29 @@ type Client struct {
 	// during the handshake, before the client is visible to any other
 	// goroutine, so no lock guards it.
 	features      clientFeatures
-	connectedAt   time.Time      // when the WS connection was established
-	remoteAddr    string         // client IP resolved through trusted_proxies (clientip.Resolve), no port
-	msgCount      int            // count of messages processed; resets after session check
-	msgsReceived  int64          // total messages received over the lifetime of this connection
-	msgsSent      int64          // total messages sent over the lifetime of this connection
-	msgsDropped   int64          // messages dropped due to full send buffer
-	invalidCount  int            // consecutive invalid messages; reset on valid parse
-	lastActivity  time.Time      // last message received from this client; guarded by mu
-	lastTouch     time.Time      // last touchSession write for this socket's session; guarded by mu
-	sendClosed    bool           // true after all send channels have been closed
-	terminalKick  bool           // set by markTerminalKick: the server ended this session for good; guarded by mu
-	send          chan []byte    // normal-priority outbound messages (chat messages, reactions)
-	sendHigh      chan []byte    // high-priority outbound messages (DMs, mentions)
-	sendLow       chan []byte    // low-priority outbound messages (typing, moderation and mention-badge notices) — dropped on overflow
-	timeouts      heldTimeouts   // which member_timeouts list this client holds (member_timeouts_delivery.go)
-	presenceStale atomic.Bool    // a presence frame was dropped; the next presence flush sends a full snapshot
-	cseq          cseqState      // per-socket sequenced-frame count, stamped by the writer (client_cseq.go)
-	mu            syncutil.Mutex // guards sendClosed, msgCount, channelID, lastActivity, msgsReceived, msgsSent, msgsDropped
+	connectedAt   time.Time                     // when the WS connection was established
+	remoteAddr    string                        // client IP resolved through trusted_proxies (clientip.Resolve), no port
+	msgCount      int                           // count of messages processed; resets after session check
+	msgsReceived  int64                         // total messages received over the lifetime of this connection
+	msgsSent      int64                         // total messages sent over the lifetime of this connection
+	msgsDropped   int64                         // messages dropped due to full send buffer
+	invalidCount  int                           // consecutive invalid messages; reset on valid parse
+	lastActivity  time.Time                     // last message received from this client; guarded by mu
+	lastTouch     time.Time                     // last touchSession write for this socket's session; guarded by mu
+	sendClosed    bool                          // true after all send channels have been closed
+	terminalKick  bool                          // set by markTerminalKick: the server ended this session for good; guarded by mu
+	send          chan []byte                   // normal-priority outbound messages (chat messages, reactions)
+	sendHigh      chan []byte                   // high-priority outbound messages (DMs, mentions)
+	sendLow       chan []byte                   // low-priority outbound messages (typing, moderation and mention-badge notices) — dropped on overflow
+	timeouts      heldTimeouts                  // which member_timeouts list this client holds (member_timeouts_delivery.go)
+	presenceStale atomic.Bool                   // a presence frame was dropped; the next presence flush sends a full snapshot
+	cseq          cseqState                     // per-socket sequenced-frame count, stamped by the writer (client_cseq.go)
+	mu            syncutil.Ranked[lockRankLeaf] // guards sendClosed, msgCount, channelID, lastActivity, msgsReceived, msgsSent, msgsDropped
 
 	// focusMu serialises every channel_focus APPLY (the readPump applier and the
 	// deferred-focus drain goroutine), so an older deferred intent can never land
 	// after a newer one. Lock order: focusMu before mu.
-	focusMu syncutil.Mutex
+	focusMu syncutil.Ranked[lockRankSerialiser]
 	// focusSeq is bumped on every focus intent, deferred or applied; guarded by mu.
 	focusSeq uint64
 	// pendingFocusChID is the latest deferred focus intent (0 = none); guarded by mu.
