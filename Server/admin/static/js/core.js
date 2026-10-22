@@ -95,7 +95,7 @@ async function apiRes(method,path,body,headers){
    role mask; tabs and row actions hide what it cannot use. Hiding is an
    affordance only — every route re-checks the bit server-side. */
 const PERM={MANAGE_CHANNELS:0x20000,KICK_MEMBERS:0x40000,BAN_MEMBERS:0x80000,
-  MUTE_MEMBERS:0x100000,MANAGE_ROLES:0x1000000,MANAGE_SERVER:0x2000000,
+  MUTE_MEMBERS:0x100000,MANAGE_NICKNAMES:0x800000,MANAGE_ROLES:0x1000000,MANAGE_SERVER:0x2000000,
   MANAGE_INVITES:0x4000000,VIEW_AUDIT_LOG:0x8000000,ADMINISTRATOR:0x40000000};
 function can(bit){
   const p=(state.me&&state.me.permissions)||0;
@@ -145,7 +145,7 @@ const ACTION_LABEL={
   registration_approve:'approved the registration of {t}',registration_deny:'denied the registration of {t}',invite_create:'created an invite',invite_revoke:'revoked an invite',
   channel_create:'created {t}',channel_update:'edited {t}',channel_delete:'deleted {t}',channel_perms_update:'changed role access to {t}',channel_perms_clear:'reset role access to {t}',
   channel_user_perms_update:'changed member access to {t}',channel_user_perms_clear:'reset member access to {t}',category_perms_update:'changed role access on category {t}',category_perms_clear:'reset role access on category {t}',category_user_perms_update:'changed member access on category {t}',category_user_perms_clear:'reset member access on category {t}',channel_perms_sync:'synced category access into {t}',channel_retention_change:'changed message retention for {t}',
-  role_create:'created {t}',role_update:'edited {t}',role_delete:'deleted {t}',role_reorder:'reordered the roles',role_change:'changed the role of {t}',role_add:'added a role to {t}',role_remove:'removed a role from {t}',
+  role_create:'created {t}',role_update:'edited {t}',role_delete:'deleted {t}',role_reorder:'reordered the roles',role_change:'changed the role of {t}',nickname_change:'changed the nickname of {t}',role_add:'added a role to {t}',role_remove:'removed a role from {t}',
   permission_explain:'checked the permissions of {t}',permission_preview:'previewed permissions for {t}',emoji_create:'added an emoji',emoji_delete:'removed an emoji',
   setting_change:'changed a server setting',settings_change:'changed the server settings',registration_mode_change:'changed who can join',
   retention_policy_change:'changed the message retention policy',config_write:'wrote config.yaml',server_setup:'set up the server',

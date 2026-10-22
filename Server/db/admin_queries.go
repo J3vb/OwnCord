@@ -69,7 +69,8 @@ func (d *DB) GetServerStats(ctx context.Context) (*ServerStats, error) {
 // UserListFilter narrows ListAllUsers for the admin Members page. The zero
 // value lists everyone.
 type UserListFilter struct {
-	// Query is a case-insensitive username substring; empty matches all.
+	// Query is a case-insensitive substring of the username or nickname; empty
+	// matches all.
 	Query string
 	// RoleID keeps one role; 0 means any role.
 	RoleID int64
@@ -115,6 +116,7 @@ func (d *DB) ListAllUsers(ctx context.Context, f UserListFilter, limit, offset i
 		result = append(result, UserWithRole{
 			ID:           r.ID,
 			Username:     r.Username,
+			DisplayName:  r.DisplayName,
 			Avatar:       r.Avatar,
 			RoleID:       r.RoleID,
 			Status:       r.Status,

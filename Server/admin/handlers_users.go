@@ -48,7 +48,7 @@ func handleGetStats(users *service.UserService, hub HubBroadcaster) http.Handler
 const maxUserSearchLen = 64
 
 // handleListUsers serves the Members page: q is a case-insensitive username
-// substring, role_id keeps one role and banned=1 keeps only effective bans.
+// or nickname substring, role_id keeps one role and banned=1 keeps only effective bans.
 // Filtering happens in the query, so it covers every page, not the fetched one.
 func handleListUsers(users *service.UserService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -77,6 +77,7 @@ func handleListUsers(users *service.UserService) http.HandlerFunc {
 			// offer only the actions the server's outrank rule allows.
 			safe[i].RolePosition = &page[i].RolePosition
 			safe[i].RoleIDs = page[i].RoleIDs
+			safe[i].DisplayName = page[i].DisplayName
 		}
 		writeJSON(w, http.StatusOK, safe)
 	}

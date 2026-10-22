@@ -91,6 +91,74 @@ func TestAdminAPI_ListUsers_SearchFilterAndBanned(t *testing.T) {
 	}
 }
 
+// WP 6.4d: the Members list carries each member's nickname (omitted when
+// unset), and the search matches it as well as the username.
+func membersNicknameAPI(t *testing.T) (http.Handler, string) {
+	t.Helper()
+	database := openMigratedAdminDB(t)
+	svc := service.New(database, auth.NewRateLimiter())
+	svc.Auth = service.NewAuthService(database, auth.NewRateLimiter(), nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, &mockPermInvalidator{}, svc)
+	_, ownerToken := sessionFor(t, database, "owner", 1)
+	aliceID, _ := sessionFor(t, database, "alice", 4)
+	sessionFor(t, database, "bob", 4)
+	if _, err := database.ExecContext(context.Background(),
+		`UPDATE users SET display_name = ? WHERE id = ?`, "Captain Hook", aliceID); err != nil {
+		t.Fatalf("set display_name: %v", err)
+	}
+	return handler, ownerToken
+}
+
+func listUsersRows(t *testing.T, handler http.Handler, token, query string) []map[string]any {
+	t.Helper()
+	w := doRequest(t, handler, http.MethodGet, "/users?limit=51&offset=0"+query, token, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /users%s = %d; body: %s", query, w.Code, w.Body.String())
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &rows); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return rows
+}
+
+func TestListUsers_ReturnsDisplayName(t *testing.T) {
+	handler, token := membersNicknameAPI(t)
+	for _, r := range listUsersRows(t, handler, token, "") {
+		name, has := r["display_name"]
+		switch r["username"] {
+		case "alice":
+			if name != "Captain Hook" {
+				t.Errorf("alice display_name = %v, want Captain Hook", name)
+			}
+		default:
+			if has {
+				t.Errorf("%v display_name = %v, want the field omitted when unset", r["username"], name)
+			}
+		}
+	}
+}
+
+func TestListUsers_SearchMatchesDisplayName(t *testing.T) {
+	handler, token := membersNicknameAPI(t)
+	for _, tc := range []struct{ query, want string }{
+		{"&q=HOOK", "alice"},
+		{"&q=captain%20h", "alice"},
+		{"&q=alice", "alice"},
+		{"&q=bob", "bob"},
+		{"&q=zzz", ""},
+	} {
+		rows := listUsersRows(t, handler, token, tc.query)
+		got := make([]string, 0, len(rows))
+		for _, r := range rows {
+			got = append(got, r["username"].(string))
+		}
+		if joined := strings.Join(got, ","); joined != tc.want {
+			t.Errorf("GET /users%s = %q, want %q", tc.query, joined, tc.want)
+		}
+	}
+}
+
 // Every Members action refuses the actor's own account and anyone at or above
 // the actor's rank, whatever the panel renders.
 func TestAdminAPI_MembersSelfAndRankGuard(t *testing.T) {
