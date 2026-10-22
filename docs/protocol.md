@@ -1764,7 +1764,8 @@ For a **thread** id (WP 6.9c) the audience is narrowed to the thread's followers
 who can read its parent, so an entry never reaches a user who does not follow
 the thread. A forum post is the exception: its entry goes to the forum's whole
 audience, as before (WP 6.9d). A client that finds a thread id here for a thread it does not follow
-can ignore it.
+can ignore it. A role mention (`mention_roles`) in a thread raises the holders' mention badge but
+sends a hint only to those who follow the thread, and does not make them follow it.
 
 - **Audience.** Connected users who may view the channel (the same
   `CanViewChannel` verdict as `ready`), for `text`, `announcement` and `voice` channels

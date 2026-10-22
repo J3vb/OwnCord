@@ -44,7 +44,7 @@ func (s *MessageService) resolveIDMentions(ctx context.Context, ids []int64, cha
 }
 
 // resolveRoleMentions fills set.RoleIDs with the pinged roles that exist and
-// clear the gate, then set.RoleUserIDs with their holders. The roles read and
+// clear the gate. The roles read and
 // the author's Subject are fetched only here, so a message without a role token
 // pays neither. A read failure leaves the tokens as plain text.
 func (s *MessageService) resolveRoleMentions(ctx context.Context, set *mentionSet, tokens []int64, authorID, channelID int64) {
@@ -80,13 +80,21 @@ func (s *MessageService) resolveRoleMentions(ctx context.Context, set *mentionSe
 			set.RoleIDs = append(set.RoleIDs, id)
 		}
 	}
-	if len(set.RoleIDs) == 0 {
-		return
+}
+
+// loadRoleHolders reads every holder of set.RoleIDs once and returns the set
+// with RoleUserIDs filled. Only a send calls it: an edit never raises a badge,
+// so it does not pay the read. Nothing is read when no role resolved; a read
+// failure is logged and leaves the roles listed with no holders to ping.
+func (s *MessageService) loadRoleHolders(ctx context.Context, set mentionSet, channelID int64) mentionSet {
+	if len(set.RoleIDs) == 0 || s.mentionIDs == nil {
+		return set
 	}
 	holders, err := s.mentionIDs.ListUserIDsByRoles(ctx, set.RoleIDs)
 	if err != nil {
 		slog.Error("MessageService.resolveMentions ListUserIDsByRoles", "err", err, "channel_id", channelID)
-		return
+		return set
 	}
 	set.RoleUserIDs = holders
+	return set
 }

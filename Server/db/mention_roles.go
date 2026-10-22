@@ -24,14 +24,16 @@ func insertAllMentionRows(ctx context.Context, tx mentionExecer, messageID int64
 // insertRoleMentionRows writes the role mention rows for one message inside
 // tx. The service has already applied the shared 20-mention cap across user
 // and role tokens; the storage cap here is the same backstop insertMentionRows
-// keeps for users.
+// keeps for users. A role deleted since the service read it is skipped rather
+// than failing the send on the foreign key.
 func insertRoleMentionRows(ctx context.Context, tx mentionExecer, messageID int64, roleIDs []int64) error {
 	if len(roleIDs) > maxMentionsPerMessage {
 		roleIDs = roleIDs[:maxMentionsPerMessage]
 	}
 	for _, rid := range roleIDs {
 		if _, err := tx.ExecContext(ctx,
-			`INSERT OR IGNORE INTO message_role_mentions (message_id, role_id) VALUES (?, ?)`,
+			`INSERT OR IGNORE INTO message_role_mentions (message_id, role_id)
+			 SELECT ?, id FROM roles WHERE id = ?`,
 			messageID, rid,
 		); err != nil {
 			return fmt.Errorf("insertRoleMentionRows: %w", err)

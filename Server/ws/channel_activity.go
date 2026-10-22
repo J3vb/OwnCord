@@ -80,6 +80,7 @@ type activityMention struct {
 	msgID    int64
 	authorID int64
 	ids      []int64
+	idSet    map[int64]struct{} // built at resolve time, after any forget
 	everyone bool
 	hereOnly bool
 }
@@ -412,7 +413,7 @@ func (h *Hub) activityUserEntries(
 		if m.everyone && m.hereOnly && !haveStatus {
 			status, haveStatus = h.LiveStatus(uid), true
 		}
-		direct, broad := service.MentionReach(m.ids, m.everyone, m.hereOnly, uid, status)
+		direct, broad := service.MentionReachSet(m.idSet, m.everyone, m.hereOnly, uid, status)
 		if direct || broad {
 			entries = append(entries, activityEntry(chID, m.msgID, m.authorID, direct, broad, withhold))
 			break
@@ -461,6 +462,7 @@ func activityMentions(ctx context.Context, vis VisibilityReader, in []activityMe
 			blockers[m.authorID] = set
 		}
 		if set != nil {
+			m.idSet = service.MentionIDSet(m.ids)
 			out = append(out, m)
 		}
 	}

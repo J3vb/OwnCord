@@ -160,7 +160,8 @@ func (s *MessageService) CreateForumPost(ctx context.Context, p ForumPostParams)
 	if err := s.checkMessageSlowMode(ctx, sp, forum); err != nil {
 		return nil, err
 	}
-	mentions := s.resolveMentions(ctx, content, p.UserID, p.ChannelID, false)
+	mentions := s.resolveMentions(ctx, content, p.UserID, p.ChannelID, false).withReplyPing(0)
+	mentions = s.loadRoleHolders(ctx, mentions, p.ChannelID)
 	delivery.Content, delivery.ForumPost = content, in
 	delivery.MentionedUserIDs, delivery.MentionsEveryone = mentions.UserIDs, mentions.Everyone
 	delivery.MentionedRoleIDs = mentions.RoleIDs

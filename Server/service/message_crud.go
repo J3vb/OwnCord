@@ -50,8 +50,8 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	// A reply_ping adds the replied-to author on top of the capped content
 	// mentions, without taking a content slot; everything downstream reads the
 	// one set.
-	mentions := s.resolveMentions(ctx, content, p.UserID, p.ChannelID, isDM).
-		withReplyPing(replyPingTarget(p, replyRef))
+	mentions := s.loadRoleHolders(ctx, s.resolveMentions(ctx, content, p.UserID, p.ChannelID, isDM).
+		withReplyPing(replyPingTarget(p, replyRef)), p.ChannelID)
 
 	// Persist message. RETURNING hands back the inserted row, so the DB-assigned
 	// timestamp the fan-out needs arrives with the insert instead of a re-read.

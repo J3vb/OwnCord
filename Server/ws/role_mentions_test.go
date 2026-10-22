@@ -126,3 +126,65 @@ func itoa(n int64) string {
 	b, _ := json.Marshal(n)
 	return string(b)
 }
+
+// TestChannelActivity_RoleMentionSkipsHolderWhoCannotRead: a holder denied
+// READ on the channel gets no hint, though the role was pinged.
+func TestChannelActivity_RoleMentionSkipsHolderWhoCannotRead(t *testing.T) {
+	f := newActivityFixture(t)
+	ctx := context.Background()
+	denied := f.user(t, "denied", permissions.MemberRoleID)
+	allowed := f.user(t, "allowed", permissions.MemberRoleID)
+	roleID := f.mentionableRole(t, "devs", denied, allowed)
+	if err := f.db.UpsertChannelUserOverride(ctx, f.textID, denied.ID, 0, permissions.ReadMessages); err != nil {
+		t.Fatal(err)
+	}
+	f.svc.Permissions.InvalidateAll()
+	deniedSend := f.connect(denied, 0)
+	allowedSend := f.connect(allowed, 0)
+
+	f.send(t, f.author, f.textID, "<@&"+itoa(roleID)+"> and <@"+itoa(denied.ID)+">")
+	f.flush()
+
+	if got := activityFrames(deniedSend); len(got) != 0 {
+		t.Errorf("holder who cannot read received %+v, want nothing", got)
+	}
+	if e := wantOneEntry(t, "allowed", activityFrames(allowedSend)); !e.MentionsYou {
+		t.Errorf("allowed holder entry = %+v, want mentions_you", e)
+	}
+	if n, _ := f.db.GetMentionCount(ctx, denied.ID, f.textID); n != 0 {
+		t.Errorf("denied holder mention_count = %d, want 0", n)
+	}
+}
+
+// TestChannelActivity_RoleMentionInThreadHintsFollowersOnly pins the current
+// choice: a thread's hint goes to its followers, so a role holder who does not
+// follow the thread gets the badge but no channel_activity entry (a role ping
+// never auto-joins a thread; only a direct mention does).
+func TestChannelActivity_RoleMentionInThreadHintsFollowersOnly(t *testing.T) {
+	f := newFollowFixture(t)
+	ctx := context.Background()
+	follower := f.user(t, "follower", permissions.MemberRoleID)
+	holder := f.user(t, "holder", permissions.MemberRoleID)
+	roleID := f.mentionableRole(t, "devs", follower, holder)
+	if res := f.follow(follower.ID, true); res.Error != nil {
+		t.Fatal(res.Error)
+	}
+	followerSend := f.connect(follower, 0)
+	holderSend := f.connect(holder, 0)
+
+	f.send(t, f.author, f.thread, "<@&"+itoa(roleID)+"> look")
+	f.flush()
+
+	if e := wantOneEntry(t, "follower", activityFrames(followerSend)); !e.MentionsYou {
+		t.Errorf("follower entry = %+v, want mentions_you", e)
+	}
+	if got := activityFrames(holderSend); len(got) != 0 {
+		t.Errorf("non-following holder received %+v, want no hint", got)
+	}
+	if got := f.followers(t); slices.Contains(got, holder.ID) {
+		t.Errorf("followers = %v: a role ping must not auto-follow", got)
+	}
+	if n, err := f.db.GetMentionCount(ctx, holder.ID, f.thread); err != nil || n != 1 {
+		t.Errorf("holder thread mention_count = %d (%v), want the badge", n, err)
+	}
+}

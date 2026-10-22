@@ -231,18 +231,52 @@ func TestRoleMention_EditRaisesNothing(t *testing.T) {
 	}
 }
 
+// The cap of 20 is shared by users and roles: the role keeps its slot and the
+// users fill the rest.
 func TestRoleMention_CountsInTheCap(t *testing.T) {
 	svc, _, database := newMentionFixture(t)
 	seedPingRole(t, database, true, 2)
 
 	content := "<@&7>"
-	for range maxMentionsPerMessage + 5 {
-		content += " @bob @carol"
+	for id := int64(10); id < 35; id++ { // 25 distinct existing users
+		seedUserRole(t, database, id, permissions.MemberRoleID)
+		content += fmt.Sprintf(" <@%d>", id)
 	}
-	content += " <@3>"
 	res := sendAs(t, svc, 1, content)
-	if got := len(res.MentionRoles) + len(res.Mentions); got > maxMentionsPerMessage {
-		t.Errorf("user + role mentions = %d, want at most %d", got, maxMentionsPerMessage)
+	if !slices.Equal(res.MentionRoles, []int64{devsRoleID}) {
+		t.Errorf("mention_roles = %v, want the role kept", res.MentionRoles)
+	}
+	if got := len(res.Mentions) + len(res.MentionRoles); got != maxMentionsPerMessage {
+		t.Errorf("user + role mentions = %d, want exactly %d", got, maxMentionsPerMessage)
+	}
+}
+
+func TestRoleMention_DeletedRoleDoesNotFailTheSend(t *testing.T) {
+	_, _, database := newMentionFixture(t)
+	ctx := context.Background()
+	msg, err := database.CreateMessageWithMentions(ctx, 10, 1, "x", nil, nil, 0, false, []int64{devsRoleID, 4})
+	if err != nil {
+		t.Fatalf("a role missing from roles failed the write: %v", err)
+	}
+	stored, err := database.GetRoleMentionsByMessageIDs(ctx, []int64{msg.ID})
+	if err != nil || !slices.Equal(stored[msg.ID], []int64{4}) {
+		t.Errorf("stored = %v (%v), want only the role that still exists", stored[msg.ID], err)
+	}
+}
+
+// A role holder and a <@id> target who cannot read the channel get no badge.
+func TestRoleMention_UnreadableChannelRaisesNoBadge(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+	seedPingRole(t, database, true, 2, 3) // bob, carol hold devs
+	// Members (and devs) cannot read channel 10; the mod can.
+	seedChannelOverride(t, database, permissions.MemberRoleID, 10, 0, permissions.ReadMessages)
+	seedChannelOverride(t, database, devsRoleID, 10, 0, permissions.ReadMessages)
+
+	sendAs(t, svc, 4, "<@&7> and <@2> and <@3>")
+	for _, uid := range []int64{2, 3} {
+		if got := mentionCount(t, database, uid); got != 0 {
+			t.Errorf("user %d who cannot read got mention_count %d, want 0", uid, got)
+		}
 	}
 }
 

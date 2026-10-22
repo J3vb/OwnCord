@@ -185,7 +185,22 @@ func (s *MessageService) addNameMentions(ctx context.Context, tokens []mentionCa
 // for @here; "" means no live connection. The author and the author's blockers
 // are removed by the caller.
 func MentionReach(ids []int64, everyone, hereOnly bool, uid int64, liveStatus string) (direct, broad bool) {
-	direct = slices.Contains(ids, uid)
+	return MentionReachSet(MentionIDSet(ids), everyone, hereOnly, uid, liveStatus)
+}
+
+// MentionIDSet indexes a mention's ids so a fan-out over many readers (a
+// 2,000-holder role) tests each in O(1) with MentionReachSet.
+func MentionIDSet(ids []int64) map[int64]struct{} {
+	set := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		set[id] = struct{}{}
+	}
+	return set
+}
+
+// MentionReachSet is MentionReach over a prebuilt MentionIDSet.
+func MentionReachSet(ids map[int64]struct{}, everyone, hereOnly bool, uid int64, liveStatus string) (direct, broad bool) {
+	_, direct = ids[uid]
 	if everyone {
 		broad = !hereOnly || (liveStatus != "" && db.BroadcastStatus(liveStatus) != db.StatusOffline)
 	}
@@ -209,7 +224,7 @@ func (s *MessageService) mentionEntries(ctx context.Context, channelID, msgID, a
 	if !set.pings() {
 		return nil
 	}
-	reach := set.reachIDs()
+	reach := MentionIDSet(set.reachIDs())
 
 	readers, err := s.mentionReaders(ctx, channelID, isDM, participantIDs)
 	if err != nil {
@@ -232,7 +247,7 @@ func (s *MessageService) mentionEntries(ctx context.Context, channelID, msgID, a
 				status = s.liveStatus(r.UserID)
 			}
 		}
-		if direct, broad := MentionReach(reach, set.Everyone, set.HereOnly, r.UserID, status); direct || broad {
+		if direct, broad := MentionReachSet(reach, set.Everyone, set.HereOnly, r.UserID, status); direct || broad {
 			recipients[r.UserID] = struct{}{}
 		}
 	}
