@@ -87,6 +87,9 @@ func (s *RoleService) UpdateRole(ctx context.Context, actorID, roleID int64, in 
 	fan := RoleFanout{Roles: true}
 	if res.Renamed && affectedOK {
 		fan.MemberUpdate = affected
+	} else if len(res.ResyncedMembers) > 0 {
+		// A moved position re-derived the top role of multi-role holders.
+		fan.MemberUpdate = res.ResyncedMembers
 	}
 	if res.PermsChanged {
 		if affectedOK {
@@ -125,14 +128,17 @@ func (s *RoleService) DeleteRole(ctx context.Context, actorID, roleID int64) (de
 // cached role snapshot holds the old position, which the hierarchy checks read,
 // so the whole cache is flushed.
 func (s *RoleService) ReorderRoles(ctx context.Context, actorID int64, orderedIDs []int64) ([]*db.Role, error) {
-	updated, err := s.reorderRolesLocked(ctx, actorID, orderedIDs)
+	updated, resynced, err := s.reorderRolesLocked(ctx, actorID, orderedIDs)
 	if err != nil {
 		return nil, err
 	}
 	if s.perms != nil {
 		s.perms.InvalidateAll()
 	}
-	s.notifyRoles(RoleFanout{Roles: true})
+	// A multi-role member's top role (and role order) can move with the
+	// positions; the mirror was re-derived in the same transaction, so tell
+	// everyone the new top.
+	s.notifyRoles(RoleFanout{Roles: true, MemberUpdate: resynced})
 	return updated, nil
 }
 

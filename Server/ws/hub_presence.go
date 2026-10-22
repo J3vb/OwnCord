@@ -30,7 +30,7 @@ type presenceBatchEntry struct {
 
 // memberPayloadFor is the member_join user object: what a client's member
 // list needs to add the member.
-func memberPayloadFor(user *db.User, roleName string) memberJoinUser {
+func memberPayloadFor(user *db.User, roleName string, roleIDs []int64) memberJoinUser {
 	return memberJoinUser{
 		ID:                user.ID,
 		Username:          user.Username,
@@ -40,6 +40,7 @@ func memberPayloadFor(user *db.User, roleName string) memberJoinUser {
 		IdentityPublicKey: user.IdentityPublicKey,
 		About:             user.About,
 		CreatedAt:         db.FormatMemberCreatedAt(user.CreatedAt),
+		RoleIDs:           roleIDs,
 		Banner:            user.BannerPath(),
 		BannerColor:       user.BannerColor,
 	}
