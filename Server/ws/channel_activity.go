@@ -357,7 +357,11 @@ func (h *Hub) resolveChannelActivity(ctx context.Context, chID int64, pc *pendin
 	}
 
 	forumScoped := isForumScoped(ctx, vis, ch) // once per channel, not per recipient
-	for _, uid := range h.channelReadAudienceFor(ctx, chID, ch, false) {
+	audience := h.channelReadAudienceFor(ctx, chID, ch, false)
+	if ch.IsThread() && !forumScoped { // a forum's posts stay a forum-wide hint (WP 6.9d)
+		audience = h.threadFollowersOf(ctx, chID, audience)
+	}
+	for _, uid := range audience {
 		if focused[uid] || uid == pc.latestAuthorID {
 			continue
 		}
@@ -367,6 +371,29 @@ func (h *Hub) resolveChannelActivity(ctx context.Context, chID int64, pc *pendin
 		perUser[uid] = append(perUser[uid],
 			h.activityUserEntries(uid, chID, pc, mentions, blockers, ch.NSFW && !acked[uid])...)
 	}
+}
+
+// threadFollowersOf narrows a thread's read audience to its followers (WP
+// 6.9c): a hint for a thread is for the people who follow it, and the client
+// handles every thread entry it gets. audience already holds only users the
+// parent lets read, so a follower who lost the parent is not in it and a
+// follow row never widens anything. A hub without a thread service or a failed
+// follower read sends no thread hint; ready is authoritative.
+func (h *Hub) threadFollowersOf(ctx context.Context, threadID int64, audience []int64) []int64 {
+	svc := h.threadHub.svc
+	if svc == nil {
+		return nil
+	}
+	ids, err := svc.Followers(ctx, threadID)
+	if err != nil {
+		activityReadFailed("Followers, skipping thread", "thread_id", threadID, "err", err)
+		return nil
+	}
+	following := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		following[id] = true
+	}
+	return slices.DeleteFunc(slices.Clone(audience), func(uid int64) bool { return !following[uid] })
 }
 
 // activityUserEntries is uid's entries for one channel: the latest message that

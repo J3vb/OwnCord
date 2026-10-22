@@ -238,6 +238,44 @@ func (h *Hub) readyVisibleChannels(ctx context.Context, database ReadySnapshotRe
 	return visibleChannels, grants, nil
 }
 
+// readyThreads is ready.threads (WP 6.9c): the viewer's followed open threads
+// whose parent is in visibleChannels (an NSFW parent only once acknowledged), newest activity first, capped at
+// service.MaxFollowedThreads. A follow row for a parent the viewer can no
+// longer read stays in the table and is simply left out here, so regaining the
+// parent brings the thread back. nil (the key is omitted) when the hub has no
+// thread service, and also on a failed read: the client keeps what it had
+// instead of being told it follows nothing.
+func (h *Hub) readyThreads(ctx context.Context, userID int64, visibleChannels []db.Channel, nsfwAck map[int64]bool) *[]readyThreadPayload {
+	svc := h.threadHub.svc
+	if svc == nil {
+		return nil
+	}
+	readable := make(map[int64]struct{}, len(visibleChannels))
+	for i := range visibleChannels {
+		// A thread's name discloses its starter, so an NSFW parent the viewer
+		// has not acknowledged lists none of its threads, as thread_changed
+		// withholds them.
+		if visibleChannels[i].NSFW && !nsfwAck[visibleChannels[i].ID] {
+			continue
+		}
+		readable[visibleChannels[i].ID] = struct{}{}
+	}
+	followed, err := svc.Followed(ctx, userID, readable)
+	if err != nil {
+		slog.Warn("ws: ready followed threads read failed, omitting", "user_id", userID, "err", err)
+		return nil
+	}
+	out := make([]readyThreadPayload, 0, len(followed))
+	for i := range followed {
+		f := &followed[i]
+		out = append(out, readyThreadPayload{
+			Thread: &f.Thread, LastMessageID: f.LastMessageID, LastReadMessageID: f.LastReadMessageID,
+			UnreadCount: f.UnreadCount, MentionCount: f.MentionCount,
+		})
+	}
+	return &out
+}
+
 // readyDMChannels loads the user's open DM channels and reconciles them with
 // the rest of the ready payload: the same presence rule presentableMembers
 // applies to the members array.
@@ -401,6 +439,7 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 	if h.db != nil {
 		retryFloorMS = h.readers.Ready.MessageDeliveryFloorMS()
 	}
+	threads := h.readyThreads(ctx, userID, visibleChannels, ackMap)
 	return &readyFields{
 		head: readyHead{
 			Capabilities: readyCapabilities(retryFloorMS, h.threadHub.svc != nil, h.threadHub.svc != nil),
@@ -415,6 +454,7 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 			Notices:     notices,
 			Roles:       roles,
 			ServerName:  serverName,
+			Threads:     threads,
 			VoiceStates: voiceStates,
 		},
 		roster:       roster,

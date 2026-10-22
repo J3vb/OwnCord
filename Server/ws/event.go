@@ -407,6 +407,19 @@ func (e VoiceE2EEOfferGuardedEvent) VoiceChannelID() int64        { return e.voi
 func (e VoiceE2EEOfferGuardedEvent) TargetUserID() int64          { return e.targetUserID }
 func (e VoiceE2EEOfferGuardedEvent) Payload() []byte              { return e.payload }
 
+// threadFollowEvt delivers a thread_follow_update to one user (WP 6.9c).
+// Unsequenced and on the low queue like mention_count: a missed frame costs
+// nothing, because ready.threads is authoritative.
+type threadFollowEvt struct {
+	targetUserID int64
+	payload      []byte
+}
+
+func (e threadFollowEvt) EventType() string            { return MsgTypeThreadFollowUpdate }
+func (e threadFollowEvt) deliveryClass() deliveryClass { return classTypingDM }
+func (e threadFollowEvt) TargetUserID() int64          { return e.targetUserID }
+func (e threadFollowEvt) Payload() []byte              { return e.payload }
+
 // DMChannelOpenEvent sends a dm_channel_open notification to a specific user.
 type DMChannelOpenEvent struct {
 	targetUserID int64

@@ -103,18 +103,23 @@ var contentBearingKinds = map[string]bool{
 	MsgTypeThreadChanged:   true, // a thread's name, discloses what the parent's unacknowledged members may not read (WP 6.9c)
 
 	// ── metadata: no message body ──
-	MsgTypeAuthOK:              false,
-	MsgTypeAuthError:           false,
-	MsgTypeReady:               false, // buildReady carries channel/member/voice state only, never message content
-	MsgTypeChatSendOK:          false, // direct to the sender, who already knows their own content
-	MsgTypeChatForwardOK:       false, // direct to the sender; ids only
-	MsgTypePollCreateOK:        false, // direct to the sender; ids only
-	MsgTypeForumPostCreateOK:   false, // direct to the sender, who already knows their own content
-	MsgTypePollVoteOK:          false, // direct to the sender; ids only
-	MsgTypePollEndOK:           false, // direct to the sender; ids only
-	MsgTypeChatDeleted:         false, // ids only
-	MsgTypeThreadCreateOK:      false, // direct to the sender, who just named the thread
-	MsgTypeThreadUpdateOK:      false, // direct to the sender; the thread id only
+	MsgTypeAuthOK:            false,
+	MsgTypeAuthError:         false,
+	MsgTypeReady:             false, // buildReady carries channel/member/voice state only, never message content
+	MsgTypeChatSendOK:        false, // direct to the sender, who already knows their own content
+	MsgTypeChatForwardOK:     false, // direct to the sender; ids only
+	MsgTypePollCreateOK:      false, // direct to the sender; ids only
+	MsgTypeForumPostCreateOK: false, // direct to the sender, who already knows their own content
+	MsgTypePollVoteOK:        false, // direct to the sender; ids only
+	MsgTypePollEndOK:         false, // direct to the sender; ids only
+	MsgTypeChatDeleted:       false, // ids only
+	MsgTypeThreadCreateOK:    false, // direct to the sender, who just named the thread
+	MsgTypeThreadUpdateOK:    false, // direct to the sender; the thread id only
+	MsgTypeThreadFollowOK:    false, // direct to the sender; the thread id and a flag only
+	// thread_follow_update names the thread, but it is never published to a topic:
+	// it goes to one user, only after the follower and read-access checks, so the
+	// broadcast gate has nothing to add.
+	MsgTypeThreadFollowUpdate:  false,
 	MsgTypeThreadDeleted:       false, // ids only
 	MsgTypeChatBulkDeleted:     false, // ids only
 	MsgTypeChatPinned:          false, // ids + flag only, no message body

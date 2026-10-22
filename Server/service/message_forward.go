@@ -285,6 +285,7 @@ func (s *MessageService) forwardResult(ctx context.Context, sp SendMessageParams
 	result := &SendMessageResult{
 		MessageID: msg.ID, Timestamp: msg.Timestamp, Content: snap.msg.Content,
 		IsDM: isDM, Channel: target, Attachments: attachments, Mentions: []int64{},
+		ThreadJoined: msg.ThreadJoined,
 		Forward: &db.ForwardInfo{
 			SourceChannelID: snap.origin.SourceChannelID, SourceMessageID: snap.origin.SourceMessageID,
 			SourceTimestamp: snap.origin.SourceTimestamp,

@@ -34,7 +34,7 @@ var diagnosticTables = []string{
 	"pending_totp_enrollments", "push_subscriptions",
 	"rate_lockouts", "reactions", "read_states", "recovery_assists", "recovery_kits",
 	"report_events", "report_evidence", "report_notes", "reports", "retention_runs",
-	"roles", "schema_versions", "sessions", "settings", "sounds", "totp_recovery_codes",
+	"roles", "schema_versions", "sessions", "settings", "sounds", "thread_members", "totp_recovery_codes",
 	"totp_used_codes", "trusted_senders", "user_blocks", "user_storage", "users", "voice_states",
 }
 
