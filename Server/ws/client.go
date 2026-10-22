@@ -38,10 +38,11 @@ type Client struct {
 	// channel, join token, completed flag, E2EE announce and the moderator
 	// stash, all guarded by voice.voiceMu.
 	voice     voiceSlot
-	roleName  string  // cached role name for chat_message broadcasts
-	roleIDs   []int64 // held role ids, top first; set by refreshUserSnapshot before registration
-	tokenHash string  // SHA-256 hex of the session token; used for periodic revalidation
-	lastSeq   uint64  // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
+	roleName  string          // cached role name for chat_message broadcasts
+	held      *db.MemberRoles // the one held-role read of this handshake (refreshUserSnapshot)
+	roleIDs   []int64         // held role ids, top first; set by refreshUserSnapshot before registration
+	tokenHash string          // SHA-256 hex of the session token; used for periodic revalidation
+	lastSeq   uint64          // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
 	// authChannelID is the channel the client says it had open when it
 	// disconnected, sent alongside last_seq in the auth frame (0 = none).
 	//

@@ -2063,7 +2063,7 @@ arrived.
 
 ### member_update (Server -> Client, broadcast)
 
-Triggered when a user's roles change: an admin replaces, adds or removes a role, a role is renamed or deleted, or a role reorder moves the user's top role.
+Triggered when a user's roles change: an admin replaces, adds or removes a role, a role is renamed or deleted, or a role reorder moves a role the user holds. A reorder sends one frame to every member who holds a moved role together with another role, not only to those whose top role changed.
 
 ```json
 {
@@ -2078,7 +2078,9 @@ Triggered when a user's roles change: an admin replaces, adds or removes a role,
 ```
 
 `role` is the name of the member's top role (highest `position`, lowest id on a
-tie) and `role_ids` every role they hold, top first. `role_ids` is absent when
+tie) and `role_ids` every role they hold. `role_ids[0]` is the top role; order
+the rest by `roles[].position`, because a roster cached before a reorder may
+keep an older order for the tail. `role_ids` is absent when
 the server could not read the holder list for this frame and on an older
 server; keep the member's previous roles then.
 

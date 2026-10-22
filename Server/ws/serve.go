@@ -227,6 +227,7 @@ func (h *Hub) refreshUserSnapshot(ctx context.Context, database VisibilityReader
 	}
 	c.roleName = strings.ToLower(held.Top.Name)
 	c.roleIDs = held.IDs
+	c.held = held
 	c.user = user
 	return nil
 }

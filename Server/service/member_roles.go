@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
 
 	"github.com/J3vb/OwnCord/Server/db"
 )
@@ -20,8 +19,9 @@ var ErrLastRole = fmt.Errorf("%w: a member must keep at least one role", ErrConf
 // use. It is declared here, not on Store, so the Store surface does not grow;
 // *db.DB satisfies it.
 type MemberRoleStore interface {
-	AddUserRole(ctx context.Context, userID, roleID int64) error
-	RemoveUserRole(ctx context.Context, userID, roleID int64) error
+	// GrantUserRole and RevokeUserRole report whether a row actually changed.
+	GrantUserRole(ctx context.Context, userID, roleID int64) (bool, error)
+	RevokeUserRole(ctx context.Context, userID, roleID int64) (bool, error)
 }
 
 func (s *ModerationService) memberRoleStore() (MemberRoleStore, error) {
@@ -46,15 +46,13 @@ func (s *ModerationService) AddUserRole(ctx context.Context, actorID, targetID, 
 	if err != nil {
 		return nil, err
 	}
-	held, err := s.st.GetMemberRoles(ctx, targetID)
+	changed, err := rs.GrantUserRole(ctx, targetID, roleID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to read member roles: %w", ErrInternal, err)
-	}
-	if held != nil && slices.Contains(held.IDs, roleID) {
-		return role, nil
-	}
-	if err := rs.AddUserRole(ctx, targetID, roleID); err != nil {
 		return nil, fmt.Errorf("%w: failed to add role: %w", ErrInternal, err)
+	}
+	if !changed {
+		// Already held (or a concurrent duplicate won): no audit row, no fan-out.
+		return role, nil
 	}
 	// Drop the cached snapshot first: the hub resolves visibility through it.
 	s.perms.InvalidateUser(targetID)
@@ -80,16 +78,17 @@ func (s *ModerationService) RemoveUserRole(ctx context.Context, actorID, targetI
 	if err != nil {
 		return nil, err
 	}
-	// The held check here only skips the audit row and fan-out of a no-op; the
-	// last-role guard itself is the store's, inside its own transaction.
-	if held, err := s.st.GetMemberRoles(ctx, targetID); err == nil && held != nil && !slices.Contains(held.IDs, roleID) {
-		return role, nil
-	}
-	if err := rs.RemoveUserRole(ctx, targetID, roleID); err != nil {
+	changed, err := rs.RevokeUserRole(ctx, targetID, roleID)
+	if err != nil {
 		if errors.Is(err, db.ErrLastRole) {
 			return nil, ErrLastRole
 		}
 		return nil, fmt.Errorf("%w: failed to remove role: %w", ErrInternal, err)
+	}
+	if !changed {
+		// Not held (or a concurrent duplicate DELETE already removed it): the
+		// request changed nothing, so it writes no audit row and fans out nothing.
+		return role, nil
 	}
 	s.perms.InvalidateUser(targetID)
 

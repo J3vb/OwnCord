@@ -102,59 +102,83 @@ func (d *DB) GetMemberRoles(ctx context.Context, userID int64) (*MemberRoles, er
 // AddUserRole grants roleID to userID (a no-op when already held) and
 // re-mirrors the top role, in one writer transaction.
 func (d *DB) AddUserRole(ctx context.Context, userID, roleID int64) error {
+	_, err := d.GrantUserRole(ctx, userID, roleID)
+	return err
+}
+
+// GrantUserRole is AddUserRole that also reports whether a row was inserted:
+// false means the member already held the role and nothing changed.
+func (d *DB) GrantUserRole(ctx context.Context, userID, roleID int64) (bool, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("AddUserRole begin tx: %w", err)
+		return false, fmt.Errorf("AddUserRole begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	q := d.q.WithTx(tx)
-	if err := q.AddUserRole(ctx, dbgen.AddUserRoleParams{UserID: userID, RoleID: roleID}); err != nil {
-		return fmt.Errorf("AddUserRole insert: %w", err)
+	res, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (?, ?)`, userID, roleID)
+	if err != nil {
+		return false, fmt.Errorf("AddUserRole insert: %w", err)
 	}
-	if err := syncTopRoleTx(ctx, q, userID); err != nil {
-		return fmt.Errorf("AddUserRole: %w", err)
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("AddUserRole rows: %w", err)
+	}
+	if err := syncTopRoleTx(ctx, d.q.WithTx(tx), userID); err != nil {
+		return false, fmt.Errorf("AddUserRole: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("AddUserRole commit: %w", err)
+		return false, fmt.Errorf("AddUserRole commit: %w", err)
 	}
-	return nil
+	return n > 0, nil
 }
 
 // RemoveUserRole revokes roleID from userID and re-mirrors the top role, in one
 // writer transaction. It returns ErrLastRole, changing nothing, when the
 // member holds roleID as their only role.
 func (d *DB) RemoveUserRole(ctx context.Context, userID, roleID int64) error {
+	_, err := d.RevokeUserRole(ctx, userID, roleID)
+	return err
+}
+
+// RevokeUserRole is RemoveUserRole that also reports whether a row was
+// deleted: false means the member did not hold the role (for example a
+// concurrent duplicate request already removed it) and nothing changed.
+func (d *DB) RevokeUserRole(ctx context.Context, userID, roleID int64) (bool, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("RemoveUserRole begin tx: %w", err)
+		return false, fmt.Errorf("RemoveUserRole begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
 	q := d.q.WithTx(tx)
 	n, err := q.CountUserRoles(ctx, userID)
 	if err != nil {
-		return fmt.Errorf("RemoveUserRole count: %w", err)
+		return false, fmt.Errorf("RemoveUserRole count: %w", err)
 	}
 	if n <= 1 {
 		held, err := q.ListRoleIDsByUser(ctx, userID)
 		if err != nil {
-			return fmt.Errorf("RemoveUserRole list: %w", err)
+			return false, fmt.Errorf("RemoveUserRole list: %w", err)
 		}
 		if slices.Contains(held, roleID) {
-			return fmt.Errorf("RemoveUserRole: %w", ErrLastRole)
+			return false, fmt.Errorf("RemoveUserRole: %w", ErrLastRole)
 		}
 	}
-	if err := q.RemoveUserRole(ctx, dbgen.RemoveUserRoleParams{UserID: userID, RoleID: roleID}); err != nil {
-		return fmt.Errorf("RemoveUserRole delete: %w", err)
+	res, err := tx.ExecContext(ctx, `DELETE FROM user_roles WHERE user_id = ? AND role_id = ?`, userID, roleID)
+	if err != nil {
+		return false, fmt.Errorf("RemoveUserRole delete: %w", err)
+	}
+	deleted, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("RemoveUserRole rows: %w", err)
 	}
 	if err := syncTopRoleTx(ctx, q, userID); err != nil {
-		return fmt.Errorf("RemoveUserRole: %w", err)
+		return false, fmt.Errorf("RemoveUserRole: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("RemoveUserRole commit: %w", err)
+		return false, fmt.Errorf("RemoveUserRole commit: %w", err)
 	}
-	return nil
+	return deleted > 0, nil
 }
 
 // GetRoleByID returns the role with the given ID, or nil if not found.
@@ -268,6 +292,7 @@ func (d *DB) UpdateRole(ctx context.Context, id int64, name string, color *strin
 
 	q := d.q.WithTx(tx)
 	old, err := q.GetRolePosition(ctx, id)
+	found := err == nil
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("UpdateRole read position: %w", err)
 	}
@@ -283,7 +308,7 @@ func (d *DB) UpdateRole(ctx context.Context, id int64, name string, color *strin
 		return nil, fmt.Errorf("UpdateRole: %w", err)
 	}
 	var resynced []int64
-	if err == nil && old != int64(position) {
+	if found && old != int64(position) {
 		if resynced, err = resyncMultiRoleHoldersTx(ctx, q, []int64{id}); err != nil {
 			return nil, fmt.Errorf("UpdateRole: %w", err)
 		}

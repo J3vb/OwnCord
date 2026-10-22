@@ -90,7 +90,6 @@ func (m MemberSummary) ForViewer(viewerID int64) MemberSummary {
 }
 
 // ListMembers returns non-banned users as lightweight summaries.
-// M-12: Limited to 1000 rows to prevent unbounded result sets on large servers.
 func (d *DB) ListMembers(ctx context.Context) ([]MemberSummary, error) {
 	rows, err := d.q.ListMembers(ctx)
 	if err != nil {

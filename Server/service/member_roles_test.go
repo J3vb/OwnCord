@@ -337,3 +337,40 @@ func TestRoleInput_HoistAndMentionable(t *testing.T) {
 		}
 	}
 }
+
+// Concurrent duplicate requests change one row, so they write one audit row.
+func TestMemberRoles_ConcurrentDuplicatesAuditOnce(t *testing.T) {
+	svc, database := newMemberRolesFixture(t)
+	ctx := context.Background()
+
+	run := func(name string, op func() error) {
+		t.Helper()
+		var wg sync.WaitGroup
+		errs := make([]error, 6)
+		for i := range errs {
+			wg.Go(func() { errs[i] = op() })
+		}
+		wg.Wait()
+		for _, err := range errs {
+			if err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+		}
+	}
+	run("add", func() error { _, err := svc.AddUserRole(ctx, 3, 5, memberRolesHelperID); return err })
+	run("remove", func() error { _, err := svc.RemoveUserRole(ctx, 3, 5, memberRolesHelperID); return err })
+
+	entries, err := database.GetAuditLog(ctx, 50, 0)
+	if err != nil {
+		t.Fatalf("GetAuditLog: %v", err)
+	}
+	counts := map[string]int{}
+	for _, e := range entries {
+		if e.TargetID == 5 {
+			counts[e.Action]++
+		}
+	}
+	if counts["role_add"] != 1 || counts["role_remove"] != 1 {
+		t.Errorf("audit rows = %v, want exactly one role_add and one role_remove", counts)
+	}
+}

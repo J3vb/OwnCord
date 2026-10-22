@@ -462,11 +462,13 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	// Look up role for permission-filtered ready payload.
 	// Fail closed: if the role lookup fails, disconnect rather than serving
 	// a permissive ready payload with nil role (BUG-094).
-	heldRoles, roleErr := database.GetMemberRoles(ctx, c.userID)
-	if roleErr != nil || heldRoles == nil {
-		slog.Error("ws: role lookup failed, disconnecting", "user_id", c.userID, "role_id", c.user.RoleID, "err", roleErr)
+	// The same read refreshUserSnapshot just made, so auth_ok.role_ids and the
+	// ready permissions come from one snapshot.
+	heldRoles := c.held
+	if heldRoles == nil {
+		slog.Error("ws: role lookup failed, disconnecting", "user_id", c.userID, "role_id", c.user.RoleID)
 		_ = conn.Close(websocket.StatusInternalError, "role lookup failed")
-		return fmt.Errorf("role lookup failed for user %d: %w", c.userID, roleErr)
+		return fmt.Errorf("role lookup failed for user %d", c.userID)
 	}
 	// Top role identity with the OR of every held mask: what the ready
 	// payload's permission-filtered fields resolve from.
