@@ -22,8 +22,14 @@ function granted(): boolean {
   return typeof Notification !== "undefined" && Notification.permission === "granted";
 }
 
-function present(title: string, options: NotificationOptions): Notification {
-  return new Notification(title, options);
+/** Show one notification, or null where the page may not construct one
+ *  (Android Chrome allows them only from a service worker). */
+function present(title: string, options: NotificationOptions): Notification | null {
+  try {
+    return new Notification(title, options);
+  } catch {
+    return null;
+  }
 }
 
 /** Raise one notification; a click brings the tab forward and reports `target`. */
@@ -31,13 +37,28 @@ function raise(
   title: string,
   options: NotificationOptions,
   target: NotificationTarget,
-): Notification {
+): Notification | null {
   const shown = present(title, { ...options, data: target });
-  shown.addEventListener("click", () => {
-    window.focus();
-    shown.close();
+  if (shown === null) return null;
+  const forget = (): void => {
     if (ringing.get(target.channelId) === shown) ringing.delete(target.channelId);
-    for (const handler of activationHandlers) handler(target);
+  };
+  shown.addEventListener("close", forget);
+  shown.addEventListener("click", () => {
+    forget();
+    shown.close();
+    try {
+      window.focus();
+    } catch {
+      // A page that may not take focus still reports the click.
+    }
+    for (const handler of activationHandlers) {
+      try {
+        handler(target);
+      } catch {
+        // One failing handler must not keep the others from the click.
+      }
+    }
   });
   return shown;
 }
@@ -100,14 +121,13 @@ export const notifier: Notifier = {
     // One ring per channel: the tag replaces a ring still showing, and the
     // notification stays up until the user answers it or `clearCall`.
     ringing.get(target.channelId)?.close();
-    ringing.set(
-      target.channelId,
-      raise(
-        title,
-        { body, tag: `owncord-call-${target.channelId}`, requireInteraction: true },
-        target,
-      ),
+    ringing.delete(target.channelId);
+    const ring = raise(
+      title,
+      { body, tag: `owncord-call-${target.channelId}`, requireInteraction: true },
+      target,
     );
+    if (ring !== null) ringing.set(target.channelId, ring);
   },
   async clearCall(channelId: number): Promise<void> {
     ringing.get(channelId)?.close();

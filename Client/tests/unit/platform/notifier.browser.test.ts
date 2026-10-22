@@ -20,7 +20,7 @@ class FakeNotification {
   static answer: NotificationPermission = "granted";
   static instances: FakeNotification[] = [];
   static requestPermission = vi.fn(() => Promise.resolve(FakeNotification.answer));
-  private readonly listeners: (() => void)[] = [];
+  private readonly listeners: { type: "click" | "close"; listener: () => void }[] = [];
   closed = false;
   constructor(
     readonly title: string,
@@ -29,13 +29,18 @@ class FakeNotification {
     FakeNotification.instances.push(this);
   }
   close(): void {
+    if (this.closed) return;
     this.closed = true;
+    this.fire("close");
   }
-  addEventListener(_type: "click", listener: () => void): void {
-    this.listeners.push(listener);
+  addEventListener(type: "click" | "close", listener: () => void): void {
+    this.listeners.push({ type, listener });
   }
   click(): void {
-    for (const listener of this.listeners) listener();
+    this.fire("click");
+  }
+  private fire(type: "click" | "close"): void {
+    for (const entry of this.listeners) if (entry.type === type) entry.listener();
   }
 }
 
@@ -147,6 +152,40 @@ describe("browser notifier", () => {
     expect(focus).toHaveBeenCalledOnce();
     expect(FakeNotification.instances[0]!.closed).toBe(true);
     expect(handler).toHaveBeenCalledExactlyOnceWith({ host: "h", channelId: 7, messageId: 42 });
+  });
+
+  it("reports a click to every handler even when one throws", async () => {
+    const notifier = await load();
+    const later = vi.fn();
+    notifier.onMessageActivated(() => {
+      throw new Error("handler failed");
+    });
+    notifier.onMessageActivated(later);
+    await notifier.showMessage("t", "b", { host: "h", channelId: 7, messageId: 42 });
+    FakeNotification.instances[0]!.click();
+    expect(later).toHaveBeenCalledOnce();
+    expect(FakeNotification.instances[0]!.closed).toBe(true);
+  });
+
+  it("resolves without a notification where the page may not construct one", async () => {
+    const notifier = await load();
+    vi.stubGlobal(
+      "Notification",
+      Object.assign(
+        function Illegal(): never {
+          throw new TypeError("Illegal constructor");
+        },
+        { permission: "granted", requestPermission: FakeNotification.requestPermission },
+      ),
+    );
+    await expect(notifier.show("t", "b")).resolves.toBeUndefined();
+    await expect(
+      notifier.showMessage("t", "b", { host: "h", channelId: 1, messageId: 2 }),
+    ).resolves.toBeUndefined();
+    await expect(
+      notifier.showCall("t", "b", { host: "h", channelId: 1 }, true),
+    ).resolves.toBeUndefined();
+    await expect(notifier.clearCall(1)).resolves.toBeUndefined();
   });
 
   it("does nothing to flash the window", async () => {
