@@ -50,12 +50,18 @@ export type UpdateInstallState =
     };
 
 export interface AppUpdater {
+  /** Whether this platform can do this at all. False on the web build, where a
+   *  Settings control for it is not drawn rather than drawn to fail. */
+  readonly available: boolean;
   checkForUpdate(serverUrl: string): Promise<UpdateCheckResult>;
   downloadAndInstallUpdate(serverUrl: string): Promise<void>;
   subscribeToInstall(listener: (state: UpdateInstallState) => void): () => void;
 }
 
 export interface Autostart {
+  /** Whether this platform can do this at all. False on the web build, where a
+   *  Settings control for it is not drawn rather than drawn to fail. */
+  readonly available: boolean;
   isEnabled(): Promise<boolean>;
   enable(): Promise<void>;
   disable(): Promise<void>;

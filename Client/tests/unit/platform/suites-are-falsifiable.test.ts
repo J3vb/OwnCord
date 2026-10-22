@@ -195,7 +195,7 @@ describePushToTalkSuite(async () => {
   return { subject, native };
 }, failEveryTest);
 
-describeDeepLinksSuite(async () => {
+const nullDeepLinks = async () => {
   const subject = {
     init: async () => undefined,
   } as unknown as DeepLinks;
@@ -203,7 +203,8 @@ describeDeepLinksSuite(async () => {
     coldStartLinks: () => undefined,
   };
   return { subject, native };
-}, failEveryTest);
+};
+describeDeepLinksSuite(nullDeepLinks, failEveryTest);
 
 describeHttpClientSuite(async () => {
   const subject = {
@@ -264,7 +265,7 @@ const nullPendingMessages = async () => {
 };
 describePendingMessagesSuite(nullPendingMessages, failEveryTest);
 
-describeFileSaverSuite(async () => {
+const nullFileSaver = async () => {
   const subject = {
     pickSaveLocation: async () => undefined,
     writeFile: async () => undefined,
@@ -276,7 +277,8 @@ describeFileSaverSuite(async () => {
     writeFailsWith: () => undefined,
   };
   return { subject, native };
-}, failEveryTest);
+};
+describeFileSaverSuite(nullFileSaver, failEveryTest);
 
 describeLiveKitProxiesSuite(async () => {
   const subject = {
@@ -291,7 +293,7 @@ describeLiveKitProxiesSuite(async () => {
   return { subject, native };
 }, failEveryTest);
 
-describeNotifierSuite(async () => {
+const nullNotifier = async () => {
   const subject = {
     permissionGranted: async () => undefined,
     requestPermission: async () => undefined,
@@ -318,7 +320,8 @@ describeNotifierSuite(async () => {
     callsCleared: () => [],
   };
   return { subject, native };
-}, failEveryTest);
+};
+describeNotifierSuite(nullNotifier, failEveryTest);
 
 describeWindowControlSuite(async () => {
   const subject = {
@@ -487,7 +490,7 @@ describeNativeVoiceSuite(async () => {
   return { subject, native };
 }, failEveryTest);
 
-describeExternalContentSuite(async () => {
+const nullExternalContent = async () => {
   const subject = {
     preview: async () => undefined,
     image: async () => undefined,
@@ -499,7 +502,8 @@ describeExternalContentSuite(async () => {
     asked: () => [],
   };
   return { subject, native };
-}, failEveryTest);
+};
+describeExternalContentSuite(nullExternalContent, failEveryTest);
 
 // The browser bindings (6.13c) run four suites with a declared capability
 // difference: a token-only credential store, an identity store for which a
@@ -512,3 +516,11 @@ describeCredentialStoreSuite(nullCredentialStore, { ...failEveryTest, savedPassw
 describeIdentityStoreSuite(nullIdentityStore, { ...failEveryTest, missingStoreIsError: true });
 describeSocketTransportSuite(nullSocketTransport, { ...failEveryTest, certificates: false });
 describePendingMessagesSuite(nullPendingMessages, { ...failEveryTest, memoryOnly: true });
+
+// 6.13d: the browser's notifier has no window to flash, its file save is a
+// download with no dialog or path, its deep links are `?invite=` only, and its
+// external-content broker refuses every request.
+describeNotifierSuite(nullNotifier, { ...failEveryTest, windowAttention: false });
+describeFileSaverSuite(nullFileSaver, { ...failEveryTest, nativeDialog: false });
+describeDeepLinksSuite(nullDeepLinks, { ...failEveryTest, messageLinks: false });
+describeExternalContentSuite(nullExternalContent, { ...failEveryTest, broker: false });

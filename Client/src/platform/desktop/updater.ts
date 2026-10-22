@@ -132,6 +132,7 @@ function downloadAndInstallUpdate(serverUrl: string): Promise<void> {
 }
 
 export const updater: AppUpdater = {
+  available: true,
   checkForUpdate,
   downloadAndInstallUpdate,
   subscribeToInstall: subscribeToUpdateInstall,

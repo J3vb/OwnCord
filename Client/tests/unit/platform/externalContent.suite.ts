@@ -56,9 +56,15 @@ const failures: readonly ExternalContentFailure[] = [
 
 export function describeExternalContentSuite(
   makeSubject: () => Promise<ExternalContentSubject>,
-  options?: { expectEveryTestToFail?: boolean },
+  options?: {
+    expectEveryTestToFail?: boolean;
+    /** False for a platform with no broker (the browser), which refuses every
+     *  request: only the tests whose expected answer is a refusal run. */
+    broker?: boolean;
+  },
 ): void {
   const check = options?.expectEveryTestToFail ? test.fails : test;
+  const checkBroker = options?.broker === false ? test.skip : check;
   describe("ExternalContentBroker", () => {
     let ctx: ExternalContentSubject;
     beforeEach(async () => {
@@ -66,7 +72,7 @@ export function describeExternalContentSuite(
     });
 
     describe("preview", () => {
-      check("resolves the typed minimum the native broker returned", async () => {
+      checkBroker("resolves the typed minimum the native broker returned", async () => {
         ctx.native.answers(preview);
         await expect(ctx.subject.preview(partition, pageUrl)).resolves.toEqual({
           ok: true,
@@ -74,14 +80,14 @@ export function describeExternalContentSuite(
         });
       });
 
-      check("asks the native broker for the partition and URL it was given", async () => {
+      checkBroker("asks the native broker for the partition and URL it was given", async () => {
         ctx.native.answers(preview);
         await ctx.subject.preview(partition, pageUrl);
         expect(ctx.native.asked()).toEqual([{ partition, target: pageUrl }]);
       });
 
       for (const failure of failures) {
-        check(`resolves a ${failure} refusal as that failure class`, async () => {
+        checkBroker(`resolves a ${failure} refusal as that failure class`, async () => {
           ctx.native.refuses(failure);
           await expect(ctx.subject.preview(partition, pageUrl)).resolves.toEqual({
             ok: false,
@@ -108,7 +114,7 @@ export function describeExternalContentSuite(
     });
 
     describe("image", () => {
-      check("resolves the bytes the native broker returned as a Blob", async () => {
+      checkBroker("resolves the bytes the native broker returned as a Blob", async () => {
         ctx.native.answers(new Uint8Array([71, 73, 70, 56]).buffer);
         const result = await ctx.subject.image(partition, { handle });
         expect(result.ok).toBe(true);
@@ -117,7 +123,7 @@ export function describeExternalContentSuite(
         expect(new Uint8Array(await blob!.arrayBuffer())).toEqual(new Uint8Array([71, 73, 70, 56]));
       });
 
-      check(
+      checkBroker(
         "resolves the same bytes when the native host answers a plain number array",
         async () => {
           // The postMessage IPC fallback delivers a raw-bytes response as a
@@ -135,7 +141,7 @@ export function describeExternalContentSuite(
         },
       );
 
-      check("asks for a handle or a URL, whichever the caller holds", async () => {
+      checkBroker("asks for a handle or a URL, whichever the caller holds", async () => {
         ctx.native.answers(new Uint8Array([1]).buffer);
         await ctx.subject.image(partition, { handle });
         await ctx.subject.image(partition, { url: "https://img.example.com/a.png" });
@@ -145,7 +151,7 @@ export function describeExternalContentSuite(
         ]);
       });
 
-      check("resolves a refusal as its failure class", async () => {
+      checkBroker("resolves a refusal as its failure class", async () => {
         ctx.native.refuses("oversized");
         await expect(ctx.subject.image(partition, { handle })).resolves.toEqual({
           ok: false,
@@ -153,7 +159,7 @@ export function describeExternalContentSuite(
         });
       });
 
-      check("resolves a forgotten handle as expired-handle", async () => {
+      checkBroker("resolves a forgotten handle as expired-handle", async () => {
         ctx.native.refuses("expired-handle");
         await expect(ctx.subject.image(partition, { handle })).resolves.toEqual({
           ok: false,

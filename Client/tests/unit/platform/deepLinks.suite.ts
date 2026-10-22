@@ -24,9 +24,15 @@ export interface DeepLinksSubject {
 
 export function describeDeepLinksSuite(
   makeSubject: () => Promise<DeepLinksSubject>,
-  options?: { expectEveryTestToFail?: boolean },
+  options?: {
+    expectEveryTestToFail?: boolean;
+    /** False for a platform with only invite links (the browser's `?invite=`):
+     *  the message-permalink tests are skipped. */
+    messageLinks?: boolean;
+  },
 ): void {
   const check = options?.expectEveryTestToFail ? test.fails : test;
+  const checkMessage = options?.messageLinks === false ? test.skip : check;
   describe("DeepLinks", () => {
     let ctx: DeepLinksSubject;
     beforeEach(async () => {
@@ -40,7 +46,7 @@ export function describeDeepLinksSuite(
       expect(onInvite).toHaveBeenCalledWith("ABC123", undefined);
     });
 
-    check("delivers a cold-start message permalink to onMessage", async () => {
+    checkMessage("delivers a cold-start message permalink to onMessage", async () => {
       ctx.native.coldStartLinks(["owncord://message/7/42"]);
       const onInvite = vi.fn();
       const onMessage = vi.fn();
@@ -49,7 +55,7 @@ export function describeDeepLinksSuite(
       expect(onInvite).not.toHaveBeenCalled();
     });
 
-    check("passes a message permalink's host through to onMessage", async () => {
+    checkMessage("passes a message permalink's host through to onMessage", async () => {
       // A Windows toast's launch URI carries the server it was raised for, so
       // a click from Action Center can be ignored when another server is
       // signed into now (message_notification.rs builds this shape).

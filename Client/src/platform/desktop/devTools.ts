@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { DevTools } from "../contracts/devTools";
 
 export const devTools: DevTools = {
+  available: true,
   async open(): Promise<void> {
     await invoke("open_devtools");
   },
