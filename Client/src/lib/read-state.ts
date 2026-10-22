@@ -371,6 +371,7 @@ const pendingMarkUnread = new Map<string, PendingMarkUnread>();
  * dispatcher is torn down.
  */
 export function resetReadPointerState(): void {
+  threadPointers.clear();
   highestSeen.clear();
   unreadHold.clear();
   pendingMarkUnread.clear();
@@ -382,8 +383,26 @@ export function forgetPendingMarkUnread(): void {
   pendingMarkUnread.clear();
 }
 
+/**
+ * Whether an id is a thread the reader has heard of (WP 6.9c): `mark_read`
+ * accepts a thread id, but a thread is in neither channel store. Set by the
+ * threads store when it loads.
+ */
+let threadKnown: ((id: number) => boolean) | null = null;
+export function setKnownThreadCheck(next: ((id: number) => boolean) | null): void {
+  threadKnown = next;
+}
+/** The pointer last sent for a thread; threads live in no channel store. */
+const threadPointers = new Map<number, number>();
+
+/** Restate a thread's pointer from the server (ready.threads, read_state): it may move back. */
+export function setThreadReadPointer(threadId: number, pointer: number): void {
+  threadPointers.set(threadId, pointer);
+}
+
 function isKnownChannel(channelId: number): boolean {
   return (
+    threadKnown?.(channelId) === true ||
     channelsStore.getState().channels.has(channelId) ||
     dmStore.getState().channels.some((c) => c.channelId === channelId)
   );
@@ -393,6 +412,7 @@ function isKnownChannel(channelId: number): boolean {
 function rawPointer(channelId: number): number | undefined {
   return (
     channelsStore.getState().channels.get(channelId)?.lastReadMessageId ??
+    threadPointers.get(channelId) ??
     dmStore.getState().channels.find((c) => c.channelId === channelId)?.lastReadMessageId
   );
 }
@@ -414,6 +434,7 @@ export function writeReadPointer(
   forwardOnly = false,
 ): void {
   const next = forwardOnly ? Math.max(pointer, pointerOf(channelId)) : pointer;
+  if (threadKnown?.(channelId) === true) threadPointers.set(channelId, next);
   setReadPointer(channelId, next, counts);
   setDmReadPointer(channelId, next, counts);
 }

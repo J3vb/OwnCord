@@ -267,3 +267,31 @@ button.msg-thread-chip:hover {
   outline: none;
   box-shadow: none;
 }
+
+/* The panel's Follow / Following toggle (WP 6.9c): a text button among the icons. */
+.thread-panel-follow {
+  padding: 0 8px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+.thread-panel-follow[aria-pressed="true"] {
+  color: var(--header-primary);
+  background: var(--bg-active);
+}
+
+/* A followed thread under its parent's sidebar row (WP 6.9c). */
+.channel-item.thread-item {
+  margin-left: 24px;
+  min-height: 24px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+.channel-item.thread-item .ch-name {
+  font-size: var(--font-size-sm);
+}
+.channel-item.thread-more {
+  color: var(--text-muted);
+}
+.channel-item.thread-more .ch-name {
+  font-size: var(--font-size-xs);
+}

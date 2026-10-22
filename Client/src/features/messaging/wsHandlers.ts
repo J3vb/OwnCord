@@ -72,7 +72,12 @@ import { log } from "../connection/dispatchContext";
 const REPLAY_GATE_WINDOW_MS = 5_000;
 
 // Thread frames (WP 6.9c): the dispatcher reaches them through this module.
-export { handleThreadDeleted, handleThreadState } from "./threadFrames";
+export {
+  applyReadyThreads,
+  handleThreadDeleted,
+  handleThreadFollow,
+  handleThreadState,
+} from "./threadFrames";
 export { resumeThreadFocus } from "../../stores/threadsLoader";
 
 export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_message">): void {
@@ -90,6 +95,8 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
   clearTyping(payload.channel_id, payload.user.id);
   addMessage(payload);
   handleThreadState(payload);
+  // A message that lands in the thread the panel has open is seen as it arrives.
+  loadedThreadsStore()?.noteOpenThreadMessage(payload.channel_id, payload.id);
   const activeId = channelsStore.select((s) => s.activeChannelId);
 
   // Check if this is a DM channel and whether the message is from self.
