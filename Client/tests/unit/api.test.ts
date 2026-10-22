@@ -123,6 +123,19 @@ describe("API Client", () => {
       });
       expect(res).toEqual({ id: 12, voice: "skipped" });
     });
+
+    it("PUT /moderation/users/{id}/nickname sends the name, and null to clear", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ user_id: 7, display_name: "Dave" }));
+      const res = await api.setMemberNickname(7, "Dave");
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/moderation/users/7/nickname");
+      expect(fetchCallOpts().method).toBe("PUT");
+      expect(JSON.parse(fetchCallOpts().body as string)).toEqual({ display_name: "Dave" });
+      expect(res).toEqual({ user_id: 7, display_name: "Dave" });
+
+      mockFetch.mockResolvedValue(jsonResponse({ user_id: 7, display_name: null }));
+      await api.setMemberNickname(7, null);
+      expect(JSON.parse(fetchCallOpts(1).body as string)).toEqual({ display_name: null });
+    });
   });
 
   describe("auth endpoints", () => {

@@ -27,7 +27,7 @@ import { canMention, mentionInComposer } from "../features/messaging/activeCompo
 import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup";
 import { openMenuOnKeyboard } from "@lib/context-menu";
 import { Permission, type ReadyRole } from "@lib/types";
-import { multiRoleEnabled } from "@lib/serverCapabilities";
+import { manageNicknamesEnabled, multiRoleEnabled } from "@lib/serverCapabilities";
 import { memberHasPermissionIn, topPositionFor } from "@lib/permissions";
 import {
   MEMBER_PATCH_FIELDS,
@@ -55,6 +55,9 @@ export interface MemberListOptions {
   /** Open the Ban dialog for a member; `displayName` names them in its title. */
   readonly onBan: (userId: number, username: string, displayName: string) => void;
   readonly onChangeRole: (userId: number, username: string, newRole: string) => Promise<void>;
+  /** Open the Change Nickname dialog (MANAGE_NICKNAMES); `current` is the
+   *  member's nickname now, null when they have none. Absent hides the item. */
+  readonly onChangeNickname?: (userId: number, username: string, current: string | null) => void;
   /** Add / remove one role from the profile popup's chips (WP 6.3d). */
   readonly onAddRole?: (userId: number, username: string, roleId: number) => Promise<void>;
   readonly onRemoveRole?: (userId: number, username: string, roleId: number) => Promise<void>;
@@ -88,6 +91,7 @@ interface ModerationGates {
   readonly canBan: boolean;
   readonly canManageRoles: boolean;
   readonly canTimeout: boolean;
+  readonly canManageNicknames: boolean;
 }
 
 /**
@@ -108,6 +112,8 @@ function moderationGates(
     canBan: has(Permission.BAN_MEMBERS),
     canManageRoles: has(Permission.MANAGE_ROLES),
     canTimeout: has(Permission.MODERATE_MEMBERS),
+    // The bit alone is not enough: an older server can hold it without the route.
+    canManageNicknames: manageNicknamesEnabled() && has(Permission.MANAGE_NICKNAMES),
   };
 }
 
@@ -379,9 +385,15 @@ function createMemberItem(
       canBan: baseGates.canBan && outranks,
       canManageRoles: baseGates.canManageRoles && outranks && availableRoles.length > 0,
       canTimeout: baseGates.canTimeout && outranks,
+      canManageNicknames: baseGates.canManageNicknames && outranks,
     };
     const showAdminActions =
-      !isSelf && (gates.canKick || gates.canBan || gates.canManageRoles || gates.canTimeout);
+      !isSelf &&
+      (gates.canKick ||
+        gates.canBan ||
+        gates.canManageRoles ||
+        gates.canTimeout ||
+        gates.canManageNicknames);
 
     closeActiveMenu();
     releaseMenuDismiss();
@@ -394,7 +406,7 @@ function createMemberItem(
       voiceTarget === undefined || opts.voiceModFor === undefined
         ? undefined
         : opts.voiceModFor(voiceTarget.channelId, voiceTarget.user);
-    const { onTimeoutMember, onRemoveTimeout, onMessageUser, onCallUser } = opts;
+    const { onTimeoutMember, onRemoveTimeout, onMessageUser, onCallUser, onChangeNickname } = opts;
 
     withMemberMenu(({ createMemberContextMenu }) => {
       if (seq !== menuOpenSeq || signal.aborted || !item.isConnected) {
@@ -413,6 +425,7 @@ function createMemberItem(
         // roles from the profile popup's chips instead.
         canManageRoles: gates.canManageRoles && !multiRoleEnabled(),
         canTimeout: gates.canTimeout,
+        canManageNicknames: gates.canManageNicknames,
         isSelf,
         isBlocked,
         timeoutState: timeoutStateOf(member.id),
@@ -436,6 +449,12 @@ function createMemberItem(
         onKick: () => opts.onKick(member.id, member.username),
         onBan: () => opts.onBan(member.id, member.username, memberDisplayName(member)),
         onChangeRole: (newRole: string) => opts.onChangeRole(member.id, member.username, newRole),
+        ...(onChangeNickname === undefined
+          ? {}
+          : {
+              onChangeNickname: () =>
+                onChangeNickname(member.id, member.username, member.displayName ?? null),
+            }),
         restoreFocusTo: () => hooks.focusMember(member.id),
         onClosed: () => {
           if (activeMenu !== created) return;

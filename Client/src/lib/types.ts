@@ -513,6 +513,12 @@ export interface ReadyPayload {
      */
     readonly multi_role?: boolean;
     /**
+     * A moderator holding MANAGE_NICKNAMES can set another member's nickname
+     * over `PUT /moderation/users/{id}/nickname` (WP 6.4). Absent means an
+     * older server, where the bit may exist but the route does not.
+     */
+    readonly manage_nicknames?: boolean;
+    /**
      * Content may carry `<@id>` and `<@&id>` mention tokens (WP 6.3f): the
      * composer sends the ones the user picked, the server resolves them and
      * lists honoured roles in `mention_roles`. Absent means an older server,
