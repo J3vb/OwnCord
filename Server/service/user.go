@@ -216,7 +216,7 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 	if err != nil || current == nil {
 		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
 	}
-	if err := s.checkDisplayNameEdit(ctx, userID, current, cleanDisplayName); err != nil {
+	if err := s.checkTimedOutProfileEdit(ctx, userID, current, cleanDisplayName, patch.Username); err != nil {
 		return nil, err
 	}
 	// An empty Username means "unspecified", the same as a nil

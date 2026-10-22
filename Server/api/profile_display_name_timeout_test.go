@@ -36,4 +36,15 @@ func TestUpdateProfile_DisplayNameWhileTimedOutIs403(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Errorf("about only: status = %d, want 200; body = %s", rr.Code, rr.Body.String())
 	}
+
+	// The client's save shape: every field resent, only about changed.
+	rr = patchJSON(t, router, "/api/v1/users/me", token, map[string]string{"username": "timedout", "display_name": "", "about": "again"})
+	if rr.Code != http.StatusOK {
+		t.Errorf("unchanged name resent: status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+
+	rr = patchJSON(t, router, "/api/v1/users/me", token, map[string]string{"username": "renamed"})
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("username change: status = %d, want 403; body = %s", rr.Code, rr.Body.String())
+	}
 }

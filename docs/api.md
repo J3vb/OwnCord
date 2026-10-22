@@ -883,11 +883,12 @@ Omitting a field leaves it unchanged; sending `""` clears the nullable ones.
 `display_name` and `about` are HTML-sanitized and trimmed server-side, and the
 length caps count characters, not bytes.
 
-A `display_name` that differs from your current one is refused with `403`
-`TIMED_OUT` while a moderator timeout is active on your account (resending the
-current value, and changing anything else, still works), and with `400` when it
-equals, ignoring case, another account's username. Your own username is
-allowed.
+While a moderator timeout is active on your account, a `display_name` or
+`username` that differs from your current one is refused with `403`
+`TIMED_OUT`, and the whole request is not applied. Resending the current
+values with other changes still works. A `display_name` that equals another
+account's username is refused with `400` (ignoring ASCII letter case, the rule
+usernames themselves use); your own username is allowed.
 
 #### Response 200 OK
 

@@ -56,14 +56,48 @@ func TestUpdateProfile_OtherAvatarAboutAllowedWhileTimedOut(t *testing.T) {
 	ctx := context.Background()
 	timeOutNickFixture(t, f, nickMember, time.Now().Add(time.Hour))
 
+	before, err := f.database.GetUserByID(ctx, nickMember)
+	if err != nil || before == nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	// The client resends the current username with every save.
 	u, err := f.users.UpdateProfile(ctx, nickMember, ProfilePatch{
-		Username: "renamed3", Avatar: new("https://cdn.example.net/a.png"), About: new("about me"),
+		Username: before.Username, Avatar: new("https://cdn.example.net/a.png"), About: new("about me"),
 	})
 	if err != nil {
 		t.Fatalf("UpdateProfile: %v", err)
 	}
-	if u.Username != "renamed3" || derefOr(u.About, "") != "about me" || derefOr(u.Avatar, "") == "" {
-		t.Errorf("row = %+v, want username, avatar and about applied", u)
+	if derefOr(u.About, "") != "about me" || derefOr(u.Avatar, "") == "" {
+		t.Errorf("row = %+v, want avatar and about applied", u)
+	}
+}
+
+// With the nickname reset the username is the shown name, so it is held too.
+func TestUpdateProfile_UsernameRefusedWhileTimedOut(t *testing.T) {
+	f := newNicknameFixture(t)
+	ctx := context.Background()
+	timeOutNickFixture(t, f, nickMember, time.Now().Add(time.Hour))
+
+	_, err := f.users.UpdateProfile(ctx, nickMember, ProfilePatch{Username: "renamed3", About: new("x")})
+	if !errors.Is(err, ErrTimedOut) {
+		t.Fatalf("err = %v, want ErrTimedOut", err)
+	}
+	u, err := f.database.GetUserByID(ctx, nickMember)
+	if err != nil || u == nil || u.Username == "renamed3" || derefOr(u.About, "") == "x" {
+		t.Errorf("row = %+v (err %v), want the whole patch refused", u, err)
+	}
+}
+
+func TestUpdateProfile_DisplayNameAllowedAfterTimeoutLifted(t *testing.T) {
+	f := newNicknameFixture(t)
+	ctx := context.Background()
+	timeOutNickFixture(t, f, nickMember, time.Now().Add(time.Hour))
+	if _, err := f.database.LiftTimeout(ctx, nickMember, nickMod); err != nil {
+		t.Fatalf("LiftTimeout: %v", err)
+	}
+
+	if _, err := f.users.UpdateProfile(ctx, nickMember, ProfilePatch{Username: "renamed4", DisplayName: new("Free")}); err != nil {
+		t.Fatalf("lifted timeout must not block: %v", err)
 	}
 }
 
