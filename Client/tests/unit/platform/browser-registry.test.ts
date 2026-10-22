@@ -130,7 +130,15 @@ describe("browser platform registry", () => {
     await expect(b.window.setFullscreen(true)).resolves.toBeUndefined();
     expect(await b.window.setZoom(1)).toBe(false);
     await expect(b.appProcess.reportReady()).resolves.toBeUndefined();
-    await expect(b.appProcess.relaunch()).resolves.toBeUndefined();
+    const reload = vi.fn();
+    vi.stubGlobal("location", { ...window.location, reload });
+    try {
+      // A page relaunches by reloading itself.
+      await expect(b.appProcess.relaunch()).resolves.toBeUndefined();
+      expect(reload).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
     await expect(b.devTools.open()).resolves.toBeUndefined();
     await expect(b.appMetadata.getVersion()).rejects.toThrow();
     await expect(b.urlOpener.open("https://example.invalid/")).rejects.toThrow();

@@ -67,7 +67,10 @@ const appMetadata: AppMetadata = {
 };
 
 const appProcess: AppProcess = {
-  relaunch: async () => undefined,
+  // A page relaunches by reloading itself.
+  relaunch: async () => {
+    window.location.reload();
+  },
   reportReady: async () => undefined,
 };
 

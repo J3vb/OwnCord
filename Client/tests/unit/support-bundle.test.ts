@@ -282,6 +282,14 @@ describe("exportSupportBundle", () => {
     desktop.fileSaver.writeFile.mockResolvedValue(undefined);
   });
 
+  it("still writes the bundle when the app version cannot be read", async () => {
+    desktop.fileSaver.pickSaveLocation.mockResolvedValue("bundle.zip");
+    desktop.appMetadata.getVersion.mockRejectedValue(new Error("unavailable"));
+
+    await expect(exportSupportBundle(desktop as never, {})).resolves.toBe(true);
+    expect(desktop.fileSaver.writeFile).toHaveBeenCalledTimes(1);
+  });
+
   it("reads nothing and writes nothing when the save dialog is cancelled", async () => {
     desktop.fileSaver.pickSaveLocation.mockResolvedValue(null);
 
