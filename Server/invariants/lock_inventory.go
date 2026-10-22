@@ -32,7 +32,8 @@ const (
 // row naming a lock that is gone.
 //
 // A lock is a struct field, package-level var, function-local var or short
-// declaration whose type is syncutil.Mutex/RWMutex (or sync.Mutex/RWMutex,
+// declaration whose type is syncutil.Mutex/RWMutex, syncutil.Ranked[R] or
+// RankedRW[R] (or sync.Mutex/RWMutex,
 // which syncutil-locks forbids in ws but which is still a lock if one slips
 // in). A field is named Type.field after the struct that declares it, so an
 // embedded state's lock is activityState.mu, not Hub.activity.mu; a package
@@ -57,6 +58,11 @@ type lockDecl struct {
 	name string // Type.field, or the identifier of a var/local
 	file string
 	line int
+	// rank is the R of a syncutil.Ranked[R]/RankedRW[R], "" for a plain
+	// mutex. When R is a type parameter of the declaring struct, generic
+	// names that struct, and the rank comes from its instantiations.
+	rank    string
+	generic string
 }
 
 // lockRow is one table row.
@@ -69,9 +75,19 @@ type lockRow struct {
 
 // checkLockInventoryTree reads the non-test files of ws/ from fsys.
 func checkLockInventoryTree(fsys fs.FS) []Violation {
+	files, bad := readLockFiles(fsys, lockInventoryID)
+	if bad != nil {
+		return bad
+	}
+	return checkLockInventory(files)
+}
+
+// readLockFiles reads the non-test files of ws/, keyed by slash path. A read
+// failure comes back as a violation of rule.
+func readLockFiles(fsys fs.FS, rule string) (map[string][]byte, []Violation) {
 	entries, err := fs.ReadDir(fsys, lockInventoryDir)
 	if err != nil {
-		return []Violation{{Rule: lockInventoryID, File: lockInventoryDir, Msg: "reading ws/: " + err.Error()}}
+		return nil, []Violation{{Rule: rule, File: lockInventoryDir, Msg: "reading ws/: " + err.Error()}}
 	}
 	files := make(map[string][]byte)
 	for _, e := range entries {
@@ -81,11 +97,11 @@ func checkLockInventoryTree(fsys fs.FS) []Violation {
 		}
 		src, err := fs.ReadFile(fsys, lockInventoryDir+"/"+n)
 		if err != nil {
-			return []Violation{{Rule: lockInventoryID, File: lockInventoryDir + "/" + n, Msg: err.Error()}}
+			return nil, []Violation{{Rule: rule, File: lockInventoryDir + "/" + n, Msg: err.Error()}}
 		}
 		files[lockInventoryDir+"/"+n] = src
 	}
-	return checkLockInventory(files)
+	return files, nil
 }
 
 // checkLockInventory is the rule over in-memory sources keyed by slash path,
@@ -179,11 +195,12 @@ func lockTableRows(f *ast.File, fset *token.FileSet) []lockRow {
 
 // lockScan holds the per-file state of the declaration scan.
 type lockScan struct {
-	names map[string]bool // local names bound to sync and syncutil
-	fset  *token.FileSet
-	rel   string
-	named map[*ast.StructType]string
-	out   []lockDecl
+	names  map[string]bool // local names bound to sync and syncutil
+	fset   *token.FileSet
+	rel    string
+	named  map[*ast.StructType]string
+	params map[*ast.StructType]map[string]bool // a generic struct's type parameters
+	out    []lockDecl
 }
 
 // lockDecls finds every mutex declaration in one file.
@@ -200,7 +217,8 @@ func lockDecls(f *ast.File, fset *token.FileSet, rel string) []lockDecl {
 	if len(names) == 0 {
 		return nil
 	}
-	s := &lockScan{names: names, fset: fset, rel: rel, named: make(map[*ast.StructType]string)}
+	s := &lockScan{names: names, fset: fset, rel: rel, named: make(map[*ast.StructType]string),
+		params: make(map[*ast.StructType]map[string]bool)}
 	ast.Inspect(f, func(n ast.Node) bool {
 		switch x := n.(type) {
 		case *ast.TypeSpec:
@@ -221,9 +239,37 @@ func (s *lockScan) add(name string, pos token.Pos) {
 	s.out = append(s.out, lockDecl{name: name, file: s.rel, line: s.fset.Position(pos).Line})
 }
 
+// addTyped adds a lock and records the rank its type carries, if any. params
+// are the type parameters of the declaring struct, nil outside one.
+func (s *lockScan) addTyped(name string, pos token.Pos, typ ast.Expr, params map[string]bool, owner string) {
+	s.add(name, pos)
+	if typ == nil {
+		return
+	}
+	ast.Inspect(typ, func(n ast.Node) bool {
+		ix, ok := n.(*ast.IndexExpr)
+		if !ok || !s.isMutexSel(ix.X) {
+			return true
+		}
+		if id, ok := ix.Index.(*ast.Ident); ok {
+			d := &s.out[len(s.out)-1]
+			d.rank = id.Name
+			if params[id.Name] {
+				d.generic = owner
+			}
+		}
+		return false
+	})
+}
+
 func (s *lockScan) isMutexSel(e ast.Expr) bool {
 	sel, ok := e.(*ast.SelectorExpr)
-	if !ok || (sel.Sel.Name != "Mutex" && sel.Sel.Name != "RWMutex") {
+	if !ok {
+		return false
+	}
+	switch sel.Sel.Name {
+	case "Mutex", "RWMutex", "Ranked", "RankedRW":
+	default:
 		return false
 	}
 	id, ok := sel.X.(*ast.Ident)
@@ -258,7 +304,7 @@ func (s *lockScan) valueIsLock(e ast.Expr) bool {
 		return v.Type != nil && s.holdsLock(v.Type)
 	case *ast.CallExpr:
 		id, ok := v.Fun.(*ast.Ident)
-		return ok && id.Name == "new" && len(v.Args) == 1 && s.isMutexSel(v.Args[0])
+		return ok && id.Name == "new" && len(v.Args) == 1 && s.holdsLock(v.Args[0])
 	}
 	return false
 }
@@ -266,6 +312,7 @@ func (s *lockScan) valueIsLock(e ast.Expr) bool {
 func (s *lockScan) typeSpec(x *ast.TypeSpec) {
 	if st, ok := x.Type.(*ast.StructType); ok {
 		s.named[st] = x.Name.Name
+		s.params[st] = typeParamNames(x.TypeParams)
 		return
 	}
 	if s.holdsLock(x.Type) {
@@ -287,19 +334,21 @@ func (s *lockScan) structType(x *ast.StructType) {
 			continue
 		}
 		if len(fld.Names) == 0 { // embedded: the field is named for the type
-			s.add(owner+"."+embeddedName(fld.Type), fld.Pos())
+			s.addTyped(owner+"."+embeddedName(fld.Type), fld.Pos(), fld.Type, s.params[x], owner)
 		}
 		for _, nm := range fld.Names {
-			s.add(owner+"."+nm.Name, nm.Pos())
+			s.addTyped(owner+"."+nm.Name, nm.Pos(), fld.Type, s.params[x], owner)
 		}
 	}
 }
 
 func (s *lockScan) valueSpec(x *ast.ValueSpec) {
 	for i, nm := range x.Names {
-		typed := x.Type != nil && s.holdsLock(x.Type)
-		if typed || (i < len(x.Values) && s.valueIsLock(x.Values[i])) {
-			s.add(nm.Name, nm.Pos())
+		switch {
+		case x.Type != nil && s.holdsLock(x.Type):
+			s.addTyped(nm.Name, nm.Pos(), x.Type, nil, "")
+		case i < len(x.Values) && s.valueIsLock(x.Values[i]):
+			s.addTyped(nm.Name, nm.Pos(), x.Values[i], nil, "")
 		}
 	}
 }
@@ -310,15 +359,31 @@ func (s *lockScan) assign(x *ast.AssignStmt) {
 	}
 	for i, lhs := range x.Lhs {
 		if id, ok := lhs.(*ast.Ident); ok && i < len(x.Rhs) && s.valueIsLock(x.Rhs[i]) {
-			s.add(id.Name, id.Pos())
+			s.addTyped(id.Name, id.Pos(), x.Rhs[i], nil, "")
 		}
 	}
+}
+
+// typeParamNames returns the names a type parameter list declares.
+func typeParamNames(fl *ast.FieldList) map[string]bool {
+	if fl == nil {
+		return nil
+	}
+	out := make(map[string]bool)
+	for _, f := range fl.List {
+		for _, nm := range f.Names {
+			out[nm.Name] = true
+		}
+	}
+	return out
 }
 
 // embeddedName is the field name Go gives an embedded type: its base name.
 func embeddedName(e ast.Expr) string {
 	switch t := e.(type) {
 	case *ast.StarExpr:
+		return embeddedName(t.X)
+	case *ast.IndexExpr: // syncutil.Ranked[R]: the field is named Ranked
 		return embeddedName(t.X)
 	case *ast.SelectorExpr:
 		return t.Sel.Name

@@ -63,7 +63,7 @@ type roleBatch struct {
 
 // roleRefreshState is the coalescer. See the file comment for its lock order.
 type roleRefreshState struct {
-	mu          syncutil.Mutex
+	mu          syncutil.Ranked[lockRankLeaf]
 	pending     map[int64]roleRefreshFlags
 	all, roles  bool
 	inFlight    map[int64]roleRefreshFlags
@@ -71,7 +71,7 @@ type roleRefreshState struct {
 	wake        chan struct{} // cap 1; made on first use so a zero Hub works
 
 	// flushMu serializes rounds so a test barrier can run one.
-	flushMu syncutil.Mutex
+	flushMu syncutil.Ranked[lockRankSerialiser]
 
 	// gate, when set, runs at the start of every round, after its pending
 	// work was taken. Test-only (see SetRoleRefreshGateForTest).
