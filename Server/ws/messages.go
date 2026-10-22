@@ -62,6 +62,9 @@ type memberJoinUser struct {
 	About *string `json:"about"`
 	// CreatedAt is the account creation instant, "2006-01-02T15:04:05Z".
 	CreatedAt string `json:"created_at"`
+	// RoleIDs is every role the member holds, top role first (WP 6.3c); Role
+	// stays the top role's name. Omitted when the holder list was not read.
+	RoleIDs []int64 `json:"role_ids,omitempty"`
 	// Banner (the /api/v1/files/<id> path) and BannerColor are omitted when
 	// unset, like members[] in ready: absent means no banner.
 	Banner      *string `json:"banner,omitempty"`
@@ -84,6 +87,9 @@ type memberJoinPayload struct {
 type memberUpdatePayload struct {
 	UserID int64  `json:"user_id"`
 	Role   string `json:"role"`
+	// RoleIDs is every role the member holds, top role first (WP 6.3c); Role
+	// is the top role's name. Omitted when the holder list was not read.
+	RoleIDs []int64 `json:"role_ids,omitempty"`
 }
 
 type userUpdatePayload struct {
@@ -417,21 +423,21 @@ func buildPresenceMsg(userID int64, status string, customStatus *string) []byte 
 // which runs before this); Status here applies the BroadcastStatus collapse
 // so an invisible connector's member_join reports "offline" like every other
 // payload another user can see, instead of the raw chosen status.
-func buildMemberJoin(user *db.User, roleName string) []byte {
+func buildMemberJoin(user *db.User, roleName string, roleIDs []int64) []byte {
 	return buildJSON(wsMsg{
 		Type: MsgTypeMemberJoin,
 		Payload: memberJoinPayload{
-			User:   memberPayloadFor(user, roleName),
+			User:   memberPayloadFor(user, roleName, roleIDs),
 			Status: db.BroadcastStatus(user.Status),
 		},
 	})
 }
 
 // buildMemberUpdate constructs a member_update broadcast per PROTOCOL.md.
-func buildMemberUpdate(userID int64, roleName string) []byte {
+func buildMemberUpdate(userID int64, roleName string, roleIDs []int64) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeMemberUpdate,
-		Payload: memberUpdatePayload{UserID: userID, Role: roleName},
+		Payload: memberUpdatePayload{UserID: userID, Role: roleName, RoleIDs: roleIDs},
 	})
 }
 

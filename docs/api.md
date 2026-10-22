@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 227 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 231 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -118,6 +118,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | DELETE  | `/admin/api/users/{id}`                                              |
 | PATCH   | `/admin/api/users/{id}`                                              |
 | POST    | `/admin/api/users/{id}/recovery-credential`                          |
+| DELETE  | `/admin/api/users/{id}/roles/{roleId}`                               |
+| PUT     | `/admin/api/users/{id}/roles/{roleId}`                               |
 | DELETE  | `/admin/api/users/{id}/sessions`                                     |
 | GET     | `/api/v1/admin/plugins/`                                             |
 | POST    | `/api/v1/admin/plugins/install`                                      |
@@ -201,6 +203,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | PUT     | `/api/v1/moderation/channels/{id}/forum`                             |
 | GET     | `/api/v1/moderation/members/`                                        |
 | PATCH   | `/api/v1/moderation/members/{id}`                                    |
+| DELETE  | `/api/v1/moderation/members/{id}/roles/{roleId}`                     |
+| PUT     | `/api/v1/moderation/members/{id}/roles/{roleId}`                     |
 | DELETE  | `/api/v1/moderation/members/{id}/sessions`                           |
 | GET     | `/api/v1/moderation/queue/`                                          |
 | GET     | `/api/v1/moderation/queue/{id}`                                      |
@@ -3985,6 +3989,7 @@ Authorization is two-layered:
 | `GET /admin/api/stats`                                                                                                                               | perimeter only                                                                               |
 | `GET /admin/api/users`                                                                                                                               | perimeter only                                                                               |
 | `PATCH /admin/api/users/{id}`                                                                                                                        | perimeter; `BAN_MEMBERS` for `banned`, `MANAGE_ROLES` for `role_id` (checked in the service) |
+| `PUT/DELETE /admin/api/users/{id}/roles/{roleId}`                                                                                                    | perimeter; `MANAGE_ROLES` (checked in the service) — WP 6.3c                                 |
 | `DELETE /admin/api/users/{id}/sessions`                                                                                                              | `KICK_MEMBERS`                                                                               |
 | `DELETE /admin/api/users/{id}`                                                                                                                       | `ADMINISTRATOR`; the actor must outrank the target (checked in the service) — B4-9           |
 | `POST /admin/api/users/{id}/recovery-credential`                                                                                                     | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`), not a bit — B4-6         |
@@ -4394,6 +4399,40 @@ response has no `purge` member.
 | 403    | `FORBIDDEN`    | Missing bit (including `MANAGE_MESSAGES` for `delete_message_seconds`), or the actor does not outrank the target                                                                                    |
 | 404    | `NOT_FOUND`    | User not found                                                                                                                                                                                      |
 | 429    | `RATE_LIMITED` | `delete_message_seconds` used again too soon (one per actor every 2 seconds); nothing was changed                                                                                                   |
+
+---
+
+### PUT /admin/api/users/{id}/roles/{roleId}
+
+### DELETE /admin/api/users/{id}/roles/{roleId}
+
+Add or remove one role of a member without touching the others (WP 6.3c). A
+member holds one or more roles; `users.role_id`, `role` on the wire and the
+rank checks follow the **top** role (highest `position`, lowest id on a tie),
+while permissions are the union of every held role. `PATCH` with `role_id`
+still replaces every role the member holds with that one.
+
+The checks are those of `PATCH` with `role_id`: `MANAGE_ROLES`, the actor must
+outrank the target's top role, and the role must sit below the actor's own top
+role. Both calls are idempotent (adding a held role or removing one that is not
+held changes nothing and writes no audit row). Each real change writes a
+`role_add` or `role_remove` audit row, drops the target's cached permissions and
+sends one `member_update` (with `role_ids`) plus a visibility refresh to the
+target's live connection. The same routes exist under
+`/api/v1/moderation/members/{id}/roles/{roleId}`.
+
+**Auth:** Admin perimeter + `MANAGE_ROLES` (checked in the service)
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code          | Cause                                                                                                                      |
+| ------ | ------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | Invalid id, unknown role, or the target is the caller                                                                      |
+| 403    | `FORBIDDEN`   | Missing `MANAGE_ROLES`, the actor does not outrank the target, or the role is at or above theirs                           |
+| 404    | `NOT_FOUND`   | User not found                                                                                                             |
+| 409    | `LAST_ROLE`   | `DELETE` only: the role is the member's only one. Two concurrent removals of a member's last two roles cannot both succeed |
 
 ---
 
@@ -5360,14 +5399,18 @@ principal that clears the bit still cannot escalate through it.
   entirely (it is what lets the owner hand out anything).
 - The default role (`is_default = 1`) cannot be deleted: every member falls
   back to it.
-- Deleting a role moves its members onto the default role in one `UPDATE`,
-  drops the role's `channel_overrides` rows, invalidates the moved members'
+- Deleting a role gives the default role to each member it leaves with no
+  role (a member who holds another role keeps it and is not moved), re-derives
+  every holder's top role in the same transaction, drops the role's `channel_overrides` rows, invalidates the moved members'
   cached permissions, and broadcasts a `member_update` per member.
 - Names are unique **case-insensitively** (migration `023`), matching the
   case-insensitive lookup the desktop client does. Max 32 characters.
 - Colors are `#rgb` or `#rrggbb`, normalized to uppercase. `""` clears the
   color. Anything else is `400`.
 - Unknown permission bits are masked off rather than rejected.
+- Moving a role (a `position` edit or a reorder) re-derives the top role of
+  every member who holds it next to another role, and sends them a
+  `member_update`.
 - Every mutation writes an audit row (`role_create`, `role_update`,
   `role_delete`, `role_reorder`) and broadcasts `roles_update` (see
   `docs/protocol.md`) carrying the full new list.
@@ -5420,11 +5463,14 @@ Roles ordered by position descending, each with its member count.
 | `color`       | string  | No       | `#rgb`/`#rrggbb`, or `""` for none                                    |
 | `permissions` | integer | No       | Bitfield; defaults to `0`                                             |
 | `position`    | integer | No       | Must be free; defaults to the highest free slot below the actor's own |
+| `hoist`       | boolean | No       | The role is its own member-list group; defaults to `false`            |
+| `mentionable` | boolean | No       | Any member may ping the role; defaults to `false`                     |
 
 #### Response 201 Created
 
 The created role (`id`, `name`, `color`, `permissions`, `position`,
-`is_default` — always `false`; the default role is seeded, never created).
+`is_default` — always `false`; the default role is seeded, never created —
+`hoist` and `mentionable`).
 
 #### Errors
 

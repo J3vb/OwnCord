@@ -51,7 +51,7 @@ func newCommandTestDeps(t *testing.T, res *plugin.CommandResult) (deps PluginDep
 	if ownerID, err = database.CreateUser(ctx, "cmd-owner", "hash", 1); err != nil { // Owner role
 		t.Fatalf("CreateUser owner: %v", err)
 	}
-	role, err := database.CreateRole(ctx, "cmd-muted", nil, 0, 0) // no permission bits
+	role, err := database.CreateRole(ctx, "cmd-muted", nil, 0, 0, false, false) // no permission bits
 	if err != nil {
 		t.Fatalf("CreateRole: %v", err)
 	}

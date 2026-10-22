@@ -34,6 +34,9 @@
               "display_name": "Alice Fixture",
               "id": "<id:number>",
               "role": "member",
+              "role_ids": [
+                4
+              ],
               "status": "online",
               "username": "alice"
             }

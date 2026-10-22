@@ -38,12 +38,30 @@ SELECT id, name, color, permissions, position, is_default, hoist, mentionable
 FROM roles WHERE is_default = 1 ORDER BY position DESC, id ASC LIMIT 1;
 
 -- name: CreateRole :one
-INSERT INTO roles (name, color, permissions, position, is_default)
-VALUES (?, ?, ?, ?, 0)
+INSERT INTO roles (name, color, permissions, position, is_default, hoist, mentionable)
+VALUES (?, ?, ?, ?, 0, ?, ?)
 RETURNING id, name, color, permissions, position, is_default, hoist, mentionable;
 
 -- name: UpdateRole :exec
-UPDATE roles SET name = ?, color = ?, permissions = ?, position = ? WHERE id = ?;
+UPDATE roles SET name = ?, color = ?, permissions = ?, position = ?, hoist = ?, mentionable = ? WHERE id = ?;
+
+-- name: GetRolePosition :one
+SELECT position FROM roles WHERE id = ?;
+
+-- name: ListMultiRoleHoldersOfRole :many
+-- Holders of the role who hold at least one other role: the only members whose
+-- top role (and role order) a position change can move.
+SELECT ur.user_id FROM user_roles ur
+WHERE ur.role_id = ?
+  AND (SELECT COUNT(*) FROM user_roles x WHERE x.user_id = ur.user_id) > 1
+ORDER BY ur.user_id ASC;
+
+-- name: ListAllUserRoleIDs :many
+-- Every held role id of every member, top role first within a member.
+SELECT ur.user_id, ur.role_id
+FROM user_roles ur
+JOIN roles r ON r.id = ur.role_id
+ORDER BY ur.user_id ASC, r.position DESC, r.id ASC;
 
 -- name: SetRolePosition :exec
 UPDATE roles SET position = ? WHERE id = ?;

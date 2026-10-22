@@ -76,7 +76,7 @@ func TestDeleteRoleReassigning_KeepsOtherRolesAndMirrors(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
-	custom, err := database.CreateRole(ctx, "Custom", nil, permissions.ReadMessages, 70)
+	custom, err := database.CreateRole(ctx, "Custom", nil, permissions.ReadMessages, 70, false, false)
 	if err != nil {
 		t.Fatalf("CreateRole: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestLastAdminGuard_AdminInLowerRole(t *testing.T) {
 	ctx := context.Background()
 	// A high-ranked role with no administrator bit; the Admin role (80) sits
 	// below it, so the account's mirror names the non-admin role.
-	top, err := database.CreateRole(ctx, "Overlord", nil, permissions.ReadMessages, 95)
+	top, err := database.CreateRole(ctx, "Overlord", nil, permissions.ReadMessages, 95, false, false)
 	if err != nil {
 		t.Fatalf("CreateRole: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestDeciderAuthority_ORsHeldMasks(t *testing.T) {
 	database, ownerID, modID, memberID, member2ID := newAppealQueriesTestDB(t)
 	ctx := context.Background()
 
-	helper, err := database.CreateRole(ctx, "Helper", nil, permissions.ModerateMembers, 10)
+	helper, err := database.CreateRole(ctx, "Helper", nil, permissions.ModerateMembers, 10, false, false)
 	if err != nil {
 		t.Fatalf("CreateRole: %v", err)
 	}

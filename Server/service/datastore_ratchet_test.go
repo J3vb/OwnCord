@@ -60,8 +60,11 @@ const (
 	// db/channel_forum.go, outside the count, and Store did not grow
 	// (ForumStore is a slice interface in service).
 	// 6.9c-a2 adds one (131 to 132): MessageAPIResponse.Thread, the optional
-	// thread summary on a starter message. Any further tag fails.
-	modelsJSONTagBaseline = 132
+	// thread summary on a starter message. 6.3c moves db.Role out of models.go
+	// into db/role_model.go (its six tags leave the count; it also gains the
+	// two hoist/mentionable wire tags, outside it), 132 to 126. Any further
+	// tag fails.
+	modelsJSONTagBaseline = 126
 
 	// storeFullSurfaceBaseline is the compiler's own method count for Store,
 	// promoted methods from the cross-package embeds included (309 plus the 9

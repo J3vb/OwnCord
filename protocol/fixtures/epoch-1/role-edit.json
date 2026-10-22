@@ -10,32 +10,40 @@
             "roles": [
               {
                 "color": "#E74C3C",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": false,
+                "mentionable": false,
                 "name": "Owner",
                 "permissions": 2147483647,
                 "position": 100
               },
               {
                 "color": "#F39C12",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": false,
+                "mentionable": false,
                 "name": "Admin",
                 "permissions": 1073741823,
                 "position": 80
               },
               {
                 "color": "#3498DB",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": false,
+                "mentionable": false,
                 "name": "Moderator",
                 "permissions": 15728639,
                 "position": 60
               },
               {
                 "color": "#3366CC",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": true,
+                "mentionable": false,
                 "name": "Member",
                 "permissions": 7779,
                 "position": 40
@@ -52,6 +60,9 @@
           "cseq": 6,
           "payload": {
             "role": "Regular",
+            "role_ids": [
+              4
+            ],
             "user_id": "<id:number>"
           },
           "seq": "<seq:number>",
@@ -66,32 +77,40 @@
             "roles": [
               {
                 "color": "#E74C3C",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": false,
+                "mentionable": false,
                 "name": "Owner",
                 "permissions": 2147483647,
                 "position": 100
               },
               {
                 "color": "#F39C12",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": false,
+                "mentionable": false,
                 "name": "Admin",
                 "permissions": 1073741823,
                 "position": 80
               },
               {
                 "color": "#3498DB",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": false,
+                "mentionable": false,
                 "name": "Moderator",
                 "permissions": 15728639,
                 "position": 60
               },
               {
                 "color": "#3366CC",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": true,
+                "mentionable": false,
                 "name": "Regular",
                 "permissions": 7778,
                 "position": 40
@@ -125,32 +144,40 @@
             "roles": [
               {
                 "color": "#E74C3C",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": false,
+                "mentionable": false,
                 "name": "Owner",
                 "permissions": 2147483647,
                 "position": 100
               },
               {
                 "color": "#F39C12",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": false,
+                "mentionable": false,
                 "name": "Admin",
                 "permissions": 1073741823,
                 "position": 80
               },
               {
                 "color": "#3498DB",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": false,
+                "mentionable": false,
                 "name": "Moderator",
                 "permissions": 15728639,
                 "position": 60
               },
               {
                 "color": "#3366CC",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": true,
+                "mentionable": false,
                 "name": "Member",
                 "permissions": 7779,
                 "position": 40
@@ -221,6 +248,9 @@
           "cseq": 4,
           "payload": {
             "role": "Regular",
+            "role_ids": [
+              4
+            ],
             "user_id": "<id:number>"
           },
           "seq": "<seq:number>",
@@ -235,32 +265,40 @@
             "roles": [
               {
                 "color": "#E74C3C",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": false,
+                "mentionable": false,
                 "name": "Owner",
                 "permissions": 2147483647,
                 "position": 100
               },
               {
                 "color": "#F39C12",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": false,
+                "mentionable": false,
                 "name": "Admin",
                 "permissions": 1073741823,
                 "position": 80
               },
               {
                 "color": "#3498DB",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": false,
+                "mentionable": false,
                 "name": "Moderator",
                 "permissions": 15728639,
                 "position": 60
               },
               {
                 "color": "#3366CC",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": true,
+                "mentionable": false,
                 "name": "Regular",
                 "permissions": 7778,
                 "position": 40

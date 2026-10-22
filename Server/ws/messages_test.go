@@ -213,7 +213,7 @@ func TestBuildAuthError_ValidJSON(t *testing.T) {
 
 func TestBuildMemberJoin_Type(t *testing.T) {
 	user := &db.User{ID: 1, Username: "alice"}
-	msg := buildMemberJoin(user, "member")
+	msg := buildMemberJoin(user, "member", nil)
 	var env struct {
 		Type string `json:"type"`
 	}
@@ -227,7 +227,7 @@ func TestBuildMemberJoin_Type(t *testing.T) {
 
 func TestBuildMemberJoin_Payload(t *testing.T) {
 	user := &db.User{ID: 42, Username: "alice"}
-	msg := buildMemberJoin(user, "admin")
+	msg := buildMemberJoin(user, "admin", nil)
 	var env struct {
 		Payload struct {
 			User struct {
@@ -254,7 +254,7 @@ func TestBuildMemberJoin_Payload(t *testing.T) {
 
 func TestBuildMemberJoin_NilAvatar(t *testing.T) {
 	user := &db.User{ID: 1, Username: "noavatar", Avatar: nil}
-	msg := buildMemberJoin(user, "member")
+	msg := buildMemberJoin(user, "member", nil)
 	var env struct {
 		Payload struct {
 			User struct {
@@ -273,7 +273,7 @@ func TestBuildMemberJoin_NilAvatar(t *testing.T) {
 func TestBuildMemberJoin_NonNilAvatar(t *testing.T) {
 	avatarURL := "https://example.com/avatar.png"
 	user := &db.User{ID: 1, Username: "withavatar", Avatar: &avatarURL}
-	msg := buildMemberJoin(user, "member")
+	msg := buildMemberJoin(user, "member", nil)
 	var env struct {
 		Payload struct {
 			User struct {
@@ -295,7 +295,7 @@ func TestBuildMemberJoin_NonNilAvatar(t *testing.T) {
 // the way the channel-scoped presence path already avoids.
 func TestBuildMemberJoin_StatusField_InvisibleCollapsesToOffline(t *testing.T) {
 	user := &db.User{ID: 1, Username: "ghost", Status: db.StatusInvisible}
-	msg := buildMemberJoin(user, "member")
+	msg := buildMemberJoin(user, "member", nil)
 	var env struct {
 		Payload struct {
 			Status string `json:"status"`
@@ -313,7 +313,7 @@ func TestBuildMemberJoin_StatusField_InvisibleCollapsesToOffline(t *testing.T) {
 // through unchanged.
 func TestBuildMemberJoin_StatusField_PassesThroughNonInvisible(t *testing.T) {
 	user := &db.User{ID: 1, Username: "idler", Status: db.StatusIdle}
-	msg := buildMemberJoin(user, "member")
+	msg := buildMemberJoin(user, "member", nil)
 	var env struct {
 		Payload struct {
 			Status string `json:"status"`
@@ -330,7 +330,7 @@ func TestBuildMemberJoin_StatusField_PassesThroughNonInvisible(t *testing.T) {
 // ─── buildMemberUpdate ────────────────────────────────────────────────────────
 
 func TestBuildMemberUpdate_Type(t *testing.T) {
-	msg := buildMemberUpdate(7, "moderator")
+	msg := buildMemberUpdate(7, "moderator", nil)
 	var env struct {
 		Type string `json:"type"`
 	}
@@ -343,7 +343,7 @@ func TestBuildMemberUpdate_Type(t *testing.T) {
 }
 
 func TestBuildMemberUpdate_Payload(t *testing.T) {
-	msg := buildMemberUpdate(7, "moderator")
+	msg := buildMemberUpdate(7, "moderator", nil)
 	var env struct {
 		Payload struct {
 			UserID int64  `json:"user_id"`
@@ -776,7 +776,7 @@ func TestBuildVoiceE2EEOffer_ValidJSON(t *testing.T) {
 func TestBuildMemberJoin_IncludesIdentityKey(t *testing.T) {
 	key := "aWRlbnRpdHlrZXk="
 	user := &db.User{ID: 7, Username: "pinned", IdentityPublicKey: &key}
-	msg := buildMemberJoin(user, "member")
+	msg := buildMemberJoin(user, "member", nil)
 	var env struct {
 		Payload struct {
 			User struct {
@@ -794,7 +794,7 @@ func TestBuildMemberJoin_IncludesIdentityKey(t *testing.T) {
 
 func TestBuildMemberJoin_NoIdentityKey_Omitted(t *testing.T) {
 	user := &db.User{ID: 8, Username: "legacy"}
-	msg := buildMemberJoin(user, "member")
+	msg := buildMemberJoin(user, "member", nil)
 	var env struct {
 		Payload struct {
 			User map[string]any `json:"user"`

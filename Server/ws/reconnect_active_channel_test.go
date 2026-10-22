@@ -155,7 +155,7 @@ func TestReconnect_AuthFrameActiveChannelIsReadGated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	noPerms, err := database.CreateRole(ctx, "no-perms-resume", nil, 0, 1)
+	noPerms, err := database.CreateRole(ctx, "no-perms-resume", nil, 0, 1, false, false)
 	if err != nil || noPerms == nil {
 		t.Fatalf("CreateRole: %v", err)
 	}

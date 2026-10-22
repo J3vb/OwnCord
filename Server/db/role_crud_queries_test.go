@@ -62,7 +62,7 @@ func TestCreateAndUpdateRole(t *testing.T) {
 	ctx := context.Background()
 
 	color := "#ABCDEF"
-	created, err := database.CreateRole(ctx, "Helper", &color, 0x3, 55)
+	created, err := database.CreateRole(ctx, "Helper", &color, 0x3, 55, false, false)
 	if err != nil {
 		t.Fatalf("CreateRole: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestCreateAndUpdateRole(t *testing.T) {
 		t.Error("CreateRole must never produce a default role")
 	}
 
-	if err := database.UpdateRole(ctx, created.ID, "Helpers", nil, 0x7, 56); err != nil {
+	if _, err := database.UpdateRole(ctx, created.ID, "Helpers", nil, 0x7, 56, false, false); err != nil {
 		t.Fatalf("UpdateRole: %v", err)
 	}
 	got, err := database.GetRoleByID(ctx, created.ID)
@@ -89,7 +89,7 @@ func TestSetRolePositions(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
-	if err := database.SetRolePositions(ctx, map[int64]int{2: 3, 3: 2, 4: 1}); err != nil {
+	if _, err := database.SetRolePositions(ctx, map[int64]int{2: 3, 3: 2, 4: 1}); err != nil {
 		t.Fatalf("SetRolePositions: %v", err)
 	}
 	for id, want := range map[int64]int{1: 100, 2: 3, 3: 2, 4: 1} {
@@ -102,7 +102,7 @@ func TestSetRolePositions(t *testing.T) {
 		}
 	}
 	// An empty map is a no-op rather than an empty transaction.
-	if err := database.SetRolePositions(ctx, nil); err != nil {
+	if _, err := database.SetRolePositions(ctx, nil); err != nil {
 		t.Errorf("SetRolePositions(nil): %v", err)
 	}
 }
@@ -119,7 +119,7 @@ func TestListRoles_OrdersByPositionThenIDDeterministically(t *testing.T) {
 	tied := []string{"Tie-A", "Tie-B", "Tie-C"}
 	created := make([]int64, 0, len(tied))
 	for _, name := range tied {
-		role, err := database.CreateRole(ctx, name, nil, 0, 30)
+		role, err := database.CreateRole(ctx, name, nil, 0, 30, false, false)
 		if err != nil {
 			t.Fatalf("CreateRole %s: %v", name, err)
 		}
@@ -212,7 +212,7 @@ func TestDeleteRoleReassigning(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
-	role, err := database.CreateRole(ctx, "Temp", nil, 0x3, 50)
+	role, err := database.CreateRole(ctx, "Temp", nil, 0x3, 50, false, false)
 	if err != nil {
 		t.Fatalf("CreateRole: %v", err)
 	}

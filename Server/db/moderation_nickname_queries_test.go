@@ -21,7 +21,7 @@ func nicknameFixtureDB(t *testing.T) (database *db.DB, mod, member int64) {
 	t.Helper()
 	database = openMigratedMemory(t)
 	ctx := context.Background()
-	role, err := database.CreateRole(ctx, "nick-mod", nil, permissions.ManageNicknames, 80)
+	role, err := database.CreateRole(ctx, "nick-mod", nil, permissions.ManageNicknames, 80, false, false)
 	if err != nil {
 		t.Fatalf("CreateRole: %v", err)
 	}

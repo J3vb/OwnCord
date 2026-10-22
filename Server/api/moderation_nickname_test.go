@@ -158,7 +158,7 @@ func TestNicknameRoute_PromotedBeforeWriteBroadcastsNothing(t *testing.T) {
 	}
 	// Promote the victim straight in the database. The router's permission
 	// cache still holds the old rank, as it would mid-request.
-	peer, err := database.CreateRole(ctx, "pw-peer-role", nil, permissions.ReadMessages, 80)
+	peer, err := database.CreateRole(ctx, "pw-peer-role", nil, permissions.ReadMessages, 80, false, false)
 	if err != nil {
 		t.Fatalf("CreateRole: %v", err)
 	}

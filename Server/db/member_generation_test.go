@@ -67,7 +67,8 @@ func TestMemberGeneration_MovesOnMemberWritesOnly(t *testing.T) {
 		{"role rename", func() {
 			r, err := database.GetRoleByID(ctx, 4)
 			must(err)
-			must(database.UpdateRole(ctx, r.ID, "Regulars", r.Color, r.Permissions, r.Position))
+			_, err = database.UpdateRole(ctx, r.ID, "Regulars", r.Color, r.Permissions, r.Position, false, false)
+			must(err)
 		}, true},
 		{"registration request", func() {
 			pending, err = database.CreatePendingUser(ctx, "carol", "hash", 4, 10)
