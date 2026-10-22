@@ -70,8 +70,7 @@ describe("screen share gate (web build)", () => {
     expect(host.querySelector(".vw-share-btn")).not.toBeNull();
   });
 
-  it("makes the share keybind a no-op without getDisplayMedia", () => {
-    setMediaDevices(undefined);
+  function pressShareKey(): ReturnType<typeof vi.fn> {
     const onToggleScreenshare = vi.fn();
     const keybinds = parseKeybinds(
       {
@@ -103,6 +102,16 @@ describe("screen share gate (web build)", () => {
       new KeyboardEvent("keydown", { key: "F9", code: "F9", cancelable: true }),
     );
     detach();
-    expect(onToggleScreenshare).not.toHaveBeenCalled();
+    return onToggleScreenshare;
+  }
+
+  it("makes the share keybind a no-op without getDisplayMedia", () => {
+    setMediaDevices(undefined);
+    expect(pressShareKey()).not.toHaveBeenCalled();
+  });
+
+  it("runs the share keybind with getDisplayMedia", () => {
+    setMediaDevices({ getDisplayMedia: vi.fn() });
+    expect(pressShareKey()).toHaveBeenCalledTimes(1);
   });
 });

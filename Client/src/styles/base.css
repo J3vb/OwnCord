@@ -40,9 +40,14 @@ body {
 }
 
 #app {
-  height: 100%;
-  /* --app-height is the keyboard-aware height touch input writes (6.13f2). */
-  height: var(--app-height, 100dvh);
+  /* --app-height is the keyboard-aware height touch input writes (6.13f2). A
+     var() line is never dropped at parse time, so 100dvh sits behind @supports. */
+  height: var(--app-height, 100%);
+}
+@supports (height: 100dvh) {
+  #app {
+    height: var(--app-height, 100dvh);
+  }
 }
 
 button {
