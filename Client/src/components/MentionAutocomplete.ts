@@ -9,7 +9,9 @@ import { getChannelMessages } from "@stores/messages.store";
 import { getCurrentUser } from "@stores/auth.store";
 import { currentUserHasPermission } from "@lib/permissions";
 import { Permission } from "@lib/types";
-import { EVERYONE_TOKEN, HERE_TOKEN } from "@lib/mentions";
+import { EVERYONE_TOKEN, HERE_TOKEN, isEveryoneToken } from "@lib/mentions";
+import { idMentionsEnabled } from "@lib/serverCapabilities";
+import { channelsStore } from "@stores/channels.store";
 import {
   createInlineAutocomplete,
   type InlineAutocompleteComponent,
@@ -29,14 +31,19 @@ export interface MentionSuggestion {
    * is a display name), the meaning for @everyone/@here.
    */
   readonly detail: string;
-  readonly kind: "user" | "broadcast";
-  /** User id, or null for @everyone/@here. */
+  readonly kind: "user" | "broadcast" | "role";
+  /** User id, or null for @everyone/@here and for a role. */
   readonly userId: number | null;
+  /** Role id for a role suggestion (WP 6.3e), else null. */
+  readonly roleId: number | null;
 }
 
 export interface MentionAutocompleteOptions {
   /** Called with the token to insert (without the leading "@"). */
   readonly onSelect: (token: string) => void;
+  /** Called with the chosen suggestion just before `onSelect`: the composer
+   *  tracks which user or role the inserted text stands for. */
+  readonly onPick?: (suggestion: MentionSuggestion) => void;
   readonly onClose: () => void;
   /**
    * Channel whose loaded history ranks the suggestions: members who spoke
@@ -111,6 +118,7 @@ export function filterMentionSuggestions(query: string, channelId?: number): Men
           : messagingText("mention.userDetail", { username: member.username, role: member.role }),
       kind: "user",
       userId: member.id,
+      roleId: null,
     };
     if (q === "" || lowerUsername.startsWith(q) || lowerDisplay.startsWith(q)) {
       prefix.push(entry);
@@ -143,6 +151,7 @@ export function filterMentionSuggestions(query: string, channelId?: number): Men
         detail: messagingText("mention.everyone"),
         kind: "broadcast",
         userId: null,
+        roleId: null,
       },
       {
         token: HERE_TOKEN,
@@ -150,12 +159,49 @@ export function filterMentionSuggestions(query: string, channelId?: number): Men
         detail: messagingText("mention.here"),
         kind: "broadcast",
         userId: null,
+        roleId: null,
       },
     ];
     broadcasts.push(...all.filter((s) => q === "" || s.token.startsWith(q)));
   }
 
-  return [...broadcasts, ...prefix, ...substring].slice(0, MAX_MENTION_SUGGESTIONS);
+  return [...broadcasts, ...prefix, ...substring, ...roleSuggestions(q)].slice(
+    0,
+    MAX_MENTION_SUGGESTIONS,
+  );
+}
+
+/**
+ * Roles the signed-in user may ping, matching lower-cased `q`: prefix matches
+ * before substring matches, each alphabetical. Offered only on a server that
+ * resolves `<@&id>` (a role typed as plain `@Name` there is dead text), and
+ * only a `mentionable` role, or any role for a holder of MENTION_EVERYONE. The
+ * server still decides.
+ */
+function roleSuggestions(q: string): MentionSuggestion[] {
+  if (!idMentionsEnabled()) return [];
+  const pingAny = currentUserHasPermission(Permission.MENTION_EVERYONE);
+  const prefix: MentionSuggestion[] = [];
+  const substring: MentionSuggestion[] = [];
+  for (const role of channelsStore.getState().roles) {
+    if (role.mentionable !== true && !pingAny) continue;
+    // A role named "everyone" or "here" would read as the broadcast token.
+    if (isEveryoneToken(role.name)) continue;
+    const lower = role.name.toLowerCase();
+    if (q !== "" && !lower.includes(q)) continue;
+    const entry: MentionSuggestion = {
+      token: role.name,
+      label: role.name,
+      detail: messagingText("mention.roleDetail"),
+      kind: "role",
+      userId: null,
+      roleId: role.id,
+    };
+    (q === "" || lower.startsWith(q) ? prefix : substring).push(entry);
+  }
+  const byName = (a: MentionSuggestion, b: MentionSuggestion): number =>
+    a.label.localeCompare(b.label);
+  return [...prefix.toSorted(byName), ...substring.toSorted(byName)];
 }
 
 /**
@@ -183,6 +229,7 @@ export function createMentionAutocomplete(
     // Open already populated with the full member list.
     primeOnCreate: true,
     onSelect: options.onSelect,
+    ...(options.onPick === undefined ? {} : { onPick: options.onPick }),
     onClose: options.onClose,
     comboboxInput: options.comboboxInput,
   });

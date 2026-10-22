@@ -39,6 +39,12 @@
     },
     {
       "file": "components/message-list/content-parser.ts",
+      "binding": "rolesById",
+      "category": "pure-cache",
+      "reason": "WeakMap keyed by the channels store's roles array snapshot; a new roster is a new key and an old one is collected with it, so nothing outlives the session that built it"
+    },
+    {
+      "file": "components/message-list/content-parser.ts",
       "binding": "parseCache",
       "category": "pure-cache",
       "reason": "Key is message id + editedAt + content, and the cache is cleared on MessageList destroy (clearContentParseCache)"

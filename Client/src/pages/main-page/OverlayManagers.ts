@@ -127,6 +127,7 @@ export function mapToPinnedMessage(msg: {
   readonly timestamp?: string;
   readonly mentions?: readonly number[];
   readonly mentions_everyone?: boolean;
+  readonly mention_roles?: readonly number[];
 }): PinnedMessage {
   const author = resolveAuthor(msg.user);
   return {
@@ -140,6 +141,7 @@ export function mapToPinnedMessage(msg: {
     avatarColor: pickPinAvatarColor(msg.user.username),
     ...(msg.mentions !== undefined ? { mentions: msg.mentions } : {}),
     ...(msg.mentions_everyone !== undefined ? { mentionsEveryone: msg.mentions_everyone } : {}),
+    ...(msg.mention_roles !== undefined ? { mentionRoles: msg.mention_roles } : {}),
   };
 }
 

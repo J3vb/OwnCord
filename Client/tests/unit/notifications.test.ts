@@ -314,6 +314,32 @@ describe("notifyIncomingMessage", () => {
     });
   });
 
+  it("role mention notifies a holder", async () => {
+    const { sendNotification } = await import("@tauri-apps/plugin-notification");
+    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+    testPrefs.set("notificationLevel", "mentions");
+    authStore.setState((prev) => ({
+      ...prev,
+      user: prev.user === null ? null : { ...prev.user, role_ids: [5] },
+    }));
+    // A non-holder's role: the "mentions only" level stays silent.
+    notifyIncomingMessage(makePayload({ id: 10, content: "hey <@&6>" }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sendNotification).not.toHaveBeenCalled();
+    // A held role notifies, from the token alone (a server before mention_roles)...
+    notifyIncomingMessage(makePayload({ id: 11, content: "hey <@&5>" }));
+    await vi.waitFor(() => {
+      expect(sendNotification).toHaveBeenCalledTimes(1);
+    });
+    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+    resetNotificationCoalescing();
+    // ...and from mention_roles alone once the server sends it.
+    notifyIncomingMessage(makePayload({ id: 12, content: "hey team", mention_roles: [5] }));
+    await vi.waitFor(() => {
+      expect(sendNotification).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("handles long messages by truncating", async () => {
     const { sendNotification } = await import("@tauri-apps/plugin-notification");
     (sendNotification as ReturnType<typeof vi.fn>).mockClear();

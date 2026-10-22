@@ -13,6 +13,7 @@ import { createLazyScreen } from "@components/lazyScreen";
 import {
   createMentionAutocomplete,
   type MentionAutocompleteComponent,
+  type MentionSuggestion,
 } from "@components/MentionAutocomplete";
 import {
   createEmojiAutocomplete,
@@ -31,6 +32,8 @@ import {
   type SlashAutocompleteComponent,
 } from "@components/SlashAutocomplete";
 import { replaceEmojiShortcodes } from "../features/messaging/shortcodes";
+import { applyPickedMentions, type PickedMention } from "@lib/pickedMentions";
+import { idMentionsEnabled } from "@lib/serverCapabilities";
 import { applySlashCommand } from "../features/messaging/slashCommands";
 import { FORMAT_MARKERS, wrapWithMarker } from "../features/messaging/markdownMarkers";
 import { MAX_MESSAGE_LEN } from "../features/messaging/messageLimits";
@@ -129,6 +132,8 @@ export interface ReplyTarget {
 export interface ComposerDraft {
   readonly content: string;
   readonly replyTo: ReplyTarget | null;
+  /** Users and roles picked from the mention popup (WP 6.3e). */
+  readonly picks?: readonly PickedMention[];
   readonly attachments: readonly {
     readonly id: string;
     readonly filename: string;
@@ -349,6 +354,12 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   /** Set by mount(); backs togglePicker(). */
   let togglePickerOf: ((kind: "emoji" | "gif") => void) | null = null;
   let mentionPopup: MentionAutocompleteComponent | null = null;
+  /** Users and roles picked from the popup for this draft (WP 6.3e), by the
+   *  text now in the textarea. Send turns the spans still intact into id
+   *  tokens, on a server that resolves them; an edited span is plain text. */
+  let pickedMentions: PickedMention[] = [];
+  /** The popup row just chosen; insertMention reads it as it inserts the text. */
+  let pendingPick: MentionSuggestion | null = null;
   /** Index of the "@" the open popup is completing; -1 when closed. */
   let mentionStart = -1;
   let emojiPopup: EmojiAutocompleteComponent | null = null;
@@ -410,6 +421,20 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     mentionPopup.destroy();
     mentionPopup = null;
     mentionStart = -1;
+    pendingPick = null;
+  }
+
+  /** Remember that the text `@token` stands for the picked user or role. */
+  function recordPick(token: string): void {
+    const pick = pendingPick;
+    pendingPick = null;
+    if (pick === null || pick.token !== token || !idMentionsEnabled()) return;
+    const id = pick.kind === "role" ? pick.roleId : pick.userId;
+    if (id === null) return;
+    const picked = { text: `@${token}`, token: pick.kind === "role" ? `<@&${id}>` : `<@${id}>` };
+    if (!pickedMentions.some((p) => p.text === picked.text && p.token === picked.token)) {
+      pickedMentions.push(picked);
+    }
   }
 
   /** Replace the token under the caret with "@token ". */
@@ -429,6 +454,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     const after = textarea.value.slice(caret);
     const inserted = `@${token} `;
     textarea.value = before + inserted + after;
+    recordPick(token);
     const pos = before.length + inserted.length;
     textarea.selectionStart = pos;
     textarea.selectionEnd = pos;
@@ -656,6 +682,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (mentionPopup === null) {
       mentionPopup = createMentionAutocomplete({
         onSelect: insertMention,
+        onPick: (suggestion) => {
+          pendingPick = suggestion;
+        },
         onClose: closeMentionPopup,
         channelId: options.channelId,
         // The popup manages combobox/aria-activedescendant state on the
@@ -944,7 +973,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       showUploadError(messagingText("slash.needsText", { name: slash.name }));
       return;
     }
-    const content = replaceEmojiShortcodes(slash === null ? textarea.value.trim() : slash.text);
+    const content = applyPickedMentions(
+      replaceEmojiShortcodes(slash === null ? textarea.value.trim() : slash.text),
+      idMentionsEnabled() ? pickedMentions : [],
+    );
     const hasAttachments = pendingAttachments.length > 0;
     if (content.length === 0 && !hasAttachments) return;
 
@@ -1010,6 +1042,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     clearPendingAttachments();
 
     textarea.value = "";
+    pickedMentions = [];
     closeSlashPopup();
     autoResize();
     textarea.focus();
@@ -1614,6 +1647,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       () => {
         autoResizeOnInput();
         maybeEmitTyping();
+        // A cleared draft forgets what was picked into it.
+        if (textarea?.value === "") pickedMentions = [];
         syncAutocomplete();
         // An edit is the user acting on the refusal, so the line goes away.
         clearUploadError();
@@ -2060,6 +2095,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     return {
       content: textarea?.value ?? "",
       replyTo: state.replyTo,
+      ...(pickedMentions.length === 0 ? {} : { picks: [...pickedMentions] }),
       attachments: pendingAttachments.flatMap((a) =>
         a.uploadedAt === undefined
           ? []
@@ -2086,6 +2122,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       textarea.value = draft.content;
       autoResize();
     }
+    pickedMentions = [...(draft.picks ?? [])];
     if (draft.replyTo !== null) {
       const { messageId, username, ...opts } = draft.replyTo;
       setReplyTo(messageId, username, opts);

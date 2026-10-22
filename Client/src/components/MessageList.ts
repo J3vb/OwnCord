@@ -17,7 +17,7 @@ import {
   isWindowDetached,
 } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
-import { membersStore } from "@stores/members.store";
+import { membersStore, memberDisplayName } from "@stores/members.store";
 import { blocksStore } from "@stores/blocks.store";
 import { authorityChannelId, isReadSurface, threadsStore } from "@stores/threads.store";
 import { refreshThreadChips } from "./message-list/threadChip";
@@ -56,6 +56,7 @@ import {
   resyncMentions,
 } from "./message-list/content-parser";
 import { highlightsCurrentUser } from "@lib/mentions";
+import { applyPickedMentions, tokensToPickedText } from "@lib/pickedMentions";
 import { canManageMessages } from "@lib/permissions";
 import { readableRoleColor } from "@lib/themes";
 import { resolveDisplayName } from "@lib/avatar";
@@ -2779,7 +2780,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // — without re-parsing or rebuilding them (P4-02, F3). A system row draws
       // its mentions with no server info, so it resyncs the same way.
       if (el.classList.contains("message")) {
-        const mentionInfo = { mentions: msg.mentions, mentionsEveryone: msg.mentionsEveryone };
+        const mentionInfo = {
+          mentions: msg.mentions,
+          mentionsEveryone: msg.mentionsEveryone,
+          mentionRoles: msg.mentionRoles,
+        };
         resyncMentions(el, mentionInfo);
         el.classList.toggle(
           "mentioned",
@@ -3153,7 +3158,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     editRefocus = false;
     const gen = ++editGen;
     edit = { messageId, session: null, gen };
-    const startText = text ?? msg.content;
+    // Stored `<@id>` / `<@&id>` tokens read as `@name` in the box, and the
+    // spans left intact turn back into tokens on save (WP 6.3e).
+    const shown = tokensToPickedText(msg.content, {
+      user: (id) => {
+        const member = membersStore.getState().members.get(id);
+        return member === undefined ? undefined : memberDisplayName(member);
+      },
+      role: (id) => channelsStore.getState().roles.find((r) => r.id === id)?.name,
+    });
+    const startText = text ?? shown.text;
     withInlineEdit(
       (m) => {
         if (edit === null || edit.gen !== gen || disposable.signal.aborted) return;
@@ -3161,7 +3175,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
           messageId,
           text: startText,
           onSave: (content) => {
-            if (options.onEditSave(messageId, content)) closeEdit(true);
+            if (options.onEditSave(messageId, applyPickedMentions(content, shown.picks))) {
+              closeEdit(true);
+            }
           },
           onCancel: () => closeEdit(true),
           onEmpty: () => options.onEmptyEdit(messageId),

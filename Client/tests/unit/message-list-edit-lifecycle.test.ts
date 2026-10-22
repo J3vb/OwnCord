@@ -31,7 +31,7 @@ import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
-import { setChannels, setActiveChannel } from "@stores/channels.store";
+import { setChannels, setActiveChannel, setRoles, channelsStore } from "@stores/channels.store";
 
 const CHANNEL_ID = 1;
 const ME = { id: 1, username: "Alice", avatar: null };
@@ -144,6 +144,29 @@ describe("MessageList — inline editor lifecycle (WP 3A-8 review)", () => {
       if (d) Object.defineProperty(HTMLElement.prototype, name, d);
       else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
     }
+  });
+
+  it("the edit box shows id tokens as @name and converts untouched spans back on save", async () => {
+    membersStore.setState(() => ({
+      members: new Map([
+        [10, { id: 10, username: "bob", avatar: null, role: "member", status: "online" as const }],
+      ]),
+      typingUsers: new Map(),
+    }));
+    setRoles([{ id: 5, name: "Mods", color: null, permissions: 0 }]);
+    channelsStore.flush();
+    setMessages([makeMessage(1, { content: "hi <@10> <@&5> <@77>" })]);
+    mount();
+
+    expect(list!.startEdit(1)).toBe(true);
+    await vi.waitFor(() => expect(editor(1)).not.toBeNull());
+    expect(editor(1)!.value).toBe("hi @bob @Mods <@77>");
+
+    // The unknown id stays as typed; the user changes one span and the text.
+    editor(1)!.value = "yo @bob @Mod <@77>";
+    editor(1)!.dispatchEvent(new Event("input", { bubbles: true }));
+    container.querySelector<HTMLElement>("[data-testid='msg-edit-save-1']")!.click();
+    expect(options.onEditSave).toHaveBeenCalledWith(1, "yo <@10> @Mod <@77>");
   });
 
   it("a failed editor load leaves nothing editing, so the next attempt can start", async () => {

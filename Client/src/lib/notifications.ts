@@ -155,6 +155,7 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   const mentionInfo = {
     mentions: payload.mentions,
     mentionsEveryone: payload.mentions_everyone,
+    mentionRoles: payload.mention_roles,
   };
   const directMention = mentionsCurrentUser(payload.content, mentionInfo);
   const everyoneMention = payload.mentions_everyone === true;
