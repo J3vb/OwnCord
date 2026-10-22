@@ -374,7 +374,7 @@ function buildPlainMention(raw: string, text: string): HTMLSpanElement {
 }
 
 /** `<@id>`: the member's current name, or `@unknown-user` for one nobody can name. */
-function buildUserIdNode(raw: string, userId: number): HTMLSpanElement {
+function buildUserIdNode(raw: string, userId: number, info?: MentionInfo): HTMLSpanElement {
   const me = authStore.getState().user;
   const member = membersStore.getState().members.get(userId);
   // The signed-in user is not always in the member map (DM-only views).
@@ -385,7 +385,10 @@ function buildUserIdNode(raw: string, userId: number): HTMLSpanElement {
       : undefined);
   if (named === undefined) return buildPlainMention(raw, messagingText("mention.unknownUser"));
   const span = createElement("span", {
-    class: me?.id === userId ? "mention mention-self" : "mention",
+    class:
+      me?.id === userId && (info?.mentions === undefined || info.mentions.includes(userId))
+        ? "mention mention-self"
+        : "mention",
     role: "button",
     tabindex: "0",
     "data-user-id": String(userId),
@@ -406,9 +409,10 @@ function buildRoleIdNode(raw: string, roleId: number, info?: MentionInfo): HTMLS
     return buildPlainMention(raw, `@${role.name}`);
   }
   const span = createElement("span", {
-    class: currentUserHeldRoleIds().includes(roleId)
-      ? "mention mention-role mention-self"
-      : "mention mention-role",
+    class:
+      info?.mentionRoles?.includes(roleId) === true && currentUserHeldRoleIds().includes(roleId)
+        ? "mention mention-role mention-self"
+        : "mention mention-role",
     "data-role-id": String(roleId),
     "data-mention": raw,
   });
@@ -426,7 +430,7 @@ function buildIdMentionNode(raw: string, info?: MentionInfo): HTMLSpanElement | 
   const match = ID_TOKEN_FULL.exec(raw);
   if (match === null) return null;
   const id = Number(match[2]);
-  return match[1] === "&" ? buildRoleIdNode(raw, id, info) : buildUserIdNode(raw, id);
+  return match[1] === "&" ? buildRoleIdNode(raw, id, info) : buildUserIdNode(raw, id, info);
 }
 
 /** Build the clickable chip for a `#name` that resolves, or null. */
@@ -704,7 +708,8 @@ export function resyncMentions(root: ParentNode, info?: MentionInfo): void {
       const raw = span.dataset["mention"] ?? span.textContent ?? "";
       const token = raw.startsWith("@") ? raw.slice(1) : raw;
       // An id token always rebuilds to a pill or its plain stand-in, so a
-      // rename, a role edit or a member leaving or returning shows at once.
+      // rename, a role rename, recolour or deletion, or a member leaving or
+      // returning shows at once (MessageList resyncs on member and role changes).
       const replacement = buildIdMentionNode(raw, info) ?? buildMentionNode(raw, token, info);
       // A mention that labels a masked link stays plain link content when it is
       // rebuilt, as at first render (buildMaskedLink).

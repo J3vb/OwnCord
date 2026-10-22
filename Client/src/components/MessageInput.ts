@@ -973,10 +973,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       showUploadError(messagingText("slash.needsText", { name: slash.name }));
       return;
     }
-    const content = applyPickedMentions(
-      replaceEmojiShortcodes(slash === null ? textarea.value.trim() : slash.text),
-      idMentionsEnabled() ? pickedMentions : [],
-    );
+    const typed = replaceEmojiShortcodes(slash === null ? textarea.value.trim() : slash.text);
+    const content = applyPickedMentions(typed, idMentionsEnabled() ? pickedMentions : []);
     const hasAttachments = pendingAttachments.length > 0;
     if (content.length === 0 && !hasAttachments) return;
 
@@ -984,7 +982,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // `.length` check here would count UTF-16 units and refuse ~2000 astral
     // emoji the server accepts. Checked before the debounce stamp below so a
     // refused send does not suppress the next one.
-    if ([...content].length > MAX_MESSAGE_LEN) {
+    if ([...typed].length > MAX_MESSAGE_LEN) {
       showUploadError(messagingText("error.tooLong", { max: String(MAX_MESSAGE_LEN) }));
       return;
     }

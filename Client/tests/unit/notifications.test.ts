@@ -326,14 +326,11 @@ describe("notifyIncomingMessage", () => {
     notifyIncomingMessage(makePayload({ id: 10, content: "hey <@&6>" }));
     await new Promise((r) => setTimeout(r, 50));
     expect(sendNotification).not.toHaveBeenCalled();
-    // A held role notifies, from the token alone (a server before mention_roles)...
+    // A typed token the server did not list stays silent.
     notifyIncomingMessage(makePayload({ id: 11, content: "hey <@&5>" }));
-    await vi.waitFor(() => {
-      expect(sendNotification).toHaveBeenCalledTimes(1);
-    });
-    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
-    resetNotificationCoalescing();
-    // ...and from mention_roles alone once the server sends it.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sendNotification).not.toHaveBeenCalled();
+    // A held role the server lists notifies.
     notifyIncomingMessage(makePayload({ id: 12, content: "hey team", mention_roles: [5] }));
     await vi.waitFor(() => {
       expect(sendNotification).toHaveBeenCalledTimes(1);

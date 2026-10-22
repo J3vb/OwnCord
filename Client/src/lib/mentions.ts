@@ -118,6 +118,8 @@ export function resolveMentionsFromContent(content: string): number[] {
   }
   for (const match of content.matchAll(MENTION_TOKEN_REGEX)) {
     if (match[3] === "@") continue;
+    // `<@5>` is an id token (counted above), not the name "5".
+    if (match[1] === "<") continue;
     const token = match[2];
     if (token === undefined || isEveryoneToken(token)) continue;
     const id = resolveMentionUserId(token);
@@ -127,13 +129,12 @@ export function resolveMentionsFromContent(content: string): number[] {
 }
 
 /**
- * Role IDs `content` mentions: the server's list when it sent one (it has
- * already dropped the roles the sender could not ping), else the `<@&id>`
- * tokens in the text.
+ * Role IDs the server says this message mentions. Only its list counts: it has
+ * dropped the roles the sender could not ping, whereas a `<@&id>` typed into a
+ * message is just text until the server honours it. Absent = none.
  */
-export function mentionedRoleIds(content: string, info?: MentionInfo): readonly number[] {
-  if (info?.mentionRoles !== undefined) return info.mentionRoles;
-  return Array.from(content.matchAll(ROLE_MENTION_REGEX), (m) => Number(m[1]));
+export function mentionedRoleIds(info?: MentionInfo): readonly number[] {
+  return info?.mentionRoles ?? [];
 }
 
 /**
@@ -147,10 +148,12 @@ export function currentUserHeldRoleIds(): readonly number[] {
   return id === undefined ? [] : [id];
 }
 
-/** Whether `content` mentions a role the signed-in user holds. */
-function mentionsHeldRole(content: string, info?: MentionInfo): boolean {
+/** Whether the server lists a role the signed-in user holds. */
+function mentionsHeldRole(info?: MentionInfo): boolean {
+  const mentioned = mentionedRoleIds(info);
+  if (mentioned.length === 0) return false;
   const held = currentUserHeldRoleIds();
-  return mentionedRoleIds(content, info).some((id) => held.includes(id));
+  return mentioned.some((id) => held.includes(id));
 }
 
 /**
@@ -166,7 +169,7 @@ export function mentionsCurrentUser(content: string, info?: MentionInfo): boolea
     info?.mentions !== undefined
       ? info.mentions.includes(me.id)
       : resolveMentionsFromContent(content).includes(me.id);
-  return direct || mentionsHeldRole(content, info);
+  return direct || mentionsHeldRole(info);
 }
 
 /**

@@ -100,7 +100,7 @@ import {
   onMarkUnreadFailed,
   setLiveTailInView,
 } from "@lib/read-state";
-import { readPointerEnabled } from "@lib/serverCapabilities";
+import { idMentionsEnabled, readPointerEnabled } from "@lib/serverCapabilities";
 import { markMessageUnread } from "./message-list/mark-unread";
 
 // -- Options ------------------------------------------------------------------
@@ -2663,6 +2663,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       ),
     );
 
+    // A role rename, recolour or deletion changes how role pills read.
+    unsubscribers.push(
+      channelsStore.subscribeSelector(
+        (s) => s.roles,
+        () => refreshAuthorRows(),
+      ),
+    );
+
     // The server's per-channel verdicts change on a role or override edit.
     // Delete and pin are built into each row, so a change there rebuilds; react
     // only flips the lock on the rendered controls.
@@ -3160,14 +3168,17 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     edit = { messageId, session: null, gen };
     // Stored `<@id>` / `<@&id>` tokens read as `@name` in the box, and the
     // spans left intact turn back into tokens on save (WP 6.3e).
-    const shown = tokensToPickedText(msg.content, {
-      user: (id) => {
+    const names = {
+      user: (id: number) => {
         const member = membersStore.getState().members.get(id);
         return member === undefined ? undefined : memberDisplayName(member);
       },
-      role: (id) => channelsStore.getState().roles.find((r) => r.id === id)?.name,
-    });
-    const startText = text ?? shown.text;
+      role: (id: number) => channelsStore.getState().roles.find((r) => r.id === id)?.name,
+    };
+    const shown = tokensToPickedText(msg.content, names);
+    // A restored edit draft (failed save) is converted the same way.
+    const restored = text === undefined ? shown : tokensToPickedText(text, names);
+    const startText = restored.text;
     withInlineEdit(
       (m) => {
         if (edit === null || edit.gen !== gen || disposable.signal.aborted) return;
@@ -3175,7 +3186,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
           messageId,
           text: startText,
           onSave: (content) => {
-            if (options.onEditSave(messageId, applyPickedMentions(content, shown.picks))) {
+            // Without the capability the box showed the raw text; save it as is.
+            const picks = idMentionsEnabled() ? [...shown.picks, ...restored.picks] : [];
+            if (options.onEditSave(messageId, applyPickedMentions(content, picks))) {
               closeEdit(true);
             }
           },

@@ -633,10 +633,28 @@ describe("id mention rendering (WP 6.3e)", () => {
       ...prev,
       user: prev.user === null ? null : { ...prev.user, role_ids: [5] },
     }));
-    const el = render("<@&5> <@&6>");
+    const el = render("<@&5> <@&6>", { mentionRoles: [5, 6] });
     const pills = el.querySelectorAll(".mention-role");
     expect(pills[0]?.classList.contains("mention-self")).toBe(true);
     expect(pills[1]?.classList.contains("mention-self")).toBe(false);
+  });
+
+  it("a held role the server did not list is no mention-self pill", () => {
+    seedRoles();
+    authStore.setState((prev) => ({
+      ...prev,
+      user: prev.user === null ? null : { ...prev.user, role_ids: [5] },
+    }));
+    const pill = render("<@&5>").querySelector(".mention-role");
+    expect(pill?.textContent).toBe("@Mods");
+    expect(pill?.classList.contains("mention-self")).toBe(false);
+  });
+
+  it("a self pill the server did not list is not mention-self", () => {
+    expect(render("<@12>", { mentions: [10] }).querySelector(".mention")?.className).toBe(
+      "mention",
+    );
+    expect(render("<@12>", { mentions: [12] }).querySelector(".mention-self")).not.toBeNull();
   });
 
   it("unknown ids stay plain", () => {

@@ -77,26 +77,31 @@ describe("token regexes", () => {
 
 describe("role mentions", () => {
   it("role mention highlights a holder", () => {
-    expect(mentionsCurrentUser("ping <@&5>")).toBe(true);
-    expect(highlightsCurrentUser("ping <@&5>")).toBe(true);
+    expect(mentionsCurrentUser("ping <@&5>", { mentionRoles: [5] })).toBe(true);
+    expect(highlightsCurrentUser("ping <@&5>", { mentionRoles: [5] })).toBe(true);
+  });
+
+  it("a typed token the server did not list never counts", () => {
+    expect(mentionsCurrentUser("ping <@&5>")).toBe(false);
+    expect(highlightsCurrentUser("ping <@&5>", { mentions: [] })).toBe(false);
   });
 
   it("role mention does not highlight a non-holder", () => {
-    expect(mentionsCurrentUser("ping <@&6>")).toBe(false);
-    expect(highlightsCurrentUser("ping <@&6>")).toBe(false);
+    expect(mentionsCurrentUser("ping <@&6>", { mentionRoles: [6] })).toBe(false);
+    expect(highlightsCurrentUser("ping <@&6>", { mentionRoles: [6] })).toBe(false);
     expect(mentionsCurrentUser("no tokens here")).toBe(false);
   });
 
   it("counts any one of several held roles", () => {
     signIn("member", [6, 5]);
-    expect(mentionsCurrentUser("<@&6>")).toBe(true);
-    expect(mentionsCurrentUser("<@&5>")).toBe(true);
+    expect(mentionsCurrentUser("x", { mentionRoles: [6] })).toBe(true);
+    expect(mentionsCurrentUser("x", { mentionRoles: [5] })).toBe(true);
   });
 
   it("falls back to the role name's id when role_ids is absent", () => {
     signIn("mods");
-    expect(mentionsCurrentUser("<@&5>")).toBe(true);
-    expect(mentionsCurrentUser("<@&6>")).toBe(false);
+    expect(mentionsCurrentUser("x", { mentionRoles: [5] })).toBe(true);
+    expect(mentionsCurrentUser("x", { mentionRoles: [6] })).toBe(false);
   });
 
   it("trusts mention_roles over the content once the server sends it", () => {
@@ -115,7 +120,7 @@ describe("role mentions", () => {
       motd: null,
       isAuthenticated: false,
     }));
-    expect(mentionsCurrentUser("<@&5> <@12>")).toBe(false);
+    expect(mentionsCurrentUser("<@&5> <@12>", { mentionRoles: [5] })).toBe(false);
   });
 });
 
@@ -159,6 +164,15 @@ describe("id mentions", () => {
   it("highlights by id even when the member list does not hold the user", () => {
     membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
     expect(mentionsCurrentUser("<@12>")).toBe(true);
+  });
+
+  it("does not read <@5> as the user named 5", () => {
+    membersStore.setState(() => ({
+      members: new Map([[7, member(7, "5")]]),
+      typingUsers: new Map(),
+    }));
+    expect(resolveMentionsFromContent("<@5>")).toEqual([5]);
+    expect(resolveMentionsFromContent("@5")).toEqual([7]);
   });
 
   it("stays authoritative for the server's list when it sent one", () => {
