@@ -543,6 +543,10 @@
 }
 
 @media (pointer: coarse) {
+  .channel-item {
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
   .channel-item,
   .category {
     min-height: 44px;
