@@ -1,7 +1,9 @@
 // Browser binding for the IdentityStore suite (6.13c): the browser platform's
 // identity key and pin store over IndexedDB. "The native store" is a small
-// in-test IndexedDB: it answers, fails every request, or is missing. The same
-// suite runs against the desktop store in `identityStore.desktop.test.ts`.
+// in-test IndexedDB: it answers, fails every request, or is missing. A missing
+// store is a failure here, so the suite runs with `missingStoreIsError: true`;
+// the full suite runs against the desktop store in
+// `identityStore.desktop.test.ts`.
 //
 // The adapter keeps its open database across calls, so each test takes a fresh
 // module instance.
@@ -18,8 +20,19 @@ const control: {
   answer: unknown;
   failure: unknown;
   openFailure: unknown;
+  openBlocked: boolean;
+  opens: number;
+  lastDb: { onversionchange: Handler; onclose: Handler } | null;
   data: Map<string, Map<IDBValidKey, unknown>>;
-} = { answer: undefined, failure: null, openFailure: null, data: new Map() };
+} = {
+  answer: undefined,
+  failure: null,
+  openFailure: null,
+  openBlocked: false,
+  opens: 0,
+  lastDb: null,
+  data: new Map(),
+};
 
 class FakeRequest {
   result: unknown = undefined;
@@ -70,13 +83,22 @@ class FakeTransaction {
 const fakeIndexedDB = {
   open(_name: string, _version?: number): FakeRequest {
     const request = new FakeRequest();
+    control.opens++;
     setTimeout(() => {
+      if (control.openBlocked) {
+        request.onblocked?.();
+        return;
+      }
       if (control.openFailure !== null) {
         request.error = control.openFailure;
         request.onerror?.();
         return;
       }
-      const db = {
+      const db: {
+        onversionchange: Handler;
+        onclose: Handler;
+        [member: string]: unknown;
+      } = {
         objectStoreNames: { contains: (name: string) => control.data.has(name) },
         createObjectStore: (name: string) => {
           control.data.set(name, new Map());
@@ -86,6 +108,7 @@ const fakeIndexedDB = {
         onversionchange: null,
         onclose: null,
       };
+      control.lastDb = db;
       request.result = db;
       request.onupgradeneeded?.();
       request.onsuccess?.();
@@ -104,6 +127,9 @@ function resetControl(): void {
   control.answer = undefined;
   control.failure = null;
   control.openFailure = null;
+  control.openBlocked = false;
+  control.opens = 0;
+  control.lastDb = null;
   control.data = new Map();
   vi.stubGlobal("indexedDB", fakeIndexedDB);
 }
@@ -112,24 +138,27 @@ afterAll(() => {
   vi.unstubAllGlobals();
 });
 
-describeIdentityStoreSuite(async () => {
-  resetControl();
-  const browserBinding = await freshStore();
-  return {
-    subject: browserBinding,
-    native: {
-      succeedWith(value: unknown) {
-        control.answer = value;
+describeIdentityStoreSuite(
+  async () => {
+    resetControl();
+    const browserBinding = await freshStore();
+    return {
+      subject: browserBinding,
+      native: {
+        succeedWith(value: unknown) {
+          control.answer = value;
+        },
+        failWith(error: unknown) {
+          control.failure = error;
+        },
+        unavailable() {
+          vi.stubGlobal("indexedDB", undefined);
+        },
       },
-      failWith(error: unknown) {
-        control.failure = error;
-      },
-      unavailable() {
-        vi.stubGlobal("indexedDB", undefined);
-      },
-    },
-  };
-});
+    };
+  },
+  { missingStoreIsError: true },
+);
 
 describe("browser identity store", () => {
   let store: IdentityStore;
@@ -170,6 +199,43 @@ describe("browser identity store", () => {
     await expect(store.storePin("a.example", "7", "pin")).resolves.toBe("failed");
     await expect(store.loadKey("1@a.example")).rejects.toThrow();
     await expect(store.saveKey("1@a.example", "blob")).resolves.toBe(false);
+  });
+
+  it("answers a store failure when reaching IndexedDB throws", async () => {
+    Object.defineProperty(globalThis, "indexedDB", {
+      configurable: true,
+      get() {
+        throw new Error("storage blocked");
+      },
+    });
+    await expect(store.getPin("a.example", "7")).resolves.toEqual({ status: "unavailable" });
+    await expect(store.storePin("a.example", "7", "pin")).resolves.toBe("failed");
+    await expect(store.loadKey("1@a.example")).rejects.toThrow();
+    await expect(store.saveKey("1@a.example", "blob")).resolves.toBe(false);
+    await expect(store.deleteKey("1@a.example")).resolves.toBe(false);
+  });
+
+  it("fails a blocked open, and opens again on the next call", async () => {
+    control.openBlocked = true;
+    await expect(store.getPin("a.example", "7")).resolves.toEqual({ status: "unavailable" });
+    control.openBlocked = false;
+    await expect(store.storePin("a.example", "7", "pin")).resolves.toBe("stored");
+    expect(control.opens).toBe(2);
+  });
+
+  it("reuses the open database, and reopens once it closes", async () => {
+    await store.storePin("a.example", "7", "pin");
+    await store.getPin("a.example", "7");
+    expect(control.opens).toBe(1);
+    control.lastDb!.onclose?.();
+    await expect(store.getPin("a.example", "7")).resolves.toEqual({
+      status: "pinned",
+      pin: "pin",
+    });
+    expect(control.opens).toBe(2);
+    control.lastDb!.onversionchange?.();
+    await expect(store.loadKey("1@a.example")).resolves.toBeNull();
+    expect(control.opens).toBe(3);
   });
 
   it("opens the database again after a failed open", async () => {

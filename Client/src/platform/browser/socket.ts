@@ -6,6 +6,8 @@
 // One live socket per transport. Each `connect()` is a new attempt with its
 // own generation; a superseded attempt's socket is closed, and its events —
 // a late close above all — are ignored, so they never reach the live attempt.
+// A handshake that has neither opened nor closed after 10 s is given up and
+// reported as a lost connection, the same bound the desktop proxy applies.
 // The browser keeps certificate trust itself, so there are no certificate
 // events and `acceptCertificate` refuses.
 import type {
@@ -20,6 +22,10 @@ import { inertUnsubscribe, refuse, UnavailableError } from "./unavailable";
 /** `WebSocket.OPEN`, by spec. */
 const OPEN = 1;
 
+/** How long a handshake may take; matches the desktop proxy's connect bound
+ *  (`src-tauri/src/ws_proxy.rs`, `CONNECT_TIMEOUT`). */
+const HANDSHAKE_TIMEOUT_MS = 10_000;
+
 function createBrowserSocket(): SocketConnection {
   const messageListeners = new Set<(text: string) => void>();
   const stateListeners = new Set<
@@ -32,6 +38,13 @@ function createBrowserSocket(): SocketConnection {
   let live: WebSocket | null = null;
   /** Settles the current attempt's connect() promise. */
   let settleAttempt: (() => void) | null = null;
+  /** The current attempt's handshake timer, until it opens or closes. */
+  let handshakeTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function clearHandshakeTimer(): void {
+    if (handshakeTimer !== null) clearTimeout(handshakeTimer);
+    handshakeTimer = null;
+  }
 
   function report(state: SocketConnectionState): void {
     for (const listener of stateListeners) listener(state);
@@ -40,6 +53,7 @@ function createBrowserSocket(): SocketConnection {
   /** End the current attempt: settle its promise and close its socket. Its
    *  late events then fail the generation check. */
   function retire(): void {
+    clearHandshakeTimer();
     settleAttempt?.();
     settleAttempt = null;
     const socket = live;
@@ -76,8 +90,17 @@ function createBrowserSocket(): SocketConnection {
     // attempt or a disconnect retires this one.
     await new Promise<void>((resolve) => {
       settleAttempt = resolve;
+      handshakeTimer = setTimeout(() => {
+        handshakeTimer = null;
+        if (gen !== generation || live !== socket) return;
+        // Retiring first means the close that follows finds the attempt
+        // gone, so the loss is reported exactly once.
+        retire();
+        report("disconnected");
+      }, HANDSHAKE_TIMEOUT_MS);
       socket.addEventListener("open", () => {
-        if (gen !== generation) return;
+        if (gen !== generation || live !== socket) return;
+        clearHandshakeTimer();
         report("connected");
         resolve();
       });
@@ -90,6 +113,7 @@ function createBrowserSocket(): SocketConnection {
       socket.addEventListener("close", () => {
         resolve();
         if (gen !== generation || live !== socket) return;
+        clearHandshakeTimer();
         live = null;
         settleAttempt = null;
         report("disconnected");

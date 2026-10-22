@@ -8,9 +8,20 @@ function socketScheme(): string {
   return location.protocol === "https:" ? "wss:" : "ws:";
 }
 
+/** `host` as a URL authority (lower case, default port dropped), or null
+ *  when it is not one. */
+function authority(host: string): string | null {
+  try {
+    return new URL(`https://${host}`).host;
+  } catch {
+    return null;
+  }
+}
+
 export const nativeProxies: NativeProxies = {
   async ensureHttpProxy(host: string): Promise<string> {
-    if (host.toLowerCase() !== location.host.toLowerCase()) {
+    const wanted = authority(host);
+    if (wanted === null || wanted !== authority(location.host)) {
       // i18n-exempt: diagnostic
       throw new Error("the browser client reaches only the server that served it");
     }

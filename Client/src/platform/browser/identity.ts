@@ -7,13 +7,15 @@
 // so the app never takes an unreadable store for "no key". A pin read that
 // fails — including a database that will not open, or a stored value that is
 // not a pin — answers "unavailable", never "unpinned" (DC-08, `lib/identity.ts`).
-// Only a page with no IndexedDB at all answers as a host with no store
-// ("no-store" / "unpinned").
+// A page whose IndexedDB is missing or cannot be reached answers the same way
+// as a failing store: this adapter only runs where a store is expected, and
+// the inert registry member is the one that answers "no store".
 import type {
   IdentityPinLookup,
   IdentityStore,
   StoreIdentityPinResult,
 } from "../contracts/identityStore";
+import { UnavailableError } from "./unavailable";
 
 const DB_NAME = "owncord-identity";
 const DB_VERSION = 1;
@@ -21,21 +23,20 @@ const KEYS = "keys";
 const PINS = "pins";
 type StoreName = typeof KEYS | typeof PINS;
 
-/** The page's IndexedDB, or null when it has none. */
-function factory(): IDBFactory | null {
-  try {
-    const found: IDBFactory | undefined = globalThis.indexedDB;
-    return found ?? null;
-  } catch {
-    return null;
-  }
+/** The page's IndexedDB. Throws, like any other store failure, when the page
+ *  has none or may not use it. */
+function factory(): IDBFactory {
+  const found: IDBFactory | undefined = globalThis.indexedDB;
+  if (found === undefined || found === null) throw new UnavailableError();
+  return found;
 }
 
 let opening: Promise<IDBDatabase> | null = null;
 
 /** The open database, shared by every call until it closes or fails. */
-function database(idb: IDBFactory): Promise<IDBDatabase> {
+function database(): Promise<IDBDatabase> {
   if (opening !== null) return opening;
+  const idb = factory();
   const attempt = new Promise<IDBDatabase>((resolve, reject) => {
     const request = idb.open(DB_NAME, DB_VERSION);
     // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
@@ -61,6 +62,10 @@ function database(idb: IDBFactory): Promise<IDBDatabase> {
     };
     // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
     request.onerror = () => reject(request.error ?? new Error("identity database did not open")); // i18n-exempt: diagnostic
+    // Another tab holds an older version open: fail this attempt rather than
+    // wait, so a later call opens again.
+    // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
+    request.onblocked = () => reject(new Error("identity database open was blocked")); // i18n-exempt: diagnostic
   });
   opening = attempt;
   // A failed open is not cached: the next call tries again.
@@ -73,12 +78,11 @@ function database(idb: IDBFactory): Promise<IDBDatabase> {
 /** Run one request in its own transaction; resolves with its result once the
  *  transaction commits, rejects on any request or transaction failure. */
 async function run(
-  idb: IDBFactory,
   storeName: StoreName,
   mode: IDBTransactionMode,
   operation: (store: IDBObjectStore) => IDBRequest,
 ): Promise<unknown> {
-  const db = await database(idb);
+  const db = await database();
   return new Promise<unknown>((resolve, reject) => {
     const tx = db.transaction(storeName, mode);
     const request = operation(tx.objectStore(storeName));
@@ -99,10 +103,8 @@ function pinKey(host: string, userId: string): string {
 
 export const identity: IdentityStore = {
   async saveKey(host, key): Promise<boolean> {
-    const idb = factory();
-    if (idb === null) return false;
     try {
-      await run(idb, KEYS, "readwrite", (store) => store.put(key, host));
+      await run(KEYS, "readwrite", (store) => store.put(key, host));
       return true;
     } catch {
       return false;
@@ -110,19 +112,15 @@ export const identity: IdentityStore = {
   },
 
   async loadKey(host): Promise<string | null> {
-    const idb = factory();
-    if (idb === null) return null;
     // A failure propagates: the caller must not mint a key over one it
     // could not read.
-    const value = await run(idb, KEYS, "readonly", (store) => store.get(host));
+    const value = await run(KEYS, "readonly", (store) => store.get(host));
     return typeof value === "string" ? value : null;
   },
 
   async deleteKey(host): Promise<boolean> {
-    const idb = factory();
-    if (idb === null) return false;
     try {
-      await run(idb, KEYS, "readwrite", (store) => store.delete(host));
+      await run(KEYS, "readwrite", (store) => store.delete(host));
       return true;
     } catch {
       return false;
@@ -130,10 +128,8 @@ export const identity: IdentityStore = {
   },
 
   async storePin(host, userId, pin): Promise<StoreIdentityPinResult> {
-    const idb = factory();
-    if (idb === null) return "no-store";
     try {
-      await run(idb, PINS, "readwrite", (store) => store.put(pin, pinKey(host, userId)));
+      await run(PINS, "readwrite", (store) => store.put(pin, pinKey(host, userId)));
       return "stored";
     } catch {
       return "failed";
@@ -141,11 +137,9 @@ export const identity: IdentityStore = {
   },
 
   async getPin(host, userId): Promise<IdentityPinLookup> {
-    const idb = factory();
-    if (idb === null) return { status: "unpinned" };
     let value: unknown;
     try {
-      value = await run(idb, PINS, "readonly", (store) => store.get(pinKey(host, userId)));
+      value = await run(PINS, "readonly", (store) => store.get(pinKey(host, userId)));
     } catch {
       return { status: "unavailable" };
     }

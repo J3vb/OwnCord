@@ -1,7 +1,9 @@
 // The browser platform's credential store (6.13c): the sign-in token in Web
 // Storage, keyed by host. A kept token lives in `localStorage`; a
 // session-only one in `sessionStorage`, which the browser drops with the tab.
-// Each save leaves exactly one copy, `delete` removes both, and no password is
+// A save that does not say which keeps the token where it already is (kept,
+// when it is nowhere yet), so a refresh never moves it. Each save leaves
+// exactly one copy, `delete` removes both, and no password is
 // ever stored, so there is no saved-password login.
 //
 // The contract's outcomes hold as on desktop: a failed write or delete answers
@@ -9,7 +11,8 @@
 // answers as a host with no store (`false` / `null`).
 import type { CredentialStore, SavedCredential } from "../contracts/credentials";
 
-/** The prefix the Advanced tab's "clear storage" keeps (`AdvancedTab.ts`). */
+/** The prefix the Advanced tab keeps when it clears localStorage
+ *  (`clearLocalStoragePreservingUserData`, `AdvancedTab.ts`). */
 const KEY_PREFIX = "owncord:credential:";
 
 type AreaName = "localStorage" | "sessionStorage";
@@ -43,8 +46,18 @@ function parseCredential(raw: string): SavedCredential | null {
   return { username, token, hasPassword: false };
 }
 
+/** True when this tab already holds the host's token session-only. */
+function heldForSession(host: string): boolean {
+  try {
+    return (area("sessionStorage")?.getItem(keyFor(host)) ?? null) !== null;
+  } catch {
+    return false;
+  }
+}
+
 export const credentials: CredentialStore = {
-  async save(host, username, token, _password, _clearPassword, sessionOnly = false) {
+  async save(host, username, token, _password, _clearPassword, sessionOnlyArg) {
+    const sessionOnly = sessionOnlyArg ?? heldForSession(host);
     const target = area(sessionOnly ? "sessionStorage" : "localStorage");
     if (target === null) return false;
     const other = area(sessionOnly ? "localStorage" : "sessionStorage");
@@ -65,7 +78,9 @@ export const credentials: CredentialStore = {
       if (found === null) continue;
       // A read that throws rejects: an unreadable store is not "nothing stored".
       const raw = found.getItem(keyFor(host));
-      if (raw !== null) return parseCredential(raw);
+      const parsed = raw === null ? null : parseCredential(raw);
+      // A record that is not a credential does not hide a good one.
+      if (parsed !== null) return parsed;
     }
     return null;
   },

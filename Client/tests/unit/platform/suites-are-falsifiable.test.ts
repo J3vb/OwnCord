@@ -105,7 +105,7 @@ const nullCredentialStore = async () => {
 };
 describeCredentialStoreSuite(nullCredentialStore, failEveryTest);
 
-describeIdentityStoreSuite(async () => {
+const nullIdentityStore = async () => {
   const subject = {
     saveKey: async () => undefined,
     loadKey: async () => undefined,
@@ -119,7 +119,8 @@ describeIdentityStoreSuite(async () => {
     unavailable: () => undefined,
   };
   return { subject, native };
-}, failEveryTest);
+};
+describeIdentityStoreSuite(nullIdentityStore, failEveryTest);
 
 describeSettingsStoreSuite(async () => {
   const subject = {
@@ -500,12 +501,14 @@ describeExternalContentSuite(async () => {
   return { subject, native };
 }, failEveryTest);
 
-// The browser bindings (6.13c) run three suites with a declared capability
-// difference: a token-only credential store, a transport whose host keeps
-// certificate trust itself, and a memory-only draft store. Each variant swaps
-// some cases for others, so each must fail against the null subject too. The
-// http, settings and identity bindings run their suites unchanged, which the
-// runs above already cover.
+// The browser bindings (6.13c) run four suites with a declared capability
+// difference: a token-only credential store, an identity store for which a
+// missing store is a failure, a transport whose host keeps certificate trust
+// itself, and a memory-only draft store. Each variant swaps some cases for
+// others, so each must fail against the null subject too. The http and
+// settings bindings run their suites unchanged, which the runs above already
+// cover.
 describeCredentialStoreSuite(nullCredentialStore, { ...failEveryTest, savedPasswords: false });
+describeIdentityStoreSuite(nullIdentityStore, { ...failEveryTest, missingStoreIsError: true });
 describeSocketTransportSuite(nullSocketTransport, { ...failEveryTest, certificates: false });
 describePendingMessagesSuite(nullPendingMessages, { ...failEveryTest, memoryOnly: true });

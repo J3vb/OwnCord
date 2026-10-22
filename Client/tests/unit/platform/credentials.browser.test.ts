@@ -80,12 +80,43 @@ describe("browser credentials", () => {
     await expect(browserBinding.load("chat.example")).resolves.toMatchObject({ token: "tab" });
   });
 
-  it("moves a session-only token to kept, leaving no copy behind", async () => {
+  it("moves a session-only token to kept when asked, leaving no copy behind", async () => {
     install();
     await browserBinding.save("chat.example", "alice", "tab", undefined, false, true);
-    await browserBinding.save("chat.example", "alice", "kept");
+    await browserBinding.save("chat.example", "alice", "kept", undefined, false, false);
     expect(session.keys()).toEqual([]);
     await expect(browserBinding.load("chat.example")).resolves.toMatchObject({ token: "kept" });
+  });
+
+  it("keeps a session-only token in sessionStorage on a save that does not say", async () => {
+    install();
+    await browserBinding.save("chat.example", "alice", "tab", undefined, false, true);
+    await browserBinding.save("chat.example", "alice2", "tab2");
+    expect(local.keys()).toEqual([]);
+    expect(session.keys()).toEqual(["owncord:credential:chat.example"]);
+    await expect(browserBinding.load("chat.example")).resolves.toMatchObject({
+      username: "alice2",
+      token: "tab2",
+    });
+  });
+
+  it("keeps a kept token in localStorage on a save that does not say", async () => {
+    install();
+    await browserBinding.save("chat.example", "alice", "kept");
+    await browserBinding.save("chat.example", "alice2", "kept2");
+    expect(local.keys()).toEqual(["owncord:credential:chat.example"]);
+    expect(session.keys()).toEqual([]);
+  });
+
+  it("reads a good kept copy past a malformed session-only record", async () => {
+    install();
+    session.setItem("owncord:credential:chat.example", "{not json");
+    local.setItem("owncord:credential:chat.example", '{"username":"alice","token":"tok"}');
+    await expect(browserBinding.load("chat.example")).resolves.toEqual({
+      username: "alice",
+      token: "tok",
+      hasPassword: false,
+    });
   });
 
   it("never stores a password it is handed", async () => {

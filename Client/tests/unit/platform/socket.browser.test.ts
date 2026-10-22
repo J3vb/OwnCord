@@ -4,7 +4,7 @@
 // with no WebSocket at all. The browser keeps certificate trust itself, so the
 // suite runs with `certificates: false`; the full suite runs against the
 // desktop transport in `socket.desktop.test.ts`.
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   SocketConnection,
   SocketConnectionState,
@@ -242,6 +242,61 @@ describe("browser socket", () => {
     vi.stubGlobal("WebSocket", Refusing);
     await expect(connection.connect(options)).resolves.toBeUndefined();
     expect(states.at(-1)).toBe("disconnected");
+  });
+
+  describe("handshake timeout", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("reports a socket that never opens as disconnected, once, and settles", async () => {
+      vi.useFakeTimers();
+      let settled = false;
+      const attempt = connection.connect(options).then(() => {
+        settled = true;
+      });
+      const socket = latest();
+      await vi.advanceTimersByTimeAsync(9_999);
+      expect(settled).toBe(false);
+      expect(states).not.toContain("disconnected");
+      await vi.advanceTimersByTimeAsync(1);
+      await attempt;
+      expect(settled).toBe(true);
+      expect(socket.closeCalls).toBeGreaterThan(0);
+      // The close that follows the give-up is not a second report.
+      await vi.runAllTimersAsync();
+      socket.fireClose();
+      expect(states.filter((state) => state === "disconnected")).toHaveLength(1);
+      expect(states.at(-1)).toBe("disconnected");
+      await expect(connection.send("x")).rejects.toThrow();
+    });
+
+    it("leaves an opened connection alone", async () => {
+      vi.useFakeTimers();
+      const attempt = connection.connect(options);
+      latest().fireOpen();
+      await attempt;
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(states).not.toContain("disconnected");
+      await expect(connection.send("x")).resolves.toBeUndefined();
+    });
+
+    it("a superseded attempt's timer does nothing to the live attempt", async () => {
+      vi.useFakeTimers();
+      void connection.connect(options);
+      await vi.advanceTimersByTimeAsync(6_000);
+      const second = connection.connect(options);
+      const live = latest();
+      // Past the first attempt's deadline, short of the second's.
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(states).not.toContain("disconnected");
+      expect(live.closeCalls).toBe(0);
+      live.fireOpen();
+      await second;
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(states.at(-1)).toBe("connected");
+      expect(states).not.toContain("disconnected");
+    });
   });
 
   it("never reports a certificate event and needs no certificate listener", async () => {
