@@ -132,6 +132,9 @@ export interface MessageUser {
 /** User object with role, used in auth_ok and member_join. */
 export interface UserWithRole extends MessageUser {
   readonly role: string;
+  /** Every role the user holds, top role first (WP 6.3c). Absent from an older
+   *  server, where `role` is the only role. */
+  readonly role_ids?: readonly number[];
   readonly totp_enabled?: boolean;
   /** The user's profile text. Null = unset. Sent for every member since the
    *  server's 3C-7 (absent from older servers). */
@@ -277,6 +280,9 @@ export interface ReadyMember {
   readonly username: string;
   readonly avatar: string | null;
   readonly role: string;
+  /** Every role the member holds, top role first (WP 6.3c). Absent from an
+   *  older server, where `role` is the only role. */
+  readonly role_ids?: readonly number[];
   readonly status: UserStatus;
   /** Nickname to render instead of `username`. Null = unset. */
   readonly display_name?: string | null;
@@ -323,6 +329,11 @@ export interface ReadyRole {
   readonly position?: number;
   /** True for the fallback role members land on when their role is deleted. */
   readonly is_default?: boolean;
+  /** The role is its own member-list group (WP 6.3c). Absent means an older
+   *  server: every role counts as hoisted. */
+  readonly hoist?: boolean;
+  /** Any member may ping the role (WP 6.3c). Absent = not mentionable. */
+  readonly mentionable?: boolean;
 }
 
 // -----------------------------------------------------------------------------
@@ -460,6 +471,13 @@ export interface ReadyPayload {
      * thread controls.
      */
     readonly threads?: boolean;
+    /**
+     * A member can hold several roles (WP 6.3c): `role_ids` rides `members[]`,
+     * `auth_ok.user`, `member_join.user` and `member_update`, roles carry
+     * `hoist`, and `PUT`/`DELETE {base}/{id}/roles/{roleId}` add and remove
+     * one. Absent means an older server, where `role` is the only role.
+     */
+    readonly multi_role?: boolean;
   };
   readonly channels: readonly ReadyChannel[];
   /**
@@ -1081,6 +1099,8 @@ export interface UploadPolicyPayload {
 export interface MemberUpdatePayload {
   readonly user_id: number;
   readonly role: string;
+  /** Every role the member holds now, top first (WP 6.3c); absent from an older server. */
+  readonly role_ids?: readonly number[];
 }
 
 export interface UserUpdatePayload {

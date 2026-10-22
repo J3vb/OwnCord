@@ -18,6 +18,7 @@ export interface ReadyCapabilityFlags {
   readonly dm_privacy?: boolean;
   readonly polls?: boolean;
   readonly threads?: boolean;
+  readonly multi_role?: boolean;
 }
 
 /** The last full `ready`'s capabilities; null until one arrives. */
@@ -92,4 +93,13 @@ export function pollsEnabled(): boolean {
  */
 export function threadsEnabled(): boolean {
   return caps?.threads === true;
+}
+
+/**
+ * Whether a member can hold several roles (WP 6.3c): `role_ids` on members, a
+ * `hoist` flag on roles and the add/remove role routes. False keeps today's
+ * single-role picker and per-role member-list groups.
+ */
+export function multiRoleEnabled(): boolean {
+  return caps?.multi_role === true;
 }

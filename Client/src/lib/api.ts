@@ -1918,6 +1918,24 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     },
 
     /**
+     * Give a member one more role (WP 6.3c, a server that advertises
+     * `multi_role`). Same checks as `adminChangeRole`: MANAGE_ROLES, the actor's
+     * top role outranks the member's, and the role sits below the actor's.
+     * Answers 204; the roster changes on the `member_update` echo.
+     */
+    adminAddMemberRole(userId: number, roleId: number, signal?: AbortSignal): Promise<void> {
+      return memberRequest<void>("PUT", `/${userId}/roles/${roleId}`, undefined, signal);
+    },
+
+    /**
+     * Take one role away. Removing the member's last role is refused with 409
+     * `LAST_ROLE`; otherwise the same checks and echo as `adminAddMemberRole`.
+     */
+    adminRemoveMemberRole(userId: number, roleId: number, signal?: AbortSignal): Promise<void> {
+      return memberRequest<void>("DELETE", `/${userId}/roles/${roleId}`, undefined, signal);
+    },
+
+    /**
      * Lift a ban. The mirror of `adminBanMember`: the server broadcasts a
      * `member_join` for the unbanned user, which every client turns back into a
      * roster entry, so the roster needs no refreshing locally.

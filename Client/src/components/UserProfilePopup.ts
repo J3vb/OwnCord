@@ -68,6 +68,36 @@ export interface ProfileRoleControl {
   change(role: string): Promise<void>;
 }
 
+/** One role the member holds, as a chip (WP 6.3d). */
+export interface ProfileRoleChip {
+  readonly id: number;
+  readonly name: string;
+  /** Server colour; null = the seeded fallback for the name. */
+  readonly color: string | null;
+  /** The viewer may take this role away: MANAGE_ROLES and the role is below
+   *  their own top role. The popup still hides the x on the last chip. */
+  readonly removable: boolean;
+}
+
+/** What the multi-role area shows right now. */
+export interface ProfileRolesState {
+  /** Held roles, highest first. */
+  readonly chips: readonly ProfileRoleChip[];
+  /** Roles the viewer may add that the member does not hold; empty hides "+". */
+  readonly addable: readonly { readonly id: number; readonly name: string }[];
+}
+
+/** The multi-role chips' live source, used instead of `ProfileRoleControl` on a
+ *  server that advertises `multi_role`. Re-read on every `subscribe` callback. */
+export interface ProfileRolesControl {
+  read(): ProfileRolesState;
+  subscribe(listener: () => void): () => void;
+  /** Add / remove one role. Report their own failures; the chips change only
+   *  when the server's echo reaches the store. */
+  add(roleId: number): Promise<void>;
+  remove(roleId: number): Promise<void>;
+}
+
 export interface UserProfilePopupOptions {
   readonly user: UserProfileData;
   /** Anchor point — the click event's clientX/clientY. */
@@ -89,6 +119,9 @@ export interface UserProfilePopupOptions {
   readonly unavailableReason?: string;
   /** Live role and role picker. Absent: the badge shows `user.role` as given. */
   readonly roleControl?: ProfileRoleControl;
+  /** Role chips with remove and add (WP 6.3d). Set on a multi-role server; it
+   *  replaces the single-role picker. Absent: `roleControl` as before. */
+  readonly rolesControl?: ProfileRolesControl;
   /** The viewer's private note about this member (WP 6.11c). Absent: no Note
    *  section (the viewer's own card, or no session to keep a note in). */
   readonly note?: NoteBinding;
@@ -284,6 +317,7 @@ export function createUserProfilePopup(
     let roleMenuOpen = false;
     let roleBusy = false;
     const control = options.roleControl;
+    const rolesControl = options.rolesControl;
 
     const closeRoleMenu = (focusButton: boolean): void => {
       roleMenuOpen = false;
@@ -329,8 +363,179 @@ export function createUserProfilePopup(
       }
     }
 
+    const addRole = async (roleId: number): Promise<void> => {
+      if (roleBusy || rolesControl === undefined) return;
+      roleBusy = true;
+      for (const item of roleOptions()) item.setAttribute("aria-disabled", "true");
+      try {
+        await rolesControl.add(roleId);
+      } catch {
+        // add() reports its own failures; the menu just closes.
+      } finally {
+        roleBusy = false;
+      }
+      if (isOpen()) closeRoleMenu(true);
+    };
+
+    const removeRole = async (roleId: number): Promise<void> => {
+      if (roleBusy || rolesControl === undefined) return;
+      roleBusy = true;
+      try {
+        await rolesControl.remove(roleId);
+      } catch {
+        // remove() reports its own failures.
+      } finally {
+        roleBusy = false;
+      }
+    };
+
+    /** Chips for every held role, an x on those the viewer may remove (never on
+     *  the last one), and a "+" listing the roles that can be added. */
+    function renderChips(state: ProfileRolesState): void {
+      if (popup === null || rolesControl === undefined) return;
+      const hadFocus = roleHolder.contains(document.activeElement);
+      const focusedRole = hadFocus
+        ? ((document.activeElement as HTMLElement).dataset["role"] ?? null)
+        : null;
+      roleHolder.replaceChildren();
+      const list = createElement("div", {
+        class: "upp-chips",
+        role: "list",
+        "aria-label": requestsText("profile.role.list"),
+        "data-testid": "upp-chips",
+      });
+      for (const chip of state.chips) {
+        const el = createElement("span", {
+          class: "upp-role-badge upp-chip",
+          role: "listitem",
+          "data-role-id": String(chip.id),
+        });
+        const dot = createElement("span", { class: "upp-role-dot" });
+        dot.style.background = chip.color ?? roleColorVar(chip.name.toLowerCase());
+        appendChildren(el, dot, createElement("span", {}, chip.name));
+        if (chip.removable && state.chips.length > 1) {
+          const x = createElement(
+            "button",
+            {
+              class: "upp-chip-x",
+              type: "button",
+              "aria-label": requestsText("profile.role.remove", { role: chip.name }),
+              "data-role-id": String(chip.id),
+              "data-testid": `upp-chip-x-${chip.id}`,
+            },
+            "\u00d7",
+          );
+          x.addEventListener("click", () => void removeRole(chip.id), { signal });
+          el.appendChild(x);
+        }
+        list.appendChild(el);
+      }
+      if (state.addable.length > 0) {
+        const plus = createElement(
+          "button",
+          {
+            class: "upp-role-badge upp-role-btn upp-chip-add",
+            type: "button",
+            "aria-haspopup": "menu",
+            "aria-expanded": String(roleMenuOpen),
+            "aria-label": requestsText("profile.role.add"),
+            "data-testid": "upp-chip-add",
+          },
+          "+",
+        );
+        plus.addEventListener(
+          "click",
+          () => {
+            roleMenuOpen = !roleMenuOpen;
+            renderRole();
+            if (roleMenuOpen) focusRoleOption(0);
+            else roleHolder.querySelector<HTMLElement>(".upp-role-btn")?.focus();
+          },
+          { signal },
+        );
+        plus.addEventListener(
+          "keydown",
+          (e: KeyboardEvent) => {
+            if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+            e.preventDefault();
+            if (!roleMenuOpen) {
+              roleMenuOpen = true;
+              renderRole();
+            }
+            focusRoleOption(e.key === "ArrowDown" ? 0 : -1);
+          },
+          { signal },
+        );
+        list.appendChild(plus);
+      } else {
+        roleMenuOpen = false;
+      }
+      roleHolder.appendChild(list);
+
+      if (roleMenuOpen) {
+        const menu = createElement("div", {
+          class: "upp-role-menu",
+          role: "menu",
+          "aria-label": requestsText("profile.role.menu", { name: displayName }),
+          "data-testid": "upp-role-menu",
+        });
+        for (const role of state.addable) {
+          const item = createElement(
+            "button",
+            {
+              class: "upp-role-option",
+              type: "button",
+              role: "menuitem",
+              tabindex: "-1",
+              "data-role": role.name,
+              "data-role-id": String(role.id),
+              ...(roleBusy ? { "aria-disabled": "true" } : {}),
+            },
+            role.name,
+          );
+          item.addEventListener("click", () => void addRole(role.id), { signal });
+          menu.appendChild(item);
+        }
+        menu.addEventListener(
+          "keydown",
+          (e: KeyboardEvent) => {
+            const items = roleOptions();
+            const at = items.indexOf(document.activeElement as HTMLElement);
+            if (e.key === "ArrowDown") focusRoleOption(at + 1);
+            else if (e.key === "ArrowUp") focusRoleOption(at - 1);
+            else if (e.key === "Home") focusRoleOption(0);
+            else if (e.key === "End") focusRoleOption(-1);
+            else if (e.key === "Escape") {
+              e.stopPropagation();
+              closeRoleMenu(true);
+              return;
+            } else if (e.key === "Tab") {
+              closeRoleMenu(true);
+              return;
+            } else return;
+            e.preventDefault();
+          },
+          { signal },
+        );
+        roleHolder.appendChild(menu);
+        if (focusedRole !== null) {
+          roleOptions()
+            .find((i) => i.dataset["role"] === focusedRole)
+            ?.focus();
+        }
+      } else if (hadFocus && !roleHolder.contains(document.activeElement)) {
+        // The control that held focus went away (a chip was removed): keep
+        // focus in the card.
+        popup.focus();
+      }
+    }
+
     function renderRoleContent(): void {
       if (popup === null) return;
+      if (rolesControl !== undefined) {
+        renderChips(rolesControl.read());
+        return;
+      }
       const state: ProfileRoleState = control?.read() ?? { role: user.role, choices: null };
       const focusedRole = roleHolder.contains(document.activeElement)
         ? ((document.activeElement as HTMLElement).dataset["role"] ?? null)
@@ -673,8 +878,9 @@ export function createUserProfilePopup(
       }
     });
 
-    if (control !== undefined) {
-      disposable.addCleanup(control.subscribe(() => renderRole()));
+    const live = rolesControl ?? control;
+    if (live !== undefined) {
+      disposable.addCleanup(live.subscribe(() => renderRole()));
     }
 
     // Focus the popup for a11y

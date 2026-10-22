@@ -23,7 +23,7 @@ import { navigateToChannel } from "@lib/channel-navigation";
 import { isChannelMuted } from "@lib/channel-mutes";
 import { isHideMutedChannels } from "@lib/hide-muted-channels";
 import type { Channel, ChannelsState } from "@stores/channels.store";
-import { authStore, getCurrentUser, type AuthState } from "@stores/auth.store";
+import { authStore, type AuthState } from "@stores/auth.store";
 import { uiStore, toggleCategory, type UiState } from "@stores/ui.store";
 import { safetyStore, type SafetyState } from "../features/safety/store";
 import { voiceStore } from "@stores/voice.store";
@@ -40,7 +40,7 @@ import { attachVoiceUserDrag, markVoiceDropTarget } from "../features/voice/drag
 import { openIdentityMismatchModal } from "../features/voice/peerVerification";
 import { createAvatarElement, pickAvatarColor } from "@components/message-list/avatar";
 import { membersStore, type Member, type MembersState } from "@stores/members.store";
-import { roleHasPermission } from "@lib/permissions";
+import { currentUserRoleHasPermission } from "@lib/permissions";
 import { Permission, type ChannelType } from "@lib/types";
 import { shellText } from "../i18n/shell";
 import { voiceText } from "../i18n/voice";
@@ -127,8 +127,7 @@ export interface VoiceModerationCallbacks {
  *  decides whether a channel with no verdict says why moderation is missing.
  *  Derived through the same helper as the member-list moderation gates. */
 export function canModerateVoice(): boolean {
-  const role = getCurrentUser()?.role ?? "";
-  return roleHasPermission(role, Permission.MUTE_MEMBERS);
+  return currentUserRoleHasPermission(Permission.MUTE_MEMBERS);
 }
 
 export interface ChannelSidebarOptions {
@@ -320,6 +319,7 @@ function projectSidebarInputs(
       channels: channels.channels,
       activeChannelId: channels.activeChannelId,
       selfRole: auth.user?.role ?? "",
+      selfRoleIds: auth.user?.role_ids,
       roles: channels.roles,
       categories: channels.categories,
       collapsed: ui.collapsedCategories,
@@ -336,6 +336,7 @@ function sameListInputs(a: ChannelListInputs, b: ChannelListInputs): boolean {
     a.channels === b.channels &&
     a.activeChannelId === b.activeChannelId &&
     a.selfRole === b.selfRole &&
+    a.selfRoleIds === b.selfRoleIds &&
     a.roles === b.roles &&
     a.categories === b.categories &&
     a.collapsed === b.collapsed &&

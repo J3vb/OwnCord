@@ -13,6 +13,7 @@ import { authStore } from "../../stores/auth.store";
 import { membersStore, memberDisplayName, type Member } from "../../stores/members.store";
 import type {
   ProfileRoleControl,
+  ProfileRolesControl,
   UserProfilePopupComponent,
 } from "../../components/UserProfilePopup";
 import { showToast } from "../../lib/toast";
@@ -22,7 +23,8 @@ import { formatDate } from "../../i18n/format";
 import { blocksStore } from "../../stores/blocks.store";
 import { uiStore } from "../../stores/ui.store";
 import { channelsStore } from "../../stores/channels.store";
-import { roleChangeChoices } from "../moderation/roleAssignment";
+import { memberRolesState, roleChangeChoices } from "../moderation/roleAssignment";
+import { multiRoleEnabled } from "../../lib/serverCapabilities";
 import { createNoteBinding, currentNotesContext } from "./userNotes";
 
 /** What the popup's action buttons do. Each is omitted when the caller has no
@@ -37,6 +39,10 @@ export interface UserProfilePopupCallbacks {
   /** Change the member's role (MANAGE_ROLES). Omitted: no role picker. It
    *  reports its own failures; the card follows the roster, not this call. */
   readonly onChangeRole?: (userId: number, username: string, newRole: string) => Promise<void>;
+  /** Add / remove one role (WP 6.3d). Both set on a server that advertises
+   *  `multi_role`: the role area becomes chips. They report their own failures. */
+  readonly onAddRole?: (userId: number, username: string, roleId: number) => Promise<void>;
+  readonly onRemoveRole?: (userId: number, username: string, roleId: number) => Promise<void>;
 }
 
 export interface OpenUserProfilePopupOptions {
@@ -109,6 +115,8 @@ export function openUserProfilePopup(options: OpenUserProfilePopupOptions): () =
   const onReport = isSelf ? undefined : callbacks?.onReport;
   const onToggleBlock = isSelf ? undefined : callbacks?.onToggleBlock;
   const onChangeRole = callbacks?.onChangeRole;
+  const onAddRole = callbacks?.onAddRole;
+  const onRemoveRole = callbacks?.onRemoveRole;
   const blocked = blocksStore.getState().blockedByMe.has(userId);
   const unavailableReason = callUnavailableReason(userId);
   const fallbackFocus = options.fallbackFocus;
@@ -125,7 +133,7 @@ export function openUserProfilePopup(options: OpenUserProfilePopupOptions): () =
         choices:
           onChangeRole === undefined || member === undefined
             ? null
-            : roleChangeChoices(userId, role),
+            : roleChangeChoices(userId, role, member.roleIds),
       };
     },
     subscribe: (listener) => {
@@ -143,6 +151,42 @@ export function openUserProfilePopup(options: OpenUserProfilePopupOptions): () =
       await onChangeRole?.(userId, username, role);
     },
   };
+  // The chips replace the single-role picker only on a server that holds
+  // several roles per member; any other server keeps the picker above.
+  const rolesControl: ProfileRolesControl | undefined =
+    multiRoleEnabled() && onAddRole !== undefined && onRemoveRole !== undefined
+      ? {
+          read: () => {
+            const member = membersStore.getState().members.get(userId);
+            return memberRolesState(
+              userId,
+              member?.role ?? live.role,
+              member === undefined ? live.roleIds : member.roleIds,
+            );
+          },
+          subscribe: (listener) => {
+            const unsubs = [
+              membersStore.subscribeSelector(
+                (st) => st.members.get(userId)?.roleIds ?? st.members.get(userId)?.role,
+                listener,
+              ),
+              authStore.subscribeSelector((st) => st.user?.role_ids ?? st.user?.role, listener),
+              channelsStore.subscribeSelector((st) => st.roles, listener),
+            ];
+            return () => {
+              for (const unsub of unsubs) unsub();
+            };
+          },
+          add: async (roleId) => {
+            const username = membersStore.getState().members.get(userId)?.username ?? live.username;
+            await onAddRole(userId, username, roleId);
+          },
+          remove: async (roleId) => {
+            const username = membersStore.getState().members.get(userId)?.username ?? live.username;
+            await onRemoveRole(userId, username, roleId);
+          },
+        }
+      : undefined;
   // Captured now, not when the card mounts or closes: a flush on close must
   // use the session that opened the card, whatever has been switched to since.
   const notesContext = isSelf ? null : currentNotesContext();
@@ -172,7 +216,7 @@ export function openUserProfilePopup(options: OpenUserProfilePopupOptions): () =
         },
         anchorX,
         anchorY,
-        roleControl,
+        ...(rolesControl === undefined ? { roleControl } : { rolesControl }),
         ...(note === undefined ? {} : { note, onNoteFlush: () => note.destroy() }),
         ...(onMessage === undefined ? {} : { onMessage: (id: number) => onMessage(id) }),
         ...(onCall === undefined ? {} : { onCall: (id: number) => onCall(id) }),

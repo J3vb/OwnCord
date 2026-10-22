@@ -27,7 +27,7 @@ import { canMention, mentionInComposer } from "../features/messaging/activeCompo
 import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup";
 import { openMenuOnKeyboard } from "@lib/context-menu";
 import { Permission, type ReadyRole } from "@lib/types";
-import { positionForRole, roleHasPermission } from "@lib/permissions";
+import { memberHasPermissionIn, topPositionFor } from "@lib/permissions";
 import {
   MEMBER_PATCH_FIELDS,
   drawMemberItem,
@@ -54,6 +54,9 @@ export interface MemberListOptions {
   /** Open the Ban dialog for a member; `displayName` names them in its title. */
   readonly onBan: (userId: number, username: string, displayName: string) => void;
   readonly onChangeRole: (userId: number, username: string, newRole: string) => Promise<void>;
+  /** Add / remove one role from the profile popup's chips (WP 6.3d). */
+  readonly onAddRole?: (userId: number, username: string, roleId: number) => Promise<void>;
+  readonly onRemoveRole?: (userId: number, username: string, roleId: number) => Promise<void>;
   readonly onToggleBlock: (userId: number, username: string, block: boolean) => Promise<void>;
   /** Block / Unblock from the profile popup, which confirms a Block in a
    *  dialog (the row menu confirms inline). Omitted: the popup has no button. */
@@ -93,12 +96,17 @@ interface ModerationGates {
  * the legacy owner/admin name check stands in — a mask of 0 would otherwise
  * hide moderation from every actual admin.
  */
-function moderationGates(roleName: string): ModerationGates {
+function moderationGates(
+  roles: readonly ReadyRole[],
+  roleIds: readonly number[] | undefined,
+  roleName: string,
+): ModerationGates {
+  const has = (perm: Permission): boolean => memberHasPermissionIn(roles, roleIds, roleName, perm);
   return {
-    canKick: roleHasPermission(roleName, Permission.KICK_MEMBERS),
-    canBan: roleHasPermission(roleName, Permission.BAN_MEMBERS),
-    canManageRoles: roleHasPermission(roleName, Permission.MANAGE_ROLES),
-    canTimeout: roleHasPermission(roleName, Permission.MODERATE_MEMBERS),
+    canKick: has(Permission.KICK_MEMBERS),
+    canBan: has(Permission.BAN_MEMBERS),
+    canManageRoles: has(Permission.MANAGE_ROLES),
+    canTimeout: has(Permission.MODERATE_MEMBERS),
   };
 }
 
@@ -304,6 +312,8 @@ function createMemberItem(
         ...(opts.onReportUser === undefined ? {} : { onReport: opts.onReportUser }),
         ...(opts.onBlockFromPopup === undefined ? {} : { onToggleBlock: opts.onBlockFromPopup }),
         onChangeRole: opts.onChangeRole,
+        ...(opts.onAddRole === undefined ? {} : { onAddRole: opts.onAddRole }),
+        ...(opts.onRemoveRole === undefined ? {} : { onRemoveRole: opts.onRemoveRole }),
       },
       fallbackFocus: () => hooks.focusMember(member.id),
     });
@@ -347,14 +357,17 @@ function createMemberItem(
     // taken once at mount -- dispatcher.ts keeps authStore.user.role
     // current on every self MEMBER_UPDATE precisely so gates like this one
     // see a promotion/demotion without waiting for the sidebar to rebuild.
-    const actorRole = authStore.getState().user?.role ?? opts.currentUserRole;
-    const baseGates = moderationGates(actorRole);
+    const actor = authStore.getState().user;
+    const actorRole = actor?.role ?? opts.currentUserRole;
+    const roleList = channelsStore.getState().roles;
+    // Permissions are the OR of every held role (WP 6.3d); rank is the top one.
+    const baseGates = moderationGates(roleList, actor?.role_ids, actorRole);
     // The server refuses moderation of a member ranked at or above the actor
     // and any role assignment at or above the actor's own rank; mirror both so
     // the menu never offers a request that cannot succeed. Unknown positions
     // (an older server) leave the decision to the server.
-    const actorPosition = positionForRole(actorRole);
-    const targetPosition = positionForRole(member.role);
+    const actorPosition = topPositionFor(roleList, actor?.role_ids, actorRole);
+    const targetPosition = topPositionFor(roleList, member.roleIds, member.role);
     const outranks = outranksPosition(actorPosition, targetPosition);
     // Roles come from the server's `ready` payload — a hardcoded list made
     // custom roles unreachable and, worse, unresolvable to a role id, so

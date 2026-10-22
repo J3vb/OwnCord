@@ -10,7 +10,8 @@
 
 import { errorText, type ApiClient } from "@lib/api";
 import { Permission } from "@lib/types";
-import { positionForRole, roleHasPermission } from "@lib/permissions";
+import { memberHasPermissionIn, topPositionFor } from "@lib/permissions";
+import type { ProfileRolesState } from "@components/UserProfilePopup";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, getRoleIdByName } from "@stores/channels.store";
 import type { ToastType } from "@components/Toast";
@@ -59,14 +60,71 @@ export function outranksPosition(
 export function roleChangeChoices(
   targetUserId: number,
   targetRole: string,
+  targetRoleIds?: readonly number[],
 ): readonly string[] | null {
   const me = authStore.getState().user;
   if (me === null || me.id === targetUserId) return null;
-  if (!roleHasPermission(me.role, Permission.MANAGE_ROLES)) return null;
-  const actorPosition = positionForRole(me.role);
-  if (!outranksPosition(actorPosition, positionForRole(targetRole))) return null;
+  const roles = channelsStore.getState().roles;
+  // Permissions are the OR of every held role; rank is the top role.
+  if (!memberHasPermissionIn(roles, me.role_ids, me.role, Permission.MANAGE_ROLES)) return null;
+  const actorPosition = topPositionFor(roles, me.role_ids, me.role);
+  if (!outranksPosition(actorPosition, topPositionFor(roles, targetRoleIds, targetRole))) {
+    return null;
+  }
   const choices = assignableRoleNames(actorPosition);
   return choices.length > 0 ? choices : null;
+}
+
+/**
+ * The chips and "+" list for `targetUserId` on a multi-role server: every held
+ * role, highest position first (the cached `role_ids` tail may keep an older
+ * order after a reorder), and, when the viewer holds MANAGE_ROLES and outranks
+ * the member, which chips they may remove and which roles they may add.
+ * Everything else is read-only chips. Read live; the server stays the authority.
+ */
+export function memberRolesState(
+  targetUserId: number,
+  targetRole: string,
+  targetRoleIds: readonly number[] | undefined,
+): ProfileRolesState {
+  const roles = channelsStore.getState().roles;
+  const me = authStore.getState().user;
+  const actorPosition = me === null ? undefined : topPositionFor(roles, me.role_ids, me.role);
+  const mayManage =
+    me !== null &&
+    me.id !== targetUserId &&
+    memberHasPermissionIn(roles, me.role_ids, me.role, Permission.MANAGE_ROLES) &&
+    outranksPosition(actorPosition, topPositionFor(roles, targetRoleIds, targetRole));
+  // Below the actor's own top role; unknown positions leave it to the server.
+  const below = (position: number | undefined): boolean =>
+    actorPosition === undefined || position === undefined || position < actorPosition;
+
+  const heldIds = new Set(targetRoleIds ?? []);
+  const held = roles
+    .filter((r) => heldIds.has(r.id))
+    .toSorted((a, b) => (b.position ?? 0) - (a.position ?? 0));
+  const byName = targetRoleIds === undefined || held.length === 0;
+  const named = byName
+    ? roles.filter((r) => r.name.toLowerCase() === targetRole.toLowerCase())
+    : held;
+  const chips = named.map((r) => ({
+    id: r.id,
+    name: r.name,
+    color: r.color,
+    removable: mayManage && below(r.position),
+  }));
+  const addable = mayManage
+    ? roles
+        .filter((r) => r.name.toLowerCase() !== "owner" && !heldIds.has(r.id) && below(r.position))
+        .map((r) => ({ id: r.id, name: r.name }))
+    : [];
+  return { chips, addable };
+}
+
+/** The two multi-role requests. */
+export interface RoleMembershipDeps {
+  readonly api: Pick<ApiClient, "adminAddMemberRole" | "adminRemoveMemberRole">;
+  readonly notify: (message: string, type: ToastType) => void;
 }
 
 export interface RoleChangeDeps {
@@ -93,5 +151,47 @@ export async function changeMemberRole(
     deps.notify(shellText("members.roleChanged", { username, role: newRole }), "success");
   } catch (err) {
     deps.notify(errorText(err, shellText("members.roleChangeFailed")), "error");
+  }
+}
+
+/** PUT one more role onto the member and toast the outcome. Never rejects; the
+ *  roster changes only when the server's `member_update` echo arrives. */
+export async function addMemberRole(
+  deps: RoleMembershipDeps,
+  userId: number,
+  username: string,
+  roleId: number,
+): Promise<void> {
+  const role = channelsStore.getState().roles.find((r) => r.id === roleId)?.name;
+  if (role === undefined) {
+    deps.notify(shellText("members.unknownRole", { role: String(roleId) }), "error");
+    return;
+  }
+  try {
+    await deps.api.adminAddMemberRole(userId, roleId);
+    deps.notify(shellText("members.roleAdded", { username, role }), "success");
+  } catch (err) {
+    deps.notify(errorText(err, shellText("members.roleAddFailed")), "error");
+  }
+}
+
+/** DELETE one role from the member and toast the outcome. Never rejects; the
+ *  roster changes only on the server's echo. */
+export async function removeMemberRole(
+  deps: RoleMembershipDeps,
+  userId: number,
+  username: string,
+  roleId: number,
+): Promise<void> {
+  const role = channelsStore.getState().roles.find((r) => r.id === roleId)?.name;
+  if (role === undefined) {
+    deps.notify(shellText("members.unknownRole", { role: String(roleId) }), "error");
+    return;
+  }
+  try {
+    await deps.api.adminRemoveMemberRole(userId, roleId);
+    deps.notify(shellText("members.roleRemoved", { username, role }), "success");
+  } catch (err) {
+    deps.notify(errorText(err, shellText("members.roleRemoveFailed")), "error");
   }
 }

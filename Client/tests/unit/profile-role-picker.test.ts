@@ -12,7 +12,12 @@ import {
   openUserProfilePopup,
   closeUserProfilePopup,
 } from "../../src/features/profiles/openUserProfilePopup";
-import { changeMemberRole } from "../../src/features/moderation/roleAssignment";
+import {
+  addMemberRole,
+  changeMemberRole,
+  removeMemberRole,
+} from "../../src/features/moderation/roleAssignment";
+import { applyReadyCapabilities, resetServerCapabilities } from "../../src/lib/serverCapabilities";
 import { authStore } from "@stores/auth.store";
 import { membersStore, updateMemberRole } from "@stores/members.store";
 import { channelsStore, setRoles } from "@stores/channels.store";
@@ -303,5 +308,107 @@ describe("profile popup role picker", () => {
       await vi.waitFor(() => expect(options().map((o) => o.dataset["role"])).toEqual(["member"]));
       expect(channelsStore.getState().roles).toHaveLength(4);
     });
+  });
+});
+
+describe("profile popup role chips on a multi_role server (WP 6.3d)", () => {
+  const chipEls = (): HTMLElement[] =>
+    Array.from(document.querySelectorAll<HTMLElement>(".upp-chip"));
+  const xs = (): HTMLButtonElement[] =>
+    Array.from(document.querySelectorAll<HTMLButtonElement>(".upp-chip-x"));
+
+  async function openMulti(
+    onAddRole = vi.fn(async () => {}),
+    onRemoveRole = vi.fn(async () => {}),
+  ): Promise<void> {
+    openUserProfilePopup({
+      userId: 7,
+      anchorX: 10,
+      anchorY: 10,
+      callbacks: { onChangeRole: vi.fn(async () => {}), onAddRole, onRemoveRole },
+    });
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-testid="user-profile-popup"]')).not.toBeNull(),
+    );
+  }
+
+  beforeEach(() => {
+    setRoles(ROLES);
+    setViewer(1, "admin");
+    authStore.setState((p) => ({ ...p, user: { ...p.user!, role_ids: [2] } }));
+    membersStore.setState((p) => ({ ...p, members: new Map() }));
+    setMember(1, "admin");
+    setMember(7, "moderator");
+    updateMemberRole(7, "moderator", [4, 3]);
+    applyReadyCapabilities({ multi_role: true });
+  });
+
+  afterEach(() => {
+    closeUserProfilePopup();
+    resetServerCapabilities();
+    document.body.replaceChildren();
+  });
+
+  it("shows the held roles by position, an x on each (two held), and no plus when nothing is left", async () => {
+    await openMulti();
+    expect(roleButton()).toBeNull();
+    expect(chipEls().map((c) => c.textContent?.replace("\u00d7", ""))).toEqual([
+      "moderator",
+      "member",
+    ]);
+    expect(xs()).toHaveLength(2);
+    // Everything below the viewer (moderator, member) is held already: no plus.
+    expect(document.querySelector('[data-testid="upp-chip-add"]')).toBeNull();
+  });
+
+  it("offers roles below the viewer that are not yet held, and sends the chosen id", async () => {
+    updateMemberRole(7, "member", [4]);
+    const add = vi.fn(async () => {});
+    await openMulti(add);
+    expect(xs()).toHaveLength(0);
+    document.querySelector<HTMLElement>('[data-testid="upp-chip-add"]')!.click();
+    expect(options().map((o) => o.dataset["role"])).toEqual(["moderator"]);
+    options()[0]!.click();
+    expect(add).toHaveBeenCalledWith(7, "user7", 3);
+  });
+
+  it("keeps the single-role picker without the capability", async () => {
+    resetServerCapabilities();
+    await openMulti();
+    expect(roleButton()).not.toBeNull();
+    expect(chipEls()).toHaveLength(0);
+  });
+
+  it("moves the chips when a member_update echo changes the held roles", async () => {
+    await openMulti();
+    updateMemberRole(7, "member", [4]);
+    await vi.waitFor(() => expect(chipEls()).toHaveLength(1));
+  });
+});
+
+describe("addMemberRole / removeMemberRole", () => {
+  beforeEach(() => setRoles(ROLES));
+
+  it("toasts the outcome and never rejects", async () => {
+    const notify = vi.fn();
+    const api = {
+      adminAddMemberRole: vi.fn(async () => {}),
+      adminRemoveMemberRole: vi.fn(async () => {
+        throw new Error("boom");
+      }),
+    };
+    await addMemberRole({ api, notify }, 7, "user7", 3);
+    expect(api.adminAddMemberRole).toHaveBeenCalledWith(7, 3);
+    expect(notify).toHaveBeenLastCalledWith("Added moderator to user7", "success");
+    await removeMemberRole({ api, notify }, 7, "user7", 3);
+    expect(notify).toHaveBeenLastCalledWith("boom", "error");
+  });
+
+  it("says so when the role vanished from the roster", async () => {
+    const notify = vi.fn();
+    const api = { adminAddMemberRole: vi.fn(), adminRemoveMemberRole: vi.fn() };
+    await addMemberRole({ api, notify }, 7, "user7", 99);
+    expect(api.adminAddMemberRole).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("Unknown role"), "error");
   });
 });

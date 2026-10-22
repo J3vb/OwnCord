@@ -7,6 +7,8 @@ import {
   roleHasPermission,
   roleHasPermissionIn,
   permissionsForRoleIn,
+  permissionsForMemberIn,
+  topPositionFor,
   canManageChannels,
   canViewAuditLog,
   canManageInvites,
@@ -328,5 +330,76 @@ describe("pure role variants", () => {
     expect(permissionsForRoleIn(ROLES, "MUTED")).toBe(0);
     expect(permissionsForRoleIn(ROLES, "nobody")).toBeNull();
     expect(permissionsForRoleIn([], "owner")).toBeNull();
+  });
+});
+
+// ─── Several roles per member (WP 6.3d) ──────────────────────────────────────
+
+describe("permissionsForMemberIn", () => {
+  const ROLES = [
+    { id: 1, name: "Owner", color: null, permissions: Permission.MANAGE_SERVER, position: 30 },
+    { id: 2, name: "Helper", color: null, permissions: Permission.KICK_MEMBERS, position: 20 },
+    { id: 3, name: "Member", color: null, permissions: MEMBER_PERMS, position: 10 },
+  ];
+
+  it("is the OR of held roles", () => {
+    const got = permissionsForMemberIn(ROLES, [2, 3], "helper");
+    expect(got).toBe(Permission.KICK_MEMBERS | MEMBER_PERMS);
+    expect(hasPermission(got ?? 0, Permission.KICK_MEMBERS)).toBe(true);
+    expect(hasPermission(got ?? 0, Permission.SEND_MESSAGES)).toBe(true);
+    expect(hasPermission(got ?? 0, Permission.MANAGE_SERVER)).toBe(false);
+  });
+
+  it("falls back to role name without role_ids", () => {
+    expect(permissionsForMemberIn(ROLES, undefined, "helper")).toBe(Permission.KICK_MEMBERS);
+    expect(permissionsForMemberIn(ROLES, [], "member")).toBe(MEMBER_PERMS);
+    // ids the cached roster does not know either: the name still answers
+    expect(permissionsForMemberIn(ROLES, [99], "helper")).toBe(Permission.KICK_MEMBERS);
+    expect(permissionsForMemberIn(ROLES, undefined, "ghost")).toBeNull();
+  });
+
+  it("ignores a held id the roster lacks while others resolve", () => {
+    expect(permissionsForMemberIn(ROLES, [99, 2], "helper")).toBe(Permission.KICK_MEMBERS);
+  });
+});
+
+describe("topPositionFor", () => {
+  const ROLES = [
+    { id: 1, name: "Owner", color: null, permissions: 0, position: 30 },
+    { id: 2, name: "Helper", color: null, permissions: 0, position: 20 },
+    { id: 3, name: "Member", color: null, permissions: 0, position: 10 },
+  ];
+
+  it("takes the highest position among held ids, not array order", () => {
+    expect(topPositionFor(ROLES, [3, 2], "member")).toBe(20);
+  });
+
+  it("falls back to the role name, then to undefined", () => {
+    expect(topPositionFor(ROLES, undefined, "member")).toBe(10);
+    expect(topPositionFor(ROLES, undefined, "ghost")).toBeUndefined();
+  });
+});
+
+describe("current user gates over held roles", () => {
+  it("grants a gate that only a lower held role provides", () => {
+    setRoles([
+      { id: 2, name: "Helper", color: null, permissions: 0, position: 20 },
+      {
+        id: 3,
+        name: "Curator",
+        color: null,
+        permissions: Permission.MANAGE_CHANNELS,
+        position: 10,
+      },
+    ]);
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 1, username: "A", avatar: null, role: "helper", role_ids: [2, 3] },
+      serverName: "T",
+      motd: null,
+      isAuthenticated: true,
+    }));
+    expect(canManageChannels()).toBe(true);
+    expect(currentUserPermissions()).toBe(Permission.MANAGE_CHANNELS);
   });
 });

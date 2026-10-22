@@ -14,7 +14,7 @@
  */
 
 import { Permission } from "@lib/types";
-import { hasPermission, permissionsForRole } from "@lib/permissions";
+import { hasPermission, permissionsForMemberIn } from "@lib/permissions";
 import { authStore } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";
 import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";
@@ -43,8 +43,12 @@ export function listForwardTargets(
   const labelledOnly = isLabelledSource(sourceChannelId);
   // The client has the role's bits, not per-channel overrides: this only hides the
   // channels that would certainly refuse; an override the server denies is a failed row.
-  const role = authStore.getState().user?.role;
-  const perms = role === undefined || role === null ? null : permissionsForRole(role);
+  const me = authStore.getState().user;
+  const role = me?.role;
+  const perms =
+    role === undefined || role === null
+      ? null
+      : permissionsForMemberIn(channelsStore.getState().roles, me?.role_ids, role);
   // An unknown role (before `ready`, an older server) hides nothing: the server decides.
   const canAttach =
     !sourceHasFiles || perms === null || hasPermission(perms, Permission.ATTACH_FILES);
