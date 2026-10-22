@@ -197,6 +197,9 @@ const { mockMarkChannelRead, mockLeaveChannel, mockMarkChannelReadSeen } = vi.ho
 }));
 
 vi.mock("@lib/read-state", () => ({
+  // threads.store registers its thread check at load.
+  setKnownThreadCheck: vi.fn(),
+  setThreadReadPointer: vi.fn(),
   markChannelRead: mockMarkChannelRead,
   leaveChannel: mockLeaveChannel,
   markChannelReadSeen: mockMarkChannelReadSeen,

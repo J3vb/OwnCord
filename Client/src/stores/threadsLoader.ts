@@ -46,6 +46,15 @@ export function withThreadsStore(run: (m: ThreadsModule) => void): void {
   );
 }
 
+/**
+ * Whether the store is loaded or loading. A frame for an id no other store
+ * knows (a followed thread's activity hint) only needs the store when one has
+ * been asked for: a session that has met no thread never imports it for them.
+ */
+export function threadsStoreInUse(): boolean {
+  return loaded !== null || importing || queue.length > 0;
+}
+
 /** The store if it has loaded; null while no thread has been seen this run. */
 export function loadedThreadsStore(): ThreadsModule | null {
   return loaded;

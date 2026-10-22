@@ -252,6 +252,7 @@ export const connectText = defineCatalog("connect", {
   "notifications.mentioned": "{author} mentioned you in {channel}",
   "notifications.mentionedIn": "You were mentioned in {channel}",
   "notifications.inChannel": "{author} in {channel}",
+  "notifications.inThread": "{channel} › {thread}",
   "notifications.newIn": "New message in {channel}",
   "notifications.spoiler": "Spoiler",
   "notifications.attachment": {

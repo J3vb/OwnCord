@@ -8,6 +8,9 @@ import {
   setGlobalNotificationLevel,
 } from "../../lib/notificationLevel";
 import { startUnreadBadge, unreadBadgeCount } from "./unreadBadge";
+import { followedThreadsStore } from "../../stores/followedThreads.store";
+import { adoptReadyThreads, resetThreadsStore } from "../../stores/threads.store";
+import type { ReadyThread } from "../../lib/types";
 
 function channel(id: number, patch: Partial<Channel>): Channel {
   return {
@@ -51,10 +54,34 @@ function setChannelList(list: readonly Channel[]): void {
   channelsStore.flush();
 }
 
+function followedFlush(): void {
+  followedThreadsStore.flush();
+}
+
 function setDms(list: readonly DmChannel[]): void {
   dmStore.setState(() => ({ channels: list }));
   dmStore.flush();
 }
+
+const followedThread = (id: number, parent: number, mentions: number): ReadyThread => ({
+  thread: {
+    id,
+    parent_id: parent,
+    name: `t${id}`,
+    owner_id: 1,
+    starter_message_id: id,
+    archived: false,
+    locked: false,
+    auto_archive_minutes: 1440,
+    message_count: 1,
+    last_message_at: null,
+    created_at: "2026-10-20T00:00:00Z",
+  },
+  last_message_id: 9,
+  last_read_message_id: 1,
+  unread_count: mentions,
+  mention_count: mentions,
+});
 
 describe("unread badge", () => {
   beforeEach(() => {
@@ -236,5 +263,38 @@ describe("unread badge", () => {
     await Promise.resolve();
     expect(setUnreadBadge).toHaveBeenCalledTimes(2);
     stop();
+  });
+
+  describe("followed threads (WP 6.9c)", () => {
+    afterEach(() => resetThreadsStore());
+
+    it("counts a followed thread's mentions with the channels' and DMs'", () => {
+      setChannelList([channel(1, { mentionCount: 2 })]);
+      setDms([dm(11, 1)]);
+      adoptReadyThreads([followedThread(91, 1, 3)]);
+      expect(unreadBadgeCount()).toBe(2 + 1 + 3);
+    });
+
+    it("pushes the new count when a thread mention arrives", () => {
+      const setUnreadBadge = vi.fn((_count: number) => Promise.resolve());
+      setChannelList([channel(1, {})]);
+      const stop = startUnreadBadge({ setUnreadBadge });
+      adoptReadyThreads([followedThread(91, 1, 2)]);
+      followedFlush();
+      expect(setUnreadBadge.mock.calls.map((c) => c[0])).toEqual([0, 2]);
+      stop();
+    });
+
+    it("drops them when the parent's level is Nothing, and when the parent is not listed", () => {
+      setChannelList([channel(1, {}), channel(2, {})]);
+      adoptReadyThreads([
+        followedThread(91, 1, 3),
+        followedThread(92, 2, 4),
+        followedThread(93, 9, 5),
+      ]);
+      expect(unreadBadgeCount()).toBe(3 + 4);
+      setChannelNotificationLevel(1, "nothing");
+      expect(unreadBadgeCount()).toBe(4);
+    });
   });
 });

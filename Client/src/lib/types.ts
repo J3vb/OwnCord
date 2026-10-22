@@ -486,8 +486,20 @@ export interface ReadyPayload {
      * where a mention is the plain `@name` text.
      */
     readonly id_mentions?: boolean;
+    /**
+     * The server understands `thread_follow`, sends `thread_follow_update` and
+     * lists the viewer's followed threads in `ready.threads` (WP 6.9c). Absent
+     * means an older server: no Follow control, no followed threads.
+     */
+    readonly thread_follows?: boolean;
   };
   readonly channels: readonly ReadyChannel[];
+  /**
+   * The viewer's followed, open threads, newest activity first (WP 6.9c).
+   * Present whenever the server advertises `thread_follows`; authoritative for
+   * the set. Absent from older servers.
+   */
+  readonly threads?: readonly ReadyThread[];
   /**
    * The full category list, present only for a viewer holding MANAGE_CHANNELS
    * (WP 6.5a). Absent for everyone else and for older servers, which derive
@@ -724,6 +736,22 @@ export interface ThreadInfo {
   readonly message_count: number;
   readonly last_message_at: string | null;
   readonly created_at: string;
+}
+
+/** One entry of `ready.threads`: a followed thread and the viewer's read state in it. */
+export interface ReadyThread {
+  readonly thread: ThreadInfo;
+  readonly last_message_id: number;
+  readonly last_read_message_id: number;
+  readonly unread_count: number;
+  readonly mention_count: number;
+}
+
+/** thread_follow_ok / thread_follow_update. `thread` rides a `following: true` update. */
+export interface ThreadFollowPayload {
+  readonly thread_id: number;
+  readonly following: boolean;
+  readonly thread?: ThreadInfo;
 }
 
 /** The idle periods a thread can auto-archive after, in minutes. */
@@ -1472,6 +1500,8 @@ export type ServerMessage =
   | (WsEnvelope<{ readonly thread_id: number }> & { readonly type: "thread_update_ok" })
   | (WsEnvelope<ThreadPayload> & { readonly type: "thread_changed" })
   | (WsEnvelope<ThreadDeletedPayload> & { readonly type: "thread_deleted" })
+  | (WsEnvelope<ThreadFollowPayload> & { readonly type: "thread_follow_ok" })
+  | (WsEnvelope<ThreadFollowPayload> & { readonly type: "thread_follow_update" })
   | (WsEnvelope<ChatEditedPayload> & { readonly type: "chat_edited" })
   | (WsEnvelope<ChatDeletedPayload> & { readonly type: "chat_deleted" })
   | (WsEnvelope<ChatBulkDeletedPayload> & { readonly type: "chat_bulk_deleted" })
@@ -1535,6 +1565,9 @@ export type ClientMessage =
   | (WsEnvelope<ThreadUpdatePayload> & { readonly type: "thread_update" })
   | (WsEnvelope<{ readonly thread_id: number }> & { readonly type: "thread_delete" })
   | (WsEnvelope<{ readonly thread_id: number | null }> & { readonly type: "thread_focus" })
+  | (WsEnvelope<{ readonly thread_id: number; readonly follow: boolean }> & {
+      readonly type: "thread_follow";
+    })
   | (WsEnvelope<ChatEditPayload> & { readonly type: "chat_edit" })
   | (WsEnvelope<ChatDeletePayload> & { readonly type: "chat_delete" })
   | (WsEnvelope<ReactionAddPayload> & { readonly type: "reaction_add" })

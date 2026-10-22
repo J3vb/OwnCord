@@ -30,6 +30,7 @@ import {
 import { safetyStore } from "../../src/features/safety/store";
 import { setConnectionStatus } from "@stores/ui.store";
 import {
+  applyFollowUpdate,
   getThread,
   removeThread,
   resetThreadsStore,
@@ -541,5 +542,59 @@ describe("a thread created after its starter row rendered", () => {
     // Recreated under a new id: a chip again.
     upsertThread(makeThread({ id: 131, parent_id: PARENT, starter_message_id: 7, name: "Again" }));
     await vi.waitFor(() => expect(chipText()).toContain("Again"));
+  });
+});
+
+describe("ThreadPanel follow toggle (WP 6.9c-c2)", () => {
+  const follow = (): HTMLButtonElement => q<HTMLButtonElement>('[data-testid="thread-follow"]');
+
+  it("is hidden when the server has no thread_follows capability", () => {
+    mountPanel();
+    expect(follow().hidden).toBe(true);
+  });
+
+  it("shows Follow and sends thread_follow true", () => {
+    applyReadyCapabilities({ threads: true, thread_follows: true });
+    setConnectionStatus("connected");
+    mountPanel();
+    expect(follow().hidden).toBe(false);
+    expect(follow().textContent).toBe("Follow");
+    expect(follow().getAttribute("aria-pressed")).toBe("false");
+    follow().click();
+    expect(ws.lastSent).toMatchObject({
+      type: "thread_follow",
+      payload: { thread_id: THREAD, follow: true },
+    });
+  });
+
+  it("shows Following once followed and sends thread_follow false", () => {
+    applyReadyCapabilities({ threads: true, thread_follows: true });
+    setConnectionStatus("connected");
+    applyFollowUpdate(THREAD, true, makeThread({ id: THREAD, parent_id: PARENT }));
+    mountPanel();
+    expect(follow().textContent).toBe("Following");
+    expect(follow().getAttribute("aria-pressed")).toBe("true");
+    follow().click();
+    expect(ws.lastSent).toMatchObject({
+      type: "thread_follow",
+      payload: { thread_id: THREAD, follow: false },
+    });
+  });
+
+  it("repaints when the follow state changes under it", async () => {
+    applyReadyCapabilities({ threads: true, thread_follows: true });
+    mountPanel();
+    expect(follow().textContent).toBe("Follow");
+    applyFollowUpdate(THREAD, true, makeThread({ id: THREAD, parent_id: PARENT }));
+    await vi.waitFor(() => expect(follow().textContent).toBe("Following"));
+  });
+
+  it("toasts and sends nothing when the socket is down", () => {
+    applyReadyCapabilities({ threads: true, thread_follows: true });
+    setConnectionStatus("disconnected");
+    mountPanel();
+    follow().click();
+    expect(ws.getSentMessages().some((m) => m.type === "thread_follow")).toBe(false);
+    expect(toast).toHaveBeenCalledWith(expect.any(String), "error");
   });
 });
