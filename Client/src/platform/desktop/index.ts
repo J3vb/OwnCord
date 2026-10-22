@@ -23,6 +23,7 @@ import { notifier } from "./notifications";
 import { pendingMessages } from "./pendingMessages";
 import { pushToTalk } from "./pushToTalk";
 import { globalShortcuts } from "./globalShortcuts";
+import { serverScope } from "./serverScope";
 import { settings } from "./settings";
 import { socket } from "./socket";
 import { systemIdle } from "./systemIdle";
@@ -52,6 +53,7 @@ export const desktop: Platform = {
   pendingMessages,
   pushToTalk,
   globalShortcuts,
+  serverScope,
   settings,
   socket,
   systemIdle,

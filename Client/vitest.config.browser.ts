@@ -3,6 +3,7 @@ import { playwright } from "@vitest/browser-playwright";
 import { resolve } from "path";
 
 export default defineConfig({
+  define: { __OWNCORD_WEB__: false },
   resolve: {
     alias: {
       "@lib": resolve(import.meta.dirname, "src/lib"),

@@ -13,6 +13,7 @@
     "dev:desktop": "vite --config vite.config.desktop.ts",
     "build": "npm run build:desktop",
     "build:desktop": "tsc -p tsconfig.build.json && vite build --config vite.config.desktop.ts",
+    "build:web": "tsc -p tsconfig.build.json && vite build --config vite.config.web.ts",
     "build:budget": "vite build --config vite.config.desktop.ts --manifest --outDir dist-budget --emptyOutDir",
     "check:budgets": "node scripts/bundle-budget.mjs",
     "check:admin-types": "node scripts/check-admin-types.mjs",

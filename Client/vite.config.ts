@@ -32,6 +32,10 @@ export function changelogModule(): Plugin {
  */
 export default defineConfig({
   plugins: [changelogModule()],
+  // The desktop build, `vite dev` and the e2e prod build are all not-web;
+  // `vite.config.web.ts` overrides this. Always defined, so no build can ship
+  // an unresolved identifier.
+  define: { __OWNCORD_WEB__: false },
   build: {
     modulePreload: { polyfill: false },
     cssCodeSplit: false,

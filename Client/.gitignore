@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-web/
 src-tauri/target/
 src-tauri/target-e2e/
 src-tauri/gen/
