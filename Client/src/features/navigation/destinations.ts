@@ -23,6 +23,8 @@
  */
 
 import type { ApiClient } from "@lib/api";
+import type { WsClient } from "@lib/ws";
+import { buildForumView } from "../forums/view";
 import { pendingRequestCount } from "../message-requests/store";
 import { buildInbox } from "../message-requests/view";
 import { buildModerationCenter } from "../moderation/view";
@@ -42,6 +44,22 @@ export interface FeatureViewContext {
   readonly close: () => void;
   /** The page's API client; the server authorizes every read behind a view. */
   readonly api: ApiClient;
+}
+
+/**
+ * What a forum channel's post list needs (WP 6.9d). A forum is a channel, not a
+ * content-area view: it is mounted by `ChannelController` in the messages slot
+ * (the channel's own signal aborts it), so it carries no `close`.
+ */
+export interface ForumViewContext {
+  readonly channelId: number;
+  /** The mounted channel's lifetime: bind every listener, request and timer to it. */
+  readonly signal: AbortSignal;
+  readonly api: ApiClient;
+  /** For `forum_post_create`; the post list itself reads over REST. */
+  readonly ws: WsClient;
+  /** Open a post in the thread panel beside the list. */
+  readonly openPost: (threadId: number) => void;
 }
 
 /** Builds a view's body. Called on every open; a view is never kept while closed. */
@@ -66,6 +84,8 @@ export interface NavigationDestinations {
   readonly safety?: {
     readonly build: (signal: AbortSignal, api: ApiClient) => HTMLDivElement;
   };
+  /** WP 6.9d: a forum channel's post list, mounted by the channel controller. */
+  readonly forum?: { readonly build: (ctx: ForumViewContext) => HTMLElement };
 }
 
 /** The destinations this build ships. */
@@ -73,4 +93,5 @@ export const NAVIGATION_DESTINATIONS: NavigationDestinations = {
   requests: { build: buildInbox, pending: pendingRequestCount },
   moderation: { build: buildModerationCenter },
   safety: { build: buildSafetyPane },
+  forum: { build: buildForumView },
 };

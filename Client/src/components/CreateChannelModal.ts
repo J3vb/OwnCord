@@ -14,6 +14,7 @@ import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
 import { errorText } from "@lib/api";
+import { forumsEnabled } from "@lib/serverCapabilities";
 import type { MountableComponent } from "@lib/safe-render";
 import type { ChannelType } from "@lib/types";
 import {
@@ -48,6 +49,11 @@ export interface CreateChannelModalOptions {
 
 /** Every channel type is creatable under every category. */
 export const CHANNEL_TYPES: readonly ChannelType[] = ["text", "voice", "announcement"] as const;
+
+/** The types the form offers: Forum only where the server supports it (WP 6.9d). */
+export function offeredChannelTypes(): readonly ChannelType[] {
+  return forumsEnabled() ? [...CHANNEL_TYPES, "forum"] : CHANNEL_TYPES;
+}
 
 export function createCreateChannelModal(options: CreateChannelModalOptions): MountableComponent {
   const { category, onCreate, onClose } = options;
@@ -137,7 +143,7 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
       "data-testid": "channel-type-select",
     });
 
-    for (const t of CHANNEL_TYPES) {
+    for (const t of offeredChannelTypes()) {
       const opt = createElement("option", { value: t }, channelTypeLabel(t));
       typeSelect.appendChild(opt);
     }

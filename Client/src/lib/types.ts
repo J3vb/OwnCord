@@ -22,7 +22,22 @@ import type { ServerRestartReasonValue } from "./protocolTypes";
 export type UserStatus = "online" | "idle" | "dnd" | "invisible" | "offline";
 
 /** Channel types supported by the server. */
-export type ChannelType = "text" | "voice" | "announcement" | "dm";
+export type ChannelType = "text" | "voice" | "announcement" | "dm" | "forum";
+
+/** A forum tag as the server states it (WP 6.9d). `position` is its place in the forum's list. */
+export interface ForumTag {
+  readonly id: number;
+  readonly name: string;
+  readonly emoji?: string;
+  readonly position: number;
+}
+
+/** A forum's tags and settings, on a `type: "forum"` channel only (WP 6.9d). */
+export interface ForumSettings {
+  readonly tags: readonly ForumTag[];
+  readonly require_tag: boolean;
+  readonly default_auto_archive_minutes: 60 | 1440 | 4320 | 10080;
+}
 
 /**
  * True for channel types that carry a message history and a chat pane —
@@ -193,6 +208,8 @@ export interface ReadyChannel {
   readonly category_position?: number;
   /** Channel topic ("" = none). Absent from older servers. */
   readonly topic?: string;
+  /** Tags and settings of a forum channel; absent on every other type and from older servers. */
+  readonly forum?: ForumSettings;
   readonly position: number;
   readonly unread_count?: number;
   readonly last_message_id?: number;
@@ -473,6 +490,11 @@ export interface ReadyPayload {
      */
     readonly threads?: boolean;
     /**
+     * The server supports forum channels (WP 6.9d): `forum_post_create` and a
+     * forum's posts. Absent means an older server, which offers no Forum type.
+     */
+    readonly forums?: boolean;
+    /**
      * A member can hold several roles (WP 6.3c): `role_ids` rides `members[]`,
      * `auth_ok.user`, `member_join.user` and `member_update`, roles carry
      * `hoist`, and `PUT`/`DELETE {base}/{id}/roles/{roleId}` add and remove
@@ -736,6 +758,24 @@ export interface ThreadInfo {
   readonly message_count: number;
   readonly last_message_at: string | null;
   readonly created_at: string;
+  /** Present only when the parent is a forum (WP 6.9d): the post's tags and opening message. */
+  readonly post?: ForumPostMeta;
+}
+
+/** A forum post's tags and a preview of its opening message. */
+export interface ForumPostMeta {
+  readonly tag_ids: readonly number[];
+  /** Null once the opening message is hard-deleted. */
+  readonly first_message: ForumFirstMessage | null;
+}
+
+export interface ForumFirstMessage {
+  readonly id: number;
+  readonly author_id: number;
+  /** The sanitised text cut to 200 characters; empty for a deleted message. */
+  readonly preview: string;
+  readonly has_attachments: boolean;
+  readonly deleted: boolean;
 }
 
 /** One entry of `ready.threads`: a followed thread and the viewer's read state in it. */
@@ -927,6 +967,8 @@ export interface ChannelCreatePayload {
   /** See ReadyChannel.category_position. */
   readonly category_position?: number;
   readonly topic?: string;
+  /** See ReadyChannel.forum. */
+  readonly forum?: ForumSettings;
   readonly position: number;
   readonly slow_mode?: number;
   /** See ReadyChannel.nsfw — the age-restriction label the server enforces. */
@@ -964,6 +1006,8 @@ export interface ChannelUpdatePayload {
   readonly id: number;
   readonly name?: string;
   readonly topic?: string;
+  /** See ReadyChannel.forum — absent means unchanged. */
+  readonly forum?: ForumSettings;
   /**
    * The category the channel now sits under ("" = uncategorized). Moving a
    * channel between categories is an edit, so the broadcast carries it and
@@ -1315,6 +1359,11 @@ export interface AuthPayload {
    * permission before honouring it. Omitted when unknown.
    */
   readonly active_channel_id?: number;
+  /**
+   * What this client can render, declared once per connection (WP 6.9d). The
+   * server withholds anything not declared, so an older client never sees it.
+   */
+  readonly features?: readonly string[];
 }
 
 export interface ChatSendPayload {
@@ -1325,6 +1374,25 @@ export interface ChatSendPayload {
   /** With reply_to, whether the reply mentions the parent's author (3A-12). */
   readonly reply_ping?: boolean;
   readonly attachments: readonly string[];
+}
+
+/** Create a forum post and its opening message in one step (WP 6.9d). */
+export interface ForumPostCreatePayload {
+  readonly channel_id: number;
+  readonly name: string;
+  readonly content: string;
+  readonly attachments: readonly string[];
+  readonly tag_ids: readonly number[];
+  readonly client_message_id: string;
+}
+
+/** forum_post_create_ok: `thread` is absent on a deduplicated answer to a caller who lost the forum. */
+export interface ForumPostCreateOkPayload {
+  readonly thread?: ThreadInfo;
+  readonly message_id: number;
+  readonly client_message_id?: string;
+  readonly deduplicated?: boolean;
+  readonly skipped_attachment_ids?: readonly string[];
 }
 
 /** Copy one message into one channel or DM; `client_message_id` is required (WP 6.9a). */
@@ -1497,6 +1565,7 @@ export type ServerMessage =
   | (WsEnvelope<ChatSendOkPayload> & { readonly type: "chat_send_ok" })
   | (WsEnvelope<ChatForwardOkPayload> & { readonly type: "chat_forward_ok" })
   | (WsEnvelope<ThreadPayload> & { readonly type: "thread_create_ok" })
+  | (WsEnvelope<ForumPostCreateOkPayload> & { readonly type: "forum_post_create_ok" })
   | (WsEnvelope<{ readonly thread_id: number }> & { readonly type: "thread_update_ok" })
   | (WsEnvelope<ThreadPayload> & { readonly type: "thread_changed" })
   | (WsEnvelope<ThreadDeletedPayload> & { readonly type: "thread_deleted" })
@@ -1562,6 +1631,7 @@ export type ClientMessage =
   | (WsEnvelope<PollVotePayload> & { readonly type: "poll_vote" })
   | (WsEnvelope<PollEndPayload> & { readonly type: "poll_end" })
   | (WsEnvelope<ThreadCreatePayload> & { readonly type: "thread_create" })
+  | (WsEnvelope<ForumPostCreatePayload> & { readonly type: "forum_post_create" })
   | (WsEnvelope<ThreadUpdatePayload> & { readonly type: "thread_update" })
   | (WsEnvelope<{ readonly thread_id: number }> & { readonly type: "thread_delete" })
   | (WsEnvelope<{ readonly thread_id: number | null }> & { readonly type: "thread_focus" })

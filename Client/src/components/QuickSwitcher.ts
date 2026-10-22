@@ -30,6 +30,7 @@ interface QuickSwitcherEntry {
 function getEntryIcon(entry: QuickSwitcherEntry): SVGSVGElement {
   if (entry.type === "voice") return createIcon("volume-2", 14);
   if (entry.type === "announcement") return createIcon("megaphone", 14);
+  if (entry.type === "forum") return createIcon("messages-square", 14);
   if (entry.type === "dm") return createIcon("user", 14);
   return createIcon("hash", 14);
 }

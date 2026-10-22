@@ -16,6 +16,13 @@ import { normalizeHostForCertCompare } from "./hostNormalize";
 
 const log = createLogger("ws");
 
+/**
+ * What this client can render, declared in every `auth` frame (WP 6.9d). The
+ * server withholds the matching channels and frames from a socket that does not
+ * declare them, so an older client never shows a broken forum.
+ */
+const CLIENT_FEATURES: readonly string[] = ["forums"];
+
 /** Monotonic generation counter — incremented on each connect() to invalidate
  *  stale event listeners from a previous connection attempt. */
 let wsGeneration = 0;
@@ -841,6 +848,7 @@ export function createWsClient({
           epoch: PROTOCOL_EPOCH,
           ...(activeChannelId !== null ? { active_channel_id: activeChannelId } : {}),
           ...(pendingWake ? { wake: true } : {}),
+          features: CLIENT_FEATURES,
         },
       });
     } else if (next === "disconnected") {

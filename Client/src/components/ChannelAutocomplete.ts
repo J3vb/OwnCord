@@ -4,6 +4,7 @@
  */
 
 import { createElement, setText } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 import { channelsStore } from "@stores/channels.store";
 import {
   createInlineAutocomplete,
@@ -22,6 +23,8 @@ export interface ChannelSuggestion {
   readonly name: string;
   /** The channel's category, or "Voice channel" for an uncategorised voice one. */
   readonly detail: string;
+  /** Set for a forum channel, whose row draws the forum glyph (WP 6.9d). */
+  readonly forum?: true;
 }
 
 export interface ChannelAutocompleteOptions {
@@ -63,7 +66,16 @@ export function filterChannelSuggestions(query: string): ChannelSuggestion[] {
     if (q !== "" && !lower.includes(q)) continue;
     const detail =
       ch.category ?? (ch.type === "voice" ? messagingText("channelMention.voice") : "");
-    const entry = { s: { id: ch.id, name: ch.name, detail }, position: ch.position, id: ch.id };
+    const entry = {
+      s: {
+        id: ch.id,
+        name: ch.name,
+        detail,
+        ...(ch.type === "forum" ? { forum: true as const } : {}),
+      },
+      position: ch.position,
+      id: ch.id,
+    };
     (q === "" || lower.startsWith(q) ? prefix : substring).push(entry);
   }
   return [...prefix.toSorted(byPosition), ...substring.toSorted(byPosition)]
@@ -73,7 +85,11 @@ export function filterChannelSuggestions(query: string): ChannelSuggestion[] {
 
 function renderChannelRow(s: ChannelSuggestion): HTMLElement[] {
   const name = createElement("span", { class: "ma-name" });
-  setText(name, `#${s.name}`);
+  if (s.forum === true) {
+    name.append(createIcon("messages-square", 12), ` ${s.name}`);
+  } else {
+    setText(name, `#${s.name}`);
+  }
   const detail = createElement("span", { class: "ma-detail" });
   setText(detail, s.detail);
   return [name, detail];
