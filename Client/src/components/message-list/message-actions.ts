@@ -6,6 +6,8 @@
 
 import { copyWithToast, isDeveloperMode } from "../../features/developer-mode/developerTools";
 import { channelBitOrRole } from "@lib/permissions";
+import { threadsEnabled } from "@lib/serverCapabilities";
+import { authorityChannelId, threadOfMessage } from "@stores/threads.store";
 import { isPinRowKind, isServerRowKind } from "@lib/messageKind";
 import { formatMessageLink } from "@lib/deep-link";
 import { channelsStore } from "@stores/channels.store";
@@ -30,6 +32,7 @@ export interface MessageActionGates {
   readonly react: ActionGate;
   readonly edit: ActionGate;
   readonly forward: ActionGate;
+  readonly createThread: ActionGate;
   readonly pin: ActionGate;
   readonly delete: ActionGate;
   readonly report: ActionGate;
@@ -60,6 +63,18 @@ export function isActionableMessage(msg: Message): boolean {
   return !msg.deleted && msg.status === "sent";
 }
 
+/**
+ * Whether Create Thread is offered: the server supports threads, the list is a
+ * text channel's own (not a DM, voice or announcement channel, and not another
+ * thread), the user may post there, and the message has no thread yet. The
+ * server decides again; this keeps a dead affordance off the screen.
+ */
+function createThreadAllowed(msg: Message, opts: MessageListOptions): boolean {
+  if (!threadsEnabled() || opts.channelType !== "text") return false;
+  const channel = channelsStore.getState().channels.get(msg.channelId);
+  return channel?.type === "text" && channel.canSend && threadOfMessage(msg) === undefined;
+}
+
 export function messageActionGates(msg: Message, opts: MessageListOptions): MessageActionGates {
   const sent = isActionableMessage(msg);
   // A server row (call log, group event) is read-only: only Copy ID (developer mode) applies.
@@ -67,7 +82,8 @@ export function messageActionGates(msg: Message, opts: MessageListOptions): Mess
   const on = sent && !isServerRowKind(msg.kind);
   const deletable = on || (sent && isPinRowKind(msg.kind));
   const own = msg.user.id === opts.currentUserId;
-  const channel = channelsStore.getState().channels.get(msg.channelId);
+  // A thread has no roles or overrides of its own: its parent answers.
+  const channel = channelsStore.getState().channels.get(authorityChannelId(msg.channelId));
   const isDm = opts.channelType === "dm";
   // The server gates SetMessagePinned on MANAGE_MESSAGES for a channel, but any
   // DM participant may pin, so offering it to a plain member is a broken
@@ -84,6 +100,10 @@ export function messageActionGates(msg: Message, opts: MessageListOptions): Mess
     // A forward would copy only the poll's fallback text and drop the voting, so the server refuses it.
     forward: gate(
       on && opts.onForwardClick !== undefined && msg.poll === undefined,
+      on ? deleteLockReason() : null,
+    ),
+    createThread: gate(
+      on && opts.onCreateThreadClick !== undefined && createThreadAllowed(msg, opts),
       on ? deleteLockReason() : null,
     ),
     pin: gate(on && canPin),

@@ -37,6 +37,9 @@ export interface ChatHeaderRefs {
    *  unless the active channel is the joined voice channel with the grid open;
    *  `setChatHeaderCallChat` is its only writer and the page wires the click. */
   readonly callChatBtn: HTMLButtonElement;
+  /** The channel's Threads list (WP 6.9c). Shown only for a text channel on a
+   *  server with threads; `setChatHeaderThreads` is its only writer. */
+  readonly threadsBtn?: HTMLButtonElement;
   /** Holds the DM partner's avatar (or a group's stack) in place of the "@". */
   readonly avatarEl: HTMLSpanElement;
   /**
@@ -51,6 +54,8 @@ export interface ChatHeaderRefs {
 
 export interface ChatHeaderOptions {
   readonly onTogglePins: () => void;
+  /** Open or close the channel's thread list, anchored to the button. */
+  readonly onToggleThreads?: (anchor: HTMLButtonElement) => void;
   readonly onSearchFocus?: () => void;
   readonly onToggleDmProfile?: () => void;
   /** Show or hide the group DM member panel. */
@@ -231,6 +236,21 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
   });
   callChatBtn.appendChild(createIcon("message-square", 18));
   callChatBtn.hidden = true;
+  const threadsBtn = createElement("button", {
+    type: "button",
+    class: "pin-btn threads-btn",
+    title: messagingText("header.threads"),
+    "aria-label": messagingText("header.threads"),
+    "aria-haspopup": "dialog",
+    "aria-expanded": "false",
+    "data-testid": "threads-btn",
+  });
+  threadsBtn.appendChild(createIcon("message-square", 18));
+  threadsBtn.hidden = true;
+  if (opts.onToggleThreads !== undefined) {
+    const toggle = opts.onToggleThreads;
+    threadsBtn.addEventListener("click", () => toggle(threadsBtn));
+  }
   const pinBtn = createElement("button", {
     type: "button",
     class: "pin-btn",
@@ -265,6 +285,7 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
     membersBtn,
     memberListBtn,
     pinBtn,
+    threadsBtn,
   );
 
   appendChildren(header, sidebarToggle, nameGroup, divider, topicEl, tools);
@@ -280,6 +301,7 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
       membersBtn,
       memberListBtn,
       callChatBtn,
+      threadsBtn,
       avatarEl,
       sidebarToggle,
       nameGroupEl: nameGroup,
@@ -307,6 +329,13 @@ export function setChatHeaderChannelType(
     delete refs.hashEl.dataset["channelType"];
     setText(refs.hashEl, "#");
   }
+}
+
+/** Show the Threads button for a text channel on a server that has threads. */
+export function setChatHeaderThreads(refs: ChatHeaderRefs, visible: boolean): void {
+  if (refs.threadsBtn === undefined) return;
+  refs.threadsBtn.hidden = !visible;
+  if (!visible) refs.threadsBtn.setAttribute("aria-expanded", "false");
 }
 
 /**
@@ -401,6 +430,7 @@ export function updateChatHeaderForDm(refs: ChatHeaderRefs, recipient: ChatHeade
     setText(refs.topicEl, recipient.status);
     refs.callBtn.style.display = "";
     refs.videoCallBtn.style.display = "";
+    if (refs.threadsBtn !== undefined) refs.threadsBtn.hidden = true;
     refs.profileBtn.style.display = recipient.isGroup === true ? "none" : "";
     refs.membersBtn.style.display = recipient.isGroup === true ? "" : "none";
   } else {

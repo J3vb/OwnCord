@@ -318,6 +318,12 @@
       "binding": "authStore",
       "category": "reset-elsewhere",
       "reason": "clearAuth writes INITIAL_STATE itself after runSessionResets, so auth always clears even if every reset throws"
+    },
+    {
+      "file": "features/messaging/activeComposer.ts",
+      "binding": "claimed",
+      "category": "dom-owned",
+      "reason": "The mounted composers' claims; each composer releases its own claim in destroy, so a session switch unmounts them and the list empties itself"
     }
   ]
 }

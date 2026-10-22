@@ -12,6 +12,8 @@ import { groupRowIcon, groupRowText } from "./groupRows";
 import { renderPinRowText } from "./pinRows";
 import { endForwardBlock, startForwardBlock } from "./forwardBlock";
 import { renderPollCard } from "./pollCard";
+import { renderThreadChip } from "./threadChip";
+import { threadOfMessage } from "@stores/threads.store";
 import { connectionLockReason, messageActionGates } from "./message-actions";
 import { QUICK_REACTIONS, emojiNode, quickReactionEmojiForPass } from "./quick-reactions";
 import { messagesStore, type Message } from "@stores/messages.store";
@@ -706,6 +708,10 @@ export function renderMessage(
       endForwardBlock(box, msg.forward);
       el.appendChild(box);
     }
+
+    // The thread this message started, below its body (WP 6.9c).
+    const thread = threadOfMessage(msg);
+    if (thread !== undefined) el.appendChild(renderThreadChip(thread, opts.onOpenThread, signal));
 
     if (msg.reactions.length > 0) {
       el.appendChild(renderReactions(msg, opts, signal));

@@ -8,6 +8,7 @@ import type {
   ForwardInfo,
   PollInfo,
   PollView,
+  ThreadInfo,
   ChatMessagePayload,
   MessageUser,
   Attachment,
@@ -74,6 +75,8 @@ export interface Message {
   readonly forward?: ForwardInfo;
   /** Set on a poll message (WP 6.9b): the card's source, kept in version order by pollState.ts. */
   readonly poll?: PollView;
+  /** Set on a thread's starter message (WP 6.9c); threadsStore holds the live state. */
+  readonly thread?: ThreadInfo;
 }
 
 /** A reaction toggle applied optimistically, awaiting its server echo. Keyed
@@ -180,6 +183,7 @@ export function chatPayloadToMessage(payload: ChatMessagePayload): Message {
     ...(payload.group_event !== undefined && { groupEvent: payload.group_event }),
     ...(payload.forward !== undefined && { forward: payload.forward }),
     ...(payload.poll !== undefined && { poll: toPollView(payload.poll) }),
+    ...(payload.thread !== undefined && { thread: payload.thread }),
   };
 }
 
@@ -209,6 +213,7 @@ export function messageResponseToMessage(response: MessageResponse): Message {
     ...(response.group_event !== undefined && { groupEvent: response.group_event }),
     ...(response.forward !== undefined && { forward: response.forward }),
     ...(response.poll !== undefined && { poll: toPollView(response.poll) }),
+    ...(response.thread !== undefined && { thread: response.thread }),
   };
 }
 

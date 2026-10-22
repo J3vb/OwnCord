@@ -11,6 +11,7 @@
 
 import { createStore } from "@lib/store";
 import { registerSessionReset } from "@lib/sessionRegistry";
+import { adoptStarterThreads } from "./threadsLoader";
 import type {
   ChatMessagePayload,
   ChatEditedPayload,
@@ -204,6 +205,7 @@ export function setMessages(
   splice = false,
   anchorId: number | null = null,
 ): void {
+  adoptStarterThreads(messages);
   messagesStore.setState((prev) =>
     reduceSetOlderLoadFailed(
       reduceSetMessages(prev, channelId, messages, hasMore, splice, anchorId),
@@ -242,6 +244,7 @@ export function setAroundMessages(
   hasMoreAfter: boolean,
   splice = false,
 ): void {
+  adoptStarterThreads(messages);
   messagesStore.setState((prev) =>
     reduceSetOlderLoadFailed(
       reduceSetAroundMessages(prev, channelId, messages, hasMoreBefore, hasMoreAfter, splice),
@@ -325,6 +328,7 @@ export function prependMessages(
   messages: readonly MessageResponse[],
   hasMore: boolean,
 ): void {
+  adoptStarterThreads(messages);
   messagesStore.setState((prev) =>
     reduceSetOlderLoadFailed(
       reducePrependMessages(prev, channelId, messages, hasMore),
@@ -354,12 +358,14 @@ export function appendNewerMessages(
   messages: readonly MessageResponse[],
   hasMore: boolean,
 ): void {
+  adoptStarterThreads(messages);
   messagesStore.setState((prev) => reduceAppendNewerMessages(prev, channelId, messages, hasMore));
 }
 
 /** Union an oldest-first page into an attached window (the follow-up after a
  *  re-attach, which recovers a live message refused while detached). */
 export function mergeTailMessages(channelId: number, messages: readonly MessageResponse[]): void {
+  adoptStarterThreads(messages);
   messagesStore.setState((prev) => reduceMergeTailMessages(prev, channelId, messages));
 }
 
@@ -435,6 +441,7 @@ export function channelIdForSend(
  * safe to hand it a single row out of a wider history window.
  */
 export function applyServerMessage(response: MessageResponse): void {
+  adoptStarterThreads([response]);
   messagesStore.setState((prev) => reduceApplyServerMessage(prev, response));
 }
 

@@ -12,6 +12,8 @@ import {
 } from "../../src/features/messaging/forwardRequests";
 import { claimPollRequest, isPollRequest } from "../../src/features/messaging/pollRequests";
 import { pollCardState } from "../../src/components/message-list/pollCard";
+import { withThreadsStore } from "../../src/stores/threadsLoader";
+import { setFocusedThread, threadsStore, upsertThread } from "../../src/stores/threads.store";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -193,6 +195,8 @@ const mentionChannel: Channel = {
   voiceMaxUsers: 0,
   voiceMaxVideo: 0,
 };
+
+let threadsJobRan = false;
 
 const PROBES: readonly Probe[] = [
   {
@@ -512,6 +516,41 @@ const PROBES: readonly Probe[] = [
       pollCardState(901).selected = [2];
     },
     isInitial: () => pollCardState(901).selected.length === 0,
+  },
+  {
+    name: "threads:loader",
+    // A job queued while the store chunk is still loading must not outlive the session.
+    mutate: () => {
+      threadsJobRan = false;
+      withThreadsStore(() => {
+        threadsJobRan = true;
+      });
+    },
+    isInitial: async () => {
+      await vi.dynamicImportSettled();
+      return !threadsJobRan;
+    },
+  },
+  {
+    name: "threads:store",
+    mutate: () => {
+      upsertThread({
+        id: 9,
+        parent_id: 1,
+        name: "probe",
+        owner_id: 1,
+        starter_message_id: 5,
+        archived: false,
+        locked: false,
+        auto_archive_minutes: 1440,
+        message_count: 0,
+        last_message_at: null,
+        created_at: "2026-10-21T00:00:00Z",
+      });
+      setFocusedThread(9);
+    },
+    isInitial: () =>
+      threadsStore.getState().byId.size === 0 && threadsStore.getState().focusedThreadId === null,
   },
 ];
 

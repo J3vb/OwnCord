@@ -19,6 +19,8 @@ import {
 import type { Message } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import { blocksStore } from "@stores/blocks.store";
+import { authorityChannelId, isReadSurface, threadsStore } from "@stores/threads.store";
+import { refreshThreadChips } from "./message-list/threadChip";
 import { safetyStore } from "../features/safety/store";
 import { registerReadingAnchor } from "../features/messaging/readingAnchor";
 import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup";
@@ -144,6 +146,10 @@ export interface MessageListOptions {
   ) => Promise<PollOutcome<unknown>>;
   /** End a poll now; absent hides End poll (WP 6.9b). */
   readonly onPollEnd?: (messageId: number) => Promise<PollOutcome<unknown>>;
+  /** Opens the Create Thread dialog for a message (WP 6.9c). Absent, the menu offers no Create Thread. */
+  readonly onCreateThreadClick?: (messageId: number) => void;
+  /** Opens a thread's side panel (the starter chip, WP 6.9c). Absent, the chip is inert text. */
+  readonly onOpenThread?: (threadId: number) => void;
   /** Retry a failed optimistic send (by its correlation id). */
   readonly onRetry?: (correlationId: string) => void;
   /** Discard a failed optimistic send without retrying. */
@@ -1055,7 +1061,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    */
   function markReadIfSeen(m?: ScrollMetrics): void {
     if (root === null) return;
-    if (channelsStore.getState().activeChannelId !== options.channelId) return;
+    if (!isReadSurface(options.channelId, channelsStore.getState().activeChannelId)) return;
     if (!isAtBottom(m) || isChannelAway(options.channelId)) {
       bottomMarked = false;
       noteVisibleRowsSeen(m);
@@ -1187,7 +1193,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    */
   function markLiveArrivalSeen(): void {
     if (root === null) return;
-    if (channelsStore.getState().activeChannelId !== options.channelId) return;
+    if (!isReadSurface(options.channelId, channelsStore.getState().activeChannelId)) return;
     if (isChannelAway(options.channelId) || isChannelCovered()) return;
     if (newDividerDeferred) return;
     noteMessageSeen(options.channelId, newestLoadedId(), true);
@@ -2663,13 +2669,13 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     unsubscribers.push(
       channelsStore.subscribeSelector(
         (s) => {
-          const ch = s.channels.get(options.channelId);
+          const ch = s.channels.get(authorityChannelId(options.channelId));
           return `${String(ch?.canDeleteOthers)}|${String(ch?.canPin)}`;
         },
         () => renderAll(),
       ),
       channelsStore.subscribeSelector(
-        (s) => s.channels.get(options.channelId)?.canReact,
+        (s) => s.channels.get(authorityChannelId(options.channelId))?.canReact,
         () => {
           if (contentContainer !== null) refreshReactionLocks(contentContainer, options.channelId);
         },
@@ -2685,6 +2691,22 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
           if (contentContainer !== null) refreshReactionLocks(contentContainer, options.channelId);
         },
       ),
+    );
+
+    // A thread's count, name or archive state changes far more often than its
+    // starter row is rebuilt: repaint the chips on screen in place (WP 6.9c).
+    const repaintThreadChips = (): void => {
+      if (contentContainer === null) return;
+      refreshThreadChips(contentContainer, {
+        messages: getChannelMessages(options.channelId),
+        onOpen: options.onOpenThread,
+        signal: disposable.signal,
+      });
+    };
+    unsubscribers.push(
+      threadsStore.subscribeSelector((s) => s.byId, repaintThreadChips),
+      threadsStore.subscribeSelector((s) => s.byStarter, repaintThreadChips),
+      threadsStore.subscribeSelector((s) => s.deleted, repaintThreadChips),
     );
 
     // Delete (CLI-08) and reactions are disabled while the socket is down; flip
