@@ -47,302 +47,212 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+## v2.4.0-beta.1
+
+**OwnCord 2.4 beta 1** (the fifth public beta) is the community release of the self-hosted chat app with channels, direct messages, voice and video, and file sharing. It adds threads, forum channels, polls, message forwarding, several roles per member, nicknames, real channel categories, an AFK channel and much fuller group DMs. Chat, the member list and Settings work much more like Discord's, the Linux app catches up with Windows, and self-hosting gets sturdier: fewer ports for Docker, safer backup restores and Prometheus metrics.
+
+It is still a **beta and a hobby project**: don't use it for anything sensitive. Update the server and the desktop app together. **This release changes the database.** The server upgrades it on first start and keeps a safety copy first; you cannot go back to 2.3 without restoring that copy. Docker Compose and systemd owners: read **Server (operators)** under Changed before you upgrade.
+
+### Highlights
+
+- **Threads**: start a thread from any message, reply in a side panel, follow threads to keep them under their channel in the sidebar, and archive, lock or rename them.
+- **Forum channels**: a channel of posts, each with a title, tags and its own thread, sorted by activity or date and filtered by tag.
+- **Polls**: ask a question with up to ten answers, one or several choices and a duration, in channels and DMs.
+- **Roles and names**: members can hold several roles, roles can have their own group in the member list and be @mentioned, and moderators can change a member's nickname.
+- **Forward messages** to another channel or DM, mark images as **spoilers**, see who is **watching your stream**, and share one Windows app's sound with its window.
+- **Discord-style chat**: edit in place, a right-click menu on messages, a hover bar with quick reactions, Mark Unread, search filters like `from:` and `has:image`, and a message box that takes several files and keeps your draft.
+- **Group DMs** get an owner, a member list, Add People, an icon and call rows; DMs get privacy settings for who may message you.
+- **Linux on par with Windows**: mic test, automatic sensitivity, live audio settings, VP9, screen-share audio, Wayland global shortcuts and `.deb` updates from the app.
+
 ### Added
 
-**Accounts & admin**
+**Threads, forums and polls**
 
-- In the admin panel, a member's roles now show as chips you can add to or remove one at a time (the last role has no remove button, and roles at or above your own rank are shown but locked), roles have **Show members separately** and **Allow anyone to @mention this role** checkboxes, and filtering the Members list by a role now lists everyone who holds it, not only those whose top role it is. `GET /admin/api/users` also returns each member's `role_ids`.
-- A server can now name one voice channel as its AFK channel (`PUT /admin/api/afk-channel`, Manage Server) and set how long a member must be idle first (the `afk_timeout_seconds` setting: 1, 5, 15, 30 or 60 minutes, 5 by default). Nobody is moved yet and the admin panel has no card for it; this release only adds the setting, the channel flag everyone's client receives, and the rule that the AFK channel is listen-only, with no microphone, camera or screen sharing.
-- Moderators can now change or reset another member's nickname (`PUT /api/v1/moderation/users/{id}/nickname`). It needs the new **Manage Nicknames** permission, and the moderator must outrank the member; the owner's nickname can never be changed this way, and everyone sees the new name at once. The permission is given to the default Moderator role automatically, and the default Admin and the owner already have it; a Moderator or Admin role you renamed or edited does not have it, so tick **Manage Nicknames** on it in the role grid. The change appears in the audit log as "changed the nickname of ..." with the old and new name. In the app, right-click a member and choose **Change Nickname** to set or reset it; the item shows only when you hold the permission, outrank the member and the server supports it.
-- The admin panel's Members list now shows each member's nickname under their username, the search box also finds a member by nickname, and the Manage dialog has a **Nickname** field with Save and Reset for moderators who hold **Manage Nicknames** and outrank the member (others see the nickname read-only). The audit log shows these changes as "changed the nickname of ...".
-- The server can now keep a private note about any member and sync it between your devices. A note is yours alone: nobody else, including admins and moderators, can read it through OwnCord, and it is capped at 256 characters. The notes are stored in the server database, not end-to-end encrypted, so the server operator can read them there, as with direct messages. Deleting an account removes the notes that account kept and the notes others kept about it. Clients start using this in a later release; until then the notes you keep in the DM side panel stay on your device.
-- The server can now store a profile banner for each member: a colour (`#rgb` or `#rrggbb`), an uploaded image (PNG, JPEG or WebP, up to 1 MiB and 1920 by 960 pixels, counted against the uploader's storage quota), or both (`POST` and `DELETE /api/v1/users/me/banner`, `banner_color` on `PATCH /api/v1/users/me`). Like an avatar, a banner image can be read by every signed-in member while it is someone's banner and by nobody else once it is replaced or removed. The banner rides on the member list, `member_join`, `user_update` and your own profile. Clients start showing banners in a later release.
-- The server can now store two direct message privacy settings per member, "allow member DMs" and "message requests", both on by default, and sync them between your devices (`GET` and `PUT /api/v1/users/me/privacy`, `ready.capabilities.dm_privacy`). The settings are visible only to their owner and are removed with the account.
-- The server now lets a member hold several roles. `PUT` and `DELETE /admin/api/users/{id}/roles/{roleId}` (also under `/api/v1/moderation/members/{id}/roles/{roleId}`) add or remove one role without touching the others, with the same rules as changing a role: Manage Roles, you outrank the member, and the role is below your own. Removing a member's last role is refused with `409 LAST_ROLE`, and changing a role with `PATCH` still replaces all of them with one. A member's permissions are the union of their roles; their rank and shown role are their highest one. Each add or remove is in the audit log (`role_add`, `role_remove`). Roles also gain **hoist** (its own group in the member list) and **mentionable** flags, set when you create or edit a role; roles that existed before are hoisted. The member list, `member_join` and `member_update` carry every role a member holds (`role_ids`), and `ready.capabilities.multi_role` announces it. Clients start showing it in a later release; an older client keeps showing the highest role.
-- Moving a role (editing its position or reordering roles) now updates the highest role of every member who holds it next to another one, and drops their cached permissions. Deleting a role no longer moves a member who holds other roles onto the default role; only a member left with no role gets it.
-- A member under a moderator timeout can no longer change their display name or username (`403 TIMED_OUT`), so a moderator's nickname reset stays in place until the timeout ends; avatar, about text and other profile edits still work. A display name that matches another member's username (ignoring case) is now refused, both when you set it and when a moderator does; your own username is still fine. The audit log entry for a profile update now shows a display name change as old and new.
-
-**Mentions**
-
-- The server now understands `<@123>` (a member by id) and `<@&5>` (a role by id) in a message, next to the typed `@name`. A role ping needs the role to be marked mentionable or the sender to have Mention Everyone; otherwise it stays plain text and pings nobody. Everyone holding a pinged role gets a mention badge and notification, except the sender and people who blocked them. Messages list the pinged roles as `mention_roles`. An edit updates the list but never raises a badge. Roles cannot be pinged in a DM. Clients start using this in a later release.
+- **Create Thread** in a message's right-click menu starts a thread on it. The thread opens in a side panel with its own replies and message box, the message shows a chip linking to it, and the channel header lists its threads.
+- A thread's creator can rename or archive it; moderators can also lock and delete it. An idle thread hides itself after the period chosen at creation; sending in it reopens it. A thread follows its channel's permissions.
+- You follow a thread by creating it, replying in it, being mentioned in it, or with **Follow** in its header. Followed threads show under their channel in the sidebar (up to five, then "N more"), with unread and mention badges and right-click **Unfollow** and **Mark as Read**. Notifications follow the parent channel's setting.
+- **Forum channels** are a new channel type: a list of posts, each with a title, up to five tags and an opening message, and replies in its own thread. Sort by latest activity or newest, filter by tag, and press **New Post** to start one.
+- Moderators set a forum's tags (name, emoji, order), whether a post needs a tag, and the default time before an idle post hides, under **Forum settings** in Edit Channel or in the admin panel.
+- **Polls**: the poll button beside the message box asks a question with two to ten answers (each with an optional emoji), a duration from 1 hour to 1 week, and an optional "Allow multiple answers". Votes show live; the author or a moderator can end a poll early.
 
 **Messages & files**
 
-- A member who turns off "allow member DMs" can no longer be reached in a one-to-one DM by someone they have not accepted: that person cannot open a DM, send, edit, react, pin, ring or join the DM call, and sees the same short refusal ("you can't message this user") a block gives. Anyone you accepted, wrote to first or were already talking to still reaches you, and group DMs are covered by the next entry. The setting is read from the server; clients get a switch for it in a later release.
-- A member who has direct messages on and turns "message requests" off is now reached by a first message directly: the conversation opens for them and the message arrives like any other, mentions and push included, with nothing waiting in a requests inbox. Requests already waiting stay there, and turning requests back on keeps the people you have already heard from. With direct messages off, the first message is refused as before. Clients get a switch for it in a later release.
-- Creating a group DM with someone, or adding them to one, is refused (`403`, "cannot add this user to a group DM", the same text a block gives) when they have turned off "allow member DMs" and have not accepted you, or when you hold a message request to them that they have not accepted. The check applies to everyone, staff included, and only your own standing with them counts; if one person in a multi-person add is refused, nobody is added. Members already in a group stay in it, keep sending and can leave. Turning "allow member DMs" off also removes anyone you have not accepted from a one-to-one DM voice call you are in.
-- The GIF picker now loads more GIFs as you scroll to the bottom of the grid, for both trending and search results, and stops when the provider has no more. The server's `/api/v1/gif/search` and `/trending` take an optional `pos` cursor and return a `next` cursor.
-- Pinning a message now leaves a line in the chat for everyone who can read it ("X pinned a message to this channel"), in channels, DMs and group DMs. It makes no sound and is never a mention; pinning the same message again within 10 minutes adds no second line. The pinner (or Manage Messages in a channel) can delete the line. Clients without the matching update show it as plain text.
-- The server can now forward a message to a channel or DM (`chat_forward`, one target at a time). The forward is a new message from the person forwarding, with a copy of the text and files, so editing or deleting the original later changes nothing; it never mentions anyone and a channel gets no push. You can only forward what you can read to somewhere you can post, a message from an 18+ channel only goes to another 18+ channel, and the copied files count against your storage quota. A forward cannot be edited. Forwarding is limited to 5 per 10 seconds. Clients start offering it in a later release.
+- **Forward** in a message's menu copies it, text and files, to another channel or DM you can post in. The original's later edits or deletion don't change the copy, and a forward never pings anyone.
+- **Mark as spoiler** on an image or video before sending blurs it in chat until someone clicks it.
+- Editing happens inside the message, as in Discord: press ↑ or choose Edit, then Enter saves and Esc cancels. Clearing the text and saving asks to delete the message.
+- Right-clicking a message opens a full menu (quick reactions, Edit, Reply, Forward, Copy Text, Pin, Copy Message Link, Mark Unread, Delete, Report). Right-clicking an image offers Copy and Save, and text fields get Cut, Copy, Paste with spelling suggestions.
+- The hover bar on a message shows three quick reactions, React, Edit or Reply, and a **...** button for the menu. Hold Shift to also see Pin and Delete.
+- **Mark Unread** (or Alt+click) makes a message and everything after it unread. Reading a channel now marks read only what you saw, and the NEW line sits above the first message you had not read.
+- The message box takes several files at once, shows **Upload to #channel** when you drag a file over the chat, keeps your draft across restarts, and lets you send while files still upload, with a progress bar and **Cancel upload**.
+- A character counter appears near the limit, and pasting very long text attaches it as `message.txt`.
+- Discord formatting: `<https://…>` posts a link without a preview, `<t:1700000000:R>` shows a time in each reader's time zone, `-# ` makes a line of small text, and `:joy:` turns into its emoji.
+- Slash commands `/shrug`, `/tableflip`, `/unflip`, `/spoiler` and `/me`.
+- Typing `#` suggests channels to link. Invite links pasted in chat show as a **Join** card.
+- A reply can ping the person you answer, with an **@ ON / @ OFF** switch in the reply bar.
+- Search understands `from:`, `in:`, `before:`, `after:`, `during:`, `has:link/file/image/video/sound`, `mentions:` and `pinned:`. Results show the year, highlight the match and offer Retry.
+- Messages with several images show them as a grid. The image viewer has arrows between a message's images, **Download** and **Open original**.
+- Code blocks highlight C, C++, Java, C#, SQL, YAML, `diff` and `ansi`.
+- Pinning a message leaves a quiet "pinned a message" line in the chat. The pins panel shows formatted messages and updates live.
+- Links whose text hides the address ask before opening, with an option to trust that site. More YouTube link types get a player.
+- Hovering a time shows the full weekday and date. Three people typing are named. Messages group when sent within 7 minutes.
+- The GIF picker loads more GIFs as you scroll.
+- Hold Shift when picking an emoji to pick several.
 
-**Voice**
+**Members, roles and profiles**
 
-- Voice: the server now tells channel members who is watching each screen share (client display follows).
-- Members who stay idle in a server voice channel are now moved to the AFK channel once it is set, after the AFK timeout on top of the client's own idle delay. A member who could not join the AFK channel, a DM or group call, and a member who comes back first are left alone. A moderator mute or deafen is kept through the move, and the member returns by joining a channel themselves. The client does not show why yet and the admin panel has no card for it.
-- The admin panel's Settings page now has a Voice: AFK card to choose the AFK channel (or none) and the extra idle time (1, 5, 15, 30 or 60 minutes), with a warning when members cannot connect to the chosen channel or it has a user limit, and the Channels page marks the AFK channel with a badge. Choosing the channel needs Manage Channels as well as Manage Server.
-- The client now shows when it was moved to the AFK channel (a short note once the move is done), marks the AFK channel in the channel list, and keeps the microphone off there with the mic button locked. Speaking or typing counts as activity again, also while in a call.
-- Windows: sharing one window can now share that app's sound too. The quality dialog before the picker has a "Share the app's sound" switch (on by default, shown on Windows 10 2004 and later). A whole screen still shares all sound as before, and sharing OwnCord's own window shares no sound.
+- Members can hold several roles. Their permissions are all their roles together; their colour and rank come from the highest. Add or remove roles from the profile card's role chips or the admin panel.
+- Roles can be **hoisted** (shown as their own group in the member list) and **mentionable** (anyone can @mention them). Everyone holding a mentioned role gets the mention.
+- Moderators with the new **Manage Nicknames** permission can **Change Nickname** from a member's right-click menu or the admin panel. The default Moderator role gets it; tick it on any role you renamed or edited.
+- The member list is now a right-hand column (Appearance can put it back under the channels), sorts A–Z with offline members in one **Offline** group, updates rows in place, has a search box, works with the arrow keys, and stays fast with hundreds of members.
+- Right-clicking a member opens the full menu in Discord's order, with **Timeout** (60 seconds to 1 week) and **Remove Timeout**. Members can see who is timed out.
+- **Ban** opens a dialog with a reason, a ban length and how much of their recent message history to delete.
+- Profile cards show About Me and the join date for everyone, a **banner** (picture, colour or both, set in Settings → Account), and a **private note** about that person that follows you between devices.
+- Clicking your own name in the bottom-left panel opens your profile card. Idle, Do Not Disturb and Invisible can run on a timer, and a custom status can have an emoji and clear itself after a set time.
+- **Remove avatar** in Account settings.
 
-**Desktop UI**
+**Direct messages**
 
-- Messages now show mentions written as ids: `<@id>` as a pill with the member's current name (so it survives a rename) and `<@&id>` as a pill in the role's colour; an id that no longer exists shows as plain `@unknown-user` or `@deleted-role` instead of the raw token. A role mention counts as mentioning you when you hold the role and the server confirms it, and on servers that support it the @ suggestions list mentionable roles after members. On today's server the composer still sends plain `@name`.
-- Members can hold several roles. The profile popup shows each role as a chip: remove one with its x, add one with +, on roles below your own (a member keeps at least one). The member list groups members by their highest hoisted role, with an **Online** group for members whose roles are not hoisted, and names take the colour of their highest coloured role, in chat too. What you may do follows all your roles together. On an older server everything looks and works as before.
-- Channel categories are now real: right-click a category header (with Manage Channels) for **Create Category**, **Rename Category**, **Move Category Up/Down** and **Delete Category** (its channels move to no category, nothing is deleted). **Create Category** is also in the server menu, a category with no channels stays visible to people who can manage channels, and a collapsed category stays collapsed after a rename. Create and Edit Channel now pick the category from a list. This needs a server with categories; on an older one the sidebar still groups by name, though the Voice and uncategorized groups now sort ahead of those.
-- Opening a voice call now opens the voice channel's text chat beside the video grid (stacked under it in a narrow window); leaving the call keeps the chat, and moving to another voice channel follows to its chat. A **Hide chat** / **Show chat** button in the header (shown during a call on that channel) keeps the grid full width, and a voice channel now shows a speaker in its header instead of `#`.
-- A voice channel in the sidebar now shows a red mention badge when someone mentions you in its chat, and right-clicking it offers **Open chat** to read that chat without joining the call; clicking the row still joins. "Mark all read" no longer appears for unread voice chat that no row shows.
-- Opening a voice call now opens the voice channel's text chat beside the video grid (stacked under it in a narrow window); leaving the call keeps the chat, and moving to another voice channel follows to its chat.
-- Images and videos can now be sent as spoilers. A **Mark as spoiler** button on each pending attachment renames the file to `SPOILER_<name>` and uploads it again (press it again to undo), and a file you already named `SPOILER_...` shows as marked. In the chat a spoiler image or video, alone or inside an image grid, is blurred under a **Spoiler** cover that opens with a click, Enter or Space; until then it cannot be opened in the viewer, saved or copied, and it stays out of the viewer's previous/next sequence. It is covered again whenever the message is redrawn.
-- You can now keep a private note about anyone from their profile card (hidden on your own), and the note in a DM's profile panel now follows your account between devices on servers that support it. The note saves as you type and when you click away, up to 256 characters; if a save fails it says "Note not saved" under the box, keeps your text and tries again when you click away. A note you wrote on this device before is uploaded the first time you open that person's card if the server has none; if the server already has a different note, the server's is shown and the one on this device is left alone. Servers that do not support it keep the note on this device only.
-- Your profile can now have a banner: a picture, a colour, or both. In Settings > Account > Edit profile, pick a **Banner colour** (saved with **Save Profile**, **Clear colour** removes it) and **Upload banner** to choose a PNG, JPEG or WebP, which is cropped to a wide strip for you; **Remove banner** appears once you have one. The banner shows on your profile card, in the DM profile panel and on your settings card, and a picture makes the strip taller. If the picture can't load, the colour or the usual gradient shows. A server with file storage turned off says so when you try to upload. This needs a server with banner support; on an older one the controls are hidden and the card looks as before.
-- The member list now sits on the right; Appearance > Member list position puts it back under the channels.
-- A group DM now has a member list on the right (a **Show Member List** button in the header toggles it) showing everyone with a crown on the owner. Anyone can add people with **Add People** while the group has fewer than 10, and the owner can **Remove From Group** or **Make Group Owner** from a member's right-click or ⋯ menu, each after a confirm. Added, removed, left, renamed and icon-changed events show as quiet lines in the chat that make no sound, and the leave confirm now says someone can add you back. These need a server with 3B-10 group DM support; on an older server the list shows but the add and owner actions stay hidden.
-- A group DM can now have its own picture. Right-click the group and choose **Change Group Icon** to pick a PNG, JPEG or WebP (it is cropped to a square for you) or **Remove Group Icon**; anyone in the group can do either, and everyone sees the picture in the DM list and the chat header instead of the two stacked faces. If the picture can't load, the faces show as before. This needs a server with 3B-10 group DM support.
-- The New Direct Message picker now has a search box (it filters by name or username), lists online people first, shows real avatars, and keeps your picks as removable chips while you search. Leaving a group now says you won't be able to rejoin it. The Message Requests inbox has a **Retry** button when it can't load. Closing a 1:1 DM while you're in its call no longer drops the call on the next connection blip.
-- Settings > Privacy & Safety now has a **Direct messages** section with two switches: **Allow direct messages from server members** and **Message requests** (greyed out, with a hint, while the first is off). A switch that can't be saved goes back to its previous position and says so. The section needs a server that stores these settings and is hidden on an older one. A refused "New Direct Message" now shows the same short "You can't message this user right now." message whatever the reason.
-- Right-clicking a channel now has **Notification Settings** with All Messages, Only @mentions, Nothing or Use Server Default, so one noisy channel can be quiet in a loud server (or the reverse). A channel set to Nothing sends no pop-up, sound or taskbar flash and drops out of the taskbar badge, but its mention badge in the sidebar stays. Settings > Notifications lists every channel with its own level and a Reset button.
-- Right-clicking a channel or a DM now has **Mute Channel** / **Mute Conversation** with a flyout: for 15 minutes, 1, 3, 8 or 24 hours, or until you turn it back on. Clicking the row still mutes until you turn it back on. A muted row says "Muted until 3:30 PM" (with the date if it ends on another day), the Muted Channels list in Settings shows the same, and the channel goes back to normal on its own when the time is up. Messages that mention you still notify while muted.
-- A 1:1 DM now opens with its profile panel showing and remembers if you close it (a **Show User Profile** button in the header brings it back), the panel stays when you switch between DMs and updates a changed avatar, Escape closes only an open confirm, an empty DM list says "No direct messages yet" with a Start one button, and the DM preview above the channels gets the in-call phone icon and the same right-click menu.
-- The incoming call banner now shows the caller's pulsing avatar, has a **Join with video** button, and names a group call by the group ("{caller} is calling" underneath). Ctrl+Enter accepts a ringing call and Escape declines it, and a call that is replaced by a newer one from another chat leaves a "Missed call" notice.
-- A member's profile card now shows their About Me text and the date they joined, for everyone and not only for you, and **Remove avatar** in Account settings clears your picture (shown only when you have one). Both need a server with the 3C-7 profile support; on an older server the card hides those lines and Remove avatar falls back to a profile update.
-- A group call now lists every member of the group: those in the call, then those being rung, then those who are not in it, greyed out and labelled "Not in call". **Ring again** (it rings the whole group) stays available whenever someone is missing, not only after nobody answered.
-- You can now Block or Unblock someone from their profile card, from a DM's profile panel and from a DM's right-click menu, a Block asks once and an Unblock is one click. That menu also has Mark As Read, Profile, Call and Copy User ID (Developer Mode), and Message and Call on a profile card are greyed out, with the reason, while you're offline or either of you has blocked the other.
-- DM calls now leave a line in the chat: who started it and how long it lasted, or "You missed a call from X" if you didn't pick up. A call that is still going has a Join button. The line can't be edited, replied to or reacted to, and makes no message sound.
-- The DM header now has a **Video Call** button next to Voice Call, shows the person's avatar (or a group's faces) instead of "@", reads "Do Not Disturb" instead of "Dnd", and you can click a group's name to rename it.
-- Right-clicking a channel now has **Copy Link** (an `owncord://` link that opens that channel) and, if you can manage invites, **Invite People**.
-- The chat header shows the channel's own icon (a megaphone for an announcement channel) instead of always "#", and clicking a long topic opens the whole topic in a small window.
-- Private channels now show a small lock over their icon in the channel list, so you can tell at a glance which channels only some members can see. It updates straight away when a channel's permissions change.
-- In a DM call, drag the bottom edge of the call area to make it taller or shorter, as in Discord; the height is remembered, and double-click puts it back.
-- Settings → Keybinds lets you change the keys for Toggle Camera, Search Messages, Upload File, Emoji Picker and GIF Picker, and set keys for Toggle Screen Share and Disconnect from Voice (no key by default). Click a key, press the new one; Reset and × undo it, and **Reset all keybinds** restores every default. A key that clashes with another shortcut is refused with the reason. The Ctrl+/ shortcuts list shows your keys. Holding a shortcut no longer repeats it, and Cmd no longer stands in for Ctrl on these keys.
-- Settings has a **Search** box above the tabs (Ctrl+F focuses it while Settings is open). It hides tabs and headings with no match, searching each tab's name and the labels and descriptions of its rows, and highlights the matches in the tab you open. Escape clears the box first, and the arrow keys move from it into the tabs.
-- Settings → Notifications has an **App sounds volume** slider for every OwnCord sound, and a switch for each one (message, mention, incoming call, outgoing call, join/leave, mute/deafen, stream). Everything starts at today's volume with every sound on.
-- Settings → Notifications has an **Unread message badge** switch (on by default). Off, the unread count is cleared from the taskbar or tray icon and stays clear; on again, it shows the current count.
-- The member list sorts each role group A–Z, with Idle and Do Not Disturb people among the Online ones and offline people last. Letter avatars use a fixed colour per person instead of the role colour, role names keep their capitals in the Change Role menu, status tooltips say "Do Not Disturb" instead of "dnd", and the bans list appears as soon as your role is given Ban Members.
-- The Invite Manager can set an invite's expiry (1 hour to 30 days, or never) and max uses, shows the full link and when each invite expires, opens with a ready-to-copy link, shows the server's reason when an invite action fails, and offers Retry if the list cannot load.
-- Right-clicking a member now opens the full menu in Discord's order: Profile, Mention (adds @name to your message box), Message, Call, Server Mute, Deafen and Disconnect for someone in a voice channel, Change Role, **Timeout** (60 seconds to 1 week) or **Remove Timeout**, Force Logout, Ban, Copy User ID and Block. Right-clicking yourself offers Profile and Mention.
-- The member list now updates in place: when someone goes online or offline only their row moves, and nothing else jumps or loses focus. Everyone who is offline sits in one **Offline** group at the bottom, and each role's count shows only the people online.
-- The member list has a search box at the top: type part of a name or username (case, accents and a leading @ don't matter) to show only matching people, with each group's count showing the matches. Escape clears it.
-- Closing the window now keeps OwnCord running in the tray (Settings → Advanced → Close to Tray, on by default; Quit in the tray menu exits), and **Start Minimized** keeps the window hidden when OwnCord starts at login. On Linux, closing still quits when the desktop has no tray.
-- Compact mode now shows the time at the start of each message's first line, ahead of the name, instead of hiding it.
-- Settings → Appearance has a **Sync with computer** theme tile that switches between the dark and light themes with your computer's setting, and follows it when it changes.
-- With Developer Mode on, right-clicking a member adds **Copy User ID** and right-clicking a channel adds **Copy Channel ID**, next to the existing Copy Message ID.
-- Clicking your own name or avatar in the bottom-left panel now opens your profile card, with your status (Do Not Disturb and Invisible say what they do), your custom status, **Edit Profile** (opens Settings → Account) and, with Developer Mode on, **Copy User ID**. The small status dot still opens its own menu.
-- Your profile card can now put Idle, Do Not Disturb or Invisible on a timer (15 minutes to 3 days, or Forever; the arrow on the row or the Right arrow key opens the choices) and shows "Until 3:40 PM" under it, going back to Online when it ends, even across a restart. The custom status has an emoji button and a **Clear after** choice (Today, 4 hours, 1 hour, 30 minutes or Don't clear) that needs a server with custom status expiry; the card shows when it clears.
-- A member's profile card, opened from the member list, lets anyone with Manage Roles change that member's role from the role badge (only roles below your own, never your own role). **Ban** now opens a dialog with the member's name, a reason, the ban length and how much of their message history to delete (that last choice needs Manage Messages and a server that supports it; if the deletion stops partway, **Retry** finishes it).
-- Log Out in Settings now asks "Are you sure you want to log out?" first, so a stray click no longer signs you out.
-- Settings now lists its tabs in Discord's order (Appearance, Accessibility, Voice & Video, Text & Images, Notifications, Keybinds, then Advanced, Diagnostics & logs and About), and shows the app version in small text under Log Out.
-- Settings → Accessibility has **Always underline links** and a **Saturation** slider (0–100 %) that makes role colours, names and accent buttons more or less vivid without touching images or video. Settings → Text & Images has **Animate emoji**; switched off, animated custom emoji show their first frame.
-- Settings → Appearance has a **Zoom Level** slider (50 %–200 %), and Ctrl+= / Ctrl+- zoom in and out and Ctrl+0 resets, as in Discord. It scales the whole app and is remembered.
-- Linux `.deb` installs now update from the app with one password prompt, instead of telling you to install the new package by hand. The first update onto this version is still manual; if the system cannot ask for a password, the banner says to install by hand.
-- Settings → Diagnostics & logs has an **Open Log Folder** button that opens OwnCord's log folder in your file manager, so you can find the logs without a tray icon (stock GNOME has none). If the folder cannot be opened, the reason shows under the button.
-- Right-clicking a category header now offers **Mark Category as Read**, **Collapse Category** (or Expand), and **Collapse All Categories**.
-- The Create Channel window has an optional **Topic** field, and Enter in the name field creates the channel.
-- Ctrl+K now also finds your DMs, lists names that start with what you typed first, shows an unread dot or mention count on each result, draws a megaphone for announcement channels and says "No results" when nothing matches.
+- Settings → Privacy & Safety → **Direct messages**: turn off DMs from server members you haven't accepted, and turn message requests off so first messages arrive directly.
+- Group DMs have an owner, a member list (**Show Member List**), **Add People** (up to 10 members), and for the owner **Remove From Group** and **Make Group Owner**. Joins, leaves, renames and icon changes leave quiet lines in the chat.
+- A group DM can have its own icon (**Change Group Icon**).
+- DM calls leave a line in the chat: who called and how long it lasted, or "You missed a call". A call still going has a Join button.
+- The DM header has **Video Call**, the person's avatar, and click-to-rename for groups. 1:1 DMs open with the profile panel showing.
+- The incoming call banner shows the caller's avatar and **Join with video**; Ctrl+Enter accepts and Escape declines.
+- A group call lists every member, greys out those not in it, and keeps **Ring again** available.
+- **Block** and **Unblock** from a profile card, the DM panel and the DM menu. Messages from blocked people are collapsed and don't notify. Privacy & Safety lists blocked users.
+- The New Direct Message picker has search, online-first sorting and real avatars.
+- In a DM call, drag the bottom edge of the call area to resize it.
 
-**Voice**
+**Channels and notifications**
 
-- Linux: you can now change a screen share's quality while it is live, from the stream card's Quality menu. Viewers see a short blip while the share restarts at the new quality.
-- On Linux, Settings → Voice & Video now has **Input Volume** (0–200 %) and **Automatically determine input sensitivity**, as on Windows, and the sensitivity bar moves with your voice during a call. A Linux profile still at the default sensitivity switches to automatic, as Windows did in beta 4.
-- On Linux, Echo Cancellation, Noise Suppression, Automatic Gain Control and Enhanced Noise Suppression now apply straight away during a call instead of at the next join.
-- On Linux, Settings → Voice & Video now has a working **Mic Test**: it plays your microphone back on your chosen speakers with your input volume, sensitivity and noise settings, and the level bar moves while it runs. Use headphones, as on Windows. Joining a voice channel stops the test, and it cannot start during a call.
-- On Linux, the level bar in Settings → Voice & Video now moves whenever the tab is open, as on Windows, instead of only in a call or during the Mic Test. The Mic Test still does not run during a call; the bar then follows your call's microphone.
-- On Linux, Settings → Diagnostics now really opens your microphone for a second and passes only when audio arrives, instead of only checking that it is listed. Incoming media still cannot be checked on Linux, and the result now says why.
-- On Linux, app sounds (join, mute, message chime, ringing) now play on the output device chosen in Settings → Voice & Video, in a call and outside one. If that device cannot be opened they play on the default output.
-- On Linux, plugging in or removing an audio device now updates the device lists in Settings → Voice & Video and switches over, in a call and outside one. A saved device that comes back is picked again.
-- Linux: switching camera in a call keeps your video tile instead of restarting it.
-- Linux: Settings → Voice & Video → Video Codec is now shown, with VP8, H.264 (when this build can encode it) and Auto.
-- On Linux, sharing your screen can now include the sound of your other apps: the share picker has a **Share audio** switch (on by default) when PulseAudio or pipewire-pulse is running. OwnCord's own sound is never shared. Viewers most likely hear it in mono for now.
-- Settings → Voice & Video → Video Codec now offers **VP9**, which keeps text sharper in a screen share at the same bandwidth. Windows only. When someone who cannot play VP9 joins the call, your camera or screen share switches to VP8 for everyone after a moment, and goes back to VP9 once they leave.
-- Settings → Voice & Video → Video Codec now offers **H.265** on Windows PCs whose graphics card encodes it in hardware, for a sharper picture at the same bandwidth. It is not offered on Intel graphics. Like VP9, it switches to VP8 for everyone while someone in the call cannot play it.
-- Linux: video layers nobody is watching are paused, saving CPU and upload.
-- Linux: a 120 fps screen share now gives up some sharpness before smoothness when the connection or CPU cannot keep up, as on Windows, and holds its frame rate more steadily. Settings → Voice & Video notes that Wayland limits a screen share to 60 fps.
-- Linux (X11): the screen share picker greys out **120 fps** for a screen whose monitor runs below 120 Hz, and says the monitor's rate. Picking a faster screen brings your 120 fps choice back.
-- Linux: OwnCord now tells the call it can play VP9 video, so a Windows VP9 camera or screen share no longer drops to VP8 when a Linux user joins.
-- Linux: Settings → Voice & Video → Video Codec now offers **VP9** when this build can encode it, for sharper text. Pick it and your camera or screen share goes out as VP9 at one quality level, with no lower-quality extra stream. Auto stays VP8, and a saved VP9 on a build without it publishes VP8.
-- Linux: on NVIDIA graphics cards, picking H.264 now encodes your camera and screen share on the graphics card instead of the CPU, and H.264 video from others is decoded there too. Other machines keep the software encoder.
-- Linux: paused video layers stay paused when you start or stop another camera or screen share.
-- Linux (Wayland): push to talk and the Mute and Deafen shortcuts now work while another app is in front on GNOME 48 or newer and KDE Plasma. Settings → Keybinds has **Set up global shortcuts**, which opens your desktop's own dialog, then shows the keys it set; your desktop reserves those keys for OwnCord in every app, and push to talk is limited to function keys. GNOME 47 and older, Sway and other desktops without this service keep the note that global keys are unavailable, and the tray items still work.
-- Windows: unread mentions and DMs now also show on the tray icon as a red dot, as on Linux, and the dot comes back on the next update if the first swap failed.
-
-**Desktop UI (Linux)**
-
-- Linux: unread mentions now also show on the tray icon, as a red dot with the count as its title, so stock GNOME (with its tray extension) shows them as well as KDE's launcher count. The launcher count is now also sent to the desktop entry name AppImage integration tools usually create.
-- Linux: Away detection now works on KDE Plasma on Wayland and on wlroots desktops (Sway, Hyprland), where it used to fall back to activity inside the OwnCord window.
-- Servers can now offer updates to Linux clients installed from the `.deb`: a client that asks with `?deb_install=pkexec` on `GET /api/v1/client-update/linux-x86_64-deb` (or `linux-aarch64-deb`) gets the signed `.deb` of the latest release, and a 200 with the latest version when it is already current. Releases now publish a `.deb.sig` beside each `.deb`. Clients released so far do not ask, and still get 204, now even when GitHub cannot be reached (it used to be 502). The desktop app's `.deb` installer follows in a later change.
-
-**Profiles**
-
-- The member list now carries each member's About Me and join date: `ready.members[]` and `member_join.user` gain `about` (or `null`) and `created_at` (RFC 3339 UTC), for every member. A new `DELETE /api/v1/users/me/avatar` removes your avatar without sending a username, so it cannot undo a rename made on another device. The desktop app's profile popup follows in a later change.
-- A custom status can clear itself: `presence_update` takes an optional `custom_status_expires_in` (60 seconds to 7 days), the server clears the status at that moment and tells everyone with a `presence` whose `custom_status` is `null`, and an expired status no longer comes back when you reconnect. Your own `auth_ok.user` and `/users/me` carry `custom_status_expires_at`; nobody else sees it. The desktop app's "Clear after" picker follows in a later change.
-- Moderators can see who is timed out: `ready` gains `member_timeouts` and a new `member_timeouts` frame is sent when a timeout is issued, lifted or runs out, to everyone who can moderate members and to the timed-out member (their own entry only). Other members are not told. The desktop app's timeout icon follows in a later change.
-
-**Messaging**
-
-- A voice channel's chat now has unread and mention state like a text channel: the server counts its unread messages and mentions in `ready` and sends the `channel_activity` hint for it. This needs no new client; the voice row's badge comes with a later client change.
-- The search API understands `from:name`, `in:channel` (a channel name, in every channel with that name you can read), `before:`, `after:` and `during:` with `YYYY-MM-DD` dates, plus an optional `tz` time zone for the dates. A search can be filters only (`from:alex`) and then lists newest first, page by page. Unknown names give no results, and a channel you cannot read looks the same as one that does not exist.
-- The search API also understands `has:link`, `has:file`, `has:image`, `has:video` and `has:sound`, `mentions:name` (messages that mention that user in their text, not reply pings or @everyone) and `pinned:true` / `pinned:false`. Several `has:` or `mentions:` filters must all match.
-- Banning a member can now also delete their recent messages. `PATCH /api/v1/moderation/members/{id}` (and the admin panel's `PATCH /admin/api/users/{id}`) takes an optional `delete_message_seconds` (0 to 604800, only with `banned: true`) and deletes the member's messages from that long ago in the channels where you can read and manage messages. It needs the Manage Messages permission as well as Ban Members. Connected clients drop the messages right away, the response gains `purge` with the count and whether it finished, and a very large purge stops at 10,000 messages or 20 seconds with `complete: false`: send the same request again to continue. Requests without the field behave as before.
-- The server can now read a channel up to a given message and mark a message unread again: `mark_read` takes an optional `message_id`, there is a new `mark_unread`, and `channel_focus` takes `read: false` to focus without marking read. `mark_read` and `mark_unread` each answer with a `read_state` frame, and `ready` advertises `capabilities.read_pointer`. Clients that do not send the new fields behave as before.
-- A reply can now ping the author of the message it answers: `chat_send` takes an optional `reply_ping`, and when it is `true` the replied-to author gets the mention highlight and badge. Leaving it out does not ping, and the ping survives an edit. In the desktop app, the reply bar now names the author by display name and has an **@ ON / @ OFF** toggle: it starts on for each reply, is hidden when you reply to yourself, and a retried send keeps the choice.
-- A message now holds at most 20 different reaction emoji. A 21st different emoji is refused with the new `REACTION_LIMIT` error; reacting with an emoji already there, and removing, still work, and messages already over 20 are left alone. The desktop app refuses a 21st emoji straight away and says the message has reached the reaction limit.
-- Discord's chat keys: Escape marks the open channel read and goes back to the newest messages, Shift+Escape marks the whole server read, Page Up / Page Down scroll the chat from the message box, typing anywhere in the chat starts a message, and Ctrl+E / Ctrl+G open the emoji and GIF pickers.
-- Typing `#` in the message box suggests channels to link, as `@` does for people.
-- An `owncord://invite/…` link pasted in chat now shows as a **Join** chip with the server it names; clicking it asks before leaving your current server, and an invite for the server you are already in says so. An @mention of a member with a display name now shows that name, with their username on hover.
-- The message hover bar now follows Discord: three quick-reaction emoji, React, Edit (or Reply on others' messages) and a **...** button that opens the message menu. Hold Shift to also see Pin, Delete (Shift-click still skips the confirmation) and Reply on your own messages. Copy Message Link, Report and Copy Message ID are in the menu.
-- Right-clicking an image or GIF in chat, or the enlarged image, now opens a menu with Copy Image and Save Image, plus Copy Link and Open Link for images posted by link. Before, right-click did nothing.
-- Right-clicking a message now opens a menu, as in Discord: three quick reactions, Add Reaction, Edit Message (your own), Reply, Copy Text (and Copy when you have selected some of it), Pin Message, Copy Message Link, Delete Message (hold Shift to skip the confirmation), Report Message, and Copy Message ID in developer mode. Right-clicking a link adds Copy Link and Open Link. Actions you cannot use right now, such as reacting while offline or timed out, are greyed out with the reason. The menu also opens from the keyboard with the Menu key or Shift+F10 on a message's buttons.
-- Reading a channel no longer marks all of it read when you switch away. The desktop app now marks read only what you saw, the NEW line sits above the first message you had not read (also after you jump to an old message), and **Mark Unread** in a message's right-click menu, or Alt+click on a message, makes that message and everything after it unread again. Needs a server that supports it; with an older server nothing changes.
-- Right-clicking in the message box or any other text field now shows the usual Cut, Copy, Paste and Select All menu, with spelling suggestions where the system offers them.
-- Linux: spell checking in the message composer, in the system language (needs a hunspell dictionary).
-- Hovering a follow-up message now shows just its time beside it (for example `19:31`), on one line, instead of "Today at 19:31" wrapping over the avatar column.
-- A typed shortcode such as `:joy:` is sent as its emoji, as in Discord. A server's own custom emoji keep their name, and code is left as written.
-- Discord's message formatting: `<https://…>` posts a link with no preview, `<t:1700000000:R>` shows a time in each reader's own time zone (with the full date on hover), and a line starting with `-# ` shows in small, muted text.
-- When a file attached to a message could no longer be attached at send time (for example, an upload left unsent for over an hour), the server now names the skipped files in its send confirmation (`skipped_attachment_ids` on `chat_send_ok`) instead of only logging them, and a send with no text whose files were all skipped is refused with `ATTACHMENTS_UNAVAILABLE`.
-- Channels you are not viewing now show their unread dot as soon as a message arrives, instead of after the next reconnect. With notifications set to All, each one alerts too, and a mention alert names who mentioned you and opens their message. Needs a server with this release.
-- The server now tells each client, per channel, whether it may delete other members' messages, pin, and react (`can_delete_others`, `can_pin`, `can_react` in `ready` and in the per-viewer `channel_create`), so the app can disable controls the server would refuse. Pinning now follows the same permission rule as before, defined in one place; nothing about who can pin changes. A timed-out moderator keeps pin and delete-others in channels; a timed-out member cannot react. The desktop app's buttons follow in a later change.
-- The desktop app's message box, as in Discord: the + button takes several files at once, dragging a file over the chat shows **Upload to #channel**, and a draft's text and reply are kept when you restart the app (per server and account; attachments are not).
-- A character counter appears when 200 characters are left and turns red past 4,000, and pasting text that would go past the limit attaches it as `message.txt` instead.
-- Clearing an edit and pressing Enter now asks whether to delete the message, instead of doing nothing.
-- Hovering a message's time, or its follow-up time beside it, now shows the weekday, date and time (for example "Tuesday, October 7, 2026 at 2:34 PM"), and "(edited)" now shows when the message was edited on hover.
-- Three people typing are now named ("Ana, Ben, and Cy are typing..."), with the names in bold. Four or more still read "Several people are typing...".
-- The delete confirmation now shows who wrote the message and the start of its text, and tells you that holding Shift when you click Delete skips the question.
-- A channel with slow mode now says so under the message box, with the interval ("Slow mode is on: one message every 5s"), before you send anything. Moderators, who are not limited, do not see it.
-- The pinned messages panel now shows each pin as formatted text (bold, links, mentions, emoji) instead of raw characters, stays open when you unpin a message (the card just leaves the list), and follows pins and unpins made by anyone while it is open. Unpin appears or disappears as your permission changes.
-- Pinning or unpinning a message from its menu now updates the message straight away, and puts it back if the server refuses.
-- A link whose text hides its address (`[text](address)`) now asks before leaving OwnCord, showing the full address; tick "Trust this site's links from now on" to skip the question for that site. Plain links open as before.
-- Links from `m.youtube.com`, `music.youtube.com`, `youtube-nocookie.com` and YouTube `/live/` addresses now get a video player in chat, like other YouTube links.
-- Hold Shift when you pick an emoji in the emoji picker to keep it open and pick several, in the message box or on a message's reactions.
-- Editing a message now happens inside the message itself, as in Discord: press ↑ in an empty message box or choose Edit, change the text in place, then Enter saves, Shift+Enter adds a line and Esc cancels. Saving an empty edit asks to delete the message. A save that fails reopens the editor with your text.
-- Deleted messages now disappear from the channel instead of leaving a "[message deleted]" row, and a reply to a deleted message says "Original message was deleted".
-- You can press Enter while files are still uploading: the message box clears at once and the message shows in the chat with a progress bar per file and a **Cancel upload** button, then posts by itself when the files are in, also if you have switched channels. Messages you send meanwhile are not held back. If an upload fails or you cancel, the message shows **Retry** (uploads again) and **Delete**; closing the app drops a message that is still uploading.
-- A DM now keeps a record of its calls. The server adds one call row per call, from voice presence, to the DM, with who started it, who joined and how long it lasted, and everyone in the DM gets it live and on reconnect. A call ends 10 seconds after the last person leaves, so a quick rejoin is the same call, and a call cut short by a server restart ends at the last moment anyone was seen in it. In a one-to-one DM the call is logged once both sides have accepted the DM. Call rows cannot be edited, deleted, pinned, reacted to or replied to, and search skips them. `chat_message` gains `kind` and `call` and the end of a call is a `chat_edited` with `edited_at: null` (see docs/protocol.md). Needs a client that draws call rows; older clients show the row as a plain line of text.
-- A group DM now has an owner. The creator owns it, groups that already exist get an owner from the author of their oldest message who is still a member (else the lowest member id), and when the owner leaves or their account is erased the group passes to the lowest remaining member id. `owner_id` rides on every group DM summary (`ready`, `GET /dms`, `dm_channel_open`) and is left out for a one-to-one DM. The server also learns five more `chat_message.kind` values (`group_add`, `group_remove`, `group_leave`, `group_rename`, `group_icon`) with a `group_event` block, stored read-only like call rows; nothing writes them yet, so nobody sees a change except the new field. Adding and removing members, transferring ownership and the group icon come in later parts.
-- Group DMs can now change membership. Any member can add people (`POST /api/v1/dms/{id}/members`, up to 10 members, a full group answers `409 GROUP_DM_FULL`), only the owner can remove someone (`DELETE /api/v1/dms/{id}/members/{userId}`; the removed member loses the DM and its call) and the owner can hand the group to another member (`PUT /api/v1/dms/{id}/owner`). Adding, removing, leaving and renaming each leave one read-only row in the chat that every remaining member sees live and on reconnect (`group_add`, `group_remove`, `group_leave`, `group_rename`), and the members who are not the author get it as unread. The group changes are limited to 20 a minute per person. When the owner leaves, the group now passes to the lowest member id who is not banned from the server. Leaving or being removed clears your unread count for that DM. Needs a client that draws these rows; older clients show the sentence as an ordinary message from the person who made the change. The group icon is still to come.
-- Group DMs can now have an icon. Any member can set it (`POST /api/v1/dms/{id}/icon`, an image of at most 1 MiB and 1024 x 1024 pixels, as for an avatar) or remove it (`DELETE /api/v1/dms/{id}/icon`). Each change leaves one read-only `group_icon` row in the chat that every member sees live and on reconnect, and `icon` (a file URL, empty for none) rides on every DM summary (`ready`, `GET /dms`, `dm_channel_open`). Only the group's members can fetch the icon file, and only while it is the live one; a replaced icon is cleaned up like an old avatar. Needs a client that draws the icon; older clients ignore it and show the row as an ordinary message.
+- Channel categories are real: right-click a category for **Create**, **Rename**, **Move Up/Down**, **Delete** (its channels are kept), **Mark as Read** and **Collapse All**. Moderators can drag channels between categories and reorder categories.
+- A category can carry permissions; channels created in it copy them and stay **synced** until you edit a channel's own permissions (admin panel).
+- The **AFK channel**: in the admin panel's Settings, pick a voice channel and an idle time. Members idle in voice that long are moved there, where they can listen but not speak, and the app says why.
+- A voice channel's text chat opens beside the call grid (**Hide chat** keeps the grid full width), and a voice channel shows unread and mention badges, with **Open chat** in its menu to read without joining.
+- Per-channel **Notification Settings** (All, Only @mentions, Nothing, Server Default) and **Mute** for 15 minutes up to 24 hours, also for DMs.
+- Right-clicking a channel offers **Copy Link** and **Invite People**. Private channels show a lock. The header shows the channel's own icon and the full topic on click.
+- The Invite Manager sets expiry and max uses and shows the full link.
+- Ctrl+K also finds DMs and shows unread and mention counts. The Create Channel window has a Topic field.
+- **Hide Muted Channels** in the server menu, which also opens with a click on the server name; Ctrl+, opens Settings.
+- Discord chat keys: Escape marks the channel read, Shift+Escape marks the server read, Page Up/Down scroll from the message box, typing anywhere starts a message, Ctrl+E and Ctrl+G open the emoji and GIF pickers. **Ctrl+/** lists every shortcut.
 
 **Voice and video**
 
-- A viewer can tell the server which video codecs it can decode: `voice_e2ee_announce` takes an optional `video_decode` list, and the server passes it on with the voice key to everyone in the call, including people who join later or reconnect. A list that is malformed is dropped and the key still goes through. Older servers and apps behave as before. The desktop app uses it to pick a codec everyone in the call can play.
+- Stream tiles show who is watching, and the streamer hears a soft sound when someone starts or stops watching.
+- Windows: sharing one window can also share that app's sound (**Share the app's sound**, Windows 10 2004 and later).
+- **VP9** and, on Windows graphics cards that encode it, **H.265** in Settings → Voice & Video → Video Codec, for sharper text in screen shares. When someone in the call cannot play it, your video switches to VP8 until they leave.
+- If your screen share is slow, the app tells you why. A 120 fps share can now really reach 120 fps.
+- An **App sounds volume** slider and a switch for each OwnCord sound in Settings → Notifications.
 
-**Server (operators)**
+**Settings and desktop**
 
-- `GET /api/v1/metrics` gains a `windows` key with the latency, worst-hold and counter figures for the last minute and fifteen minutes, so a stall shows up and then clears instead of being buried in totals since boot; every existing key is unchanged.
-- `GET /api/v1/metrics/prometheus` serves the same figures in Prometheus text format in every build, with no setting to turn on; it is limited to the same addresses as `GET /api/v1/metrics` (`server.metrics_allowed_cidrs`).
-- The metrics gain the size of the database's write-ahead log (`db_wal_mb` in `GET /api/v1/metrics`, `owncord_db_wal_bytes` in the Prometheus output), and the server log now shows how long each database migration took when it runs at start-up.
-- The metrics gain `reconnect_ring_misses` (in `GET /api/v1/metrics`, also under `windows`, and as `owncord_reconnect_ring_misses_total` in the Prometheus output): resumes that fell behind the in-memory replay ring, the ones the persisted event log can serve. Divide `reconnect_tier_db` by it for the log's hit rate.
+- **Close to Tray** (on by default) and **Start Minimized**. New logins stay signed in by default.
+- A **Search** box in Settings (Ctrl+F) that finds tabs and settings.
+- Settings → Keybinds can change the keys for camera, search, upload, emoji and GIF pickers, and set keys for screen share and disconnect.
+- **Zoom Level** (50–200 %) with Ctrl+= / Ctrl+- / Ctrl+0, a **Sync with computer** theme, **Always underline links**, a **Saturation** slider and an **Animate emoji** switch.
+- Compact mode shows the time before the name. Developer Mode adds **Copy User ID** and **Copy Channel ID**.
+- An **Unread message badge** switch for the taskbar and tray. Windows shows unread mentions as a red dot on the tray icon.
+- Log Out asks first. Settings tabs follow Discord's order and show the app version.
+- An invite link for another server asks before switching servers.
+
+**Linux**
+
+- Settings → Voice & Video has Input Volume, automatic input sensitivity, a working **Mic Test** and a live level meter, and audio processing switches apply during a call.
+- App sounds play on your chosen output, and plugging in or removing an audio device switches over.
+- Screen share can include other apps' sound (**Share audio**, needs PulseAudio or pipewire-pulse), in stereo.
+- Video Codec choice with VP8, H.264, VP9 and Auto. NVIDIA graphics cards encode and decode H.264 on the card. Switching camera keeps your tile, and you can change a live share's quality.
+- Wayland: push to talk, Mute and Deafen work while another app is in front on GNOME 48+ and KDE Plasma (**Set up global shortcuts** in Keybinds).
+- X11: push to talk on mouse side buttons and F13–F24; 120 fps is greyed out for monitors below 120 Hz.
+- `.deb` installs update from the app with one password prompt (the first update onto this version is still manual).
+- Spell checking in the message box (needs a hunspell dictionary), ping and quality bars in the voice panel, unread count on the tray icon, Away detection on KDE Wayland and wlroots desktops, and **Open Log Folder** in Settings → Diagnostics.
+
+**Admin panel and server**
+
+- Members show every role as chips you add or remove one at a time, and their nickname. Roles get **Show members separately** and **Allow anyone to @mention this role**.
+- A Voice: AFK card in Settings, category permissions and **Sync now** on Channels, and Forum in the create-channel dialog.
+- `GET /api/v1/metrics/prometheus` serves the metrics in Prometheus format in every build. The JSON metrics gain one-minute and fifteen-minute windows, the write-ahead log size and replay misses, and the log shows how long each migration took.
+- `chatserver config reset-overrides` (server stopped) drops settings saved from the admin panel, to recover from a lockout.
 
 ### Changed
 
-**Accounts & admin**
+**Chat and channels**
 
-- Changing a member's role, or editing or deleting a role, no longer holds up the admin request while every connected member is updated. The change is saved and answered at once, and each affected member's channel list, role name and timeout view then catch up in the background, in small paced batches so a role with hundreds of members cannot flood everyone's connection. Members whose role did not change stop receiving redundant channel updates, and the role list now always arrives in the order the changes were made.
+- A channel with unread messages shows only a bold name and a white pill; numbers are kept for mentions and DMs. Muted channels no longer look unread unless you are mentioned.
+- Inside a category, text channels come before voice channels, and a new channel lands at the bottom.
+- Deleted messages disappear instead of leaving a "[message deleted]" row.
+- Upload File moved from Ctrl+U to Ctrl+Shift+U. Compact mode only changes the message list.
+- Suppress @everyone and @here now hides only those pings; a mention by name still alerts. Do Not Disturb also stops the taskbar flash.
+- You now go Idle after ten quiet minutes in a voice or DM call too.
+- Rarely used screens (pickers, search, Invite Manager, the voice panel, the video grid) load the first time you open them, so the app starts faster and the installers are smaller.
 
-**Voice and video**
+**Accounts**
 
-- Going Idle after ten quiet minutes now also happens while you are in a voice channel or a DM call, instead of staying Online. Activity still brings you back.
-- The Docker Compose stack now needs only three ports for chat and voice: `8443/TCP`, `7881/TCP` and `7882/UDP`. Voice media used to need the `50000-60000/UDP` range, and the LiveKit key and secret had to be typed in both `.env` and `livekit.yaml`; now they live only in `.env`. **For server owners using `docker compose`:**
-  - Forward `7882/UDP` on your router instead of the `50000-60000` range, and close the old range.
-  - Put the LiveKit key and secret only in `.env`, never using a `'` in either value (letters and digits, for example `openssl rand -hex 32`, are safest). `docker compose` now refuses to run any command, even `down` or `logs`, if `.env` is missing either value, and the message names the variable.
-  - An existing `livekit.yaml` keeps working: its port range and its `keys:` are overridden by compose.
-  - If `livekit.yaml` has a `webhook:` block whose `api_key` is not the key in `.env`, LiveKit will not start. Change it to the `.env` key.
-  - If `livekit.yaml` has a `key_file:`, it overrides the `.env` pair. Remove it.
-
-**Desktop UI**
-
-- A channel with unread messages now shows only a bold name and the white pill, as in Discord; the number is kept for mentions and DMs.
-- A muted channel no longer turns bold or shows the pill for ordinary unread messages; a mention still shows.
-- Alt+Shift+Up/Down now also reaches unread channels inside collapsed categories, and skips muted channels unless they have a mention.
-- A collapsed category no longer shows a dot for hidden muted channels with unread messages, since those channels now look read.
-- Inside a category, text and announcement channels now come before voice channels, and Move Up / Move Down and dragging only reorder channels of the same kind.
-- The emoji and GIF pickers, Ctrl+K, message search, the Invite Manager, pinned messages, Create Channel and the new-DM picker now load the first time you open them instead of at startup, so the app loads less up front. If one cannot load, a "Couldn't open that. Try again." message shows and the next try tries again.
-- The voice panel and the per-user volume menu now load the first time you join a voice channel or open the menu, instead of at startup.
-- The video grid (the tiles for cameras and screen shares) now loads when you join a voice channel instead of at startup. If it cannot load, a "Couldn't open that. Try again." message shows and the next join tries again.
-
-**Accounts & profiles**
-
-- New usernames (register, first-run setup, rename) are now 2–32 letters, digits, `_`, `.` or `-`, starting with a letter or digit, with no spaces; `everyone` and `here` are reserved. Existing accounts still sign in and recover as before.
-- Display names (32), custom statuses (128) and group DM names (100) must now fit on one line: line breaks, invisible characters and more than two stacked accent marks are refused, and runs of spaces become one. Emoji still work.
-
-**Login & connection**
-
-- New logins now stay signed in by default (Auto connect starts ticked). The password is saved only when Remember password is ticked; Auto connect alone keeps just the sign-in token.
-- The server's load test at 1,000 and 2,000 people online has now been run and published: 1,000 online holds steady chat and a burst of messages with room to spare on a 2 vCPU / 4 GB server, but a burst of 500 logins and a full reconnect of everyone are slower than their targets, and the 2,000 run was not valid, so 2,000 stays an estimate (see [Capacity](docs/capacity.md#scale-profile)).
-- When the server's database is stuck behind a long write, an ordinary request now gives up after 15 seconds and answers "service unavailable" with a short retry hint, instead of hanging until the connection drops. Uploads, downloads, the live connection, voice, backups and account deletion are not cut short.
-
-**Notifications**
-
-- Suppress @everyone and @here now hides only those pings in channels you are not viewing. A message that mentions you by name still alerts, as it already did in the open channel. Older servers keep today's behaviour.
-- With an older server, a mention in a channel you are not viewing now alerts about 3 seconds after it arrives.
-- Do Not Disturb now also stops the taskbar or window flash for messages and mentions, not just the pop-up and sound. A ringing call still flashes.
-
-**Desktop UI**
-
-- Upload File moved from Ctrl+U to Ctrl+Shift+U, as in Discord. Ctrl+U is now only Underline in the message box.
-- Compact mode now changes only the message list, as in Discord: the channel list, members, header, voice list and user bar keep their normal size.
-- On Linux the app's log now says why it closed: a window close, tray Quit, a signal and which program sent it, a frozen window or webview, rising memory, or (on the next start) a run that was killed without a trace. A support bundle carries all of it.
-
-**Accounts & admin**
-
-- The server now keeps only the newest 3 pre-restore and 3 pre-migration safety copies, so repeated upgrades and restores no longer fill the backup disk. Copy any older one you want to keep before upgrading.
+- New usernames are 2–32 letters, digits, `_`, `.` or `-`, with no spaces; `everyone` and `here` are reserved. Existing accounts are not affected.
+- Display names, custom statuses and group names must fit on one line: line breaks, invisible characters and stacked accents are refused. A display name can't copy someone else's username, and a timed-out member can't change their name.
 
 **Server (operators)**
 
-- The shipped systemd unit (`deploy/owncord.service`) now runs a root-owned `/opt/owncord/chatserver` with config and data in `/var/lib/owncord` (`StateDirectory=`), so the service can no longer rewrite its own program file. Your installed unit keeps working until you re-copy it; if you do, follow [Migrating from the /opt/owncord data layout](docs/deployment.md#migrating-from-the-optowncord-data-layout) first, because the unit refuses to start while `/opt/owncord/data` exists.
-- `CAP_NET_BIND_SERVICE` is now commented out in the unit. If you use `tls.mode: acme`, uncomment the line, or the server cannot bind port 80 and logs `ACME HTTP server error`.
-- Admin-panel self-update under systemd is now opt-in: with the new unit, "Update now" shows that the server cannot replace its own program file. [Opt in to admin-panel updates](docs/deployment.md#opt-in-to-admin-panel-updates) with a two-line drop-in and a `chown`, or install new releases by hand.
+- **Docker Compose now needs only three ports:** `8443/TCP`, `7881/TCP` and `7882/UDP`. Forward `7882/UDP` instead of `50000-60000/UDP` and close the old range. The LiveKit key and secret now live only in `.env` (letters and digits are safest, never a `'`); compose refuses to run if either is missing. An old `livekit.yaml` keeps working, but remove any `key_file:`, and a `webhook:` `api_key` must match the `.env` key.
+- **The systemd unit now keeps config and data in `/var/lib/owncord`** and the program in a root-owned `/opt/owncord`. Your installed unit keeps working until you re-copy it; if you do, follow [Migrating from the /opt/owncord data layout](https://github.com/J3vb/OwnCord/blob/main/docs/deployment.md#migrating-from-the-optowncord-data-layout) first. With `tls.mode: acme`, uncomment `CAP_NET_BIND_SERVICE`. Admin-panel self-update under systemd is now [opt-in](https://github.com/J3vb/OwnCord/blob/main/docs/deployment.md#opt-in-to-admin-panel-updates); otherwise "Update now" says to install by hand.
+- **Restoring a backup** now stages a checked copy and swaps it in on the next start, before anything opens the database. A crash midway is picked up on the next start, and a file that fails its check is rolled back. After a restore, apps fetch everything fresh. When you move a data folder by hand, copy `.ws-seq-floor` along with the database.
+- The server keeps only the newest three pre-restore and three pre-migration safety copies. Copy any older one you want to keep before upgrading.
+- In a container, the setup wizard saves its settings in the data volume, so they survive a recreate.
+- An ordinary request stuck behind a long database write gives up after 15 seconds with "service unavailable", and a chat command after 10 seconds with "The server is busy — retry in a moment". Nothing is applied in either case, so Retry is safe.
+- Role changes are answered at once and reach members in the background, in paced batches. An admin editing a role from an out-of-date copy is told to reload instead of overwriting the other change.
+- The load test at 1,000 people online was run and published; see [Capacity](https://github.com/J3vb/OwnCord/blob/main/docs/capacity.md#scale-profile).
 
 ### Fixed
 
 **Messages & files**
 
-- A command that waits on a stalled database for more than 10 seconds now fails with "The server is busy — retry in a moment" (a Retry button on a message) instead of waiting indefinitely. Nothing was applied when this appears, so Retry never double-posts. Voice moderation and slash commands are not affected.
-
-**Desktop UI**
-
-- An app that fails to start now shows an error dialog instead of closing without a word: on Linux desktops (a run with no display still prints the error only), and on every platform when the main window or tray cannot be created.
-- Picking a channel in Ctrl+K while in the DM list now takes you to the channel list and clears its unread badge, instead of leaving the DM list showing.
-- A new channel now lands at the bottom of its category instead of the top.
-- Losing access to a channel now says "You no longer have access to this channel, or it was deleted" instead of claiming it was deleted, since a permission change looks the same to the app.
-- Editing a channel no longer overwrites a change someone else made while the dialog was open: fields you did not touch update in the open dialog, and Save sends only the fields you changed.
-
-**Accounts & admin**
-
-- Downloading a backup from the admin panel stopped partway through when it took longer than 30 seconds, leaving a failed download and a spent link. It now keeps going while data is flowing, and ends only if the browser stops receiving it.
-- Restoring a backup from the admin panel no longer copies over the database while the server is running. The server now stages a checked copy beside the database and restarts, and the next start swaps it in before anything opens the database. A crash or power loss in the middle is picked up on the next start, and a restored file that fails its check is rolled back so the server keeps running on the data it had. The Dashboard's attention panel shows what happened (restored, or failed with the previous data kept), and the audit log records it. A restore that is staged but never followed by a restart is applied at the next start; deleting `<database>.restore-pending.json` cancels it. The "database is busy" refusal (`DATABASE_BUSY`) no longer happens.
-- After a backup is restored from the admin panel or the restore command, connected apps now fetch everything fresh instead of resuming from older events. When you move a data folder by hand, copy the `.ws-seq-floor` file beside the database along with it.
-- After a backup is restored from the admin panel or the restore command, connected apps now fetch everything fresh instead of resuming from older events. When you move a data folder by hand, copy the `.ws-seq-floor` file beside the database along with it; the same goes when you restore another machine's backup to move a server.
-- "Update now" on a server whose install folder the service cannot write to failed with a vague download error after the download. The Updates page now says the server cannot replace its own program file and to install the release by hand, and nothing is downloaded or restarted.
-- **Update now** on the Updates page no longer fails on a slow connection: the download is not cut off after 30 seconds, and the page still gets the result when the update takes longer than the server's 30-second response limit. The server gives up if no data arrives for 60 seconds or the update check and download together take more than 10 minutes.
-- Deleting an account with a long history held up every other message, login and reaction on the server until it finished (about 3 seconds at 100,000 messages, far longer on a slow disk). The history is now removed in short steps that let others through, the account is signed out and locked at the start, and a restart or the server's housekeeping finishes the job if it is interrupted. Whoever deletes an account still sees success; for a few seconds the account can show with part of its history gone. The last-administrator check also counts deletions already under way.
-
-**Login & connection**
-
-- An app that was online when the server had to skip an update meant for it now also fetches everything fresh on its next reconnect, instead of keeping the gap. Every sequenced update now also carries a per-connection count (`cseq`).
-- The desktop app now notices when that count skips and, after a short random wait, reconnects to fetch everything fresh, instead of waiting for its next disconnect. Servers without the count behave as before.
-
-**Messaging**
-
-- Direct messages and group DMs can only be started with active accounts.
-- A video in chat now takes the shape of the clip once played, like an image, instead of sitting in a wide black box. Small and portrait videos no longer have black bars beside them.
-- Losing permission to send in a channel also stopped you deleting your own messages there. You can now delete your own messages with read access alone.
-- An upload or send error under the message box now has a close button, so it can be dismissed without typing or sending something first.
-- Reactions could be clicked while the app was offline and were lost. Reaction pills and the React button are now disabled until the connection is back, as Delete already was.
-- Editing a message showed you as typing to everyone in the channel. Editing no longer does.
-- Delete, Pin and React now follow the channel's permissions. A channel that grants or removes them for you now shows or hides those buttons, instead of the buttons following your role alone.
-- Messages from the same person now group when sent up to 7 minutes apart, as in Discord, instead of 5.
-- When the emoji list could not load, the picker said "No emoji found". It now says it could not load emoji and has a Retry button.
-- When older messages failed to load as you scrolled up, a brief pop-up came and went. A "Couldn't load messages" row with Retry now stays at the top of the chat until it works.
+- Channels you are not viewing show their unread dot as soon as a message arrives, instead of after a reconnect.
+- Losing permission to send in a channel no longer stops you deleting your own messages there.
+- Delete, Pin and React follow the channel's own permissions, not just your role, and are disabled while offline.
+- Editing a message no longer shows you as typing.
+- A video in chat takes the clip's own shape instead of a wide black box.
+- Files that could not be attached at send time are named and put back in the message box instead of vanishing.
+- A failed load of older messages leaves a "Couldn't load messages" row with Retry. The emoji picker says when emoji could not load. An upload error under the message box can be dismissed.
+- Editing a channel no longer overwrites a change someone else made while the dialog was open.
+- Picking a channel in Ctrl+K from the DM list now opens the channel list too.
 
 **Voice and video**
 
-- On Linux the voice panel's ping read "—" with empty signal bars, a watched screen share had no quality chip, and your own Go Live showed no frame rate. All three now show, as on Windows.
-- In the call view, the Show chat, view toggle and Pop out call buttons covered the focused tile's name at the top left. They now sit at the bottom right beside the control bar, and Show chat is a chat icon.
-- On Linux, Settings → Diagnostics no longer reports voice signaling as failed during a working call, and its microphone check now looks at the microphone voice actually uses. Incoming media shows as not tested on Linux for now.
-- On Linux (X11), the mouse side buttons (Mouse 4 and Mouse 5) can now be bound as the Push to Talk key, as on Windows.
-- On Linux (X11), the Push to Talk key can now be F13 to F24, and a key synced from Windows fires.
-- On Linux, a ringing call's notification now goes away when the ring ends, clicking a notification opens its message however many have piled up, notifications no longer play the desktop's sound on top of OwnCord's, and the AppImage's notifications show the OwnCord icon.
-- Linux: screen-share audio now reaches viewers in stereo instead of mono.
-- Voice signaling through the server's built-in proxy dropped the call connection when a single message passed 32 KiB, which could happen in a busy room. Messages up to 256 KiB now pass through.
-- Timing out someone who was in a voice channel kicked them out of it within a minute, even when the moderator could not mute them. They now stay in the call (muted if the moderator could mute members), and the mute lifts the moment the timeout ends instead of up to 15 minutes later. They still cannot join a voice channel while timed out.
+- Timing out someone in voice no longer kicks them out of the call; they stay muted, and the mute lifts the moment the timeout ends.
+- Voice through the server's built-in proxy no longer drops in a busy room when one signaling message passes 32 KiB.
+- An H.264 screen share falls back to VP8 when the graphics card can't encode it.
+- The call view's buttons no longer cover the focused tile's name.
+- Linux: the voice panel's ping, the quality chip and your Go Live frame rate now show; Diagnostics no longer reports a working call as failed; notifications behave as on Windows.
+
+**Login & connection**
+
+- An app that missed an update from the server now notices at once and fetches everything fresh, instead of keeping the gap until its next disconnect.
+- An app that fails to start shows an error dialog instead of closing without a word, including on Linux.
+
+**Server**
+
+- Backup downloads and **Update now** no longer fail after 30 seconds on a slow connection.
+- "Update now" on a server that cannot replace its own program file now says so up front instead of failing after the download.
+- Deleting an account with a long history no longer holds up the whole server; it runs in short steps and finishes after a restart if interrupted.
+- A restored backup no longer reuses the old event numbering, which could make apps miss updates.
+
+### Known issues
+
+- **Role mentions can't be picked from the @ suggestions yet.** Role pings render and notify, but the message box sends `@name` until the next release.
+- **Not yet tested with two people on Windows:** threads, forums, polls, forwarding, group DM management and stream viewers.
+- **A call tile with only a profile picture has no right-click menu** yet; right-click the person in the voice channel instead.
+- **Push to Talk on Caps Lock also toggles Caps Lock**, and key combinations cannot be bound yet.
+- **On Linux**, a Wayland screen share is limited to 60 fps, and Diagnostics cannot test incoming media.
+- **The Windows installers are not code-signed.** Windows shows "Windows protected your PC" on install and on Update Now; choose "More info", then "Run anyway".
+- **A certificate change that is not a public-CA renewal prompts every member.** Compare the new fingerprint with the server owner out of band before accepting.
+- **There is no browser or phone client yet.** The desktop app is the only supported client.
+
+### Under the hood
+
+- Several security hardening fixes.
+- Server state has one owner per piece: shutdown waits for background work, hub locks are rank-checked in the deadlock build, and plugin events run after the broadcast lock.
+- The client's sidebar and member list render from view-models, a layer-direction lint rule guards imports, and scrolling, images and GIFs do less work per frame.
+- Database changes 060 to 079 (mentions, roles, call log, group DMs, AFK, notes and banners, privacy, forwards, categories, polls, threads, forums, nicknames), each with a rollback script.
+- The browser client portal is built in but off by default and not part of this release.
 
 ## v2.3.0-beta.1
 
